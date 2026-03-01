@@ -1,0 +1,56 @@
+name: Baseline Governance
+
+on:
+  pull_request:
+    paths:
+      - docs/specs/design-v0.baselines.lock.yaml
+      - src/baseline.rs
+      - src/bin/baselinectl.rs
+      - Cargo.toml
+      - .github/workflows/baseline-governance.yml
+  push:
+    branches: [main]
+    paths:
+      - docs/specs/design-v0.baselines.lock.yaml
+      - src/baseline.rs
+      - src/bin/baselinectl.rs
+      - Cargo.toml
+      - .github/workflows/baseline-governance.yml
+
+jobs:
+  baseline-lock-and-metadata:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Test
+        run: cargo test
+
+      - name: Generate parity metadata
+        run: |
+          cargo run --bin baselinectl -- \
+            --mode generate \
+            --backend backend-a \
+            --host-os linux \
+            --host-cpu amd64 \
+            --metadata artifacts/parity-metadata.json
+
+      - name: Validate parity metadata
+        run: |
+          cargo run --bin baselinectl -- \
+            --mode validate \
+            --metadata artifacts/parity-metadata.json
+
+      - name: Upload metadata artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: parity-metadata
+          path: artifacts/parity-metadata.json
+          if-no-files-found: error

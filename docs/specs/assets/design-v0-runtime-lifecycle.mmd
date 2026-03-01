@@ -1,0 +1,21 @@
+sequenceDiagram
+  participant U as User (docker/nerdctl)
+  participant P as vesper-proxy (socket)
+  participant D as vesperd
+  participant C as containerd (in System VM)
+  participant S as containerd-shim-vesper-v2
+  participant B as Vesper Backend
+  participant V as MicroVM
+  participant A as vesper-agent (in MicroVM)
+
+  U->>P: docker run ...
+  P->>D: Docker API request (or nerdctl via containerd)
+  D->>C: forward to containerd (vsock)
+  C->>S: CreateTask / StartTask (shim v2)
+  S->>B: CreateMicroVM(spec, rootfs, net)
+  B->>V: Boot microVM
+  V->>A: agent starts (vsock listener)
+  S->>A: CreateContainer + Exec (ttrpc/gRPC)
+  A->>A: setup mounts/cgroups inside guest
+  A->>V: launch container process
+  U<<->>P: attach logs/stdin/stdout

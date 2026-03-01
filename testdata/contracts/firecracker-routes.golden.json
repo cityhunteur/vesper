@@ -1,0 +1,150 @@
+[
+  {
+    "method": "GET",
+    "path": "/"
+  },
+  {
+    "method": "PUT",
+    "path": "/actions"
+  },
+  {
+    "method": "GET",
+    "path": "/balloon"
+  },
+  {
+    "method": "PATCH",
+    "path": "/balloon"
+  },
+  {
+    "method": "PUT",
+    "path": "/balloon"
+  },
+  {
+    "method": "PATCH",
+    "path": "/balloon/hinting/start"
+  },
+  {
+    "method": "GET",
+    "path": "/balloon/hinting/status"
+  },
+  {
+    "method": "PATCH",
+    "path": "/balloon/hinting/stop"
+  },
+  {
+    "method": "GET",
+    "path": "/balloon/statistics"
+  },
+  {
+    "method": "PATCH",
+    "path": "/balloon/statistics"
+  },
+  {
+    "method": "PUT",
+    "path": "/boot-source"
+  },
+  {
+    "method": "PUT",
+    "path": "/cpu-config"
+  },
+  {
+    "method": "PATCH",
+    "path": "/drives/{drive_id}"
+  },
+  {
+    "method": "PUT",
+    "path": "/drives/{drive_id}"
+  },
+  {
+    "method": "PUT",
+    "path": "/entropy"
+  },
+  {
+    "method": "GET",
+    "path": "/hotplug/memory"
+  },
+  {
+    "method": "PATCH",
+    "path": "/hotplug/memory"
+  },
+  {
+    "method": "PUT",
+    "path": "/hotplug/memory"
+  },
+  {
+    "method": "PUT",
+    "path": "/logger"
+  },
+  {
+    "method": "GET",
+    "path": "/machine-config"
+  },
+  {
+    "method": "PATCH",
+    "path": "/machine-config"
+  },
+  {
+    "method": "PUT",
+    "path": "/machine-config"
+  },
+  {
+    "method": "PUT",
+    "path": "/metrics"
+  },
+  {
+    "method": "GET",
+    "path": "/mmds"
+  },
+  {
+    "method": "PATCH",
+    "path": "/mmds"
+  },
+  {
+    "method": "PUT",
+    "path": "/mmds"
+  },
+  {
+    "method": "PUT",
+    "path": "/mmds/config"
+  },
+  {
+    "method": "PATCH",
+    "path": "/network-interfaces/{iface_id}"
+  },
+  {
+    "method": "PUT",
+    "path": "/network-interfaces/{iface_id}"
+  },
+  {
+    "method": "PUT",
+    "path": "/pmem/{id}"
+  },
+  {
+    "method": "PUT",
+    "path": "/serial"
+  },
+  {
+    "method": "PUT",
+    "path": "/snapshot/create"
+  },
+  {
+    "method": "PUT",
+    "path": "/snapshot/load"
+  },
+  {
+    "method": "GET",
+    "path": "/version"
+  },
+  {
+    "method": "PATCH",
+    "path": "/vm"
+  },
+  {
+    "method": "GET",
+    "path": "/vm/config"
+  },
+  {
+    "method": "PUT",
+    "path": "/vsock"
+  }
+]

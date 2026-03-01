@@ -1,0 +1,48 @@
+name: Compat Exceptions Policy
+
+on:
+  pull_request:
+    paths:
+      - docs/specs/compat-exceptions.yaml
+      - src/compat.rs
+      - src/bin/compatexctl.rs
+      - Cargo.toml
+      - .github/workflows/compat-exceptions.yml
+  push:
+    branches: [main]
+    paths:
+      - docs/specs/compat-exceptions.yaml
+      - src/compat.rs
+      - src/bin/compatexctl.rs
+      - Cargo.toml
+      - .github/workflows/compat-exceptions.yml
+  workflow_dispatch:
+    inputs:
+      require_zero_open:
+        description: "Fail if any open exceptions remain (parity-GA gate)"
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  validate-compat-exceptions:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Test
+        run: cargo test
+
+      - name: Validate registry lifecycle policy
+        run: cargo run --bin compatexctl -- --registry docs/specs/compat-exceptions.yaml
+
+      - name: Parity-GA zero-open gate
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.require_zero_open }}
+        run: cargo run --bin compatexctl -- --registry docs/specs/compat-exceptions.yaml --require-zero-open

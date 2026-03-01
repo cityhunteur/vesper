@@ -1,0 +1,36 @@
+flowchart TB
+  subgraph macOS["macOS Host"]
+    CLI["docker / nerdctl / vesperctl"]
+    PROXY["vesper-proxy\n(Docker socket + port forward)"]
+    VESPERD["vesperd\n(orchestration + APIs)"]
+    STORE["Image+Snapshot Store\n(APFS)"]
+    NET["Host Networking\n(vmnet/NAT/portfw)"]
+  end
+
+  subgraph SYSVM["Vesper System VM (Linux control plane)"]
+    DOCKERD["dockerd (optional)"]
+    CONTAINERD["containerd"]
+    SHIM["containerd-shim-vesper-v2"]
+  end
+
+  subgraph BACKENDS["MicroVM Backends"]
+    KVMHOST["Backend A: KVMHost\n(stock firecracker inside SYSVM)\nrequires nested virt"]
+    NATIVE["Backend B: Native HVF/VF\nmacOS VMM port"]
+  end
+
+  subgraph UVM["Workload MicroVM (per container)"]
+    AGENT["vesper-agent\n(ttrpc/gRPC over vsock)"]
+    PROC["Container Process(es)"]
+  end
+
+  CLI --> PROXY
+  PROXY --> VESPERD
+  VESPERD --> STORE
+  VESPERD --> NET
+
+  VESPERD <--> SYSVM
+  SYSVM --> SHIM
+  SHIM --> BACKENDS
+  KVMHOST --> UVM
+  NATIVE --> UVM
+  AGENT --> PROC

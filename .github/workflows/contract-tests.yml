@@ -1,0 +1,41 @@
+name: Firecracker Contract Tests
+
+on:
+  pull_request:
+    paths:
+      - third_party/firecracker/firecracker.yaml
+      - src/spec.rs
+      - src/api.rs
+      - src/bin/contractgen.rs
+      - testdata/contracts/firecracker-routes.golden.json
+      - Cargo.toml
+      - .github/workflows/contract-tests.yml
+  push:
+    branches: [main]
+    paths:
+      - third_party/firecracker/firecracker.yaml
+      - src/spec.rs
+      - src/api.rs
+      - src/bin/contractgen.rs
+      - testdata/contracts/firecracker-routes.golden.json
+      - Cargo.toml
+      - .github/workflows/contract-tests.yml
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Golden contract check
+        run: cargo run --bin contractgen -- --mode check
+
+      - name: Contract and state tests
+        run: make contract-test
