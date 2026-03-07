@@ -17,6 +17,7 @@ const ACTION_NOT_SUPPORTED_POSTBOOT_MESSAGE: &str =
     "The requested operation is not supported after starting the microVM.";
 const ACTION_NOT_SUPPORTED_PREBOOT_MESSAGE: &str =
     "The requested operation is not supported before starting the microVM.";
+const SEND_CTRL_ALT_DEL_AARCH64_MESSAGE: &str = "SendCtrlAltDel does not supported on aarch64.";
 const MISSING_KERNEL_CONFIG_MESSAGE: &str = "Cannot start microvm without kernel configuration.";
 const METRICS_ALREADY_INITIALIZED_MESSAGE: &str = "Cannot initialize the metrics system due to bad user input: Reinitialization of metrics not allowed.";
 
@@ -680,14 +681,39 @@ fn handle_actions(state: &Arc<AppState>, method: &Method, template: &str, body: 
             *vm_state = VmState::Running;
             StatusCode::NO_CONTENT.into_response()
         }
-        ActionType::SendCtrlAltDel => error_response(
-            &state.firecracker_revision,
-            StatusCode::NOT_IMPLEMENTED,
-            "NotImplemented",
-            "action is not implemented",
-            template,
-            method.as_str(),
-        ),
+        ActionType::SendCtrlAltDel => {
+            #[cfg(target_arch = "aarch64")]
+            {
+                error_response(
+                    &state.firecracker_revision,
+                    StatusCode::BAD_REQUEST,
+                    "InvalidRequest",
+                    SEND_CTRL_ALT_DEL_AARCH64_MESSAGE,
+                    template,
+                    method.as_str(),
+                )
+            }
+
+            #[cfg(target_arch = "x86_64")]
+            {
+                let vm_state = *state
+                    .vm_state
+                    .read()
+                    .expect("vm state lock poisoned while reading");
+                if vm_state == VmState::PreBoot {
+                    return error_response(
+                        &state.firecracker_revision,
+                        StatusCode::BAD_REQUEST,
+                        "InvalidState",
+                        ACTION_NOT_SUPPORTED_PREBOOT_MESSAGE,
+                        template,
+                        method.as_str(),
+                    );
+                }
+
+                StatusCode::NO_CONTENT.into_response()
+            }
+        }
     }
 }
 
@@ -1625,6 +1651,102 @@ mod tests {
         let payload: ErrorEnvelope = serde_json::from_slice(&body).unwrap();
         assert_eq!(payload.code, "InvalidState");
         assert_eq!(payload.fault_message, ACTION_NOT_SUPPORTED_POSTBOOT_MESSAGE);
+    }
+
+    #[tokio::test]
+    #[cfg(target_arch = "x86_64")]
+    async fn rejects_send_ctrl_alt_del_before_start() {
+        let router = test_state().router();
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/actions")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(
+                        r#"{"action_type":"SendCtrlAltDel"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let payload: ErrorEnvelope = serde_json::from_slice(&body).unwrap();
+        assert_eq!(payload.code, "InvalidState");
+        assert_eq!(payload.fault_message, ACTION_NOT_SUPPORTED_PREBOOT_MESSAGE);
+    }
+
+    #[tokio::test]
+    #[cfg(target_arch = "x86_64")]
+    async fn send_ctrl_alt_del_succeeds_after_start() {
+        let router = test_state().router();
+        let kernel = NamedTempFile::new().unwrap();
+
+        let boot_source_response = router
+            .clone()
+            .oneshot(put_boot_source_request(
+                kernel.path().to_str().unwrap(),
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(boot_source_response.status(), StatusCode::NO_CONTENT);
+
+        let start_response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/actions")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(r#"{"action_type":"InstanceStart"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(start_response.status(), StatusCode::NO_CONTENT);
+
+        let ctrl_alt_del_response = router
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/actions")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(
+                        r#"{"action_type":"SendCtrlAltDel"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(ctrl_alt_del_response.status(), StatusCode::NO_CONTENT);
+    }
+
+    #[tokio::test]
+    #[cfg(target_arch = "aarch64")]
+    async fn rejects_send_ctrl_alt_del_on_aarch64() {
+        let router = test_state().router();
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/actions")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(
+                        r#"{"action_type":"SendCtrlAltDel"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let payload: ErrorEnvelope = serde_json::from_slice(&body).unwrap();
+        assert_eq!(payload.code, "InvalidRequest");
+        assert_eq!(payload.fault_message, SEND_CTRL_ALT_DEL_AARCH64_MESSAGE);
     }
 
     #[tokio::test]
