@@ -235,6 +235,18 @@ struct FullVmConfigurationResponse {
     machine_config: MachineConfig,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct VmStateChangeRequest {
+    state: VmStateChange,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+enum VmStateChange {
+    Paused,
+    Resumed,
+}
+
 #[derive(Debug)]
 pub struct AppState {
     routes: Vec<RouteTemplate>,
@@ -403,6 +415,7 @@ async fn handle_all(
         ("PATCH", "/machine-config") => {
             return handle_patch_machine_config(&state, &method, &route.template, body);
         }
+        ("PATCH", "/vm") => return handle_patch_vm(&state, &method, &route.template, body),
         ("GET", "/vm/config") => return full_vm_config_response(&state),
         _ => {}
     }
@@ -639,6 +652,50 @@ fn handle_patch_machine_config(
     StatusCode::NO_CONTENT.into_response()
 }
 
+fn handle_patch_vm(
+    state: &Arc<AppState>,
+    method: &Method,
+    template: &str,
+    body: Bytes,
+) -> Response {
+    let payload: VmStateChangeRequest = match serde_json::from_slice(&body) {
+        Ok(value) => value,
+        Err(_) => {
+            return error_response(
+                &state.firecracker_revision,
+                StatusCode::BAD_REQUEST,
+                "InvalidRequest",
+                "invalid JSON payload",
+                template,
+                method.as_str(),
+            );
+        }
+    };
+
+    let mut vm_state = state
+        .vm_state
+        .write()
+        .expect("vm state lock poisoned while writing");
+    match (payload.state, *vm_state) {
+        (VmStateChange::Paused, VmState::Running) => {
+            *vm_state = VmState::Paused;
+            StatusCode::NO_CONTENT.into_response()
+        }
+        (VmStateChange::Resumed, VmState::Paused) => {
+            *vm_state = VmState::Running;
+            StatusCode::NO_CONTENT.into_response()
+        }
+        _ => error_response(
+            &state.firecracker_revision,
+            StatusCode::BAD_REQUEST,
+            "InvalidState",
+            &state_invalid_message(operation_key(method.as_str(), template), *vm_state),
+            template,
+            method.as_str(),
+        ),
+    }
+}
+
 fn validate_state_guard(state: &Arc<AppState>, route: &RouteTemplate) -> Option<String> {
     const PREBOOT_ONLY_OPS: &[&str] = &[
         "PUT /boot-source",
@@ -806,6 +863,10 @@ mod tests {
                 RouteSpec {
                     method: "GET".to_string(),
                     path: "/vm/config".to_string(),
+                },
+                RouteSpec {
+                    method: "PATCH".to_string(),
+                    path: "/vm".to_string(),
                 },
             ],
             "abc123".to_string(),
@@ -998,6 +1059,109 @@ mod tests {
             .unwrap();
         let payload: ErrorEnvelope = serde_json::from_slice(&body).unwrap();
         assert_eq!(payload.code, "InvalidRequest");
+    }
+
+    #[tokio::test]
+    async fn rejects_vm_pause_before_start() {
+        let router = test_state().router();
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri("/vm")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(r#"{"state":"Paused"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let payload: ErrorEnvelope = serde_json::from_slice(&body).unwrap();
+        assert_eq!(payload.code, "InvalidState");
+    }
+
+    #[tokio::test]
+    async fn pauses_and_resumes_vm_state() {
+        let router = test_state().router();
+
+        let start_response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/actions")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(r#"{"action_type":"InstanceStart"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(start_response.status(), StatusCode::NO_CONTENT);
+
+        let pause_response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri("/vm")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(r#"{"state":"Paused"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(pause_response.status(), StatusCode::NO_CONTENT);
+
+        let paused_state = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(paused_state.status(), StatusCode::OK);
+        let paused_body = to_bytes(paused_state.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let paused_payload: serde_json::Value = serde_json::from_slice(&paused_body).unwrap();
+        assert_eq!(paused_payload["state"], "Paused");
+
+        let resume_response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri("/vm")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(r#"{"state":"Resumed"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resume_response.status(), StatusCode::NO_CONTENT);
+
+        let resumed_state = router
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resumed_state.status(), StatusCode::OK);
+        let resumed_body = to_bytes(resumed_state.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let resumed_payload: serde_json::Value = serde_json::from_slice(&resumed_body).unwrap();
+        assert_eq!(resumed_payload["state"], "Running");
     }
 
     #[tokio::test]
