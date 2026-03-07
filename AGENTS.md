@@ -42,6 +42,15 @@ third_party/     Vendored Firecracker OpenAPI
    - remaining gaps, if any
 9. Close an issue only when its acceptance criteria and checklist items are actually satisfied in code and tests.
 
+## Tracker Update Protocol
+
+- Every parity unit must leave a tracker artifact behind: issue comment, issue state change, checklist update, or all three.
+- Post the tracker update after push and after the first CI/check signal is available.
+- Include both local verification and remote verification in the tracker update.
+- If CI is still running, mark the issue comment as pending and follow up with the final result.
+- If CI fails, comment with the failing workflow/check name, the failing commit SHA, and the remediation plan before moving the issue forward.
+- Do not mark a checklist item complete from local testing alone if the branch or push checks are still red or pending.
+
 ## Issue And Status Rules
 
 - Reopen issues if they were closed on scaffolding or partial behavior and the acceptance criteria are still unmet.
@@ -70,6 +79,21 @@ cargo run --bin baselinectl -- --mode validate
 cargo run --bin baselinectl -- --mode generate
 cargo run --bin compatexctl -- --registry docs/specs/compat-exceptions.yaml
 ```
+
+## Per-Unit Verification Checklist
+
+Before pushing:
+
+- Run the narrowest tests that cover the touched files and behavior.
+- Run at least one broader regression command if the unit changes API semantics or shared library code.
+- Confirm `git status` only contains the intended files for the unit.
+
+After pushing:
+
+- Check the GitHub Actions runs or required checks for the pushed SHA.
+- Record the initial check state in the linked issue or tracker comment.
+- Follow the checks through completion and post the final success or failure result.
+- If the unit changes parity behavior, update the relevant tracker/checklist status to reflect what is now verified.
 
 ## Phase 0 Expectations
 
