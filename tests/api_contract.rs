@@ -1,4 +1,4 @@
-use axum::body::{to_bytes, Body};
+use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode};
 use tower::ServiceExt;
 
@@ -24,6 +24,8 @@ fn concrete_path(template: &str) -> String {
 async fn all_pinned_routes_are_reachable() {
     let lock = vesper::baseline::load("docs/specs/design-v0.baselines.lock.yaml").unwrap();
     let firecracker = lock.baselines.get("firecracker").unwrap().revision.clone();
+    let firecracker_version =
+        vesper::spec::load_info_version("third_party/firecracker/firecracker.yaml").unwrap();
 
     let routes = vesper::spec::load_routes("third_party/firecracker/firecracker.yaml")
         .unwrap()
@@ -34,7 +36,7 @@ async fn all_pinned_routes_are_reachable() {
         })
         .collect::<Vec<_>>();
 
-    let router = vesper::api::AppState::new(&routes, firecracker.clone())
+    let router = vesper::api::AppState::new(&routes, firecracker.clone(), firecracker_version)
         .unwrap()
         .router();
 
@@ -59,12 +61,13 @@ async fn all_pinned_routes_are_reachable() {
 
         assert_ne!(response.status(), StatusCode::NOT_FOUND);
 
-        if response.status() == StatusCode::NO_CONTENT {
+        if response.status().is_success() {
             continue;
         }
 
         let payload: serde_json::Value =
-            serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
+            serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
         assert_eq!(
             payload["baseline_firecracker_revision"].as_str().unwrap(),
             firecracker

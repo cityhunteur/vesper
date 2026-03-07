@@ -45,8 +45,9 @@ async fn run() -> Result<(), String> {
             path: route.path,
         })
         .collect::<Vec<_>>();
+    let firecracker_version = vesper::spec::load_info_version(&args.swagger)?;
 
-    let app_state = vesper::api::AppState::new(&routes, firecracker_revision)?;
+    let app_state = vesper::api::AppState::new(&routes, firecracker_revision, firecracker_version)?;
     let app = app_state.router();
 
     if let Some(parent) = Path::new(&args.socket).parent() {

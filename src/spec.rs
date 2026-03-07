@@ -10,11 +10,7 @@ pub struct Route {
 }
 
 pub fn load_routes(path: impl AsRef<Path>) -> Result<Vec<Route>, String> {
-    let path = path.as_ref();
-    let content = fs::read_to_string(path)
-        .map_err(|err| format!("read swagger spec {}: {err}", path.display()))?;
-    let yaml: Value =
-        serde_yaml::from_str(&content).map_err(|err| format!("parse swagger yaml: {err}"))?;
+    let yaml = load_swagger_yaml(path.as_ref())?;
 
     let paths = yaml
         .get("paths")
@@ -60,6 +56,24 @@ pub fn load_routes(path: impl AsRef<Path>) -> Result<Vec<Route>, String> {
     Ok(routes)
 }
 
+pub fn load_info_version(path: impl AsRef<Path>) -> Result<String, String> {
+    let yaml = load_swagger_yaml(path.as_ref())?;
+
+    yaml.get("info")
+        .and_then(Value::as_mapping)
+        .and_then(|info| info.get("version"))
+        .and_then(Value::as_str)
+        .map(|value| value.to_string())
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| "swagger spec missing info.version".to_string())
+}
+
+fn load_swagger_yaml(path: &Path) -> Result<Value, String> {
+    let content = fs::read_to_string(path)
+        .map_err(|err| format!("read swagger spec {}: {err}", path.display()))?;
+    serde_yaml::from_str(&content).map_err(|err| format!("parse swagger yaml: {err}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -69,5 +83,11 @@ mod tests {
         let routes = load_routes("third_party/firecracker/firecracker.yaml").unwrap();
         assert!(!routes.is_empty());
         assert!(routes.iter().any(|route| route.path == "/actions"));
+    }
+
+    #[test]
+    fn loads_swagger_info_version() {
+        let version = load_info_version("third_party/firecracker/firecracker.yaml").unwrap();
+        assert_eq!(version, "1.16.0-dev");
     }
 }
