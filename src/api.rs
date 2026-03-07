@@ -13,6 +13,10 @@ const DEFAULT_APP_NAME: &str = "Firecracker";
 const DEFAULT_INSTANCE_ID: &str = "anonymous-instance";
 const DEFAULT_MEM_SIZE_MIB: usize = 128;
 const MAX_SUPPORTED_VCPUS: u8 = 32;
+const ACTION_NOT_SUPPORTED_POSTBOOT_MESSAGE: &str =
+    "The requested operation is not supported after starting the microVM.";
+const ACTION_NOT_SUPPORTED_PREBOOT_MESSAGE: &str =
+    "The requested operation is not supported before starting the microVM.";
 const MISSING_KERNEL_CONFIG_MESSAGE: &str = "Cannot start microvm without kernel configuration.";
 const METRICS_ALREADY_INITIALIZED_MESSAGE: &str = "Cannot initialize the metrics system due to bad user input: Reinitialization of metrics not allowed.";
 
@@ -327,6 +331,19 @@ struct VmStateChangeRequest {
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
+enum ActionType {
+    FlushMetrics,
+    InstanceStart,
+    SendCtrlAltDel,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ActionRequest {
+    action_type: ActionType,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
 enum VmStateChange {
     Paused,
     Resumed,
@@ -594,11 +611,6 @@ fn full_vm_config_response(state: &Arc<AppState>) -> Response {
 }
 
 fn handle_actions(state: &Arc<AppState>, method: &Method, template: &str, body: Bytes) -> Response {
-    #[derive(Deserialize)]
-    struct ActionRequest {
-        action_type: String,
-    }
-
     let payload: ActionRequest = match serde_json::from_slice(&body) {
         Ok(value) => value,
         Err(_) => {
@@ -613,51 +625,70 @@ fn handle_actions(state: &Arc<AppState>, method: &Method, template: &str, body: 
         }
     };
 
-    if payload.action_type.trim() == "InstanceStart" {
-        let mut vm_state = state
-            .vm_state
-            .write()
-            .expect("vm state lock poisoned while writing");
+    match payload.action_type {
+        ActionType::FlushMetrics => {
+            let vm_state = *state
+                .vm_state
+                .read()
+                .expect("vm state lock poisoned while reading");
+            if vm_state == VmState::PreBoot {
+                return error_response(
+                    &state.firecracker_revision,
+                    StatusCode::BAD_REQUEST,
+                    "InvalidState",
+                    ACTION_NOT_SUPPORTED_PREBOOT_MESSAGE,
+                    template,
+                    method.as_str(),
+                );
+            }
 
-        if *vm_state != VmState::PreBoot {
-            return error_response(
-                &state.firecracker_revision,
-                StatusCode::BAD_REQUEST,
-                "InvalidState",
-                &state_invalid_message(operation_key(method.as_str(), template), *vm_state),
-                template,
-                method.as_str(),
-            );
+            StatusCode::NO_CONTENT.into_response()
         }
+        ActionType::InstanceStart => {
+            let mut vm_state = state
+                .vm_state
+                .write()
+                .expect("vm state lock poisoned while writing");
 
-        let boot_source = state
-            .boot_source
-            .read()
-            .expect("boot source lock poisoned while reading")
-            .clone();
-        if boot_source.kernel_image_path.is_empty() {
-            return error_response(
-                &state.firecracker_revision,
-                StatusCode::BAD_REQUEST,
-                "InvalidRequest",
-                MISSING_KERNEL_CONFIG_MESSAGE,
-                template,
-                method.as_str(),
-            );
+            if *vm_state != VmState::PreBoot {
+                return error_response(
+                    &state.firecracker_revision,
+                    StatusCode::BAD_REQUEST,
+                    "InvalidState",
+                    ACTION_NOT_SUPPORTED_POSTBOOT_MESSAGE,
+                    template,
+                    method.as_str(),
+                );
+            }
+
+            let boot_source = state
+                .boot_source
+                .read()
+                .expect("boot source lock poisoned while reading")
+                .clone();
+            if boot_source.kernel_image_path.is_empty() {
+                return error_response(
+                    &state.firecracker_revision,
+                    StatusCode::BAD_REQUEST,
+                    "InvalidRequest",
+                    MISSING_KERNEL_CONFIG_MESSAGE,
+                    template,
+                    method.as_str(),
+                );
+            }
+
+            *vm_state = VmState::Running;
+            StatusCode::NO_CONTENT.into_response()
         }
-
-        *vm_state = VmState::Running;
-        return StatusCode::NO_CONTENT.into_response();
+        ActionType::SendCtrlAltDel => error_response(
+            &state.firecracker_revision,
+            StatusCode::NOT_IMPLEMENTED,
+            "NotImplemented",
+            "action is not implemented",
+            template,
+            method.as_str(),
+        ),
     }
-
-    error_response(
-        &state.firecracker_revision,
-        StatusCode::NOT_IMPLEMENTED,
-        "NotImplemented",
-        "action is not implemented",
-        template,
-        method.as_str(),
-    )
 }
 
 fn handle_put_boot_source(
@@ -1480,6 +1511,120 @@ mod tests {
         let payload: ErrorEnvelope = serde_json::from_slice(&body).unwrap();
         assert_eq!(payload.code, "InvalidRequest");
         assert_eq!(payload.fault_message, MISSING_KERNEL_CONFIG_MESSAGE);
+    }
+
+    #[tokio::test]
+    async fn rejects_flush_metrics_before_start() {
+        let router = test_state().router();
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/actions")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(r#"{"action_type":"FlushMetrics"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let payload: ErrorEnvelope = serde_json::from_slice(&body).unwrap();
+        assert_eq!(payload.code, "InvalidState");
+        assert_eq!(payload.fault_message, ACTION_NOT_SUPPORTED_PREBOOT_MESSAGE);
+    }
+
+    #[tokio::test]
+    async fn flush_metrics_succeeds_after_start_without_metrics_init() {
+        let router = test_state().router();
+        let kernel = NamedTempFile::new().unwrap();
+
+        let boot_source_response = router
+            .clone()
+            .oneshot(put_boot_source_request(
+                kernel.path().to_str().unwrap(),
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(boot_source_response.status(), StatusCode::NO_CONTENT);
+
+        let start_response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/actions")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(r#"{"action_type":"InstanceStart"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(start_response.status(), StatusCode::NO_CONTENT);
+
+        let flush_response = router
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/actions")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(r#"{"action_type":"FlushMetrics"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(flush_response.status(), StatusCode::NO_CONTENT);
+    }
+
+    #[tokio::test]
+    async fn rejects_instance_start_after_boot_with_firecracker_postboot_message() {
+        let router = test_state().router();
+        let kernel = NamedTempFile::new().unwrap();
+
+        let boot_source_response = router
+            .clone()
+            .oneshot(put_boot_source_request(
+                kernel.path().to_str().unwrap(),
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(boot_source_response.status(), StatusCode::NO_CONTENT);
+
+        let first_start_response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/actions")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(r#"{"action_type":"InstanceStart"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(first_start_response.status(), StatusCode::NO_CONTENT);
+
+        let second_start_response = router
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/actions")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(r#"{"action_type":"InstanceStart"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(second_start_response.status(), StatusCode::BAD_REQUEST);
+        let body = to_bytes(second_start_response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let payload: ErrorEnvelope = serde_json::from_slice(&body).unwrap();
+        assert_eq!(payload.code, "InvalidState");
+        assert_eq!(payload.fault_message, ACTION_NOT_SUPPORTED_POSTBOOT_MESSAGE);
     }
 
     #[tokio::test]
