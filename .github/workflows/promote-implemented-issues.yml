@@ -12,6 +12,7 @@ permissions:
 
 env:
   GH_TOKEN: ${{ secrets.PROJECT_TOKEN || secrets.GITHUB_TOKEN }}
+  HAS_PROJECT_TOKEN: ${{ secrets.PROJECT_TOKEN != '' }}
   PROJECT_ID: "PVT_kwHOAFt3k84BQfZi"
   STATUS_FIELD_ID: "PVTSSF_lAHOAFt3k84BQfZizg-mBPk"
   IN_REVIEW_OPTION_ID: "df73e18b"
@@ -97,6 +98,7 @@ jobs:
             if grep -qx "$EVAL_READY_LABEL" <<<"$LABELS"; then
               HAS_EVAL_READY=true
             fi
+            ADDED_EVAL_READY=false
 
             ITEM_ID="$(jq -r --arg project "$PROJECT_ID" '.data.repository.issue.projectItems.nodes[]? | select(.project.id == $project) | .id' <<<"$ISSUE_JSON" | head -n1)"
             STATUS_NAME="$(jq -r --arg project "$PROJECT_ID" '.data.repository.issue.projectItems.nodes[]? | select(.project.id == $project) | (.fieldValueByName.name // "")' <<<"$ISSUE_JSON" | head -n1)"
@@ -125,11 +127,17 @@ jobs:
 
             if [ "$HAS_EVAL_READY" = "false" ]; then
               gh issue edit "$ISSUE" --repo "${{ github.repository }}" --add-label "$EVAL_READY_LABEL"
+              ADDED_EVAL_READY=true
               echo "Added eval:ready to #$ISSUE."
             fi
 
             if [ "$STATUS_NAME" = "In review" ] && [ "$HAS_EVAL_READY" = "true" ]; then
               echo "Skipping eval dispatch for #$ISSUE because it is already in review with eval:ready."
+              continue
+            fi
+
+            if [ "$HAS_PROJECT_TOKEN" = "true" ] && [ "$ADDED_EVAL_READY" = "true" ]; then
+              echo "Relying on eval:ready label event to run eval for #$ISSUE."
               continue
             fi
 
