@@ -240,6 +240,12 @@ struct MetricsConfig {
     metrics_path: String,
 }
 
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct SerialConfig {
+    serial_out_path: Option<String>,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct MachineConfigPutRequest {
@@ -361,6 +367,7 @@ pub struct AppState {
     logger_config: RwLock<LoggerConfig>,
     machine_config: RwLock<MachineConfig>,
     metrics_config: RwLock<Option<MetricsConfig>>,
+    serial_config: RwLock<SerialConfig>,
 }
 
 impl AppState {
@@ -413,6 +420,7 @@ impl AppState {
             logger_config: RwLock::new(LoggerConfig::default()),
             machine_config: RwLock::new(MachineConfig::default()),
             metrics_config: RwLock::new(None),
+            serial_config: RwLock::new(SerialConfig::default()),
         })
     }
 
@@ -520,6 +528,7 @@ async fn handle_all(
         ("GET", "/machine-config") => return machine_config_response(&state),
         ("PUT", "/logger") => return handle_put_logger(&state, &method, &route.template, body),
         ("PUT", "/metrics") => return handle_put_metrics(&state, &method, &route.template, body),
+        ("PUT", "/serial") => return handle_put_serial(&state, &method, &route.template, body),
         ("PUT", "/boot-source") => {
             return handle_put_boot_source(&state, &method, &route.template, body);
         }
@@ -860,6 +869,34 @@ fn handle_put_metrics(
     StatusCode::NO_CONTENT.into_response()
 }
 
+fn handle_put_serial(
+    state: &Arc<AppState>,
+    method: &Method,
+    template: &str,
+    body: Bytes,
+) -> Response {
+    let payload: SerialConfig = match serde_json::from_slice(&body) {
+        Ok(value) => value,
+        Err(_) => {
+            return error_response(
+                &state.firecracker_revision,
+                StatusCode::BAD_REQUEST,
+                "InvalidRequest",
+                "invalid JSON payload",
+                template,
+                method.as_str(),
+            );
+        }
+    };
+
+    *state
+        .serial_config
+        .write()
+        .expect("serial config lock poisoned while writing") = payload;
+
+    StatusCode::NO_CONTENT.into_response()
+}
+
 fn handle_put_machine_config(
     state: &Arc<AppState>,
     method: &Method,
@@ -1020,6 +1057,7 @@ fn validate_state_guard(state: &Arc<AppState>, route: &RouteTemplate) -> Option<
         "PUT /logger",
         "PUT /machine-config",
         "PUT /metrics",
+        "PUT /serial",
         "PATCH /machine-config",
         "PUT /drives/{drive_id}",
         "PATCH /drives/{drive_id}",
@@ -1220,6 +1258,10 @@ mod tests {
                 RouteSpec {
                     method: "PUT".to_string(),
                     path: "/metrics".to_string(),
+                },
+                RouteSpec {
+                    method: "PUT".to_string(),
+                    path: "/serial".to_string(),
                 },
                 RouteSpec {
                     method: "PATCH".to_string(),
@@ -1860,6 +1902,84 @@ mod tests {
         let vm_config_payload: serde_json::Value = serde_json::from_slice(&vm_config_body).unwrap();
         assert!(vm_config_payload.get("logger").is_none());
         assert!(vm_config_payload.get("metrics").is_none());
+    }
+
+    #[tokio::test]
+    async fn stores_serial_config_and_omits_runtime_export() {
+        let state = Arc::new(test_state());
+
+        let serial_response = handle_put_serial(
+            &state,
+            &Method::PUT,
+            "/serial",
+            Bytes::from_static(br#"{"serial_out_path":"serial.log"}"#),
+        );
+        assert_eq!(serial_response.status(), StatusCode::NO_CONTENT);
+
+        let serial_config = state
+            .serial_config
+            .read()
+            .expect("serial config lock poisoned while reading")
+            .clone();
+        assert_eq!(serial_config.serial_out_path.as_deref(), Some("serial.log"));
+
+        let vm_config_response = full_vm_config_response(&state);
+        assert_eq!(vm_config_response.status(), StatusCode::OK);
+        let vm_config_body = to_bytes(vm_config_response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let vm_config_payload: serde_json::Value = serde_json::from_slice(&vm_config_body).unwrap();
+        assert!(vm_config_payload.get("serial").is_none());
+    }
+
+    #[tokio::test]
+    async fn rejects_serial_after_start() {
+        let router = test_state().router();
+        let kernel = NamedTempFile::new().unwrap();
+
+        let boot_source_response = router
+            .clone()
+            .oneshot(put_boot_source_request(
+                kernel.path().to_str().unwrap(),
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(boot_source_response.status(), StatusCode::NO_CONTENT);
+
+        let start_response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/actions")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(r#"{"action_type":"InstanceStart"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(start_response.status(), StatusCode::NO_CONTENT);
+
+        let serial_response = router
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/serial")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(
+                        r#"{"serial_out_path":"serial.log"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(serial_response.status(), StatusCode::BAD_REQUEST);
+        let body = to_bytes(serial_response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let payload: ErrorEnvelope = serde_json::from_slice(&body).unwrap();
+        assert_eq!(payload.code, "InvalidState");
     }
 
     #[tokio::test]
