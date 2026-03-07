@@ -1,0 +1,138 @@
+name: Promote Implemented Issues
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  issues: write
+  actions: write
+  contents: read
+  repository-projects: write
+
+env:
+  GH_TOKEN: ${{ secrets.PROJECT_TOKEN || secrets.GITHUB_TOKEN }}
+  PROJECT_ID: "PVT_kwHOAFt3k84BQfZi"
+  STATUS_FIELD_ID: "PVTSSF_lAHOAFt3k84BQfZizg-mBPk"
+  IN_REVIEW_OPTION_ID: "df73e18b"
+  EVAL_READY_LABEL: "eval:ready"
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve issue references from pushed commits
+        id: issues
+        run: |
+          set -euo pipefail
+
+          COMPARE_JSON="$(gh api "repos/${{ github.repository }}/compare/${{ github.event.before }}...${{ github.sha }}")"
+          ISSUE_NUMBERS="$(
+            printf '%s' "$COMPARE_JSON" \
+              | jq -r '[.commits[].commit.message | split("\n")[0]] | join("\n")' \
+              | grep -oE '#[0-9]+' \
+              | tr -d '#' \
+              | sort -n -u \
+              | paste -sd, - \
+              || true
+          )"
+
+          if [ -z "${ISSUE_NUMBERS:-}" ]; then
+            echo "numbers=" >> "$GITHUB_OUTPUT"
+            echo "count=0" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "numbers=$ISSUE_NUMBERS" >> "$GITHUB_OUTPUT"
+          echo "count=$(tr ',' '\n' <<<"$ISSUE_NUMBERS" | sed '/^$/d' | wc -l | tr -d ' ')" >> "$GITHUB_OUTPUT"
+
+      - name: Promote implemented issues to In review and trigger eval
+        if: steps.issues.outputs.count != '0'
+        run: |
+          set -euo pipefail
+
+          for ISSUE in $(tr ',' ' ' <<<"${{ steps.issues.outputs.numbers }}"); do
+            ISSUE_JSON="$(gh api graphql -f query='
+              query($owner: String!, $repo: String!, $number: Int!) {
+                repository(owner: $owner, name: $repo) {
+                  issue(number: $number) {
+                    state
+                    labels(first: 50) {
+                      nodes { name }
+                    }
+                    projectItems(first: 20) {
+                      nodes {
+                        id
+                        project { id }
+                        fieldValueByName(name: "Status") {
+                          ... on ProjectV2ItemFieldSingleSelectValue {
+                            name
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            ' -f owner="${{ github.repository_owner }}" -f repo="${{ github.event.repository.name }}" -F number="$ISSUE")"
+
+            if [ "$(jq -r '.data.repository.issue == null' <<<"$ISSUE_JSON")" = "true" ]; then
+              echo "::warning::Skipping #$ISSUE because it is not an issue in this repository."
+              continue
+            fi
+
+            ISSUE_STATE="$(jq -r '.data.repository.issue.state' <<<"$ISSUE_JSON")"
+            if [ "$ISSUE_STATE" != "OPEN" ]; then
+              echo "Skipping #$ISSUE because it is $ISSUE_STATE."
+              continue
+            fi
+
+            LABELS="$(jq -r '.data.repository.issue.labels.nodes[].name' <<<"$ISSUE_JSON")"
+            if ! grep -qx 'kind:roadmap' <<<"$LABELS"; then
+              echo "Skipping #$ISSUE because it is not a roadmap issue."
+              continue
+            fi
+
+            HAS_EVAL_READY=false
+            if grep -qx "$EVAL_READY_LABEL" <<<"$LABELS"; then
+              HAS_EVAL_READY=true
+            fi
+
+            ITEM_ID="$(jq -r --arg project "$PROJECT_ID" '.data.repository.issue.projectItems.nodes[]? | select(.project.id == $project) | .id' <<<"$ISSUE_JSON" | head -n1)"
+            STATUS_NAME="$(jq -r --arg project "$PROJECT_ID" '.data.repository.issue.projectItems.nodes[]? | select(.project.id == $project) | (.fieldValueByName.name // "")' <<<"$ISSUE_JSON" | head -n1)"
+
+            if [ -n "$ITEM_ID" ] && [ "$STATUS_NAME" != "In review" ]; then
+              gh api graphql -f query='
+                mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
+                  updateProjectV2ItemFieldValue(input: {
+                    projectId: $projectId
+                    itemId: $itemId
+                    fieldId: $fieldId
+                    value: { singleSelectOptionId: $optionId }
+                  }) {
+                    projectV2Item { id }
+                  }
+                }
+              ' -f projectId="$PROJECT_ID" \
+                -f itemId="$ITEM_ID" \
+                -f fieldId="$STATUS_FIELD_ID" \
+                -f optionId="$IN_REVIEW_OPTION_ID" \
+                >/dev/null
+              echo "Moved #$ISSUE to In review."
+            elif [ -z "$ITEM_ID" ]; then
+              echo "::warning::Issue #$ISSUE is not on the project board."
+            fi
+
+            if [ "$HAS_EVAL_READY" = "false" ]; then
+              gh issue edit "$ISSUE" --repo "${{ github.repository }}" --add-label "$EVAL_READY_LABEL"
+              echo "Added eval:ready to #$ISSUE."
+            fi
+
+            if [ "$STATUS_NAME" = "In review" ] && [ "$HAS_EVAL_READY" = "true" ]; then
+              echo "Skipping eval dispatch for #$ISSUE because it is already in review with eval:ready."
+              continue
+            fi
+
+            gh workflow run eval-on-review.yml --repo "${{ github.repository }}" --ref main -f issue_number="$ISSUE"
+            echo "Dispatched eval for #$ISSUE."
+          done

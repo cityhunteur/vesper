@@ -28,7 +28,7 @@ jobs:
     runs-on: ubuntu-latest
     if: >-
       (github.event_name == 'workflow_dispatch') ||
-      (github.event.label.name == 'eval:ready')
+      (github.event.label.name == 'eval:ready' && github.actor != 'github-actions[bot]')
     steps:
       - name: Resolve issue number
         id: issue
