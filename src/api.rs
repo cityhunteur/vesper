@@ -246,6 +246,35 @@ struct SerialConfig {
     serial_out_path: Option<String>,
 }
 
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct TokenBucket {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    one_time_burst: Option<u64>,
+    refill_time: u64,
+    size: u64,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct RateLimiterConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    bandwidth: Option<TokenBucket>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    ops: Option<TokenBucket>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct EntropyDeviceConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    rate_limiter: Option<RateLimiterConfig>,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct MachineConfigPutRequest {
@@ -321,6 +350,8 @@ struct FullVmConfigurationResponse {
     boot_source: BootSourceConfig,
     #[serde(rename = "machine-config")]
     machine_config: MachineConfig,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    entropy: Option<EntropyDeviceConfig>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq, Serialize)]
@@ -368,6 +399,7 @@ pub struct AppState {
     machine_config: RwLock<MachineConfig>,
     metrics_config: RwLock<Option<MetricsConfig>>,
     serial_config: RwLock<SerialConfig>,
+    entropy_config: RwLock<Option<EntropyDeviceConfig>>,
 }
 
 impl AppState {
@@ -421,6 +453,7 @@ impl AppState {
             machine_config: RwLock::new(MachineConfig::default()),
             metrics_config: RwLock::new(None),
             serial_config: RwLock::new(SerialConfig::default()),
+            entropy_config: RwLock::new(None),
         })
     }
 
@@ -529,6 +562,7 @@ async fn handle_all(
         ("PUT", "/logger") => return handle_put_logger(&state, &method, &route.template, body),
         ("PUT", "/metrics") => return handle_put_metrics(&state, &method, &route.template, body),
         ("PUT", "/serial") => return handle_put_serial(&state, &method, &route.template, body),
+        ("PUT", "/entropy") => return handle_put_entropy(&state, &method, &route.template, body),
         ("PUT", "/boot-source") => {
             return handle_put_boot_source(&state, &method, &route.template, body);
         }
@@ -610,11 +644,17 @@ fn full_vm_config_response(state: &Arc<AppState>) -> Response {
         .read()
         .expect("machine config lock poisoned while reading")
         .clone();
+    let entropy = state
+        .entropy_config
+        .read()
+        .expect("entropy config lock poisoned while reading")
+        .clone();
     (
         StatusCode::OK,
         Json(FullVmConfigurationResponse {
             boot_source,
             machine_config: config,
+            entropy,
         }),
     )
         .into_response()
@@ -893,6 +933,34 @@ fn handle_put_serial(
         .serial_config
         .write()
         .expect("serial config lock poisoned while writing") = payload;
+
+    StatusCode::NO_CONTENT.into_response()
+}
+
+fn handle_put_entropy(
+    state: &Arc<AppState>,
+    method: &Method,
+    template: &str,
+    body: Bytes,
+) -> Response {
+    let payload: EntropyDeviceConfig = match serde_json::from_slice(&body) {
+        Ok(value) => value,
+        Err(_) => {
+            return error_response(
+                &state.firecracker_revision,
+                StatusCode::BAD_REQUEST,
+                "InvalidRequest",
+                "invalid JSON payload",
+                template,
+                method.as_str(),
+            );
+        }
+    };
+
+    *state
+        .entropy_config
+        .write()
+        .expect("entropy config lock poisoned while writing") = Some(payload);
 
     StatusCode::NO_CONTENT.into_response()
 }
@@ -1262,6 +1330,10 @@ mod tests {
                 RouteSpec {
                     method: "PUT".to_string(),
                     path: "/serial".to_string(),
+                },
+                RouteSpec {
+                    method: "PUT".to_string(),
+                    path: "/entropy".to_string(),
                 },
                 RouteSpec {
                     method: "PATCH".to_string(),
@@ -1930,6 +2002,116 @@ mod tests {
             .unwrap();
         let vm_config_payload: serde_json::Value = serde_json::from_slice(&vm_config_body).unwrap();
         assert!(vm_config_payload.get("serial").is_none());
+    }
+
+    #[tokio::test]
+    async fn stores_entropy_config_and_exports_it() {
+        let router = test_state().router();
+
+        let entropy_response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/entropy")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(
+                        r#"{"rate_limiter":{"bandwidth":{"size":4096,"refill_time":1000,"one_time_burst":512},"ops":{"size":32,"refill_time":100}}}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(entropy_response.status(), StatusCode::NO_CONTENT);
+
+        let vm_config_response = router
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/vm/config")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(vm_config_response.status(), StatusCode::OK);
+        let vm_config_body = to_bytes(vm_config_response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let vm_config_payload: serde_json::Value = serde_json::from_slice(&vm_config_body).unwrap();
+        assert_eq!(
+            vm_config_payload["entropy"]["rate_limiter"]["bandwidth"]["size"],
+            4096
+        );
+        assert_eq!(
+            vm_config_payload["entropy"]["rate_limiter"]["bandwidth"]["refill_time"],
+            1000
+        );
+        assert_eq!(
+            vm_config_payload["entropy"]["rate_limiter"]["bandwidth"]["one_time_burst"],
+            512
+        );
+        assert_eq!(
+            vm_config_payload["entropy"]["rate_limiter"]["ops"]["size"],
+            32
+        );
+        assert_eq!(
+            vm_config_payload["entropy"]["rate_limiter"]["ops"]["refill_time"],
+            100
+        );
+        assert!(
+            vm_config_payload["entropy"]["rate_limiter"]["ops"]
+                .get("one_time_burst")
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn rejects_entropy_after_start() {
+        let router = test_state().router();
+        let kernel = NamedTempFile::new().unwrap();
+
+        let boot_source_response = router
+            .clone()
+            .oneshot(put_boot_source_request(
+                kernel.path().to_str().unwrap(),
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(boot_source_response.status(), StatusCode::NO_CONTENT);
+
+        let start_response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/actions")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(r#"{"action_type":"InstanceStart"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(start_response.status(), StatusCode::NO_CONTENT);
+
+        let entropy_response = router
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/entropy")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(r#"{}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(entropy_response.status(), StatusCode::BAD_REQUEST);
+        let body = to_bytes(entropy_response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let payload: ErrorEnvelope = serde_json::from_slice(&body).unwrap();
+        assert_eq!(payload.code, "InvalidState");
     }
 
     #[tokio::test]
