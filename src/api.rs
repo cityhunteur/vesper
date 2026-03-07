@@ -4,9 +4,9 @@ use axum::http::{Method, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use axum::routing::any;
 use axum::{Json, Router};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::{BTreeMap, HashMap};
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::sync::{Arc, RwLock};
 
 const DEFAULT_APP_NAME: &str = "Firecracker";
@@ -14,6 +14,7 @@ const DEFAULT_INSTANCE_ID: &str = "anonymous-instance";
 const DEFAULT_MEM_SIZE_MIB: usize = 128;
 const MAX_SUPPORTED_VCPUS: u8 = 32;
 const MISSING_KERNEL_CONFIG_MESSAGE: &str = "Cannot start microvm without kernel configuration.";
+const METRICS_ALREADY_INITIALIZED_MESSAGE: &str = "Cannot initialize the metrics system due to bad user input: Reinitialization of metrics not allowed.";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ErrorEnvelope {
@@ -162,6 +163,78 @@ impl Default for MachineConfig {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+enum LoggerLevel {
+    Off,
+    Trace,
+    Debug,
+    Info,
+    Warn,
+    Error,
+}
+
+impl<'de> Deserialize<'de> for LoggerLevel {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        use serde::de::Error;
+
+        let key = String::deserialize(deserializer)?;
+        match key.to_ascii_lowercase().as_str() {
+            "off" => Ok(Self::Off),
+            "trace" => Ok(Self::Trace),
+            "debug" => Ok(Self::Debug),
+            "info" => Ok(Self::Info),
+            "warn" | "warning" => Ok(Self::Warn),
+            "error" => Ok(Self::Error),
+            _ => Err(D::Error::custom("Invalid LevelFilter")),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LoggerConfig {
+    log_path: Option<String>,
+    level: LoggerLevel,
+    show_level: bool,
+    show_log_origin: bool,
+    module: Option<String>,
+}
+
+impl Default for LoggerConfig {
+    fn default() -> Self {
+        Self {
+            log_path: None,
+            level: LoggerLevel::Info,
+            show_level: false,
+            show_log_origin: false,
+            module: None,
+        }
+    }
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LoggerConfigRequest {
+    #[serde(default)]
+    log_path: Option<String>,
+    #[serde(default)]
+    level: Option<LoggerLevel>,
+    #[serde(default)]
+    show_level: Option<bool>,
+    #[serde(default)]
+    show_log_origin: Option<bool>,
+    #[serde(default)]
+    module: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MetricsConfig {
+    metrics_path: String,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct MachineConfigPutRequest {
@@ -267,7 +340,9 @@ pub struct AppState {
     firecracker_version: String,
     vm_state: RwLock<VmState>,
     boot_source: RwLock<BootSourceConfig>,
+    logger_config: RwLock<LoggerConfig>,
     machine_config: RwLock<MachineConfig>,
+    metrics_config: RwLock<Option<MetricsConfig>>,
 }
 
 impl AppState {
@@ -317,7 +392,9 @@ impl AppState {
             firecracker_version,
             vm_state: RwLock::new(VmState::PreBoot),
             boot_source: RwLock::new(BootSourceConfig::default()),
+            logger_config: RwLock::new(LoggerConfig::default()),
             machine_config: RwLock::new(MachineConfig::default()),
+            metrics_config: RwLock::new(None),
         })
     }
 
@@ -423,6 +500,8 @@ async fn handle_all(
         ("GET", "/") => return instance_info_response(&state),
         ("GET", "/version") => return firecracker_version_response(&state),
         ("GET", "/machine-config") => return machine_config_response(&state),
+        ("PUT", "/logger") => return handle_put_logger(&state, &method, &route.template, body),
+        ("PUT", "/metrics") => return handle_put_metrics(&state, &method, &route.template, body),
         ("PUT", "/boot-source") => {
             return handle_put_boot_source(&state, &method, &route.template, body);
         }
@@ -620,6 +699,110 @@ fn handle_put_boot_source(
     StatusCode::NO_CONTENT.into_response()
 }
 
+fn handle_put_logger(
+    state: &Arc<AppState>,
+    method: &Method,
+    template: &str,
+    body: Bytes,
+) -> Response {
+    let payload: LoggerConfigRequest = match serde_json::from_slice(&body) {
+        Ok(value) => value,
+        Err(_) => {
+            return error_response(
+                &state.firecracker_revision,
+                StatusCode::BAD_REQUEST,
+                "InvalidRequest",
+                "invalid JSON payload",
+                template,
+                method.as_str(),
+            );
+        }
+    };
+
+    if let Err(message) = validate_logger_request(&payload) {
+        return error_response(
+            &state.firecracker_revision,
+            StatusCode::BAD_REQUEST,
+            "InvalidRequest",
+            &message,
+            template,
+            method.as_str(),
+        );
+    }
+
+    let mut config = state
+        .logger_config
+        .write()
+        .expect("logger config lock poisoned while writing");
+    if let Some(log_path) = payload.log_path {
+        config.log_path = Some(log_path);
+    }
+    if let Some(level) = payload.level {
+        config.level = level;
+    }
+    if let Some(show_level) = payload.show_level {
+        config.show_level = show_level;
+    }
+    if let Some(show_log_origin) = payload.show_log_origin {
+        config.show_log_origin = show_log_origin;
+    }
+    if let Some(module) = payload.module {
+        config.module = Some(module);
+    }
+
+    StatusCode::NO_CONTENT.into_response()
+}
+
+fn handle_put_metrics(
+    state: &Arc<AppState>,
+    method: &Method,
+    template: &str,
+    body: Bytes,
+) -> Response {
+    let payload: MetricsConfig = match serde_json::from_slice(&body) {
+        Ok(value) => value,
+        Err(_) => {
+            return error_response(
+                &state.firecracker_revision,
+                StatusCode::BAD_REQUEST,
+                "InvalidRequest",
+                "invalid JSON payload",
+                template,
+                method.as_str(),
+            );
+        }
+    };
+
+    if let Err(message) = validate_metrics_request(&payload) {
+        return error_response(
+            &state.firecracker_revision,
+            StatusCode::BAD_REQUEST,
+            "InvalidRequest",
+            &message,
+            template,
+            method.as_str(),
+        );
+    }
+
+    let mut config = state
+        .metrics_config
+        .write()
+        .expect("metrics config lock poisoned while writing");
+    if config.is_some() {
+        return error_response(
+            &state.firecracker_revision,
+            StatusCode::BAD_REQUEST,
+            "InvalidRequest",
+            METRICS_ALREADY_INITIALIZED_MESSAGE,
+            template,
+            method.as_str(),
+        );
+    }
+
+    *config = Some(payload);
+    StatusCode::NO_CONTENT.into_response()
+}
+
 fn handle_put_machine_config(
     state: &Arc<AppState>,
     method: &Method,
@@ -777,7 +960,9 @@ fn handle_patch_vm(
 fn validate_state_guard(state: &Arc<AppState>, route: &RouteTemplate) -> Option<String> {
     const PREBOOT_ONLY_OPS: &[&str] = &[
         "PUT /boot-source",
+        "PUT /logger",
         "PUT /machine-config",
+        "PUT /metrics",
         "PATCH /machine-config",
         "PUT /drives/{drive_id}",
         "PATCH /drives/{drive_id}",
@@ -822,6 +1007,27 @@ fn validate_boot_source(config: &BootSourceConfig) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+fn validate_logger_request(config: &LoggerConfigRequest) -> Result<(), String> {
+    if let Some(path) = &config.log_path {
+        validate_writable_path(path).map_err(|err| format!("Failed to open target file: {err}"))?;
+    }
+
+    Ok(())
+}
+
+fn validate_metrics_request(config: &MetricsConfig) -> Result<(), String> {
+    validate_writable_path(&config.metrics_path)
+        .map_err(|err| format!("Cannot initialize the metrics system due to bad user input: {err}"))
+}
+
+fn validate_writable_path(path: &str) -> Result<(), std::io::Error> {
+    OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .map(|_| ())
 }
 
 fn validate_machine_config(config: &MachineConfig) -> Result<(), &'static str> {
@@ -948,7 +1154,15 @@ mod tests {
                 },
                 RouteSpec {
                     method: "PUT".to_string(),
+                    path: "/logger".to_string(),
+                },
+                RouteSpec {
+                    method: "PUT".to_string(),
                     path: "/machine-config".to_string(),
+                },
+                RouteSpec {
+                    method: "PUT".to_string(),
+                    path: "/metrics".to_string(),
                 },
                 RouteSpec {
                     method: "PATCH".to_string(),
@@ -1266,6 +1480,171 @@ mod tests {
         let payload: ErrorEnvelope = serde_json::from_slice(&body).unwrap();
         assert_eq!(payload.code, "InvalidRequest");
         assert_eq!(payload.fault_message, MISSING_KERNEL_CONFIG_MESSAGE);
+    }
+
+    #[tokio::test]
+    async fn merges_logger_updates_and_rejects_invalid_targets() {
+        let state = Arc::new(test_state());
+
+        let first_response = handle_put_logger(
+            &state,
+            &Method::PUT,
+            "/logger",
+            Bytes::from_static(br#"{"level":"warning"}"#),
+        );
+        assert_eq!(first_response.status(), StatusCode::NO_CONTENT);
+
+        let second_response = handle_put_logger(
+            &state,
+            &Method::PUT,
+            "/logger",
+            Bytes::from_static(br#"{"show_level":true,"module":"api_server::request"}"#),
+        );
+        assert_eq!(second_response.status(), StatusCode::NO_CONTENT);
+
+        let logger_config = state
+            .logger_config
+            .read()
+            .expect("logger config lock poisoned while reading")
+            .clone();
+        assert_eq!(logger_config.level, LoggerLevel::Warn);
+        assert!(logger_config.show_level);
+        assert!(!logger_config.show_log_origin);
+        assert_eq!(logger_config.module.as_deref(), Some("api_server::request"));
+
+        let invalid_response = handle_put_logger(
+            &state,
+            &Method::PUT,
+            "/logger",
+            Bytes::from_static(br#"{"log_path":"/definitely/missing-dir/logger.log"}"#),
+        );
+        assert_eq!(invalid_response.status(), StatusCode::BAD_REQUEST);
+        let body = to_bytes(invalid_response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let payload: ErrorEnvelope = serde_json::from_slice(&body).unwrap();
+        assert_eq!(payload.code, "InvalidRequest");
+        assert!(
+            payload
+                .fault_message
+                .starts_with("Failed to open target file:")
+        );
+    }
+
+    #[tokio::test]
+    async fn initializes_metrics_once_and_omits_runtime_export() {
+        let router = test_state().router();
+        let tempdir = tempfile::tempdir().unwrap();
+        let metrics_path = tempdir.path().join("metrics.jsonl");
+        let metrics_payload = format!(r#"{{"metrics_path":"{}"}}"#, metrics_path.display());
+
+        let first_response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/metrics")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(metrics_payload.clone()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(first_response.status(), StatusCode::NO_CONTENT);
+
+        let duplicate_response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/metrics")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(metrics_payload))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(duplicate_response.status(), StatusCode::BAD_REQUEST);
+        let duplicate_body = to_bytes(duplicate_response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let duplicate_payload: ErrorEnvelope = serde_json::from_slice(&duplicate_body).unwrap();
+        assert_eq!(duplicate_payload.code, "InvalidRequest");
+        assert_eq!(
+            duplicate_payload.fault_message,
+            METRICS_ALREADY_INITIALIZED_MESSAGE
+        );
+
+        let vm_config_response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/vm/config")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(vm_config_response.status(), StatusCode::OK);
+        let vm_config_body = to_bytes(vm_config_response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let vm_config_payload: serde_json::Value = serde_json::from_slice(&vm_config_body).unwrap();
+        assert!(vm_config_payload.get("logger").is_none());
+        assert!(vm_config_payload.get("metrics").is_none());
+    }
+
+    #[tokio::test]
+    async fn rejects_logger_and_metrics_after_start() {
+        let router = test_state().router();
+        let kernel = NamedTempFile::new().unwrap();
+
+        let boot_source_response = router
+            .clone()
+            .oneshot(put_boot_source_request(
+                kernel.path().to_str().unwrap(),
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(boot_source_response.status(), StatusCode::NO_CONTENT);
+
+        let start_response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/actions")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(r#"{"action_type":"InstanceStart"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(start_response.status(), StatusCode::NO_CONTENT);
+
+        for (path, body) in [
+            ("/logger", r#"{"level":"info"}"#),
+            ("/metrics", r#"{"metrics_path":"metrics.jsonl"}"#),
+        ] {
+            let response = router
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("PUT")
+                        .uri(path)
+                        .header("content-type", "application/json")
+                        .body(axum::body::Body::from(body))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+            let payload: ErrorEnvelope = serde_json::from_slice(&body).unwrap();
+            assert_eq!(payload.code, "InvalidState");
+        }
     }
 
     #[tokio::test]
