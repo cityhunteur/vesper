@@ -6,12 +6,14 @@ use axum::routing::any;
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
+use std::fs::File;
 use std::sync::{Arc, RwLock};
 
 const DEFAULT_APP_NAME: &str = "Firecracker";
 const DEFAULT_INSTANCE_ID: &str = "anonymous-instance";
 const DEFAULT_MEM_SIZE_MIB: usize = 128;
 const MAX_SUPPORTED_VCPUS: u8 = 32;
+const MISSING_KERNEL_CONFIG_MESSAGE: &str = "Cannot start microvm without kernel configuration.";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ErrorEnvelope {
@@ -231,8 +233,18 @@ struct FirecrackerVersionResponse {
 
 #[derive(Debug, Serialize)]
 struct FullVmConfigurationResponse {
+    #[serde(rename = "boot-source")]
+    boot_source: BootSourceConfig,
     #[serde(rename = "machine-config")]
     machine_config: MachineConfig,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct BootSourceConfig {
+    kernel_image_path: String,
+    initrd_path: Option<String>,
+    boot_args: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -254,6 +266,7 @@ pub struct AppState {
     firecracker_revision: String,
     firecracker_version: String,
     vm_state: RwLock<VmState>,
+    boot_source: RwLock<BootSourceConfig>,
     machine_config: RwLock<MachineConfig>,
 }
 
@@ -303,6 +316,7 @@ impl AppState {
             firecracker_revision,
             firecracker_version,
             vm_state: RwLock::new(VmState::PreBoot),
+            boot_source: RwLock::new(BootSourceConfig::default()),
             machine_config: RwLock::new(MachineConfig::default()),
         })
     }
@@ -409,6 +423,9 @@ async fn handle_all(
         ("GET", "/") => return instance_info_response(&state),
         ("GET", "/version") => return firecracker_version_response(&state),
         ("GET", "/machine-config") => return machine_config_response(&state),
+        ("PUT", "/boot-source") => {
+            return handle_put_boot_source(&state, &method, &route.template, body);
+        }
         ("PUT", "/machine-config") => {
             return handle_put_machine_config(&state, &method, &route.template, body);
         }
@@ -477,6 +494,11 @@ fn machine_config_response(state: &Arc<AppState>) -> Response {
 }
 
 fn full_vm_config_response(state: &Arc<AppState>) -> Response {
+    let boot_source = state
+        .boot_source
+        .read()
+        .expect("boot source lock poisoned while reading")
+        .clone();
     let config = state
         .machine_config
         .read()
@@ -485,6 +507,7 @@ fn full_vm_config_response(state: &Arc<AppState>) -> Response {
     (
         StatusCode::OK,
         Json(FullVmConfigurationResponse {
+            boot_source,
             machine_config: config,
         }),
     )
@@ -528,6 +551,22 @@ fn handle_actions(state: &Arc<AppState>, method: &Method, template: &str, body: 
             );
         }
 
+        let boot_source = state
+            .boot_source
+            .read()
+            .expect("boot source lock poisoned while reading")
+            .clone();
+        if boot_source.kernel_image_path.is_empty() {
+            return error_response(
+                &state.firecracker_revision,
+                StatusCode::BAD_REQUEST,
+                "InvalidRequest",
+                MISSING_KERNEL_CONFIG_MESSAGE,
+                template,
+                method.as_str(),
+            );
+        }
+
         *vm_state = VmState::Running;
         return StatusCode::NO_CONTENT.into_response();
     }
@@ -540,6 +579,45 @@ fn handle_actions(state: &Arc<AppState>, method: &Method, template: &str, body: 
         template,
         method.as_str(),
     )
+}
+
+fn handle_put_boot_source(
+    state: &Arc<AppState>,
+    method: &Method,
+    template: &str,
+    body: Bytes,
+) -> Response {
+    let payload: BootSourceConfig = match serde_json::from_slice(&body) {
+        Ok(value) => value,
+        Err(_) => {
+            return error_response(
+                &state.firecracker_revision,
+                StatusCode::BAD_REQUEST,
+                "InvalidRequest",
+                "invalid JSON payload",
+                template,
+                method.as_str(),
+            );
+        }
+    };
+
+    if let Err(message) = validate_boot_source(&payload) {
+        return error_response(
+            &state.firecracker_revision,
+            StatusCode::BAD_REQUEST,
+            "InvalidRequest",
+            &message,
+            template,
+            method.as_str(),
+        );
+    }
+
+    *state
+        .boot_source
+        .write()
+        .expect("boot source lock poisoned while writing") = payload;
+
+    StatusCode::NO_CONTENT.into_response()
 }
 
 fn handle_put_machine_config(
@@ -731,6 +809,21 @@ fn validate_state_guard(state: &Arc<AppState>, route: &RouteTemplate) -> Option<
     }
 }
 
+fn validate_boot_source(config: &BootSourceConfig) -> Result<(), String> {
+    File::open(&config.kernel_image_path)
+        .map_err(|err| format!("The kernel file cannot be opened: {err}"))?;
+
+    if let Some(path) = &config.initrd_path {
+        File::open(path).map_err(|err| {
+            format!(
+                "The initrd file cannot be opened due to invalid path or invalid permissions. {err}"
+            )
+        })?;
+    }
+
+    Ok(())
+}
+
 fn validate_machine_config(config: &MachineConfig) -> Result<(), &'static str> {
     #[cfg(target_arch = "aarch64")]
     if config.smt {
@@ -827,6 +920,7 @@ mod tests {
     use super::*;
     use axum::body::to_bytes;
     use axum::http::Request;
+    use tempfile::NamedTempFile;
     use tower::ServiceExt;
 
     fn test_state() -> AppState {
@@ -875,9 +969,41 @@ mod tests {
         .unwrap()
     }
 
+    fn put_boot_source_request(
+        kernel_path: &str,
+        initrd_path: Option<&str>,
+    ) -> Request<axum::body::Body> {
+        let body = match initrd_path {
+            Some(initrd_path) => {
+                format!(r#"{{"kernel_image_path":"{kernel_path}","initrd_path":"{initrd_path}"}}"#)
+            }
+            None => format!(r#"{{"kernel_image_path":"{kernel_path}"}}"#),
+        };
+
+        Request::builder()
+            .method("PUT")
+            .uri("/boot-source")
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(body))
+            .unwrap()
+    }
+
     #[tokio::test]
     async fn transitions_to_running_on_instance_start() {
         let router = test_state().router();
+        let kernel = NamedTempFile::new().unwrap();
+        let initrd = NamedTempFile::new().unwrap();
+
+        let boot_source_response = router
+            .clone()
+            .oneshot(put_boot_source_request(
+                kernel.path().to_str().unwrap(),
+                Some(initrd.path().to_str().unwrap()),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(boot_source_response.status(), StatusCode::NO_CONTENT);
+
         let response = router
             .oneshot(
                 Request::builder()
@@ -895,6 +1021,17 @@ mod tests {
     #[tokio::test]
     async fn rejects_preboot_mutation_after_start() {
         let router = test_state().router();
+        let kernel = NamedTempFile::new().unwrap();
+
+        let boot_source_response = router
+            .clone()
+            .oneshot(put_boot_source_request(
+                kernel.path().to_str().unwrap(),
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(boot_source_response.status(), StatusCode::NO_CONTENT);
 
         let _ = router
             .clone()
@@ -952,6 +1089,17 @@ mod tests {
     #[tokio::test]
     async fn updates_machine_config_and_exports_vm_config() {
         let router = test_state().router();
+        let kernel = NamedTempFile::new().unwrap();
+
+        let boot_source_response = router
+            .clone()
+            .oneshot(put_boot_source_request(
+                kernel.path().to_str().unwrap(),
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(boot_source_response.status(), StatusCode::NO_CONTENT);
 
         let put_response = router
             .clone()
@@ -1018,8 +1166,106 @@ mod tests {
             .await
             .unwrap();
         let vm_config_payload: serde_json::Value = serde_json::from_slice(&vm_config_body).unwrap();
+        assert_eq!(
+            vm_config_payload["boot-source"]["kernel_image_path"],
+            kernel.path().to_str().unwrap()
+        );
         assert_eq!(vm_config_payload["machine-config"]["mem_size_mib"], 512);
         assert_eq!(vm_config_payload["machine-config"]["vcpu_count"], 2);
+    }
+
+    #[tokio::test]
+    async fn validates_and_exports_boot_source() {
+        let router = test_state().router();
+        let kernel = NamedTempFile::new().unwrap();
+        let initrd = NamedTempFile::new().unwrap();
+
+        let put_response = router
+            .clone()
+            .oneshot(put_boot_source_request(
+                kernel.path().to_str().unwrap(),
+                Some(initrd.path().to_str().unwrap()),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(put_response.status(), StatusCode::NO_CONTENT);
+
+        let vm_config_response = router
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/vm/config")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(vm_config_response.status(), StatusCode::OK);
+        let vm_config_body = to_bytes(vm_config_response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let vm_config_payload: serde_json::Value = serde_json::from_slice(&vm_config_body).unwrap();
+        assert_eq!(
+            vm_config_payload["boot-source"]["kernel_image_path"],
+            kernel.path().to_str().unwrap()
+        );
+        assert_eq!(
+            vm_config_payload["boot-source"]["initrd_path"],
+            initrd.path().to_str().unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn rejects_invalid_boot_source_payloads() {
+        let router = test_state().router();
+
+        let invalid_kernel_response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/boot-source")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(
+                        r#"{"kernel_image_path":"/definitely/missing-kernel"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(invalid_kernel_response.status(), StatusCode::BAD_REQUEST);
+        let body = to_bytes(invalid_kernel_response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let payload: ErrorEnvelope = serde_json::from_slice(&body).unwrap();
+        assert_eq!(payload.code, "InvalidRequest");
+        assert!(
+            payload
+                .fault_message
+                .starts_with("The kernel file cannot be opened:")
+        );
+    }
+
+    #[tokio::test]
+    async fn rejects_instance_start_without_boot_source() {
+        let router = test_state().router();
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/actions")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(r#"{"action_type":"InstanceStart"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let payload: ErrorEnvelope = serde_json::from_slice(&body).unwrap();
+        assert_eq!(payload.code, "InvalidRequest");
+        assert_eq!(payload.fault_message, MISSING_KERNEL_CONFIG_MESSAGE);
     }
 
     #[tokio::test]
@@ -1085,6 +1331,17 @@ mod tests {
     #[tokio::test]
     async fn pauses_and_resumes_vm_state() {
         let router = test_state().router();
+        let kernel = NamedTempFile::new().unwrap();
+
+        let boot_source_response = router
+            .clone()
+            .oneshot(put_boot_source_request(
+                kernel.path().to_str().unwrap(),
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(boot_source_response.status(), StatusCode::NO_CONTENT);
 
         let start_response = router
             .clone()
