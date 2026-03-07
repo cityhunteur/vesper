@@ -19,6 +19,7 @@ const ACTION_NOT_SUPPORTED_PREBOOT_MESSAGE: &str =
     "The requested operation is not supported before starting the microVM.";
 const SEND_CTRL_ALT_DEL_AARCH64_MESSAGE: &str = "SendCtrlAltDel does not supported on aarch64.";
 const MISSING_KERNEL_CONFIG_MESSAGE: &str = "Cannot start microvm without kernel configuration.";
+const INVALID_VSOCK_GUEST_CID_MESSAGE: &str = "Guest CID must be greater than or equal to 3.";
 const METRICS_ALREADY_INITIALIZED_MESSAGE: &str = "Cannot initialize the metrics system due to bad user input: Reinitialization of metrics not allowed.";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -275,6 +276,30 @@ struct EntropyDeviceConfig {
     rate_limiter: Option<RateLimiterConfig>,
 }
 
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct VsockConfigRequest {
+    #[serde(default)]
+    vsock_id: Option<String>,
+    guest_cid: u32,
+    uds_path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct VsockConfig {
+    guest_cid: u32,
+    uds_path: String,
+}
+
+impl From<VsockConfigRequest> for VsockConfig {
+    fn from(value: VsockConfigRequest) -> Self {
+        Self {
+            guest_cid: value.guest_cid,
+            uds_path: value.uds_path,
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct MachineConfigPutRequest {
@@ -352,6 +377,8 @@ struct FullVmConfigurationResponse {
     machine_config: MachineConfig,
     #[serde(skip_serializing_if = "Option::is_none")]
     entropy: Option<EntropyDeviceConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    vsock: Option<VsockConfig>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq, Serialize)]
@@ -400,6 +427,7 @@ pub struct AppState {
     metrics_config: RwLock<Option<MetricsConfig>>,
     serial_config: RwLock<SerialConfig>,
     entropy_config: RwLock<Option<EntropyDeviceConfig>>,
+    vsock_config: RwLock<Option<VsockConfig>>,
 }
 
 impl AppState {
@@ -454,6 +482,7 @@ impl AppState {
             metrics_config: RwLock::new(None),
             serial_config: RwLock::new(SerialConfig::default()),
             entropy_config: RwLock::new(None),
+            vsock_config: RwLock::new(None),
         })
     }
 
@@ -563,6 +592,7 @@ async fn handle_all(
         ("PUT", "/metrics") => return handle_put_metrics(&state, &method, &route.template, body),
         ("PUT", "/serial") => return handle_put_serial(&state, &method, &route.template, body),
         ("PUT", "/entropy") => return handle_put_entropy(&state, &method, &route.template, body),
+        ("PUT", "/vsock") => return handle_put_vsock(&state, &method, &route.template, body),
         ("PUT", "/boot-source") => {
             return handle_put_boot_source(&state, &method, &route.template, body);
         }
@@ -649,12 +679,18 @@ fn full_vm_config_response(state: &Arc<AppState>) -> Response {
         .read()
         .expect("entropy config lock poisoned while reading")
         .clone();
+    let vsock = state
+        .vsock_config
+        .read()
+        .expect("vsock config lock poisoned while reading")
+        .clone();
     (
         StatusCode::OK,
         Json(FullVmConfigurationResponse {
             boot_source,
             machine_config: config,
             entropy,
+            vsock,
         }),
     )
         .into_response()
@@ -961,6 +997,45 @@ fn handle_put_entropy(
         .entropy_config
         .write()
         .expect("entropy config lock poisoned while writing") = Some(payload);
+
+    StatusCode::NO_CONTENT.into_response()
+}
+
+fn handle_put_vsock(
+    state: &Arc<AppState>,
+    method: &Method,
+    template: &str,
+    body: Bytes,
+) -> Response {
+    let payload: VsockConfigRequest = match serde_json::from_slice(&body) {
+        Ok(value) => value,
+        Err(_) => {
+            return error_response(
+                &state.firecracker_revision,
+                StatusCode::BAD_REQUEST,
+                "InvalidRequest",
+                "invalid JSON payload",
+                template,
+                method.as_str(),
+            );
+        }
+    };
+
+    if payload.guest_cid < 3 {
+        return error_response(
+            &state.firecracker_revision,
+            StatusCode::BAD_REQUEST,
+            "InvalidRequest",
+            INVALID_VSOCK_GUEST_CID_MESSAGE,
+            template,
+            method.as_str(),
+        );
+    }
+
+    *state
+        .vsock_config
+        .write()
+        .expect("vsock config lock poisoned while writing") = Some(payload.into());
 
     StatusCode::NO_CONTENT.into_response()
 }
@@ -1334,6 +1409,10 @@ mod tests {
                 RouteSpec {
                     method: "PUT".to_string(),
                     path: "/entropy".to_string(),
+                },
+                RouteSpec {
+                    method: "PUT".to_string(),
+                    path: "/vsock".to_string(),
                 },
                 RouteSpec {
                     method: "PATCH".to_string(),
@@ -2108,6 +2187,123 @@ mod tests {
             .unwrap();
         assert_eq!(entropy_response.status(), StatusCode::BAD_REQUEST);
         let body = to_bytes(entropy_response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let payload: ErrorEnvelope = serde_json::from_slice(&body).unwrap();
+        assert_eq!(payload.code, "InvalidState");
+    }
+
+    #[tokio::test]
+    async fn stores_vsock_config_and_omits_deprecated_export_field() {
+        let router = test_state().router();
+
+        let vsock_response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/vsock")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(
+                        r#"{"guest_cid":5,"uds_path":"/tmp/vesper-vsock.sock","vsock_id":"deprecated"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(vsock_response.status(), StatusCode::NO_CONTENT);
+
+        let vm_config_response = router
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/vm/config")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(vm_config_response.status(), StatusCode::OK);
+        let vm_config_body = to_bytes(vm_config_response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let vm_config_payload: serde_json::Value = serde_json::from_slice(&vm_config_body).unwrap();
+        assert_eq!(vm_config_payload["vsock"]["guest_cid"], 5);
+        assert_eq!(
+            vm_config_payload["vsock"]["uds_path"],
+            "/tmp/vesper-vsock.sock"
+        );
+        assert!(vm_config_payload["vsock"].get("vsock_id").is_none());
+    }
+
+    #[tokio::test]
+    async fn rejects_invalid_vsock_guest_cid() {
+        let router = test_state().router();
+
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/vsock")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(
+                        r#"{"guest_cid":2,"uds_path":"/tmp/vesper-vsock.sock"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let payload: ErrorEnvelope = serde_json::from_slice(&body).unwrap();
+        assert_eq!(payload.code, "InvalidRequest");
+        assert_eq!(payload.fault_message, INVALID_VSOCK_GUEST_CID_MESSAGE);
+    }
+
+    #[tokio::test]
+    async fn rejects_vsock_after_start() {
+        let router = test_state().router();
+        let kernel = NamedTempFile::new().unwrap();
+
+        let boot_source_response = router
+            .clone()
+            .oneshot(put_boot_source_request(
+                kernel.path().to_str().unwrap(),
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(boot_source_response.status(), StatusCode::NO_CONTENT);
+
+        let start_response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/actions")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(r#"{"action_type":"InstanceStart"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(start_response.status(), StatusCode::NO_CONTENT);
+
+        let vsock_response = router
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/vsock")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(
+                        r#"{"guest_cid":5,"uds_path":"/tmp/vesper-vsock.sock"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(vsock_response.status(), StatusCode::BAD_REQUEST);
+        let body = to_bytes(vsock_response.into_body(), usize::MAX)
             .await
             .unwrap();
         let payload: ErrorEnvelope = serde_json::from_slice(&body).unwrap();
