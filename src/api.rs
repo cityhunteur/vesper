@@ -276,6 +276,72 @@ struct EntropyDeviceConfig {
     rate_limiter: Option<RateLimiterConfig>,
 }
 
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum CpuidRegister {
+    Eax,
+    Ebx,
+    Ecx,
+    Edx,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct CpuidRegisterModifier {
+    register: CpuidRegister,
+    bitmap: String,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct CpuidLeafModifier {
+    leaf: String,
+    subleaf: String,
+    flags: i32,
+    modifiers: Vec<CpuidRegisterModifier>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct MsrModifier {
+    addr: String,
+    bitmap: String,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct ArmRegisterModifier {
+    addr: String,
+    bitmap: String,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct VcpuFeatureModifier {
+    index: i32,
+    bitmap: String,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct CpuConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    kvm_capabilities: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    cpuid_modifiers: Option<Vec<CpuidLeafModifier>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    msr_modifiers: Option<Vec<MsrModifier>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    reg_modifiers: Option<Vec<ArmRegisterModifier>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    vcpu_features: Option<Vec<VcpuFeatureModifier>>,
+}
+
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 struct VsockConfigRequest {
@@ -373,6 +439,9 @@ struct FirecrackerVersionResponse {
 struct FullVmConfigurationResponse {
     #[serde(rename = "boot-source")]
     boot_source: BootSourceConfig,
+    #[serde(rename = "cpu-config")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cpu_config: Option<CpuConfig>,
     #[serde(rename = "machine-config")]
     machine_config: MachineConfig,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -422,6 +491,7 @@ pub struct AppState {
     firecracker_version: String,
     vm_state: RwLock<VmState>,
     boot_source: RwLock<BootSourceConfig>,
+    cpu_config: RwLock<Option<CpuConfig>>,
     logger_config: RwLock<LoggerConfig>,
     machine_config: RwLock<MachineConfig>,
     metrics_config: RwLock<Option<MetricsConfig>>,
@@ -477,6 +547,7 @@ impl AppState {
             firecracker_version,
             vm_state: RwLock::new(VmState::PreBoot),
             boot_source: RwLock::new(BootSourceConfig::default()),
+            cpu_config: RwLock::new(None),
             logger_config: RwLock::new(LoggerConfig::default()),
             machine_config: RwLock::new(MachineConfig::default()),
             metrics_config: RwLock::new(None),
@@ -588,6 +659,9 @@ async fn handle_all(
         ("GET", "/") => return instance_info_response(&state),
         ("GET", "/version") => return firecracker_version_response(&state),
         ("GET", "/machine-config") => return machine_config_response(&state),
+        ("PUT", "/cpu-config") => {
+            return handle_put_cpu_config(&state, &method, &route.template, body);
+        }
         ("PUT", "/logger") => return handle_put_logger(&state, &method, &route.template, body),
         ("PUT", "/metrics") => return handle_put_metrics(&state, &method, &route.template, body),
         ("PUT", "/serial") => return handle_put_serial(&state, &method, &route.template, body),
@@ -669,6 +743,11 @@ fn full_vm_config_response(state: &Arc<AppState>) -> Response {
         .read()
         .expect("boot source lock poisoned while reading")
         .clone();
+    let cpu_config = state
+        .cpu_config
+        .read()
+        .expect("cpu config lock poisoned while reading")
+        .clone();
     let config = state
         .machine_config
         .read()
@@ -688,6 +767,7 @@ fn full_vm_config_response(state: &Arc<AppState>) -> Response {
         StatusCode::OK,
         Json(FullVmConfigurationResponse {
             boot_source,
+            cpu_config,
             machine_config: config,
             entropy,
             vsock,
@@ -891,6 +971,34 @@ fn handle_put_logger(
     if let Some(module) = payload.module {
         config.module = Some(module);
     }
+
+    StatusCode::NO_CONTENT.into_response()
+}
+
+fn handle_put_cpu_config(
+    state: &Arc<AppState>,
+    method: &Method,
+    template: &str,
+    body: Bytes,
+) -> Response {
+    let payload: CpuConfig = match serde_json::from_slice(&body) {
+        Ok(value) => value,
+        Err(_) => {
+            return error_response(
+                &state.firecracker_revision,
+                StatusCode::BAD_REQUEST,
+                "InvalidRequest",
+                "invalid JSON payload",
+                template,
+                method.as_str(),
+            );
+        }
+    };
+
+    *state
+        .cpu_config
+        .write()
+        .expect("cpu config lock poisoned while writing") = Some(payload);
 
     StatusCode::NO_CONTENT.into_response()
 }
@@ -1392,6 +1500,10 @@ mod tests {
                 },
                 RouteSpec {
                     method: "PUT".to_string(),
+                    path: "/cpu-config".to_string(),
+                },
+                RouteSpec {
+                    method: "PUT".to_string(),
                     path: "/logger".to_string(),
                 },
                 RouteSpec {
@@ -1677,6 +1789,108 @@ mod tests {
             vm_config_payload["boot-source"]["initrd_path"],
             initrd.path().to_str().unwrap()
         );
+    }
+
+    #[tokio::test]
+    async fn stores_cpu_config_and_exports_it() {
+        let router = test_state().router();
+
+        let initial_vm_config_response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/vm/config")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(initial_vm_config_response.status(), StatusCode::OK);
+        let initial_vm_config_body = to_bytes(initial_vm_config_response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let initial_vm_config_payload: serde_json::Value =
+            serde_json::from_slice(&initial_vm_config_body).unwrap();
+        assert!(initial_vm_config_payload.get("cpu-config").is_none());
+
+        let cpu_config_response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/cpu-config")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(
+                        r#"{"kvm_capabilities":["1","!2"],"cpuid_modifiers":[{"leaf":"0x1","subleaf":"0x0","flags":0,"modifiers":[{"register":"eax","bitmap":"0bxxxxxxxxxxxxxxxxxxxxxxxxxxxx0001"}]}],"msr_modifiers":[{"addr":"0x10a","bitmap":"0b0000000000000000000000000000000000000000000000000000000000000001"}],"reg_modifiers":[{"addr":"0x0","bitmap":"0b1"}],"vcpu_features":[{"index":0,"bitmap":"0b00000000000000000000000001100000"}]}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(cpu_config_response.status(), StatusCode::NO_CONTENT);
+
+        let vm_config_response = router
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/vm/config")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(vm_config_response.status(), StatusCode::OK);
+        let vm_config_body = to_bytes(vm_config_response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let vm_config_payload: serde_json::Value = serde_json::from_slice(&vm_config_body).unwrap();
+        assert_eq!(vm_config_payload["cpu-config"]["kvm_capabilities"][0], "1");
+        assert_eq!(vm_config_payload["cpu-config"]["kvm_capabilities"][1], "!2");
+        assert_eq!(
+            vm_config_payload["cpu-config"]["cpuid_modifiers"][0]["leaf"],
+            "0x1"
+        );
+        assert_eq!(
+            vm_config_payload["cpu-config"]["cpuid_modifiers"][0]["modifiers"][0]["register"],
+            "eax"
+        );
+        assert_eq!(
+            vm_config_payload["cpu-config"]["msr_modifiers"][0]["addr"],
+            "0x10a"
+        );
+        assert_eq!(
+            vm_config_payload["cpu-config"]["reg_modifiers"][0]["addr"],
+            "0x0"
+        );
+        assert_eq!(
+            vm_config_payload["cpu-config"]["vcpu_features"][0]["index"],
+            0
+        );
+    }
+
+    #[tokio::test]
+    async fn rejects_invalid_cpu_config_payloads() {
+        let router = test_state().router();
+
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/cpu-config")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(
+                        r#"{"cpuid_modifiers":[{"leaf":"0x1","subleaf":"0x0","flags":0,"modifiers":[{"register":"invalid","bitmap":"0b1"}]}]}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let payload: ErrorEnvelope = serde_json::from_slice(&body).unwrap();
+        assert_eq!(payload.code, "InvalidRequest");
+        assert_eq!(payload.path, "/cpu-config");
     }
 
     #[tokio::test]
@@ -2187,6 +2401,54 @@ mod tests {
             .unwrap();
         assert_eq!(entropy_response.status(), StatusCode::BAD_REQUEST);
         let body = to_bytes(entropy_response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let payload: ErrorEnvelope = serde_json::from_slice(&body).unwrap();
+        assert_eq!(payload.code, "InvalidState");
+    }
+
+    #[tokio::test]
+    async fn rejects_cpu_config_after_start() {
+        let router = test_state().router();
+        let kernel = NamedTempFile::new().unwrap();
+
+        let boot_source_response = router
+            .clone()
+            .oneshot(put_boot_source_request(
+                kernel.path().to_str().unwrap(),
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(boot_source_response.status(), StatusCode::NO_CONTENT);
+
+        let start_response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/actions")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(r#"{"action_type":"InstanceStart"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(start_response.status(), StatusCode::NO_CONTENT);
+
+        let cpu_config_response = router
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/cpu-config")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(r#"{"kvm_capabilities":["1"]}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(cpu_config_response.status(), StatusCode::BAD_REQUEST);
+        let body = to_bytes(cpu_config_response.into_body(), usize::MAX)
             .await
             .unwrap();
         let payload: ErrorEnvelope = serde_json::from_slice(&body).unwrap();
