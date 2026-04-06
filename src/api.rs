@@ -366,6 +366,19 @@ impl From<VsockConfigRequest> for VsockConfig {
     }
 }
 
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct PmemConfig {
+    id: String,
+    path_on_host: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    root_device: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    read_only: Option<bool>,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct MachineConfigPutRequest {
@@ -446,6 +459,8 @@ struct FullVmConfigurationResponse {
     machine_config: MachineConfig,
     #[serde(skip_serializing_if = "Option::is_none")]
     entropy: Option<EntropyDeviceConfig>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pmem: Vec<PmemConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     vsock: Option<VsockConfig>,
 }
@@ -497,6 +512,7 @@ pub struct AppState {
     metrics_config: RwLock<Option<MetricsConfig>>,
     serial_config: RwLock<SerialConfig>,
     entropy_config: RwLock<Option<EntropyDeviceConfig>>,
+    pmem_devices: RwLock<BTreeMap<String, PmemConfig>>,
     vsock_config: RwLock<Option<VsockConfig>>,
 }
 
@@ -553,6 +569,7 @@ impl AppState {
             metrics_config: RwLock::new(None),
             serial_config: RwLock::new(SerialConfig::default()),
             entropy_config: RwLock::new(None),
+            pmem_devices: RwLock::new(BTreeMap::new()),
             vsock_config: RwLock::new(None),
         })
     }
@@ -667,6 +684,9 @@ async fn handle_all(
         ("PUT", "/serial") => return handle_put_serial(&state, &method, &route.template, body),
         ("PUT", "/entropy") => return handle_put_entropy(&state, &method, &route.template, body),
         ("PUT", "/vsock") => return handle_put_vsock(&state, &method, &route.template, body),
+        ("PUT", "/pmem/{id}") => {
+            return handle_put_pmem(&state, &method, &route.template, &path, body);
+        }
         ("PUT", "/boot-source") => {
             return handle_put_boot_source(&state, &method, &route.template, body);
         }
@@ -758,6 +778,13 @@ fn full_vm_config_response(state: &Arc<AppState>) -> Response {
         .read()
         .expect("entropy config lock poisoned while reading")
         .clone();
+    let pmem = state
+        .pmem_devices
+        .read()
+        .expect("pmem devices lock poisoned while reading")
+        .values()
+        .cloned()
+        .collect();
     let vsock = state
         .vsock_config
         .read()
@@ -770,6 +797,7 @@ fn full_vm_config_response(state: &Arc<AppState>) -> Response {
             cpu_config,
             machine_config: config,
             entropy,
+            pmem,
             vsock,
         }),
     )
@@ -1148,6 +1176,83 @@ fn handle_put_vsock(
     StatusCode::NO_CONTENT.into_response()
 }
 
+fn handle_put_pmem(
+    state: &Arc<AppState>,
+    method: &Method,
+    template: &str,
+    request_path: &str,
+    body: Bytes,
+) -> Response {
+    let payload: PmemConfig = match serde_json::from_slice(&body) {
+        Ok(value) => value,
+        Err(_) => {
+            return error_response(
+                &state.firecracker_revision,
+                StatusCode::BAD_REQUEST,
+                "InvalidRequest",
+                "invalid JSON payload",
+                template,
+                method.as_str(),
+            );
+        }
+    };
+
+    let Some(path_id) = split_path(request_path).last().copied() else {
+        return error_response(
+            &state.firecracker_revision,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "InternalMatrixError",
+            "route parameter missing",
+            template,
+            method.as_str(),
+        );
+    };
+
+    if payload.id != path_id {
+        return error_response(
+            &state.firecracker_revision,
+            StatusCode::BAD_REQUEST,
+            "InvalidRequest",
+            "The pmem ID in the path does not match the request body.",
+            template,
+            method.as_str(),
+        );
+    }
+
+    if let Err(message) = validate_pmem_config(&payload) {
+        return error_response(
+            &state.firecracker_revision,
+            StatusCode::BAD_REQUEST,
+            "InvalidRequest",
+            &message,
+            template,
+            method.as_str(),
+        );
+    }
+
+    let mut devices = state
+        .pmem_devices
+        .write()
+        .expect("pmem devices lock poisoned while writing");
+    if payload.root_device == Some(true)
+        && devices
+            .iter()
+            .any(|(id, config)| id != &payload.id && config.root_device == Some(true))
+    {
+        return error_response(
+            &state.firecracker_revision,
+            StatusCode::BAD_REQUEST,
+            "InvalidRequest",
+            "A root pmem device is already configured.",
+            template,
+            method.as_str(),
+        );
+    }
+
+    devices.insert(payload.id.clone(), payload);
+    StatusCode::NO_CONTENT.into_response()
+}
+
 fn handle_put_machine_config(
     state: &Arc<AppState>,
     method: &Method,
@@ -1313,6 +1418,7 @@ fn validate_state_guard(state: &Arc<AppState>, route: &RouteTemplate) -> Option<
         "PUT /drives/{drive_id}",
         "PATCH /drives/{drive_id}",
         "PUT /network-interfaces/{iface_id}",
+        "PUT /pmem/{id}",
         "PUT /vsock",
         "PUT /cpu-config",
         "PUT /entropy",
@@ -1403,6 +1509,21 @@ fn validate_machine_config(config: &MachineConfig) -> Result<(), &'static str> {
     }
 
     Ok(())
+}
+
+fn validate_pmem_config(config: &PmemConfig) -> Result<(), String> {
+    let open_result = if config.read_only == Some(true) {
+        File::open(&config.path_on_host)
+    } else {
+        OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&config.path_on_host)
+    };
+
+    open_result
+        .map(|_| ())
+        .map_err(|err| format!("The pmem backing file cannot be opened: {err}"))
 }
 
 fn state_invalid_message(operation: String, state: VmState) -> String {
@@ -1525,6 +1646,10 @@ mod tests {
                 RouteSpec {
                     method: "PUT".to_string(),
                     path: "/vsock".to_string(),
+                },
+                RouteSpec {
+                    method: "PUT".to_string(),
+                    path: "/pmem/{id}".to_string(),
                 },
                 RouteSpec {
                     method: "PATCH".to_string(),
@@ -1917,11 +2042,9 @@ mod tests {
             .unwrap();
         let payload: ErrorEnvelope = serde_json::from_slice(&body).unwrap();
         assert_eq!(payload.code, "InvalidRequest");
-        assert!(
-            payload
-                .fault_message
-                .starts_with("The kernel file cannot be opened:")
-        );
+        assert!(payload
+            .fault_message
+            .starts_with("The kernel file cannot be opened:"));
     }
 
     #[tokio::test]
@@ -2198,11 +2321,9 @@ mod tests {
             .unwrap();
         let payload: ErrorEnvelope = serde_json::from_slice(&body).unwrap();
         assert_eq!(payload.code, "InvalidRequest");
-        assert!(
-            payload
-                .fault_message
-                .starts_with("Failed to open target file:")
-        );
+        assert!(payload
+            .fault_message
+            .starts_with("Failed to open target file:"));
     }
 
     #[tokio::test]
@@ -2352,11 +2473,9 @@ mod tests {
             vm_config_payload["entropy"]["rate_limiter"]["ops"]["refill_time"],
             100
         );
-        assert!(
-            vm_config_payload["entropy"]["rate_limiter"]["ops"]
-                .get("one_time_burst")
-                .is_none()
-        );
+        assert!(vm_config_payload["entropy"]["rate_limiter"]["ops"]
+            .get("one_time_burst")
+            .is_none());
     }
 
     #[tokio::test]
@@ -2496,6 +2615,210 @@ mod tests {
             "/tmp/vesper-vsock.sock"
         );
         assert!(vm_config_payload["vsock"].get("vsock_id").is_none());
+    }
+
+    #[tokio::test]
+    async fn stores_pmem_config_and_exports_it() {
+        let router = test_state().router();
+        let backing_file = NamedTempFile::new().unwrap();
+        let pmem_payload = format!(
+            r#"{{"id":"pmem0","path_on_host":"{}","root_device":true,"read_only":true}}"#,
+            backing_file.path().display()
+        );
+
+        let pmem_response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/pmem/pmem0")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(pmem_payload))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(pmem_response.status(), StatusCode::NO_CONTENT);
+
+        let vm_config_response = router
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/vm/config")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(vm_config_response.status(), StatusCode::OK);
+        let vm_config_body = to_bytes(vm_config_response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let vm_config_payload: serde_json::Value = serde_json::from_slice(&vm_config_body).unwrap();
+        assert_eq!(vm_config_payload["pmem"][0]["id"], "pmem0");
+        assert_eq!(
+            vm_config_payload["pmem"][0]["path_on_host"],
+            backing_file.path().to_str().unwrap()
+        );
+        assert_eq!(vm_config_payload["pmem"][0]["root_device"], true);
+        assert_eq!(vm_config_payload["pmem"][0]["read_only"], true);
+    }
+
+    #[tokio::test]
+    async fn rejects_pmem_id_mismatch() {
+        let router = test_state().router();
+        let backing_file = NamedTempFile::new().unwrap();
+        let pmem_payload = format!(
+            r#"{{"id":"body-id","path_on_host":"{}"}}"#,
+            backing_file.path().display()
+        );
+
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/pmem/path-id")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(pmem_payload))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let payload: ErrorEnvelope = serde_json::from_slice(&body).unwrap();
+        assert_eq!(payload.code, "InvalidRequest");
+        assert_eq!(
+            payload.fault_message,
+            "The pmem ID in the path does not match the request body."
+        );
+        assert_eq!(payload.path, "/pmem/{id}");
+    }
+
+    #[tokio::test]
+    async fn rejects_second_pmem_root_device() {
+        let router = test_state().router();
+        let first_backing_file = NamedTempFile::new().unwrap();
+        let second_backing_file = NamedTempFile::new().unwrap();
+        let first_payload = format!(
+            r#"{{"id":"pmem0","path_on_host":"{}","root_device":true}}"#,
+            first_backing_file.path().display()
+        );
+        let second_payload = format!(
+            r#"{{"id":"pmem1","path_on_host":"{}","root_device":true}}"#,
+            second_backing_file.path().display()
+        );
+
+        let first_response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/pmem/pmem0")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(first_payload))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(first_response.status(), StatusCode::NO_CONTENT);
+
+        let second_response = router
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/pmem/pmem1")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(second_payload))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(second_response.status(), StatusCode::BAD_REQUEST);
+        let body = to_bytes(second_response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let payload: ErrorEnvelope = serde_json::from_slice(&body).unwrap();
+        assert_eq!(payload.code, "InvalidRequest");
+        assert_eq!(
+            payload.fault_message,
+            "A root pmem device is already configured."
+        );
+    }
+
+    #[tokio::test]
+    async fn rejects_invalid_pmem_payloads() {
+        let router = test_state().router();
+
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/pmem/pmem0")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(r#"{"id":"pmem0"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let payload: ErrorEnvelope = serde_json::from_slice(&body).unwrap();
+        assert_eq!(payload.code, "InvalidRequest");
+    }
+
+    #[tokio::test]
+    async fn rejects_pmem_after_start() {
+        let router = test_state().router();
+        let kernel = NamedTempFile::new().unwrap();
+        let backing_file = NamedTempFile::new().unwrap();
+
+        let boot_source_response = router
+            .clone()
+            .oneshot(put_boot_source_request(
+                kernel.path().to_str().unwrap(),
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(boot_source_response.status(), StatusCode::NO_CONTENT);
+
+        let start_response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/actions")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(r#"{"action_type":"InstanceStart"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(start_response.status(), StatusCode::NO_CONTENT);
+
+        let pmem_payload = format!(
+            r#"{{"id":"pmem0","path_on_host":"{}"}}"#,
+            backing_file.path().display()
+        );
+        let pmem_response = router
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/pmem/pmem0")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(pmem_payload))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(pmem_response.status(), StatusCode::BAD_REQUEST);
+        let body = to_bytes(pmem_response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let payload: ErrorEnvelope = serde_json::from_slice(&body).unwrap();
+        assert_eq!(payload.code, "InvalidState");
+        assert_eq!(payload.path, "/pmem/{id}");
     }
 
     #[tokio::test]
