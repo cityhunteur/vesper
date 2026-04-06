@@ -4,6 +4,76 @@
 
 - **Semantics**: `PB`=pre-boot only, `PO`=post-boot only, `PB/RT`=both pre-boot and runtime mutable, `Any`=always/read-only.
 - **Status**: change `[ ]` to `[x]` when the item is complete.
+- **Issue closure is not parity completion**: a closed GitHub issue and an eval-pass comment do not automatically mean Firecracker-behavior parity is implemented.
+
+## GitHub Issue Eval Audit (2026-03-02)
+
+### Audit Snapshot
+
+- Issues reviewed: `41`
+- GitHub issue state: `41/41` closed
+- Eval signal: `41/41` issues contain an `Eval passed in run` comment; `#9` and `#10` also contain an earlier failed eval comment before the later pass.
+- Issue checklist completion in issue bodies: `0` checked / `164` unchecked checklist items.
+- Local verification run on `2026-03-02` (this repo snapshot): `make contract-check`, `make contract-test`, `make validate-entitlements`, `cargo run --bin baselinectl -- --mode generate`, `cargo run --bin baselinectl -- --mode validate`, `cargo run --bin compatexctl -- --registry docs/specs/compat-exceptions.yaml`, and `cargo test` all passed.
+
+### Evidence Anchors
+
+- `src/api.rs` initializes route handlers as `NotImplemented` by default and only implements `PUT /actions` `InstanceStart` with partial preboot/runtime guards.
+- `tests/api_contract.rs` checks route reachability plus baseline revision envelope, not full endpoint behavior parity.
+- `src/proxy.rs` forwards `unix`/`tcp` sockets but explicitly returns `vsock dialing not implemented on this build`.
+- `src/systemvm.rs` provides deterministic manifest, launch-config, and boot-smoke scaffolding rather than full runtime orchestration.
+- `src/baseline.rs`, `src/compat.rs`, `.github/workflows/baseline-governance.yml`, `.github/workflows/compat-exceptions.yml`, and `.github/workflows/eval-on-review.yml` provide governance/eval automation.
+- `scripts/ci/validate-entitlements.sh` provides a Linux-compatible entitlement validation fallback (the blocker tracked by `#41`).
+
+### Issue-by-Issue Review
+
+| Issue | Phase | GitHub State | Eval Signal | Implementation Review |
+| --- | --- | --- | --- | --- |
+| [#1](https://github.com/cityhunteur/vesper/issues/1) | 0 | CLOSED | Pass | Partial epic: Phase 0 governance scaffold largely present; checklist remains unchecked. |
+| [#2](https://github.com/cityhunteur/vesper/issues/2) | 0 | CLOSED | Pass | Scaffold implemented: OpenAPI route surface + default NotImplemented envelope. |
+| [#3](https://github.com/cityhunteur/vesper/issues/3) | 1 | CLOSED | Pass | Partial epic: some bring-up scaffolding exists, but phase outcomes are not fully implemented. |
+| [#4](https://github.com/cityhunteur/vesper/issues/4) | 2 | CLOSED | Pass | Epic closed but backend-A parity implementation evidence is absent in current codebase. |
+| [#5](https://github.com/cityhunteur/vesper/issues/5) | 3 | CLOSED | Pass | Epic closed but shim/runtime contract implementation evidence is absent in current codebase. |
+| [#6](https://github.com/cityhunteur/vesper/issues/6) | 4 | CLOSED | Pass | Epic closed but Docker UX parity implementation evidence is absent in current codebase. |
+| [#7](https://github.com/cityhunteur/vesper/issues/7) | 5 | CLOSED | Pass | Epic closed but native backend parity implementation evidence is absent in current codebase. |
+| [#8](https://github.com/cityhunteur/vesper/issues/8) | 0 | CLOSED | Pass | Partial: Preboot/runtime guards exist for a subset; semantics not full Firecracker parity. |
+| [#9](https://github.com/cityhunteur/vesper/issues/9) | 0 | CLOSED | Pass after prior fail | Partial: Unix/TCP forwarding works; vsock dial path is explicitly unimplemented. |
+| [#10](https://github.com/cityhunteur/vesper/issues/10) | 0 | CLOSED | Pass after prior fail | Implemented: macOS entitlement validation + Linux-safe fallback script. |
+| [#11](https://github.com/cityhunteur/vesper/issues/11) | 0 | CLOSED | Pass | Implemented: Contract golden + route reachability tests are wired in CI. |
+| [#12](https://github.com/cityhunteur/vesper/issues/12) | 1 | CLOSED | Pass | Partial: System VM manifest/launch/boot-smoke scaffolding exists, not full VM lifecycle. |
+| [#13](https://github.com/cityhunteur/vesper/issues/13) | 1 | CLOSED | Pass | Partial: vsock target parsing exists, but no vsock transport implementation. |
+| [#14](https://github.com/cityhunteur/vesper/issues/14) | 1 | CLOSED | Pass | No code evidence of containerd/dockerd install/supervision logic. |
+| [#15](https://github.com/cityhunteur/vesper/issues/15) | 1 | CLOSED | Pass | Partial: Proxy socket exists, but no end-to-end Docker API boundary enforcement. |
+| [#16](https://github.com/cityhunteur/vesper/issues/16) | 1 | CLOSED | Pass | Partial: boot-smoke loop exists; missing full reliability/socket/leak suite. |
+| [#17](https://github.com/cityhunteur/vesper/issues/17) | 2 | CLOSED | Pass | No code evidence of M3+ nested-virt detection/gating implementation. |
+| [#18](https://github.com/cityhunteur/vesper/issues/18) | 2 | CLOSED | Pass | No code evidence of Firecracker+jailer lifecycle management. |
+| [#19](https://github.com/cityhunteur/vesper/issues/19) | 2 | CLOSED | Pass | No code evidence of OCI->ext4 microVM rootfs pipeline. |
+| [#20](https://github.com/cityhunteur/vesper/issues/20) | 2 | CLOSED | Pass | No code evidence of microVM-per-container backend+shim wiring. |
+| [#21](https://github.com/cityhunteur/vesper/issues/21) | 2 | CLOSED | Pass | No code evidence of upstream Firecracker integration/perf baseline automation. |
+| [#22](https://github.com/cityhunteur/vesper/issues/22) | 3 | CLOSED | Pass | No code evidence of shim v2 Task RPC implementation. |
+| [#23](https://github.com/cityhunteur/vesper/issues/23) | 3 | CLOSED | Pass | No code evidence of exec/pty/stdio streaming implementation. |
+| [#24](https://github.com/cityhunteur/vesper/issues/24) | 3 | CLOSED | Pass | No code evidence of OCI bundle unpack + block-first rootfs runtime path. |
+| [#25](https://github.com/cityhunteur/vesper/issues/25) | 3 | CLOSED | Pass | No code evidence of shim reconnect/restart resilience implementation. |
+| [#26](https://github.com/cityhunteur/vesper/issues/26) | 3 | CLOSED | Pass | No code evidence of ctr conformance suite/operator docs automation. |
+| [#27](https://github.com/cityhunteur/vesper/issues/27) | 4 | CLOSED | Pass | Partial: generic socket forwarding exists; Docker API compatibility hardening not evidenced. |
+| [#28](https://github.com/cityhunteur/vesper/issues/28) | 4 | CLOSED | Pass | No code evidence of port publishing/localhost loopback implementation. |
+| [#29](https://github.com/cityhunteur/vesper/issues/29) | 4 | CLOSED | Pass | No code evidence of virtio-fs bind mount path and watch propagation. |
+| [#30](https://github.com/cityhunteur/vesper/issues/30) | 4 | CLOSED | Pass | No code evidence of Docker-desktop-like DNS/network default implementation. |
+| [#31](https://github.com/cityhunteur/vesper/issues/31) | 4 | CLOSED | Pass | No code evidence of compose/build/logs/exec workflow suite implementation. |
+| [#32](https://github.com/cityhunteur/vesper/issues/32) | 5 | CLOSED | Pass | No code evidence of native backend boot loop (memory/vCPU/kernel/initrd). |
+| [#33](https://github.com/cityhunteur/vesper/issues/33) | 5 | CLOSED | Pass | No code evidence of native virtio device parity implementation. |
+| [#34](https://github.com/cityhunteur/vesper/issues/34) | 5 | CLOSED | Pass | No code evidence of MMDS + Firecracker-equivalent rate limiter behavior. |
+| [#35](https://github.com/cityhunteur/vesper/issues/35) | 5 | CLOSED | Pass | No code evidence of portable Firecracker snapshot format implementation. |
+| [#36](https://github.com/cityhunteur/vesper/issues/36) | 5 | CLOSED | Pass | No code evidence of differential parity harness + chaos sign-off pipeline. |
+| [#37](https://github.com/cityhunteur/vesper/issues/37) | 0 | CLOSED | Pass | Implemented: baseline lock parsing, metadata generation/validation, CI workflow guardrails. |
+| [#38](https://github.com/cityhunteur/vesper/issues/38) | 0 | CLOSED | Pass | Implemented: compat exception registry validation and parity-GA zero-open gate. |
+| [#39](https://github.com/cityhunteur/vesper/issues/39) | 4 | CLOSED | Pass | No code evidence of cross-architecture execution dispatch/metadata path. |
+| [#40](https://github.com/cityhunteur/vesper/issues/40) | 5 | CLOSED | Pass | No code evidence of native networking control path/policy integration. |
+| [#41](https://github.com/cityhunteur/vesper/issues/41) | 0 | CLOSED | Pass | Implemented: eval blocker fixed via cross-platform entitlement validation path. |
+
+### Matrix Decision From This Audit
+
+Given current code evidence, endpoint and field-level parity checkboxes remain conservative (`[ ]`) until behavior-level implementation exists for Backend A/B. Route reachability and eval workflow pass signals are tracked above but are not treated as full feature-parity completion.
 
 ## API Endpoint Parity (summary)
 

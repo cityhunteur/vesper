@@ -9,7 +9,10 @@ struct Args {
     mode: String,
     #[arg(long, default_value = "third_party/firecracker/firecracker.yaml")]
     swagger: String,
-    #[arg(long, default_value = "testdata/contracts/firecracker-routes.golden.json")]
+    #[arg(
+        long,
+        default_value = "testdata/contracts/firecracker-routes.golden.json"
+    )]
     out: String,
 }
 

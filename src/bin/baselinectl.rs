@@ -46,12 +46,15 @@ fn run() -> Result<(), String> {
     match args.mode.as_str() {
         "generate" => generate(&lock, &args),
         "validate" => validate(&lock, &args.metadata),
-        other => Err(format!("invalid mode {other:?} (expected generate|validate)")),
+        other => Err(format!(
+            "invalid mode {other:?} (expected generate|validate)"
+        )),
     }
 }
 
 fn generate(lock: &vesper::baseline::Lock, args: &Args) -> Result<(), String> {
-    let metadata = vesper::baseline::build_metadata(lock, &args.backend, &args.host_os, &args.host_cpu)?;
+    let metadata =
+        vesper::baseline::build_metadata(lock, &args.backend, &args.host_os, &args.host_cpu)?;
 
     let mut entries = Vec::with_capacity(metadata.len());
     for (key, value) in metadata {
@@ -65,8 +68,8 @@ fn generate(lock: &vesper::baseline::Lock, args: &Args) -> Result<(), String> {
             .map_err(|err| format!("create metadata directory {}: {err}", parent.display()))?;
     }
 
-    let mut content =
-        serde_json::to_string_pretty(&payload).map_err(|err| format!("serialize metadata: {err}"))?;
+    let mut content = serde_json::to_string_pretty(&payload)
+        .map_err(|err| format!("serialize metadata: {err}"))?;
     content.push('\n');
     fs::write(&args.metadata, content)
         .map_err(|err| format!("write metadata file {}: {err}", &args.metadata))?;

@@ -86,14 +86,15 @@ fn run() -> Result<(), String> {
             log,
             report,
         } => {
-            let report_data = vesper::systemvm::run_boot_check(&vesper::systemvm::BootCheckConfig {
-                iterations,
-                timeout_seconds,
-                command,
-                args,
-                log_path: log,
-                report_path: report,
-            })?;
+            let report_data =
+                vesper::systemvm::run_boot_check(&vesper::systemvm::BootCheckConfig {
+                    iterations,
+                    timeout_seconds,
+                    command,
+                    args,
+                    log_path: log,
+                    report_path: report,
+                })?;
             println!(
                 "boot smoke passed: successful={} failed={}",
                 report_data.successful, report_data.failed

@@ -1,0 +1,40 @@
+name: Harness Structure
+
+on:
+  pull_request:
+    paths:
+      - src/**
+      - scripts/harness/check_structure.py
+      - docs/ARCHITECTURE.md
+      - .github/workflows/harness-structure.yml
+  push:
+    branches: [main]
+    paths:
+      - src/**
+      - scripts/harness/check_structure.py
+      - docs/ARCHITECTURE.md
+      - .github/workflows/harness-structure.yml
+
+jobs:
+  structure:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Check structure and budgets
+        run: |
+          mkdir -p artifacts
+          python3 scripts/harness/check_structure.py             --root .             --json-out artifacts/harness-structure.json             --markdown-out artifacts/harness-structure.md
+
+      - name: Upload structure report
+        uses: actions/upload-artifact@v4
+        with:
+          name: harness-structure
+          path: artifacts/harness-structure.*
+          if-no-files-found: error

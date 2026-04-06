@@ -61,7 +61,10 @@ pub fn build_metadata(
     let mut metadata = BTreeMap::new();
     metadata.insert("candidate.backend".to_string(), backend.trim().to_string());
     metadata.insert("candidate.host_os".to_string(), host_os.trim().to_string());
-    metadata.insert("candidate.host_cpu".to_string(), host_cpu.trim().to_string());
+    metadata.insert(
+        "candidate.host_cpu".to_string(),
+        host_cpu.trim().to_string(),
+    );
 
     for (name, reference) in &lock.baselines {
         metadata.insert(
@@ -74,10 +77,7 @@ pub fn build_metadata(
     Ok(metadata)
 }
 
-pub fn validate_metadata(
-    lock: &Lock,
-    metadata: &BTreeMap<String, String>,
-) -> Result<(), String> {
+pub fn validate_metadata(lock: &Lock, metadata: &BTreeMap<String, String>) -> Result<(), String> {
     let mut missing = Vec::new();
     for key in &lock.reporting.required_metadata {
         match metadata.get(key) {

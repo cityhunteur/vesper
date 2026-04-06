@@ -1,0 +1,41 @@
+name: Harness Garbage Collection
+
+on:
+  schedule:
+    - cron: "23 4 * * 1"
+  workflow_dispatch:
+    inputs:
+      fail_on:
+        description: "Fail on: never, errors, warnings"
+        required: false
+        default: "never"
+        type: choice
+        options:
+          - never
+          - errors
+          - warnings
+
+jobs:
+  janitor:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Run janitor scan
+        run: |
+          mkdir -p artifacts
+          FAIL_ON="${{ inputs.fail_on || 'never' }}"
+          python3 scripts/harness/janitor_scan.py             --root .             --fail-on "$FAIL_ON"             --json-out artifacts/janitor-scan.json             --markdown-out artifacts/janitor-scan.md
+
+      - name: Upload janitor artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: harness-janitor
+          path: artifacts/janitor-scan.*
+          if-no-files-found: error

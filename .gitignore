@@ -2,3 +2,7 @@
 /target/
 /build/
 /run/
+/.symphony/council/
+/.symphony/progress/
+/.symphony/runs/
+/.symphony/last-git-status.txt

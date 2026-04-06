@@ -37,7 +37,8 @@ mod tests {
         let content = "<?xml version=\"1.0\"?><plist><dict><key>com.apple.security.virtualization</key><true/></dict></plist>";
         std::fs::write(&path, content).unwrap();
 
-        validate_entitlements_file(Some(path.as_path()), &["com.apple.security.virtualization"]).unwrap();
+        validate_entitlements_file(Some(path.as_path()), &["com.apple.security.virtualization"])
+            .unwrap();
 
         let err = validate_entitlements_file(Some(path.as_path()), &["com.apple.vm.networking"])
             .unwrap_err();

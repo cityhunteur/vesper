@@ -1,0 +1,42 @@
+name: Harness Docs
+
+on:
+  pull_request:
+    paths:
+      - AGENTS.md
+      - WORKFLOW.md
+      - docs/**
+      - scripts/harness/check_docs.py
+      - .github/workflows/harness-docs.yml
+  push:
+    branches: [main]
+    paths:
+      - AGENTS.md
+      - WORKFLOW.md
+      - docs/**
+      - scripts/harness/check_docs.py
+      - .github/workflows/harness-docs.yml
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Check docs map and links
+        run: |
+          mkdir -p artifacts
+          python3 scripts/harness/check_docs.py             --root .             --json-out artifacts/harness-docs.json             --markdown-out artifacts/harness-docs.md
+
+      - name: Upload docs report
+        uses: actions/upload-artifact@v4
+        with:
+          name: harness-docs
+          path: artifacts/harness-docs.*
+          if-no-files-found: error
