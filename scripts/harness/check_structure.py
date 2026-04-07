@@ -16,7 +16,8 @@ RULES: Dict[str, Set[str]] = {
     "src/compat.rs": set(),
     "src/platform.rs": set(),
     "src/spec.rs": set(),
-    "src/api.rs": {"baseline", "buildinfo", "compat", "platform", "spec"},
+    "src/api.rs": {"api_matrix", "baseline", "buildinfo", "compat", "platform", "spec"},
+    "src/api_matrix.rs": {"api", "baseline", "spec"},
     "src/proxy.rs": {"buildinfo", "platform"},
     "src/systemvm.rs": {"buildinfo", "platform"},
     "src/lib.rs": set(),
@@ -89,7 +90,10 @@ def main() -> int:
             total = {(item["method"], item["path"]) for item in golden}
             handled = set(METHOD_PATH_RE.findall(api_path.read_text(encoding="utf-8")))
             api_text = api_path.read_text(encoding="utf-8")
-            if 'if route.method == "PUT" && route.template == "/actions"' in api_text:
+            if (
+                'if route.method == "PUT" && route.template == "/actions"' in api_text
+                or 'if route_match.template.method == "PUT" && route_match.template.template == "/actions"' in api_text
+            ):
                 handled.add(("PUT", "/actions"))
             coverage = len(handled) / max(len(total), 1)
             if coverage < 1.0:

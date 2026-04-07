@@ -6,6 +6,7 @@ Track debt that affects agent legibility, parity truth, or architectural coheren
 
 ### TD-001 — Split `src/api.rs`
 - Why: current hotspot reduces navigability and raises the chance of agent-local pattern matching.
+- Latest evidence: WOR-20 extracted the generated surface-stub matrix into `src/api_matrix.rs`, but `python3 scripts/harness/check_structure.py --root .` still reports `src/api.rs` over the 3200-line error budget.
 - Suggested slices:
   - actions
   - machine config

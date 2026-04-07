@@ -1,8 +1,10 @@
 CARGO ?= cargo
 RUN_DIR ?= run
 
-.PHONY: build test contract-generate contract-check contract-test validate-entitlements \
-	dev-up dev-down systemvm-build systemvm-launch-config systemvm-boot-smoke
+.PHONY: build test contract-generate contract-check contract-test surface-matrix-generate \
+	surface-matrix-check behavior-matrix-generate behavior-matrix-check \
+	validate-entitlements dev-up dev-down systemvm-build systemvm-launch-config \
+	systemvm-boot-smoke
 
 build:
 	$(CARGO) build --bins
@@ -18,6 +20,18 @@ contract-check:
 
 contract-test: contract-check
 	$(CARGO) test --test api_contract --test contract_golden
+
+surface-matrix-generate:
+	$(CARGO) run --bin baselinectl -- --mode generate-api-matrix
+
+surface-matrix-check:
+	$(CARGO) run --bin baselinectl -- --mode validate-api-matrix
+
+behavior-matrix-generate:
+	$(CARGO) run --bin baselinectl -- --mode generate-api-behavior-matrix
+
+behavior-matrix-check:
+	$(CARGO) run --bin baselinectl -- --mode validate-api-behavior-matrix
 
 validate-entitlements:
 	bash scripts/ci/validate-entitlements.sh
