@@ -5,11 +5,6 @@ tracker:
   active_states:
     - Todo
     - In Progress
-    - Verification
-    - Council
-    - Human Review
-    - Rework
-    - Merging
   terminal_states:
     - Done
     - Closed
@@ -47,10 +42,6 @@ hooks:
 agent:
   max_concurrent_agents: 4
   max_turns: 16
-  max_concurrent_agents_by_state:
-    Verification: 2
-    Council: 1
-    Rework: 2
 codex:
   command: codex app-server
   approval_policy: never
@@ -145,16 +136,20 @@ Ask:
 
 If the answer to any of the first four is yes, add the missing harness piece before shipping more feature code.
 
-## Standard states
+## Tracker state mapping
 
+- `Backlog`: parked work that is not yet selected for an execution run.
 - `Todo`: eligible for execution, no verified implementation work started.
 - `In Progress`: code or harness changes are in flight.
-- `Verification`: code is written; sensors and baseline comparison are in flight.
-- `Council`: computational sensors are green and the issue is in multi-agent eval.
-- `Human Review`: evidence is complete and a human decision is required.
-- `Rework`: prior attempt failed sensors or council review, or issue truth changed.
-- `Merging`: approved and ready to land.
+- `In Review`: non-executing checkpoint state. Use this when a local `keep`
+  exists but the slice still needs a pushed branch, PR, CI signal, or human
+  review before more execution should continue.
 - `Done`: merged and documented.
+- `Canceled` / `Cancelled` / `Duplicate`: terminal states.
+
+Local verification phases such as `Verification` and `Council` still belong in
+`verification.yaml`, `notes.md`, and the GitHub update, but they are not
+separate Linear workflow states for this project.
 
 ## Step 0: Resolve ticket identity and restore truth
 
@@ -209,7 +204,8 @@ If the answer to any of the first four is yes, add the missing harness piece bef
      - `python3 scripts/harness/check_docs.py --root .`
      - `python3 scripts/harness/check_structure.py --root .`
      - `python3 scripts/harness/compute_quality_score.py --root .`
-6. Do not move to `Verification` until the narrow sensor set for the changed unit is green.
+6. Do not mark the slice ready for checkpoint or review until the narrow sensor
+   set for the changed unit is green.
 
 ## Step 3: Collect computational sensors and artifacts
 
@@ -245,17 +241,16 @@ Treat the attempt like an experiment.
      - build, tests, runtime proof, or harness integrity failed.
 3. Append the attempt to `.symphony/runs/{{ issue.identifier }}/results.tsv`.
 4. If `discard` or `crash`:
-   - revert or move to `Rework`,
+   - revert or keep the issue in `In Progress` with a failure note,
    - explain the failure in `notes.md`,
    - do not advance the branch.
 5. If `keep`:
-   - move to `Verification` if not already there,
    - preserve the verification bundle,
    - continue to council review.
 
-## Step 5: LLM council
+## Step 5: LLM council and checkpoint gate
 
-Run a multi-agent council after `keep` and before `Human Review`.
+Run a multi-agent council after `keep` and before `In Review`.
 
 Minimum roles:
 1. `parity-judge`
@@ -279,6 +274,19 @@ Council gate:
 - Persist all verdicts under `.symphony/runs/{{ issue.identifier }}/current/council/`.
 - If true parallel council execution is unavailable, run the same rubric sequentially and record `council_mode: sequential`.
 
+After council, decide whether the run may continue:
+
+1. If the issue still maps to an umbrella GitHub tracker, or the accepted slice
+   still lives in a dirty workspace, or there is no issue-specific branch,
+   commit, or PR yet:
+   - write a checkpoint request in `notes.md` and the GitHub update draft,
+   - move the Linear issue to `In Review`,
+   - stop after the current slice instead of starting another parity unit in
+     the same run.
+2. Only continue past the current slice when the accepted work already has a
+   clean issue-specific branch/commit/PR path and the next step is still within
+   the same bounded issue.
+
 ## Step 6: GitHub update and milestone logging
 
 1. Update the mapped GitHub issue or PR with:
@@ -295,6 +303,12 @@ Council gate:
    - the verification bundle path,
    - exact commands run,
    - current or pending CI signal.
+4. For checkpoint stops, the update must explicitly say:
+   - the workspace is intentionally parked,
+   - the branch / PR / CI step is now required,
+   - the tracker was moved to `In Review`,
+   - no further parity slices should start from this issue until the checkpoint
+     is resolved.
 
 ## Step 7: Feed human taste back into the repo
 
@@ -306,7 +320,19 @@ If this attempt uncovered recurring review comments, stale guidance, or repeated
 
 ## Promotion rules
 
-Move to `Human Review` only when all are true:
+Move to `In Review` and stop the run when all are true:
+- attempt status is `keep`,
+- the council has no rejects,
+- and any of these are still true:
+  - the issue is an umbrella tracker,
+  - the workspace is dirty after the accepted slice,
+  - the branch is not pushed,
+  - there is no PR yet,
+  - CI has not produced its first truthful signal.
+
+Do not begin another parity slice from the same issue after a checkpoint stop.
+
+Move to `Done` only when all are true:
 - attempt status is `keep`,
 - required sensors are green,
 - runtime proof exists for runtime-sensitive changes,
@@ -314,11 +340,10 @@ Move to `Human Review` only when all are true:
 - GitHub issue or PR is updated,
 - the branch is pushed,
 - CI is green or clearly pending with no known local failure,
-- tracker state matches reality.
+- tracker state matches reality,
+- the bounded issue has actually been merged or otherwise fully landed.
 
 If approved by a human:
-- move to `Merging`,
-- land the PR,
 - move to `Done`,
 - leave the final milestone entry in the repo and GitHub issue.
 
