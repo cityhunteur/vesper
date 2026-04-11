@@ -10,6 +10,11 @@ struct Args {
     baseline_lock: String,
     #[arg(long, default_value = "third_party/firecracker/firecracker.yaml")]
     swagger: String,
+    #[arg(
+        long,
+        default_value = "docs/generated/firecracker-api-surface-stub-matrix.json"
+    )]
+    surface_stub_matrix: String,
     #[arg(long)]
     entitlements_file: Option<String>,
 }
@@ -46,8 +51,15 @@ async fn run() -> Result<(), String> {
         })
         .collect::<Vec<_>>();
     let firecracker_version = vesper::spec::load_info_version(&args.swagger)?;
+    let surface_stub_matrix =
+        vesper::api_matrix::load_surface_stub_matrix(&args.surface_stub_matrix)?;
 
-    let app_state = vesper::api::AppState::new(&routes, firecracker_revision, firecracker_version)?;
+    let app_state = vesper::api::AppState::new_with_matrix(
+        &routes,
+        firecracker_revision,
+        firecracker_version,
+        &surface_stub_matrix,
+    )?;
     let app = app_state.router();
 
     if let Some(parent) = Path::new(&args.socket).parent() {

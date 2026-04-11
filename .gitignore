@@ -1,4 +1,13 @@
 /artifacts/
 /target/
 /build/
-/run/
+/run/*
+!/run/WOR-20/
+/run/WOR-20/*
+!/run/WOR-20/api/
+/run/WOR-20/api/*
+!/run/WOR-20/api/*-upstream-*-baseline.md
+/.symphony/council/
+/.symphony/progress/
+/.symphony/runs/
+/.symphony/last-git-status.txt

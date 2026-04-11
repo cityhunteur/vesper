@@ -1,0 +1,102 @@
+issue:
+  linear_identifier: ""
+  github_issue: ""
+  title: ""
+  phase: ""
+  unit: ""
+
+attempt:
+  started_at: ""
+  ended_at: ""
+  baseline_commit: ""
+  candidate_commit: ""
+  branch: ""
+  council_mode: parallel
+
+guides:
+  consulted:
+    - AGENTS.md
+    - docs/index.md
+    - docs/ARCHITECTURE.md
+  task_specific: []
+
+baseline:
+  signal: ""
+  evidence_files: []
+
+candidate:
+  expected_gain: ""
+  actual_gain: ""
+  evidence_files: []
+
+sensors:
+  computational:
+    - name: targeted
+      command: ""
+      scope: targeted
+      required: true
+      result: pending
+      evidence_file: ""
+    - name: broad
+      command: ""
+      scope: broad
+      required: true
+      result: pending
+      evidence_file: ""
+    - name: parity_or_runtime
+      command: ""
+      scope: parity
+      required: false
+      result: pending
+      evidence_file: ""
+    - name: harness
+      command: ""
+      scope: docs-structure-quality
+      required: false
+      result: pending
+      evidence_file: ""
+  inferential:
+    - name: council
+      required: true
+      result: pending
+      evidence_file: "current/council/"
+
+legibility:
+  api_traces: []
+  logs: []
+  metrics: []
+  reports: []
+
+regressions:
+  introduced: []
+  suspected: []
+
+council:
+  members:
+    - role: parity-judge
+      verdict: pending
+      blocking_findings: []
+      notes: []
+    - role: runtime-judge
+      verdict: pending
+      blocking_findings: []
+      notes: []
+    - role: regression-judge
+      verdict: pending
+      blocking_findings: []
+      notes: []
+    - role: release-judge
+      verdict: pending
+      blocking_findings: []
+      notes: []
+
+result:
+  status: pending
+  rationale: ""
+  next_state: ""
+
+notes:
+  assumptions: []
+  missing_environment_capabilities: []
+  harness_updates: []
+  follow_up_issues: []

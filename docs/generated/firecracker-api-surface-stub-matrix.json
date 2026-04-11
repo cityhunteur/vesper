@@ -1,0 +1,422 @@
+{
+  "version": 1,
+  "firecracker_revision": "083c4cf69281178acc910f7f857f88e69c51d3b5",
+  "firecracker_version": "1.16.0-dev",
+  "source": {
+    "baseline_lock": "docs/specs/design-v0.baselines.lock.yaml",
+    "swagger": "third_party/firecracker/firecracker.yaml",
+    "captures": "docs/specs/firecracker-api-baseline-captures.yaml"
+  },
+  "notes": [
+    "This generated matrix pins the current Vesper surface-stub responses to the Firecracker baseline revision. Entries marked not_applicable are routed through concrete handlers and do not currently rely on the matrix-backed placeholder path. Entries marked pending_baseline_capture still require upstream behavior capture for the operation's current matrix-backed behavior slice. Entries marked captured_in_repo reference durable repo evidence for the current matrix-backed slice only and do not mean full endpoint parity is complete."
+  ],
+  "operations": [
+    {
+      "method": "GET",
+      "path": "/",
+      "semantics": "Any",
+      "stub_response": {
+        "status_code": 501,
+        "code": "NotImplemented",
+        "message": "operation not implemented"
+      },
+      "baseline_capture": "not_applicable"
+    },
+    {
+      "method": "GET",
+      "path": "/balloon",
+      "semantics": "Any",
+      "stub_response": {
+        "status_code": 501,
+        "code": "NotImplemented",
+        "message": "operation not implemented"
+      },
+      "baseline_capture": "not_applicable"
+    },
+    {
+      "method": "GET",
+      "path": "/balloon/hinting/status",
+      "semantics": "PO",
+      "stub_response": {
+        "status_code": 501,
+        "code": "NotImplemented",
+        "message": "operation not implemented"
+      },
+      "baseline_capture": "not_applicable"
+    },
+    {
+      "method": "GET",
+      "path": "/balloon/statistics",
+      "semantics": "PO",
+      "stub_response": {
+        "status_code": 501,
+        "code": "NotImplemented",
+        "message": "operation not implemented"
+      },
+      "baseline_capture": "not_applicable"
+    },
+    {
+      "method": "GET",
+      "path": "/hotplug/memory",
+      "semantics": "PO",
+      "stub_response": {
+        "status_code": 501,
+        "code": "NotImplemented",
+        "message": "operation not implemented"
+      },
+      "baseline_capture": "not_applicable"
+    },
+    {
+      "method": "GET",
+      "path": "/machine-config",
+      "semantics": "Any",
+      "stub_response": {
+        "status_code": 501,
+        "code": "NotImplemented",
+        "message": "operation not implemented"
+      },
+      "baseline_capture": "not_applicable"
+    },
+    {
+      "method": "GET",
+      "path": "/mmds",
+      "semantics": "Any",
+      "stub_response": {
+        "status_code": 501,
+        "code": "NotImplemented",
+        "message": "operation not implemented"
+      },
+      "baseline_capture": "not_applicable"
+    },
+    {
+      "method": "GET",
+      "path": "/version",
+      "semantics": "Any",
+      "stub_response": {
+        "status_code": 501,
+        "code": "NotImplemented",
+        "message": "operation not implemented"
+      },
+      "baseline_capture": "not_applicable"
+    },
+    {
+      "method": "GET",
+      "path": "/vm/config",
+      "semantics": "Any",
+      "stub_response": {
+        "status_code": 501,
+        "code": "NotImplemented",
+        "message": "operation not implemented"
+      },
+      "baseline_capture": "not_applicable"
+    },
+    {
+      "method": "PATCH",
+      "path": "/balloon",
+      "semantics": "PO",
+      "stub_response": {
+        "status_code": 501,
+        "code": "NotImplemented",
+        "message": "operation not implemented"
+      },
+      "baseline_capture": "not_applicable"
+    },
+    {
+      "method": "PATCH",
+      "path": "/balloon/hinting/start",
+      "semantics": "PO",
+      "stub_response": {
+        "status_code": 501,
+        "code": "NotImplemented",
+        "message": "operation not implemented"
+      },
+      "baseline_capture": "not_applicable"
+    },
+    {
+      "method": "PATCH",
+      "path": "/balloon/hinting/stop",
+      "semantics": "PO",
+      "stub_response": {
+        "status_code": 501,
+        "code": "NotImplemented",
+        "message": "operation not implemented"
+      },
+      "baseline_capture": "not_applicable"
+    },
+    {
+      "method": "PATCH",
+      "path": "/balloon/statistics",
+      "semantics": "PO",
+      "stub_response": {
+        "status_code": 501,
+        "code": "NotImplemented",
+        "message": "operation not implemented"
+      },
+      "baseline_capture": "not_applicable"
+    },
+    {
+      "method": "PATCH",
+      "path": "/drives/{drive_id}",
+      "semantics": "PO",
+      "stub_response": {
+        "status_code": 501,
+        "code": "NotImplemented",
+        "message": "operation not implemented"
+      },
+      "baseline_capture": "not_applicable"
+    },
+    {
+      "method": "PATCH",
+      "path": "/hotplug/memory",
+      "semantics": "PO",
+      "stub_response": {
+        "status_code": 501,
+        "code": "NotImplemented",
+        "message": "operation not implemented"
+      },
+      "baseline_capture": "not_applicable"
+    },
+    {
+      "method": "PATCH",
+      "path": "/machine-config",
+      "semantics": "PB",
+      "stub_response": {
+        "status_code": 501,
+        "code": "NotImplemented",
+        "message": "operation not implemented"
+      },
+      "baseline_capture": "not_applicable"
+    },
+    {
+      "method": "PATCH",
+      "path": "/mmds",
+      "semantics": "Any",
+      "stub_response": {
+        "status_code": 501,
+        "code": "NotImplemented",
+        "message": "operation not implemented"
+      },
+      "baseline_capture": "not_applicable"
+    },
+    {
+      "method": "PATCH",
+      "path": "/network-interfaces/{iface_id}",
+      "semantics": "PO",
+      "stub_response": {
+        "status_code": 501,
+        "code": "NotImplemented",
+        "message": "operation not implemented"
+      },
+      "baseline_capture": "not_applicable"
+    },
+    {
+      "method": "PATCH",
+      "path": "/vm",
+      "semantics": "Any",
+      "stub_response": {
+        "status_code": 501,
+        "code": "NotImplemented",
+        "message": "operation not implemented"
+      },
+      "baseline_capture": "not_applicable"
+    },
+    {
+      "method": "PUT",
+      "path": "/actions",
+      "semantics": "Any",
+      "stub_response": {
+        "status_code": 501,
+        "code": "NotImplemented",
+        "message": "operation not implemented"
+      },
+      "baseline_capture": "not_applicable"
+    },
+    {
+      "method": "PUT",
+      "path": "/balloon",
+      "semantics": "PB",
+      "stub_response": {
+        "status_code": 501,
+        "code": "NotImplemented",
+        "message": "operation not implemented"
+      },
+      "baseline_capture": "not_applicable"
+    },
+    {
+      "method": "PUT",
+      "path": "/boot-source",
+      "semantics": "PB",
+      "stub_response": {
+        "status_code": 501,
+        "code": "NotImplemented",
+        "message": "operation not implemented"
+      },
+      "baseline_capture": "not_applicable"
+    },
+    {
+      "method": "PUT",
+      "path": "/cpu-config",
+      "semantics": "PB",
+      "stub_response": {
+        "status_code": 501,
+        "code": "NotImplemented",
+        "message": "operation not implemented"
+      },
+      "baseline_capture": "not_applicable"
+    },
+    {
+      "method": "PUT",
+      "path": "/drives/{drive_id}",
+      "semantics": "PB",
+      "stub_response": {
+        "status_code": 501,
+        "code": "NotImplemented",
+        "message": "operation not implemented"
+      },
+      "baseline_capture": "not_applicable"
+    },
+    {
+      "method": "PUT",
+      "path": "/entropy",
+      "semantics": "PB",
+      "stub_response": {
+        "status_code": 501,
+        "code": "NotImplemented",
+        "message": "operation not implemented"
+      },
+      "baseline_capture": "not_applicable"
+    },
+    {
+      "method": "PUT",
+      "path": "/hotplug/memory",
+      "semantics": "PB",
+      "stub_response": {
+        "status_code": 501,
+        "code": "NotImplemented",
+        "message": "operation not implemented"
+      },
+      "baseline_capture": "not_applicable"
+    },
+    {
+      "method": "PUT",
+      "path": "/logger",
+      "semantics": "Any",
+      "stub_response": {
+        "status_code": 501,
+        "code": "NotImplemented",
+        "message": "operation not implemented"
+      },
+      "baseline_capture": "not_applicable"
+    },
+    {
+      "method": "PUT",
+      "path": "/machine-config",
+      "semantics": "PB",
+      "stub_response": {
+        "status_code": 501,
+        "code": "NotImplemented",
+        "message": "operation not implemented"
+      },
+      "baseline_capture": "not_applicable"
+    },
+    {
+      "method": "PUT",
+      "path": "/metrics",
+      "semantics": "Any",
+      "stub_response": {
+        "status_code": 501,
+        "code": "NotImplemented",
+        "message": "operation not implemented"
+      },
+      "baseline_capture": "not_applicable"
+    },
+    {
+      "method": "PUT",
+      "path": "/mmds",
+      "semantics": "Any",
+      "stub_response": {
+        "status_code": 501,
+        "code": "NotImplemented",
+        "message": "operation not implemented"
+      },
+      "baseline_capture": "not_applicable"
+    },
+    {
+      "method": "PUT",
+      "path": "/mmds/config",
+      "semantics": "PB",
+      "stub_response": {
+        "status_code": 501,
+        "code": "NotImplemented",
+        "message": "operation not implemented"
+      },
+      "baseline_capture": "not_applicable"
+    },
+    {
+      "method": "PUT",
+      "path": "/network-interfaces/{iface_id}",
+      "semantics": "PB",
+      "stub_response": {
+        "status_code": 501,
+        "code": "NotImplemented",
+        "message": "operation not implemented"
+      },
+      "baseline_capture": "not_applicable"
+    },
+    {
+      "method": "PUT",
+      "path": "/pmem/{id}",
+      "semantics": "PB",
+      "stub_response": {
+        "status_code": 501,
+        "code": "NotImplemented",
+        "message": "operation not implemented"
+      },
+      "baseline_capture": "not_applicable"
+    },
+    {
+      "method": "PUT",
+      "path": "/serial",
+      "semantics": "Any",
+      "stub_response": {
+        "status_code": 501,
+        "code": "NotImplemented",
+        "message": "operation not implemented"
+      },
+      "baseline_capture": "not_applicable"
+    },
+    {
+      "method": "PUT",
+      "path": "/snapshot/create",
+      "semantics": "PO",
+      "stub_response": {
+        "status_code": 501,
+        "code": "NotImplemented",
+        "message": "operation not implemented"
+      },
+      "baseline_capture": "not_applicable"
+    },
+    {
+      "method": "PUT",
+      "path": "/snapshot/load",
+      "semantics": "PB",
+      "stub_response": {
+        "status_code": 501,
+        "code": "NotImplemented",
+        "message": "operation not implemented"
+      },
+      "baseline_capture": "not_applicable"
+    },
+    {
+      "method": "PUT",
+      "path": "/vsock",
+      "semantics": "PB",
+      "stub_response": {
+        "status_code": 501,
+        "code": "NotImplemented",
+        "message": "operation not implemented"
+      },
+      "baseline_capture": "not_applicable"
+    }
+  ]
+}

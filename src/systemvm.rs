@@ -117,8 +117,7 @@ pub fn write_launch_config(path: impl AsRef<Path>, config: &LaunchConfig) -> Res
     let mut content = serde_json::to_string_pretty(config)
         .map_err(|err| format!("serialize launch config: {err}"))?;
     content.push('\n');
-    fs::write(path, content)
-        .map_err(|err| format!("write launch config {}: {err}", path.display()))
+    fs::write(path, content).map_err(|err| format!("write launch config {}: {err}", path.display()))
 }
 
 pub fn run_boot_check(config: &BootCheckConfig) -> Result<BootCheckReport, String> {
@@ -151,7 +150,10 @@ pub fn run_boot_check(config: &BootCheckConfig) -> Result<BootCheckReport, Strin
     let timeout = Duration::from_secs(config.timeout_seconds.max(1));
 
     for iteration in 1..=config.iterations {
-        log.push_str(&format!("iteration={iteration} command={}\n", config.command));
+        log.push_str(&format!(
+            "iteration={iteration} command={}\n",
+            config.command
+        ));
         let mut child = Command::new(&config.command)
             .args(&config.args)
             .spawn()

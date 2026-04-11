@@ -1,0 +1,51 @@
+name: Harness Quality Score
+
+on:
+  pull_request:
+    paths:
+      - AGENTS.md
+      - WORKFLOW.md
+      - .symphony/templates/**
+      - docs/**
+      - scripts/harness/**
+      - src/**
+      - tests/**
+      - third_party/**
+      - .github/workflows/harness-quality-score.yml
+  push:
+    branches: [main]
+    paths:
+      - AGENTS.md
+      - WORKFLOW.md
+      - .symphony/templates/**
+      - docs/**
+      - scripts/harness/**
+      - src/**
+      - tests/**
+      - third_party/**
+      - .github/workflows/harness-quality-score.yml
+  workflow_dispatch:
+
+jobs:
+  quality-score:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Compute quality score
+        run: |
+          mkdir -p artifacts
+          python3 scripts/harness/compute_quality_score.py             --root .             --json-out artifacts/quality-score.json             --markdown-out artifacts/quality-score.md
+
+      - name: Upload quality artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: harness-quality-score
+          path: artifacts/quality-score.*
+          if-no-files-found: error

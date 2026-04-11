@@ -1,0 +1,2796 @@
+{
+  "version": 1,
+  "firecracker_revision": "083c4cf69281178acc910f7f857f88e69c51d3b5",
+  "firecracker_version": "1.16.0-dev",
+  "source": {
+    "baseline_lock": "docs/specs/design-v0.baselines.lock.yaml",
+    "swagger": "third_party/firecracker/firecracker.yaml",
+    "captures": "docs/specs/firecracker-api-behavior-captures.yaml"
+  },
+  "notes": [
+    "This generated matrix records route-level baseline behavior captures for the pinned Firecracker revision. Entries marked pending_baseline_capture still require pinned upstream status/error capture for the current route behavior. Entries marked captured_in_repo carry scenario-level facts for the current concrete-handler or matrix-backed placeholder behavior."
+  ],
+  "operations": [
+    {
+      "method": "GET",
+      "path": "/",
+      "semantics": "Any",
+      "behavior_path": "concrete_handler",
+      "capture_state": "captured_in_repo",
+      "cases": [
+        {
+          "id": "preboot_instance_info",
+          "arch": "any",
+          "when": "Read instance info before boot",
+          "status_code": 200,
+          "outcome": "success_body",
+          "body_assertions": [
+            {
+              "pointer": "/state",
+              "kind": "exact",
+              "value": "Not started"
+            },
+            {
+              "pointer": "/app_name",
+              "kind": "type",
+              "value_type": "string"
+            },
+            {
+              "pointer": "/id",
+              "kind": "type",
+              "value_type": "string"
+            },
+            {
+              "pointer": "/vmm_version",
+              "kind": "type",
+              "value_type": "string"
+            }
+          ],
+          "evidence_files": [
+            "run/WOR-20/api/step28-upstream-identity-version-baseline.md",
+            "run/WOR-20/api/step143-upstream-instance-info-preboot-baseline.md"
+          ]
+        },
+        {
+          "id": "paused_after_snapshot_load",
+          "arch": "any",
+          "when": "Read instance info after a successful snapshot load with default resume behavior",
+          "status_code": 200,
+          "outcome": "success_body",
+          "body_assertions": [
+            {
+              "pointer": "/state",
+              "kind": "exact",
+              "value": "Paused"
+            }
+          ],
+          "evidence_files": [
+            "run/WOR-20/api/step104-upstream-instance-info-runtime-state-baseline.md"
+          ]
+        },
+        {
+          "id": "running_after_snapshot_load_resume",
+          "arch": "any",
+          "when": "Read instance info after a successful snapshot load with resume_vm=true",
+          "status_code": 200,
+          "outcome": "success_body",
+          "body_assertions": [
+            {
+              "pointer": "/state",
+              "kind": "exact",
+              "value": "Running"
+            }
+          ],
+          "evidence_files": [
+            "run/WOR-20/api/step104-upstream-instance-info-runtime-state-baseline.md"
+          ]
+        }
+      ],
+      "capture_note": "Pins the current concrete-handler `GET /` lifecycle instance-info response surface from the pinned Firecracker controller behavior."
+    },
+    {
+      "method": "GET",
+      "path": "/balloon",
+      "semantics": "Any",
+      "behavior_path": "concrete_handler",
+      "capture_state": "captured_in_repo",
+      "cases": [
+        {
+          "id": "preboot_missing_device",
+          "arch": "any",
+          "when": "Read balloon config before boot without a configured balloon device",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidRequest",
+          "message": "Balloon config error: No balloon device found.",
+          "evidence_files": [
+            "run/WOR-20/api/step9-upstream-balloon-config-baseline.md",
+            "run/WOR-20/api/step138-upstream-balloon-get-preboot-surfaces-baseline.md"
+          ]
+        },
+        {
+          "id": "preboot_configured_defaults",
+          "arch": "any",
+          "when": "Read balloon config before boot after storing a minimal balloon device",
+          "status_code": 200,
+          "outcome": "success_body",
+          "body_assertions": [
+            {
+              "pointer": "/amount_mib",
+              "kind": "exact",
+              "value": 1
+            },
+            {
+              "pointer": "/deflate_on_oom",
+              "kind": "exact",
+              "value": true
+            },
+            {
+              "pointer": "/stats_polling_interval_s",
+              "kind": "exact",
+              "value": 0
+            },
+            {
+              "pointer": "/free_page_hinting",
+              "kind": "exact",
+              "value": false
+            },
+            {
+              "pointer": "/free_page_reporting",
+              "kind": "exact",
+              "value": false
+            }
+          ],
+          "evidence_files": [
+            "run/WOR-20/api/step9-upstream-balloon-config-baseline.md",
+            "run/WOR-20/api/step138-upstream-balloon-get-preboot-surfaces-baseline.md"
+          ]
+        },
+        {
+          "id": "runtime_missing_device",
+          "arch": "any",
+          "when": "Read balloon config after boot without a configured balloon device",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidRequest",
+          "message": "Internal VMM error: Failed perform action on device: Device not found",
+          "evidence_files": [
+            "run/WOR-20/api/step10-upstream-balloon-runtime-update-baseline.md",
+            "run/WOR-20/api/step139-upstream-balloon-get-runtime-surfaces-baseline.md"
+          ]
+        },
+        {
+          "id": "runtime_updated_target",
+          "arch": "any",
+          "when": "Read balloon config after boot after a successful runtime target update",
+          "status_code": 200,
+          "outcome": "success_body",
+          "body_assertions": [
+            {
+              "pointer": "/amount_mib",
+              "kind": "exact",
+              "value": 64
+            },
+            {
+              "pointer": "/deflate_on_oom",
+              "kind": "exact",
+              "value": true
+            }
+          ],
+          "evidence_files": [
+            "run/WOR-20/api/step10-upstream-balloon-runtime-update-baseline.md",
+            "run/WOR-20/api/step139-upstream-balloon-get-runtime-surfaces-baseline.md"
+          ]
+        }
+      ],
+      "capture_note": "Pins the current concrete-handler `GET /balloon` preboot and runtime read surface from the pinned Firecracker controller behavior."
+    },
+    {
+      "method": "GET",
+      "path": "/balloon/hinting/status",
+      "semantics": "PO",
+      "behavior_path": "concrete_handler",
+      "capture_state": "captured_in_repo",
+      "cases": [
+        {
+          "id": "preboot_invalid_state",
+          "arch": "any",
+          "when": "Read balloon hinting status before boot",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidState",
+          "message": "The requested operation is not supported before starting the microVM.",
+          "evidence_files": [
+            "run/WOR-20/api/step97-upstream-balloon-hinting-status-preboot-baseline.md"
+          ]
+        },
+        {
+          "id": "missing_device_runtime",
+          "arch": "any",
+          "when": "Read balloon hinting status after boot without a configured balloon device",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidRequest",
+          "message": "Balloon update error: Failed perform action on device: Device not found",
+          "evidence_files": [
+            "run/WOR-20/api/step12-upstream-balloon-hinting-status-baseline.md",
+            "run/WOR-20/api/step141-upstream-balloon-hinting-status-runtime-surfaces-baseline.md"
+          ]
+        },
+        {
+          "id": "hinting_disabled_runtime",
+          "arch": "any",
+          "when": "Read balloon hinting status after boot with hinting disabled",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidRequest",
+          "message": "Balloon update error: Balloon: Attempting to use hinting when not enabled",
+          "evidence_files": [
+            "run/WOR-20/api/step12-upstream-balloon-hinting-status-baseline.md",
+            "run/WOR-20/api/step141-upstream-balloon-hinting-status-runtime-surfaces-baseline.md"
+          ]
+        },
+        {
+          "id": "idle_status_runtime",
+          "arch": "any",
+          "when": "Read balloon hinting status after boot with hinting enabled before any command runs",
+          "status_code": 200,
+          "outcome": "success_body",
+          "body_assertions": [
+            {
+              "pointer": "/host_cmd",
+              "kind": "exact",
+              "value": 0
+            },
+            {
+              "pointer": "/guest_cmd",
+              "kind": "type",
+              "value_type": "null"
+            }
+          ],
+          "evidence_files": [
+            "run/WOR-20/api/step12-upstream-balloon-hinting-status-baseline.md",
+            "run/WOR-20/api/step141-upstream-balloon-hinting-status-runtime-surfaces-baseline.md"
+          ]
+        }
+      ],
+      "capture_note": "Pins the current concrete-handler `GET /balloon/hinting/status` preboot invalid-state rejection plus the runtime read and fault surface from the pinned Firecracker controller behavior."
+    },
+    {
+      "method": "GET",
+      "path": "/balloon/statistics",
+      "semantics": "PO",
+      "behavior_path": "concrete_handler",
+      "capture_state": "captured_in_repo",
+      "cases": [
+        {
+          "id": "preboot_invalid_state",
+          "arch": "any",
+          "when": "Read balloon statistics before boot",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidState",
+          "message": "The requested operation is not supported before starting the microVM.",
+          "evidence_files": [
+            "run/WOR-20/api/step100-upstream-balloon-stats-get-preboot-baseline.md"
+          ]
+        },
+        {
+          "id": "missing_device_runtime",
+          "arch": "any",
+          "when": "Read balloon statistics after boot without a configured balloon device",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidRequest",
+          "message": "Internal VMM error: Failed perform action on device: Device not found",
+          "evidence_files": [
+            "run/WOR-20/api/step11-upstream-balloon-stats-baseline.md",
+            "run/WOR-20/api/step140-upstream-balloon-stats-runtime-surfaces-baseline.md"
+          ]
+        },
+        {
+          "id": "stats_disabled_runtime",
+          "arch": "any",
+          "when": "Read balloon statistics after boot with statistics disabled",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidRequest",
+          "message": "Internal VMM error: Balloon: Received stats query when stats are disabled.",
+          "evidence_files": [
+            "run/WOR-20/api/step11-upstream-balloon-stats-baseline.md",
+            "run/WOR-20/api/step140-upstream-balloon-stats-runtime-surfaces-baseline.md"
+          ]
+        },
+        {
+          "id": "enabled_stats_runtime",
+          "arch": "any",
+          "when": "Read balloon statistics after boot with statistics enabled",
+          "status_code": 200,
+          "outcome": "success_body",
+          "body_assertions": [
+            {
+              "pointer": "/target_mib",
+              "kind": "exact",
+              "value": 64
+            },
+            {
+              "pointer": "/actual_mib",
+              "kind": "exact",
+              "value": 64
+            },
+            {
+              "pointer": "/target_pages",
+              "kind": "exact",
+              "value": 16384
+            },
+            {
+              "pointer": "/actual_pages",
+              "kind": "exact",
+              "value": 16384
+            }
+          ],
+          "evidence_files": [
+            "run/WOR-20/api/step11-upstream-balloon-stats-baseline.md",
+            "run/WOR-20/api/step140-upstream-balloon-stats-runtime-surfaces-baseline.md"
+          ]
+        }
+      ],
+      "capture_note": "Pins the current concrete-handler `GET /balloon/statistics` preboot invalid-state rejection plus the runtime read and fault surface from the pinned Firecracker controller behavior."
+    },
+    {
+      "method": "GET",
+      "path": "/hotplug/memory",
+      "semantics": "PO",
+      "behavior_path": "concrete_handler",
+      "capture_state": "captured_in_repo",
+      "cases": [
+        {
+          "id": "preboot_invalid_state",
+          "arch": "any",
+          "when": "Read memory hotplug status before boot",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidState",
+          "message": "The requested operation is not supported before starting the microVM.",
+          "evidence_files": [
+            "run/WOR-20/api/step93-upstream-hotplug-get-preboot-baseline.md"
+          ]
+        },
+        {
+          "id": "runtime_initial_status",
+          "arch": "any",
+          "when": "Read memory hotplug status after preboot config and boot before any resize request",
+          "status_code": 200,
+          "outcome": "success_body",
+          "body_assertions": [
+            {
+              "pointer": "/block_size_mib",
+              "kind": "exact",
+              "value": 2
+            },
+            {
+              "pointer": "/slot_size_mib",
+              "kind": "exact",
+              "value": 128
+            },
+            {
+              "pointer": "/total_size_mib",
+              "kind": "exact",
+              "value": 1024
+            },
+            {
+              "pointer": "/plugged_size_mib",
+              "kind": "exact",
+              "value": 0
+            },
+            {
+              "pointer": "/requested_size_mib",
+              "kind": "exact",
+              "value": 0
+            }
+          ],
+          "evidence_files": [
+            "run/WOR-20/api/step6-upstream-hotplug-baseline.md"
+          ]
+        },
+        {
+          "id": "runtime_updated_requested_size",
+          "arch": "any",
+          "when": "Read memory hotplug status after boot after a successful resize request",
+          "status_code": 200,
+          "outcome": "success_body",
+          "body_assertions": [
+            {
+              "pointer": "/block_size_mib",
+              "kind": "exact",
+              "value": 2
+            },
+            {
+              "pointer": "/slot_size_mib",
+              "kind": "exact",
+              "value": 128
+            },
+            {
+              "pointer": "/total_size_mib",
+              "kind": "exact",
+              "value": 1024
+            },
+            {
+              "pointer": "/plugged_size_mib",
+              "kind": "exact",
+              "value": 0
+            },
+            {
+              "pointer": "/requested_size_mib",
+              "kind": "exact",
+              "value": 512
+            }
+          ],
+          "evidence_files": [
+            "run/WOR-20/api/step6-upstream-hotplug-baseline.md",
+            "run/WOR-20/api/step142-upstream-hotplug-runtime-updated-status-baseline.md"
+          ]
+        }
+      ],
+      "capture_note": "Pins the current concrete-handler `GET /hotplug/memory` preboot invalid-state rejection plus the runtime initial-status and post-resize requested-size surfaces from the pinned Firecracker controller behavior."
+    },
+    {
+      "method": "GET",
+      "path": "/machine-config",
+      "semantics": "Any",
+      "behavior_path": "concrete_handler",
+      "capture_state": "captured_in_repo",
+      "cases": [
+        {
+          "id": "preboot_after_put_patch",
+          "arch": "any",
+          "when": "Read machine config after preboot PUT then PATCH updates",
+          "status_code": 200,
+          "outcome": "success_body",
+          "body_assertions": [
+            {
+              "pointer": "/vcpu_count",
+              "kind": "exact",
+              "value": 2
+            },
+            {
+              "pointer": "/mem_size_mib",
+              "kind": "exact",
+              "value": 512
+            },
+            {
+              "pointer": "/track_dirty_pages",
+              "kind": "exact",
+              "value": true
+            }
+          ],
+          "evidence_files": [
+            "run/WOR-20/api/step23-upstream-machine-config-store-baseline.md"
+          ]
+        },
+        {
+          "id": "runtime_after_put_patch",
+          "arch": "any",
+          "when": "Read machine config after preboot PUT then PATCH updates and a later boot",
+          "status_code": 200,
+          "outcome": "success_body",
+          "body_assertions": [
+            {
+              "pointer": "/vcpu_count",
+              "kind": "exact",
+              "value": 2
+            },
+            {
+              "pointer": "/mem_size_mib",
+              "kind": "exact",
+              "value": 512
+            },
+            {
+              "pointer": "/track_dirty_pages",
+              "kind": "exact",
+              "value": true
+            }
+          ],
+          "evidence_files": [
+            "run/WOR-20/api/step106-upstream-machine-config-runtime-read-baseline.md"
+          ]
+        }
+      ],
+      "capture_note": "Pins the current concrete-handler `GET /machine-config` stored preboot and runtime configuration read surface from the pinned Firecracker controller behavior."
+    },
+    {
+      "method": "GET",
+      "path": "/mmds",
+      "semantics": "Any",
+      "behavior_path": "concrete_handler",
+      "capture_state": "captured_in_repo",
+      "cases": [
+        {
+          "id": "preboot_empty_store",
+          "arch": "any",
+          "when": "Read MMDS data before boot before the store has ever been initialized",
+          "status_code": 200,
+          "outcome": "success_body",
+          "body_assertions": [
+            {
+              "pointer": "",
+              "kind": "exact",
+              "value": {}
+            }
+          ],
+          "evidence_files": [
+            "run/WOR-20/api/step7-upstream-mmds-baseline.md",
+            "run/WOR-20/api/step137-upstream-mmds-preboot-empty-store-baseline.md"
+          ]
+        },
+        {
+          "id": "preboot_initialized_store",
+          "arch": "any",
+          "when": "Read MMDS data before boot after storing and patching the MMDS datastore",
+          "status_code": 200,
+          "outcome": "success_body",
+          "body_assertions": [
+            {
+              "pointer": "/meta/name",
+              "kind": "exact",
+              "value": "vesper"
+            },
+            {
+              "pointer": "/meta/version",
+              "kind": "exact",
+              "value": "1"
+            }
+          ],
+          "evidence_files": [
+            "run/WOR-20/api/step7-upstream-mmds-baseline.md"
+          ]
+        },
+        {
+          "id": "runtime_configured_store",
+          "arch": "any",
+          "when": "Read MMDS data after storing data, configuring MMDS networking, and booting the VM",
+          "status_code": 200,
+          "outcome": "success_body",
+          "body_assertions": [
+            {
+              "pointer": "/meta/name",
+              "kind": "exact",
+              "value": "vesper"
+            },
+            {
+              "pointer": "/meta/version",
+              "kind": "exact",
+              "value": "1"
+            }
+          ],
+          "evidence_files": [
+            "run/WOR-20/api/step7-upstream-mmds-baseline.md",
+            "run/WOR-20/api/step136-upstream-mmds-runtime-configured-store-baseline.md"
+          ]
+        },
+        {
+          "id": "runtime_missing_config",
+          "arch": "any",
+          "when": "Read MMDS data after boot with a preinitialized store but without MMDS networking configuration",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidRequest",
+          "message": "The MMDS data store is not initialized.",
+          "evidence_files": [
+            "run/WOR-20/api/step7-upstream-mmds-baseline.md"
+          ]
+        }
+      ],
+      "capture_note": "Pins the current concrete-handler `GET /mmds` preboot empty-store and initialized-store surfaces, runtime configured-store read behavior, and runtime missing-config rejection from the pinned Firecracker controller behavior."
+    },
+    {
+      "method": "GET",
+      "path": "/version",
+      "semantics": "Any",
+      "behavior_path": "concrete_handler",
+      "capture_state": "captured_in_repo",
+      "cases": [
+        {
+          "id": "preboot_version_response",
+          "arch": "any",
+          "when": "Read version before boot",
+          "status_code": 200,
+          "outcome": "success_body",
+          "body_assertions": [
+            {
+              "pointer": "/firecracker_version",
+              "kind": "type",
+              "value_type": "string"
+            }
+          ],
+          "evidence_files": [
+            "run/WOR-20/api/step28-upstream-identity-version-baseline.md"
+          ]
+        },
+        {
+          "id": "runtime_version_response",
+          "arch": "any",
+          "when": "Read version after boot",
+          "status_code": 200,
+          "outcome": "success_body",
+          "body_assertions": [
+            {
+              "pointer": "/firecracker_version",
+              "kind": "type",
+              "value_type": "string"
+            }
+          ],
+          "evidence_files": [
+            "run/WOR-20/api/step105-upstream-version-runtime-baseline.md"
+          ]
+        }
+      ],
+      "capture_note": "Pins the current concrete-handler `GET /version` preboot and runtime version response surface from the pinned Firecracker controller behavior."
+    },
+    {
+      "method": "GET",
+      "path": "/vm/config",
+      "semantics": "Any",
+      "behavior_path": "concrete_handler",
+      "capture_state": "captured_in_repo",
+      "cases": [
+        {
+          "id": "machine_config_export_preboot",
+          "arch": "any",
+          "when": "Read full VM config before boot after storing and patching machine configuration",
+          "status_code": 200,
+          "outcome": "success_body",
+          "body_assertions": [
+            {
+              "pointer": "/machine-config/vcpu_count",
+              "kind": "exact",
+              "value": 2
+            },
+            {
+              "pointer": "/machine-config/mem_size_mib",
+              "kind": "exact",
+              "value": 512
+            },
+            {
+              "pointer": "/machine-config/track_dirty_pages",
+              "kind": "exact",
+              "value": true
+            }
+          ],
+          "evidence_files": [
+            "run/WOR-20/api/step23-upstream-machine-config-store-baseline.md"
+          ]
+        },
+        {
+          "id": "machine_config_export_runtime",
+          "arch": "any",
+          "when": "Read full VM config after boot after storing and patching machine configuration",
+          "status_code": 200,
+          "outcome": "success_body",
+          "body_assertions": [
+            {
+              "pointer": "/machine-config/vcpu_count",
+              "kind": "exact",
+              "value": 2
+            },
+            {
+              "pointer": "/machine-config/mem_size_mib",
+              "kind": "exact",
+              "value": 512
+            },
+            {
+              "pointer": "/machine-config/track_dirty_pages",
+              "kind": "exact",
+              "value": true
+            }
+          ],
+          "evidence_files": [
+            "run/WOR-20/api/step110-upstream-vm-config-runtime-baseline.md"
+          ]
+        },
+        {
+          "id": "cpu_config_omitted_preboot",
+          "arch": "any",
+          "when": "Read full VM config before boot after storing CPU configuration",
+          "status_code": 200,
+          "outcome": "success_body",
+          "body_assertions": [
+            {
+              "pointer": "/cpu-config",
+              "kind": "absent"
+            }
+          ],
+          "evidence_files": [
+            "run/WOR-20/api/step122-upstream-vm-config-cpu-config-absent-capture-baseline.md"
+          ]
+        },
+        {
+          "id": "serial_omitted_preboot",
+          "arch": "any",
+          "when": "Read full VM config before boot after storing serial configuration",
+          "status_code": 200,
+          "outcome": "success_body",
+          "body_assertions": [
+            {
+              "pointer": "/serial",
+              "kind": "absent"
+            }
+          ],
+          "evidence_files": [
+            "run/WOR-20/api/step123-upstream-vm-config-serial-absent-capture-baseline.md"
+          ]
+        },
+        {
+          "id": "serial_omitted_runtime",
+          "arch": "any",
+          "when": "Read full VM config after boot after storing serial configuration",
+          "status_code": 200,
+          "outcome": "success_body",
+          "body_assertions": [
+            {
+              "pointer": "/serial",
+              "kind": "absent"
+            }
+          ],
+          "evidence_files": [
+            "run/WOR-20/api/step134-upstream-vm-config-serial-runtime-omission-baseline.md"
+          ]
+        },
+        {
+          "id": "metrics_omitted_preboot",
+          "arch": "any",
+          "when": "Read full VM config before boot after storing metrics configuration",
+          "status_code": 200,
+          "outcome": "success_body",
+          "body_assertions": [
+            {
+              "pointer": "/metrics",
+              "kind": "absent"
+            }
+          ],
+          "evidence_files": [
+            "run/WOR-20/api/step124-upstream-vm-config-metrics-absent-capture-baseline.md"
+          ]
+        },
+        {
+          "id": "metrics_omitted_runtime",
+          "arch": "any",
+          "when": "Read full VM config after boot after storing metrics configuration",
+          "status_code": 200,
+          "outcome": "success_body",
+          "body_assertions": [
+            {
+              "pointer": "/metrics",
+              "kind": "absent"
+            }
+          ],
+          "evidence_files": [
+            "run/WOR-20/api/step135-upstream-vm-config-metrics-runtime-omission-baseline.md"
+          ]
+        },
+        {
+          "id": "logger_omitted_preboot",
+          "arch": "any",
+          "when": "Read full VM config before boot after storing logger configuration",
+          "status_code": 200,
+          "outcome": "success_body",
+          "body_assertions": [
+            {
+              "pointer": "/logger",
+              "kind": "absent"
+            }
+          ],
+          "evidence_files": [
+            "run/WOR-20/api/step125-upstream-vm-config-logger-absent-capture-baseline.md"
+          ]
+        },
+        {
+          "id": "logger_omitted_runtime",
+          "arch": "any",
+          "when": "Read full VM config after boot after storing logger configuration",
+          "status_code": 200,
+          "outcome": "success_body",
+          "body_assertions": [
+            {
+              "pointer": "/logger",
+              "kind": "absent"
+            }
+          ],
+          "evidence_files": [
+            "run/WOR-20/api/step133-upstream-vm-config-logger-runtime-omission-baseline.md"
+          ]
+        },
+        {
+          "id": "memory_hotplug_export_preboot",
+          "arch": "any",
+          "when": "Read full VM config before boot after storing memory hotplug configuration",
+          "status_code": 200,
+          "outcome": "success_body",
+          "body_assertions": [
+            {
+              "pointer": "/memory-hotplug/block_size_mib",
+              "kind": "exact",
+              "value": 2
+            },
+            {
+              "pointer": "/memory-hotplug/slot_size_mib",
+              "kind": "exact",
+              "value": 128
+            },
+            {
+              "pointer": "/memory-hotplug/total_size_mib",
+              "kind": "exact",
+              "value": 1024
+            }
+          ],
+          "evidence_files": [
+            "run/WOR-20/api/step6-upstream-hotplug-baseline.md"
+          ]
+        },
+        {
+          "id": "memory_hotplug_export_runtime",
+          "arch": "any",
+          "when": "Read full VM config after boot after storing memory hotplug configuration",
+          "status_code": 200,
+          "outcome": "success_body",
+          "body_assertions": [
+            {
+              "pointer": "/memory-hotplug/block_size_mib",
+              "kind": "exact",
+              "value": 2
+            },
+            {
+              "pointer": "/memory-hotplug/slot_size_mib",
+              "kind": "exact",
+              "value": 128
+            },
+            {
+              "pointer": "/memory-hotplug/total_size_mib",
+              "kind": "exact",
+              "value": 1024
+            }
+          ],
+          "evidence_files": [
+            "run/WOR-20/api/step112-upstream-vm-config-memory-hotplug-runtime-baseline.md"
+          ]
+        },
+        {
+          "id": "mmds_config_export_preboot",
+          "arch": "any",
+          "when": "Read full VM config before boot after storing MMDS networking configuration",
+          "status_code": 200,
+          "outcome": "success_body",
+          "body_assertions": [
+            {
+              "pointer": "/mmds-config/network_interfaces/0",
+              "kind": "exact",
+              "value": "eth0"
+            },
+            {
+              "pointer": "/mmds-config/version",
+              "kind": "exact",
+              "value": "V1"
+            },
+            {
+              "pointer": "/mmds-config/ipv4_address",
+              "kind": "exact",
+              "value": "169.254.169.254"
+            },
+            {
+              "pointer": "/mmds-config/imds_compat",
+              "kind": "exact",
+              "value": false
+            }
+          ],
+          "evidence_files": [
+            "run/WOR-20/api/step7-upstream-mmds-baseline.md"
+          ]
+        },
+        {
+          "id": "mmds_config_export_runtime",
+          "arch": "any",
+          "when": "Read full VM config after boot after storing MMDS networking configuration",
+          "status_code": 200,
+          "outcome": "success_body",
+          "body_assertions": [
+            {
+              "pointer": "/mmds-config/network_interfaces/0",
+              "kind": "exact",
+              "value": "eth0"
+            },
+            {
+              "pointer": "/mmds-config/version",
+              "kind": "exact",
+              "value": "V1"
+            },
+            {
+              "pointer": "/mmds-config/ipv4_address",
+              "kind": "exact",
+              "value": "169.254.169.254"
+            },
+            {
+              "pointer": "/mmds-config/imds_compat",
+              "kind": "exact",
+              "value": false
+            }
+          ],
+          "evidence_files": [
+            "run/WOR-20/api/step113-upstream-vm-config-mmds-runtime-baseline.md"
+          ]
+        },
+        {
+          "id": "vsock_export_preboot",
+          "arch": "any",
+          "when": "Read full VM config before boot after storing vsock configuration",
+          "status_code": 200,
+          "outcome": "success_body",
+          "body_assertions": [
+            {
+              "pointer": "/vsock/guest_cid",
+              "kind": "exact",
+              "value": 5
+            },
+            {
+              "pointer": "/vsock/uds_path",
+              "kind": "exact",
+              "value": "/tmp/vesper-vsock.sock"
+            },
+            {
+              "pointer": "/vsock/vsock_id",
+              "kind": "absent"
+            }
+          ],
+          "evidence_files": [
+            "run/WOR-20/api/step20-upstream-vsock-store-baseline.md",
+            "run/WOR-20/api/step126-upstream-vm-config-vsock-id-omission-baseline.md"
+          ]
+        },
+        {
+          "id": "vsock_export_runtime",
+          "arch": "any",
+          "when": "Read full VM config after boot after storing vsock configuration",
+          "status_code": 200,
+          "outcome": "success_body",
+          "body_assertions": [
+            {
+              "pointer": "/vsock/guest_cid",
+              "kind": "exact",
+              "value": 5
+            },
+            {
+              "pointer": "/vsock/uds_path",
+              "kind": "exact",
+              "value": "/tmp/vesper-vsock.sock"
+            },
+            {
+              "pointer": "/vsock/vsock_id",
+              "kind": "absent"
+            }
+          ],
+          "evidence_files": [
+            "run/WOR-20/api/step111-upstream-vm-config-vsock-runtime-baseline.md",
+            "run/WOR-20/api/step126-upstream-vm-config-vsock-id-omission-baseline.md"
+          ]
+        },
+        {
+          "id": "network_interfaces_export_preboot",
+          "arch": "any",
+          "when": "Read full VM config before boot after storing a network interface configuration",
+          "status_code": 200,
+          "outcome": "success_body",
+          "body_assertions": [
+            {
+              "pointer": "/network-interfaces/0/iface_id",
+              "kind": "exact",
+              "value": "eth0"
+            },
+            {
+              "pointer": "/network-interfaces/0/host_dev_name",
+              "kind": "exact",
+              "value": "tap0"
+            },
+            {
+              "pointer": "/network-interfaces/0/guest_mac",
+              "kind": "exact",
+              "value": "06:00:ac:10:00:02"
+            }
+          ],
+          "evidence_files": [
+            "run/WOR-20/api/step115-upstream-vm-config-network-preboot-capture-baseline.md"
+          ]
+        },
+        {
+          "id": "network_interfaces_export_runtime",
+          "arch": "any",
+          "when": "Read full VM config after boot after applying a runtime network interface patch",
+          "status_code": 200,
+          "outcome": "success_body",
+          "body_assertions": [
+            {
+              "pointer": "/network-interfaces/0/iface_id",
+              "kind": "exact",
+              "value": "eth0"
+            },
+            {
+              "pointer": "/network-interfaces/0/host_dev_name",
+              "kind": "exact",
+              "value": "tap0"
+            },
+            {
+              "pointer": "/network-interfaces/0/rx_rate_limiter/bandwidth/size",
+              "kind": "exact",
+              "value": 1024
+            }
+          ],
+          "evidence_files": [
+            "run/WOR-20/api/step127-upstream-vm-config-network-runtime-baseline.md"
+          ]
+        },
+        {
+          "id": "balloon_export_preboot",
+          "arch": "any",
+          "when": "Read full VM config before boot after storing balloon configuration",
+          "status_code": 200,
+          "outcome": "success_body",
+          "body_assertions": [
+            {
+              "pointer": "/balloon/amount_mib",
+              "kind": "exact",
+              "value": 1
+            },
+            {
+              "pointer": "/balloon/deflate_on_oom",
+              "kind": "exact",
+              "value": true
+            },
+            {
+              "pointer": "/balloon/stats_polling_interval_s",
+              "kind": "exact",
+              "value": 0
+            },
+            {
+              "pointer": "/balloon/free_page_hinting",
+              "kind": "exact",
+              "value": false
+            },
+            {
+              "pointer": "/balloon/free_page_reporting",
+              "kind": "exact",
+              "value": false
+            }
+          ],
+          "evidence_files": [
+            "run/WOR-20/api/step116-upstream-vm-config-balloon-preboot-capture-baseline.md"
+          ]
+        },
+        {
+          "id": "balloon_export_runtime",
+          "arch": "any",
+          "when": "Read full VM config after boot after storing balloon configuration",
+          "status_code": 200,
+          "outcome": "success_body",
+          "body_assertions": [
+            {
+              "pointer": "/balloon/amount_mib",
+              "kind": "exact",
+              "value": 1
+            },
+            {
+              "pointer": "/balloon/deflate_on_oom",
+              "kind": "exact",
+              "value": true
+            },
+            {
+              "pointer": "/balloon/stats_polling_interval_s",
+              "kind": "exact",
+              "value": 0
+            },
+            {
+              "pointer": "/balloon/free_page_hinting",
+              "kind": "exact",
+              "value": false
+            },
+            {
+              "pointer": "/balloon/free_page_reporting",
+              "kind": "exact",
+              "value": false
+            }
+          ],
+          "evidence_files": [
+            "run/WOR-20/api/step130-upstream-vm-config-balloon-runtime-baseline.md"
+          ]
+        },
+        {
+          "id": "entropy_export_preboot",
+          "arch": "any",
+          "when": "Read full VM config before boot after storing entropy configuration",
+          "status_code": 200,
+          "outcome": "success_body",
+          "body_assertions": [
+            {
+              "pointer": "/entropy/rate_limiter/bandwidth/size",
+              "kind": "exact",
+              "value": 4096
+            },
+            {
+              "pointer": "/entropy/rate_limiter/bandwidth/refill_time",
+              "kind": "exact",
+              "value": 1000
+            },
+            {
+              "pointer": "/entropy/rate_limiter/bandwidth/one_time_burst",
+              "kind": "exact",
+              "value": 512
+            },
+            {
+              "pointer": "/entropy/rate_limiter/ops/size",
+              "kind": "exact",
+              "value": 32
+            },
+            {
+              "pointer": "/entropy/rate_limiter/ops/refill_time",
+              "kind": "exact",
+              "value": 100
+            }
+          ],
+          "evidence_files": [
+            "run/WOR-20/api/step117-upstream-vm-config-entropy-preboot-capture-baseline.md"
+          ]
+        },
+        {
+          "id": "entropy_export_runtime",
+          "arch": "any",
+          "when": "Read full VM config after boot after storing entropy configuration",
+          "status_code": 200,
+          "outcome": "success_body",
+          "body_assertions": [
+            {
+              "pointer": "/entropy/rate_limiter/bandwidth/size",
+              "kind": "exact",
+              "value": 4096
+            },
+            {
+              "pointer": "/entropy/rate_limiter/bandwidth/refill_time",
+              "kind": "exact",
+              "value": 1000
+            },
+            {
+              "pointer": "/entropy/rate_limiter/bandwidth/one_time_burst",
+              "kind": "exact",
+              "value": 512
+            },
+            {
+              "pointer": "/entropy/rate_limiter/ops/size",
+              "kind": "exact",
+              "value": 32
+            },
+            {
+              "pointer": "/entropy/rate_limiter/ops/refill_time",
+              "kind": "exact",
+              "value": 100
+            }
+          ],
+          "evidence_files": [
+            "run/WOR-20/api/step131-upstream-vm-config-entropy-runtime-baseline.md"
+          ]
+        },
+        {
+          "id": "boot_source_export_preboot",
+          "arch": "any",
+          "when": "Read full VM config before boot after storing boot source configuration",
+          "status_code": 200,
+          "outcome": "success_body",
+          "body_assertions": [
+            {
+              "pointer": "/boot-source/kernel_image_path",
+              "kind": "type",
+              "value_type": "string"
+            },
+            {
+              "pointer": "/boot-source/initrd_path",
+              "kind": "type",
+              "value_type": "string"
+            },
+            {
+              "pointer": "/boot-source/boot_args",
+              "kind": "exact",
+              "value": "console=ttyS0 reboot=k panic=1 pci=off"
+            }
+          ],
+          "evidence_files": [
+            "run/WOR-20/api/step118-upstream-vm-config-boot-source-preboot-capture-baseline.md"
+          ]
+        },
+        {
+          "id": "boot_source_export_runtime",
+          "arch": "any",
+          "when": "Read full VM config after boot after storing boot source configuration",
+          "status_code": 200,
+          "outcome": "success_body",
+          "body_assertions": [
+            {
+              "pointer": "/boot-source/kernel_image_path",
+              "kind": "type",
+              "value_type": "string"
+            },
+            {
+              "pointer": "/boot-source/initrd_path",
+              "kind": "type",
+              "value_type": "string"
+            },
+            {
+              "pointer": "/boot-source/boot_args",
+              "kind": "exact",
+              "value": "console=ttyS0 reboot=k panic=1 pci=off"
+            }
+          ],
+          "evidence_files": [
+            "run/WOR-20/api/step129-upstream-vm-config-boot-source-runtime-baseline.md"
+          ]
+        },
+        {
+          "id": "pmem_export_preboot",
+          "arch": "any",
+          "when": "Read full VM config before boot after storing a pmem configuration with defaulted booleans",
+          "status_code": 200,
+          "outcome": "success_body",
+          "body_assertions": [
+            {
+              "pointer": "/pmem/0/root_device",
+              "kind": "exact",
+              "value": false
+            },
+            {
+              "pointer": "/pmem/0/read_only",
+              "kind": "exact",
+              "value": false
+            }
+          ],
+          "evidence_files": [
+            "run/WOR-20/api/step119-upstream-vm-config-pmem-preboot-capture-baseline.md"
+          ]
+        },
+        {
+          "id": "pmem_export_runtime",
+          "arch": "any",
+          "when": "Read full VM config after boot after storing a pmem configuration with defaulted booleans",
+          "status_code": 200,
+          "outcome": "success_body",
+          "body_assertions": [
+            {
+              "pointer": "/pmem/0/root_device",
+              "kind": "exact",
+              "value": false
+            },
+            {
+              "pointer": "/pmem/0/read_only",
+              "kind": "exact",
+              "value": false
+            }
+          ],
+          "evidence_files": [
+            "run/WOR-20/api/step132-upstream-vm-config-pmem-runtime-baseline.md"
+          ]
+        },
+        {
+          "id": "drives_export_preboot_root_first",
+          "arch": "any",
+          "when": "Read full VM config before boot after storing a data drive followed by a root drive",
+          "status_code": 200,
+          "outcome": "success_body",
+          "body_assertions": [
+            {
+              "pointer": "/drives/0/drive_id",
+              "kind": "exact",
+              "value": "rootfs"
+            },
+            {
+              "pointer": "/drives/1/drive_id",
+              "kind": "exact",
+              "value": "data"
+            }
+          ],
+          "evidence_files": [
+            "run/WOR-20/api/step120-upstream-vm-config-drives-preboot-root-order-capture-baseline.md"
+          ]
+        },
+        {
+          "id": "drives_export_preboot_default_cache_type",
+          "arch": "any",
+          "when": "Read full VM config before boot after storing a drive without an explicit cache type",
+          "status_code": 200,
+          "outcome": "success_body",
+          "body_assertions": [
+            {
+              "pointer": "/drives/0/cache_type",
+              "kind": "exact",
+              "value": "Unsafe"
+            }
+          ],
+          "evidence_files": [
+            "run/WOR-20/api/step121-upstream-vm-config-drives-preboot-cache-default-capture-baseline.md"
+          ]
+        },
+        {
+          "id": "drives_export_runtime_after_patch",
+          "arch": "any",
+          "when": "Read full VM config after boot after patching an existing drive path",
+          "status_code": 200,
+          "outcome": "success_body",
+          "body_assertions": [
+            {
+              "pointer": "/drives/0/drive_id",
+              "kind": "exact",
+              "value": "rootfs"
+            },
+            {
+              "pointer": "/drives/0/path_on_host",
+              "kind": "exact",
+              "value": "/tmp/rootfs-updated.ext4"
+            }
+          ],
+          "evidence_files": [
+            "run/WOR-20/api/step128-upstream-vm-config-drives-runtime-baseline.md"
+          ]
+        }
+      ],
+      "capture_note": "Pins the current concrete-handler `GET /vm/config` preboot and runtime export blocks that are already proven against the pinned Firecracker controller behavior."
+    },
+    {
+      "method": "PATCH",
+      "path": "/balloon",
+      "semantics": "PO",
+      "behavior_path": "concrete_handler",
+      "capture_state": "captured_in_repo",
+      "cases": [
+        {
+          "id": "preboot_invalid_state",
+          "arch": "any",
+          "when": "Patch balloon target before boot with a valid request body",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidState",
+          "message": "The requested operation is not supported before starting the microVM.",
+          "evidence_files": [
+            "run/WOR-20/api/step95-upstream-balloon-patch-preboot-baseline.md"
+          ]
+        },
+        {
+          "id": "missing_device_runtime",
+          "arch": "any",
+          "when": "Patch balloon target after boot without a configured balloon device",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidRequest",
+          "message": "Balloon update error: Failed perform action on device: Device not found",
+          "evidence_files": [
+            "run/WOR-20/api/step10-upstream-balloon-runtime-update-baseline.md"
+          ]
+        },
+        {
+          "id": "update_existing_runtime",
+          "arch": "any",
+          "when": "Patch balloon target after boot with a configured balloon device",
+          "status_code": 204,
+          "outcome": "no_content",
+          "evidence_files": [
+            "run/WOR-20/api/step10-upstream-balloon-runtime-update-baseline.md"
+          ]
+        },
+        {
+          "id": "oversize_runtime",
+          "arch": "any",
+          "when": "Patch balloon target above the configured 128MiB guest memory after boot",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidRequest",
+          "message": "Balloon update error: Balloon: Requested memory should be less than 128MiB",
+          "evidence_files": [
+            "run/WOR-20/api/step10-upstream-balloon-runtime-update-baseline.md"
+          ]
+        }
+      ],
+      "capture_note": "Pins the current concrete-handler `PATCH /balloon` preboot invalid-state rejection plus the runtime target update and fault surface from the pinned Firecracker controller behavior."
+    },
+    {
+      "method": "PATCH",
+      "path": "/balloon/hinting/start",
+      "semantics": "PO",
+      "behavior_path": "concrete_handler",
+      "capture_state": "captured_in_repo",
+      "cases": [
+        {
+          "id": "preboot_invalid_state",
+          "arch": "any",
+          "when": "Start balloon hinting before boot with an empty request body",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidState",
+          "message": "The requested operation is not supported before starting the microVM.",
+          "evidence_files": [
+            "run/WOR-20/api/step98-upstream-balloon-hinting-start-preboot-baseline.md"
+          ]
+        },
+        {
+          "id": "missing_device_runtime",
+          "arch": "any",
+          "when": "Start balloon hinting after boot without a configured balloon device",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidRequest",
+          "message": "Balloon update error: Failed perform action on device: Device not found",
+          "evidence_files": [
+            "run/WOR-20/api/step13-upstream-balloon-hinting-control-baseline.md"
+          ]
+        },
+        {
+          "id": "hinting_disabled_runtime",
+          "arch": "any",
+          "when": "Start balloon hinting after boot with hinting disabled",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidRequest",
+          "message": "Balloon update error: Balloon: Attempting to use hinting when not enabled",
+          "evidence_files": [
+            "run/WOR-20/api/step13-upstream-balloon-hinting-control-baseline.md"
+          ]
+        },
+        {
+          "id": "start_success_runtime",
+          "arch": "any",
+          "when": "Start balloon hinting after boot with hinting enabled",
+          "status_code": 204,
+          "outcome": "no_content",
+          "evidence_files": [
+            "run/WOR-20/api/step13-upstream-balloon-hinting-control-baseline.md"
+          ]
+        }
+      ],
+      "capture_note": "Pins the current concrete-handler `PATCH /balloon/hinting/start` preboot invalid-state rejection plus the runtime control and fault surface from the pinned Firecracker controller behavior."
+    },
+    {
+      "method": "PATCH",
+      "path": "/balloon/hinting/stop",
+      "semantics": "PO",
+      "behavior_path": "concrete_handler",
+      "capture_state": "captured_in_repo",
+      "cases": [
+        {
+          "id": "preboot_invalid_state",
+          "arch": "any",
+          "when": "Stop balloon hinting before boot with an empty request body",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidState",
+          "message": "The requested operation is not supported before starting the microVM.",
+          "evidence_files": [
+            "run/WOR-20/api/step99-upstream-balloon-hinting-stop-preboot-baseline.md"
+          ]
+        },
+        {
+          "id": "missing_device_runtime",
+          "arch": "any",
+          "when": "Stop balloon hinting after boot without a configured balloon device",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidRequest",
+          "message": "Balloon update error: Failed perform action on device: Device not found",
+          "evidence_files": [
+            "run/WOR-20/api/step13-upstream-balloon-hinting-control-baseline.md"
+          ]
+        },
+        {
+          "id": "hinting_disabled_runtime",
+          "arch": "any",
+          "when": "Stop balloon hinting after boot with hinting disabled",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidRequest",
+          "message": "Balloon update error: Balloon: Attempting to use hinting when not enabled",
+          "evidence_files": [
+            "run/WOR-20/api/step13-upstream-balloon-hinting-control-baseline.md"
+          ]
+        },
+        {
+          "id": "stop_success_runtime",
+          "arch": "any",
+          "when": "Stop balloon hinting after boot with hinting enabled",
+          "status_code": 204,
+          "outcome": "no_content",
+          "evidence_files": [
+            "run/WOR-20/api/step13-upstream-balloon-hinting-control-baseline.md"
+          ]
+        }
+      ],
+      "capture_note": "Pins the current concrete-handler `PATCH /balloon/hinting/stop` preboot invalid-state rejection plus the runtime control and fault surface from the pinned Firecracker controller behavior."
+    },
+    {
+      "method": "PATCH",
+      "path": "/balloon/statistics",
+      "semantics": "PO",
+      "behavior_path": "concrete_handler",
+      "capture_state": "captured_in_repo",
+      "cases": [
+        {
+          "id": "preboot_invalid_state",
+          "arch": "any",
+          "when": "Patch balloon statistics before boot with a valid request body",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidState",
+          "message": "The requested operation is not supported before starting the microVM.",
+          "evidence_files": [
+            "run/WOR-20/api/step96-upstream-balloon-stats-patch-preboot-baseline.md"
+          ]
+        },
+        {
+          "id": "missing_device_runtime",
+          "arch": "any",
+          "when": "Patch balloon statistics after boot without a configured balloon device",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidRequest",
+          "message": "Balloon update error: Failed perform action on device: Device not found",
+          "evidence_files": [
+            "run/WOR-20/api/step11-upstream-balloon-stats-baseline.md"
+          ]
+        },
+        {
+          "id": "update_existing_runtime",
+          "arch": "any",
+          "when": "Patch balloon statistics polling interval from nonzero to nonzero after boot",
+          "status_code": 204,
+          "outcome": "no_content",
+          "evidence_files": [
+            "run/WOR-20/api/step11-upstream-balloon-stats-baseline.md"
+          ]
+        },
+        {
+          "id": "disable_runtime",
+          "arch": "any",
+          "when": "Patch balloon statistics polling interval from nonzero to zero after boot",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidRequest",
+          "message": "Balloon update error: Balloon: Statistics cannot be enabled/disabled after activation.",
+          "evidence_files": [
+            "run/WOR-20/api/step11-upstream-balloon-stats-baseline.md"
+          ]
+        }
+      ],
+      "capture_note": "Pins the current concrete-handler `PATCH /balloon/statistics` preboot invalid-state rejection plus the runtime update and fault surface from the pinned Firecracker controller behavior."
+    },
+    {
+      "method": "PATCH",
+      "path": "/drives/{drive_id}",
+      "semantics": "PO",
+      "behavior_path": "concrete_handler",
+      "capture_state": "captured_in_repo",
+      "cases": [
+        {
+          "id": "preboot_invalid_state",
+          "arch": "any",
+          "when": "Patch a drive before boot with a valid runtime update request body",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidState",
+          "message": "The requested operation is not supported before starting the microVM.",
+          "evidence_files": [
+            "run/WOR-20/api/step101-upstream-drive-patch-preboot-baseline.md"
+          ]
+        },
+        {
+          "id": "id_mismatch_runtime",
+          "arch": "any",
+          "when": "Path/body id mismatch after boot",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidRequest",
+          "message": "The id from the path does not match the id from the body!",
+          "evidence_files": [
+            "run/WOR-20/api/step14-upstream-drive-update-baseline.md"
+          ]
+        },
+        {
+          "id": "missing_drive_runtime",
+          "arch": "any",
+          "when": "Patch missing drive after boot",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidRequest",
+          "message": "Drive config error: Unable to patch the block device: Failed perform action on device: Device not found Please verify the request arguments.",
+          "evidence_files": [
+            "run/WOR-20/api/step14-upstream-drive-update-baseline.md"
+          ]
+        },
+        {
+          "id": "update_existing_runtime",
+          "arch": "any",
+          "when": "Patch existing drive path after boot",
+          "status_code": 204,
+          "outcome": "no_content",
+          "evidence_files": [
+            "run/WOR-20/api/step14-upstream-drive-update-baseline.md"
+          ]
+        }
+      ],
+      "capture_note": "Pins the current concrete-handler `PATCH /drives/{drive_id}` preboot invalid-state rejection plus the runtime update and fault surface from the pinned Firecracker controller behavior."
+    },
+    {
+      "method": "PATCH",
+      "path": "/hotplug/memory",
+      "semantics": "PO",
+      "behavior_path": "concrete_handler",
+      "capture_state": "captured_in_repo",
+      "cases": [
+        {
+          "id": "preboot_invalid_state",
+          "arch": "any",
+          "when": "Resize hotpluggable memory before boot with a valid requested size body",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidState",
+          "message": "The requested operation is not supported before starting the microVM.",
+          "evidence_files": [
+            "run/WOR-20/api/step94-upstream-hotplug-patch-preboot-baseline.md"
+          ]
+        },
+        {
+          "id": "patch_valid_runtime",
+          "arch": "any",
+          "when": "Resize hotpluggable memory after boot with a valid requested size body",
+          "status_code": 204,
+          "outcome": "no_content",
+          "evidence_files": [
+            "run/WOR-20/api/step6-upstream-hotplug-baseline.md"
+          ]
+        },
+        {
+          "id": "invalid_requested_size_runtime",
+          "arch": "any",
+          "when": "Resize hotpluggable memory after boot with `requested_size_mib` that is not aligned to the configured block size",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidRequest",
+          "message": "The requested size of the hotpluggable memory device must be a multiple of the block size and no larger than the total size.",
+          "evidence_files": [
+            "run/WOR-20/api/step6-upstream-hotplug-baseline.md",
+            "run/WOR-20/api/step147-upstream-hotplug-invalid-requested-size-baseline.md"
+          ]
+        }
+      ],
+      "capture_note": "Pins the current concrete-handler `PATCH /hotplug/memory` preboot invalid-state rejection plus the runtime resize success path and invalid-requested-size rejection from the pinned Firecracker controller behavior."
+    },
+    {
+      "method": "PATCH",
+      "path": "/machine-config",
+      "semantics": "PB",
+      "behavior_path": "concrete_handler",
+      "capture_state": "captured_in_repo",
+      "cases": [
+        {
+          "id": "patch_valid_preboot",
+          "arch": "any",
+          "when": "Patch machine configuration before boot with a non-empty valid update body",
+          "status_code": 204,
+          "outcome": "no_content",
+          "evidence_files": [
+            "run/WOR-20/api/step23-upstream-machine-config-store-baseline.md"
+          ]
+        },
+        {
+          "id": "shrink_below_balloon_target_preboot",
+          "arch": "any",
+          "when": "Patch machine configuration before boot with `mem_size_mib` below the configured balloon target",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidRequest",
+          "message": "The memory size (MiB) is smaller than the previously set balloon device target size.",
+          "evidence_files": [
+            "run/WOR-20/api/step9-upstream-balloon-config-baseline.md"
+          ]
+        }
+      ],
+      "capture_note": "Pins the current concrete-handler `PATCH /machine-config` preboot store/update success path plus the balloon-target floor rejection from the pinned Firecracker controller behavior."
+    },
+    {
+      "method": "PATCH",
+      "path": "/mmds",
+      "semantics": "Any",
+      "behavior_path": "concrete_handler",
+      "capture_state": "captured_in_repo",
+      "cases": [
+        {
+          "id": "patch_valid_store",
+          "arch": "any",
+          "when": "Merge a valid non-empty JSON patch into an initialized MMDS store",
+          "status_code": 204,
+          "outcome": "no_content",
+          "evidence_files": [
+            "run/WOR-20/api/step7-upstream-mmds-baseline.md"
+          ]
+        },
+        {
+          "id": "missing_store_preboot",
+          "arch": "any",
+          "when": "Merge a JSON patch before boot before the MMDS store has been initialized",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidRequest",
+          "message": "The MMDS data store is not initialized.",
+          "evidence_files": [
+            "run/WOR-20/api/step7-upstream-mmds-baseline.md"
+          ]
+        },
+        {
+          "id": "runtime_missing_config",
+          "arch": "any",
+          "when": "Merge a JSON patch after boot with an initialized store but without MMDS networking configuration",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidRequest",
+          "message": "The MMDS data store is not initialized.",
+          "evidence_files": [
+            "run/WOR-20/api/step7-upstream-mmds-baseline.md"
+          ]
+        },
+        {
+          "id": "oversized_merge_patch",
+          "arch": "any",
+          "when": "Merge a JSON patch into an initialized MMDS store that exceeds the datastore size limit",
+          "status_code": 413,
+          "outcome": "error_envelope",
+          "code": "PayloadTooLarge",
+          "message": "The MMDS patch request doesn't fit.",
+          "evidence_files": [
+            "run/WOR-20/api/step7-upstream-mmds-baseline.md"
+          ]
+        }
+      ],
+      "capture_note": "Pins the current concrete-handler `PATCH /mmds` datastore merge-patch success path plus the uninitialized-store and datastore-size overflow rejections from the pinned Firecracker controller behavior."
+    },
+    {
+      "method": "PATCH",
+      "path": "/network-interfaces/{iface_id}",
+      "semantics": "PO",
+      "behavior_path": "concrete_handler",
+      "capture_state": "captured_in_repo",
+      "cases": [
+        {
+          "id": "preboot_invalid_state",
+          "arch": "any",
+          "when": "Patch a network interface before boot with a valid runtime update request body",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidState",
+          "message": "The requested operation is not supported before starting the microVM.",
+          "evidence_files": [
+            "run/WOR-20/api/step102-upstream-network-patch-preboot-baseline.md"
+          ]
+        },
+        {
+          "id": "id_mismatch_runtime",
+          "arch": "any",
+          "when": "Path/body id mismatch after boot",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidRequest",
+          "message": "The id from the path [eth0] does not match the id from the body [eth1]!",
+          "evidence_files": [
+            "run/WOR-20/api/step15-upstream-network-update-baseline.md"
+          ]
+        },
+        {
+          "id": "missing_interface_runtime",
+          "arch": "any",
+          "when": "Patch missing interface after boot",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidRequest",
+          "message": "Network config error: Unable to update the net device: Failed perform action on device: Device not found",
+          "evidence_files": [
+            "run/WOR-20/api/step15-upstream-network-update-baseline.md"
+          ]
+        },
+        {
+          "id": "update_existing_runtime",
+          "arch": "any",
+          "when": "Patch existing interface limiter after boot",
+          "status_code": 204,
+          "outcome": "no_content",
+          "evidence_files": [
+            "run/WOR-20/api/step15-upstream-network-update-baseline.md"
+          ]
+        }
+      ],
+      "capture_note": "Pins the current concrete-handler `PATCH /network-interfaces/{iface_id}` preboot invalid-state rejection plus the runtime update and fault surface from the pinned Firecracker controller behavior."
+    },
+    {
+      "method": "PATCH",
+      "path": "/vm",
+      "semantics": "Any",
+      "behavior_path": "concrete_handler",
+      "capture_state": "captured_in_repo",
+      "cases": [
+        {
+          "id": "pause_preboot",
+          "arch": "any",
+          "when": "Pause before boot",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidState",
+          "message": "The requested operation is not supported before starting the microVM.",
+          "evidence_files": [
+            "run/WOR-20/api/step31-upstream-vm-state-baseline.md"
+          ]
+        },
+        {
+          "id": "pause_runtime",
+          "arch": "any",
+          "when": "Pause after boot",
+          "status_code": 204,
+          "outcome": "no_content",
+          "evidence_files": [
+            "run/WOR-20/api/step31-upstream-vm-state-baseline.md"
+          ]
+        },
+        {
+          "id": "resume_runtime",
+          "arch": "any",
+          "when": "Resume after boot",
+          "status_code": 204,
+          "outcome": "no_content",
+          "evidence_files": [
+            "run/WOR-20/api/step31-upstream-vm-state-baseline.md"
+          ]
+        }
+      ],
+      "capture_note": "Pins the current concrete-handler `PATCH /vm` pause and resume status surface from the pinned Firecracker controller behavior."
+    },
+    {
+      "method": "PUT",
+      "path": "/actions",
+      "semantics": "Any",
+      "behavior_path": "concrete_handler",
+      "capture_state": "captured_in_repo",
+      "cases": [
+        {
+          "id": "flush_metrics_preboot",
+          "arch": "any",
+          "when": "FlushMetrics before boot",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidState",
+          "message": "The requested operation is not supported before starting the microVM.",
+          "evidence_files": [
+            "run/WOR-20/api/step29-upstream-actions-baseline.md"
+          ]
+        },
+        {
+          "id": "flush_metrics_postboot",
+          "arch": "any",
+          "when": "FlushMetrics after boot",
+          "status_code": 204,
+          "outcome": "no_content",
+          "evidence_files": [
+            "run/WOR-20/api/step29-upstream-actions-baseline.md"
+          ]
+        },
+        {
+          "id": "instance_start_preboot_missing_kernel",
+          "arch": "any",
+          "when": "InstanceStart before boot without kernel configuration",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidRequest",
+          "message": "Cannot start microvm without kernel configuration.",
+          "evidence_files": [
+            "run/WOR-20/api/step29-upstream-actions-baseline.md"
+          ]
+        },
+        {
+          "id": "instance_start_postboot",
+          "arch": "any",
+          "when": "InstanceStart after boot",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidState",
+          "message": "The requested operation is not supported after starting the microVM.",
+          "evidence_files": [
+            "run/WOR-20/api/step29-upstream-actions-baseline.md"
+          ]
+        },
+        {
+          "id": "send_ctrl_alt_del_preboot_x86_64",
+          "arch": "x86_64",
+          "when": "SendCtrlAltDel before boot on x86_64",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidState",
+          "message": "The requested operation is not supported before starting the microVM.",
+          "evidence_files": [
+            "run/WOR-20/api/step29-upstream-actions-baseline.md"
+          ]
+        },
+        {
+          "id": "send_ctrl_alt_del_postboot_x86_64",
+          "arch": "x86_64",
+          "when": "SendCtrlAltDel after boot on x86_64",
+          "status_code": 204,
+          "outcome": "no_content",
+          "evidence_files": [
+            "run/WOR-20/api/step29-upstream-actions-baseline.md"
+          ]
+        },
+        {
+          "id": "send_ctrl_alt_del_aarch64",
+          "arch": "aarch64",
+          "when": "SendCtrlAltDel on aarch64",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidRequest",
+          "message": "SendCtrlAltDel does not supported on aarch64.",
+          "evidence_files": [
+            "run/WOR-20/api/step29-upstream-actions-baseline.md"
+          ]
+        }
+      ],
+      "capture_note": "Pins the current concrete-handler `/actions` status and error surface from the pinned Firecracker controller behavior."
+    },
+    {
+      "method": "PUT",
+      "path": "/balloon",
+      "semantics": "PB",
+      "behavior_path": "concrete_handler",
+      "capture_state": "captured_in_repo",
+      "cases": [
+        {
+          "id": "put_valid_preboot",
+          "arch": "any",
+          "when": "Store balloon configuration before boot with a valid request body",
+          "status_code": 204,
+          "outcome": "no_content",
+          "evidence_files": [
+            "run/WOR-20/api/step9-upstream-balloon-config-baseline.md"
+          ]
+        },
+        {
+          "id": "oversize_preboot",
+          "arch": "any",
+          "when": "Store balloon configuration before boot with `amount_mib` above guest memory",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidRequest",
+          "message": "Balloon config error: Amount of pages requested is too large.",
+          "evidence_files": [
+            "run/WOR-20/api/step9-upstream-balloon-config-baseline.md"
+          ]
+        }
+      ],
+      "capture_note": "Pins the current concrete-handler `PUT /balloon` preboot store success path plus the pinned oversize-balloon rejection from the Firecracker controller behavior."
+    },
+    {
+      "method": "PUT",
+      "path": "/boot-source",
+      "semantics": "PB",
+      "behavior_path": "concrete_handler",
+      "capture_state": "captured_in_repo",
+      "cases": [
+        {
+          "id": "put_valid_preboot",
+          "arch": "any",
+          "when": "Store boot source configuration before boot with valid kernel, initrd, and boot arguments",
+          "status_code": 204,
+          "outcome": "no_content",
+          "evidence_files": [
+            "run/WOR-20/api/step22-upstream-boot-source-store-baseline.md"
+          ]
+        },
+        {
+          "id": "postboot_invalid_state",
+          "arch": "any",
+          "when": "Store boot source configuration after boot",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidState",
+          "message": "The requested operation is not supported after starting the microVM.",
+          "evidence_files": [
+            "run/WOR-20/api/step88-upstream-boot-source-postboot-baseline.md"
+          ]
+        }
+      ],
+      "capture_note": "Pins the current concrete-handler `PUT /boot-source` preboot store success path plus the postboot invalid-state rejection from the pinned Firecracker controller behavior."
+    },
+    {
+      "method": "PUT",
+      "path": "/cpu-config",
+      "semantics": "PB",
+      "behavior_path": "concrete_handler",
+      "capture_state": "captured_in_repo",
+      "cases": [
+        {
+          "id": "put_valid_preboot",
+          "arch": "any",
+          "when": "Store custom CPU configuration before boot with a valid request body",
+          "status_code": 204,
+          "outcome": "no_content",
+          "evidence_files": [
+            "run/WOR-20/api/step24-upstream-cpu-config-export-baseline.md"
+          ]
+        },
+        {
+          "id": "postboot_invalid_state",
+          "arch": "any",
+          "when": "Store custom CPU configuration after boot",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidState",
+          "message": "The requested operation is not supported after starting the microVM.",
+          "evidence_files": [
+            "run/WOR-20/api/step89-upstream-cpu-config-postboot-baseline.md"
+          ]
+        }
+      ],
+      "capture_note": "Pins the current concrete-handler `PUT /cpu-config` preboot store success path plus the postboot invalid-state rejection from the pinned Firecracker controller behavior."
+    },
+    {
+      "method": "PUT",
+      "path": "/drives/{drive_id}",
+      "semantics": "PB",
+      "behavior_path": "concrete_handler",
+      "capture_state": "captured_in_repo",
+      "cases": [
+        {
+          "id": "put_valid_preboot",
+          "arch": "any",
+          "when": "Store a valid drive configuration before boot",
+          "status_code": 204,
+          "outcome": "no_content",
+          "evidence_files": [
+            "run/WOR-20/api/step17-upstream-drive-create-baseline.md",
+            "run/WOR-20/api/step18-upstream-drive-cache-default-baseline.md",
+            "run/WOR-20/api/step19-upstream-drive-root-order-baseline.md"
+          ]
+        },
+        {
+          "id": "missing_backing_file_preboot",
+          "arch": "any",
+          "when": "Store a drive before boot with a missing backing file path",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidRequest",
+          "message": "Drive config error: Unable to create the virtio block device: Virtio backend error: Error manipulating the backing file: No such file or directory (os error 2) /definitely/missing-drive.ext4",
+          "evidence_files": [
+            "run/WOR-20/api/step64-upstream-drive-backing-file-baseline.md"
+          ]
+        },
+        {
+          "id": "pmem_root_conflict_preboot",
+          "arch": "any",
+          "when": "Store a block root device before boot while a pmem root device already exists",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidRequest",
+          "message": "Drive config error: Attempt to add block as a root device while the root device defined as a pmem device",
+          "evidence_files": [
+            "run/WOR-20/api/step17-upstream-drive-create-baseline.md"
+          ]
+        },
+        {
+          "id": "duplicate_block_root_preboot",
+          "arch": "any",
+          "when": "Store a second block root device before boot while another block root device already exists",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidRequest",
+          "message": "Drive config error: A root block device already exists!",
+          "evidence_files": [
+            "run/WOR-20/api/step17-upstream-drive-create-baseline.md"
+          ]
+        }
+      ],
+      "capture_note": "Pins the current concrete-handler `PUT /drives/{drive_id}` preboot store success plus the pinned backing-file and root-device conflict failures, including same-id replacement, defaulted cache export, and root-first export ordering, from the pinned Firecracker controller behavior."
+    },
+    {
+      "method": "PUT",
+      "path": "/entropy",
+      "semantics": "PB",
+      "behavior_path": "concrete_handler",
+      "capture_state": "captured_in_repo",
+      "cases": [
+        {
+          "id": "put_valid_preboot",
+          "arch": "any",
+          "when": "Store entropy configuration before boot with a valid rate limiter body",
+          "status_code": 204,
+          "outcome": "no_content",
+          "evidence_files": [
+            "run/WOR-20/api/step21-upstream-entropy-store-baseline.md"
+          ]
+        },
+        {
+          "id": "postboot_invalid_state",
+          "arch": "any",
+          "when": "Store entropy configuration after boot with a valid rate limiter body",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidState",
+          "message": "The requested operation is not supported after starting the microVM.",
+          "evidence_files": [
+            "run/WOR-20/api/step90-upstream-entropy-postboot-baseline.md"
+          ]
+        }
+      ],
+      "capture_note": "Pins the current concrete-handler `PUT /entropy` preboot store success path plus the postboot invalid-state rejection inferred from the pinned Firecracker controller behavior."
+    },
+    {
+      "method": "PUT",
+      "path": "/hotplug/memory",
+      "semantics": "PB",
+      "behavior_path": "concrete_handler",
+      "capture_state": "captured_in_repo",
+      "cases": [
+        {
+          "id": "put_valid_preboot",
+          "arch": "any",
+          "when": "Store memory hotplug configuration before boot with a valid total size body",
+          "status_code": 204,
+          "outcome": "no_content",
+          "evidence_files": [
+            "run/WOR-20/api/step6-upstream-hotplug-baseline.md"
+          ]
+        },
+        {
+          "id": "invalid_block_size_preboot",
+          "arch": "any",
+          "when": "Store memory hotplug configuration before boot with `block_size_mib` below the pinned minimum and not a power of two",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidRequest",
+          "message": "The block size of the hotpluggable memory device must be at least 2 MiB and a power of 2.",
+          "evidence_files": [
+            "run/WOR-20/api/step6-upstream-hotplug-baseline.md",
+            "run/WOR-20/api/step146-upstream-hotplug-invalid-block-size-baseline.md"
+          ]
+        },
+        {
+          "id": "invalid_total_size_preboot",
+          "arch": "any",
+          "when": "Store memory hotplug configuration before boot with `total_size_mib` smaller than the default slot size and not aligned to the slot-size multiple rule",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidRequest",
+          "message": "The total size of the hotpluggable memory device must be at least the slot size and a multiple of the slot size.",
+          "evidence_files": [
+            "run/WOR-20/api/step6-upstream-hotplug-baseline.md",
+            "run/WOR-20/api/step145-upstream-hotplug-invalid-total-size-baseline.md"
+          ]
+        },
+        {
+          "id": "postboot_invalid_state",
+          "arch": "any",
+          "when": "Store memory hotplug configuration after boot with a valid total size body",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidState",
+          "message": "The requested operation is not supported after starting the microVM.",
+          "evidence_files": [
+            "run/WOR-20/api/step6-upstream-hotplug-baseline.md"
+          ]
+        }
+      ],
+      "capture_note": "Pins the current concrete-handler `PUT /hotplug/memory` preboot store success path, the pinned invalid-block-size and invalid-total-size rejections, and the postboot invalid-state rejection from the pinned Firecracker controller behavior."
+    },
+    {
+      "method": "PUT",
+      "path": "/logger",
+      "semantics": "Any",
+      "behavior_path": "concrete_handler",
+      "capture_state": "captured_in_repo",
+      "cases": [
+        {
+          "id": "put_valid_any",
+          "arch": "any",
+          "when": "Store logger configuration with a valid request body",
+          "status_code": 204,
+          "outcome": "no_content",
+          "evidence_files": [
+            "run/WOR-20/api/step27-upstream-logger-store-baseline.md"
+          ]
+        },
+        {
+          "id": "runtime_put_valid",
+          "arch": "any",
+          "when": "Store logger configuration after boot with a valid request body",
+          "status_code": 204,
+          "outcome": "no_content",
+          "evidence_files": [
+            "run/WOR-20/api/step107-upstream-logger-runtime-baseline.md"
+          ]
+        }
+      ],
+      "capture_note": "Pins the current concrete-handler `PUT /logger` accepted preboot and runtime store success path from the pinned Firecracker controller behavior."
+    },
+    {
+      "method": "PUT",
+      "path": "/machine-config",
+      "semantics": "PB",
+      "behavior_path": "concrete_handler",
+      "capture_state": "captured_in_repo",
+      "cases": [
+        {
+          "id": "put_valid_preboot",
+          "arch": "any",
+          "when": "Store machine configuration before boot with a valid request body",
+          "status_code": 204,
+          "outcome": "no_content",
+          "evidence_files": [
+            "run/WOR-20/api/step23-upstream-machine-config-store-baseline.md"
+          ]
+        },
+        {
+          "id": "shrink_below_balloon_target_preboot",
+          "arch": "any",
+          "when": "Store machine configuration before boot with `mem_size_mib` below the configured balloon target",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidRequest",
+          "message": "The memory size (MiB) is smaller than the previously set balloon device target size.",
+          "evidence_files": [
+            "run/WOR-20/api/step9-upstream-balloon-config-baseline.md"
+          ]
+        }
+      ],
+      "capture_note": "Pins the current concrete-handler `PUT /machine-config` preboot store success path plus the balloon-target floor rejection from the pinned Firecracker controller behavior."
+    },
+    {
+      "method": "PUT",
+      "path": "/metrics",
+      "semantics": "Any",
+      "behavior_path": "concrete_handler",
+      "capture_state": "captured_in_repo",
+      "cases": [
+        {
+          "id": "put_valid_any",
+          "arch": "any",
+          "when": "Store metrics configuration with a valid request body",
+          "status_code": 204,
+          "outcome": "no_content",
+          "evidence_files": [
+            "run/WOR-20/api/step26-upstream-metrics-store-baseline.md"
+          ]
+        },
+        {
+          "id": "runtime_put_valid",
+          "arch": "any",
+          "when": "Store metrics configuration after boot with a valid request body",
+          "status_code": 204,
+          "outcome": "no_content",
+          "evidence_files": [
+            "run/WOR-20/api/step109-upstream-metrics-runtime-baseline.md"
+          ]
+        },
+        {
+          "id": "duplicate_init",
+          "arch": "any",
+          "when": "Reinitialize metrics after a successful earlier metrics configuration",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidRequest",
+          "message": "Cannot initialize the metrics system due to bad user input: Reinitialization of metrics not allowed.",
+          "evidence_files": [
+            "run/WOR-20/api/step70-upstream-metrics-reinit-baseline.md"
+          ]
+        }
+      ],
+      "capture_note": "Pins the current concrete-handler `PUT /metrics` accepted preboot/runtime store and duplicate-init fault surface from the pinned Firecracker controller behavior."
+    },
+    {
+      "method": "PUT",
+      "path": "/mmds",
+      "semantics": "Any",
+      "behavior_path": "concrete_handler",
+      "capture_state": "captured_in_repo",
+      "cases": [
+        {
+          "id": "put_valid_store",
+          "arch": "any",
+          "when": "Replace the MMDS store with a valid JSON document",
+          "status_code": 204,
+          "outcome": "no_content",
+          "evidence_files": [
+            "run/WOR-20/api/step7-upstream-mmds-baseline.md"
+          ]
+        },
+        {
+          "id": "runtime_missing_config",
+          "arch": "any",
+          "when": "Replace the MMDS store after boot without MMDS networking configuration",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidRequest",
+          "message": "The MMDS data store is not initialized.",
+          "evidence_files": [
+            "run/WOR-20/api/step7-upstream-mmds-baseline.md"
+          ]
+        },
+        {
+          "id": "oversized_store",
+          "arch": "any",
+          "when": "Replace the MMDS store with a JSON document that exceeds the datastore size limit",
+          "status_code": 413,
+          "outcome": "error_envelope",
+          "code": "PayloadTooLarge",
+          "message": "The MMDS patch request doesn't fit.",
+          "evidence_files": [
+            "run/WOR-20/api/step7-upstream-mmds-baseline.md"
+          ]
+        }
+      ],
+      "capture_note": "Pins the current concrete-handler `PUT /mmds` datastore store success path plus the runtime missing-config and datastore-size overflow rejections from the pinned Firecracker controller behavior."
+    },
+    {
+      "method": "PUT",
+      "path": "/mmds/config",
+      "semantics": "PB",
+      "behavior_path": "concrete_handler",
+      "capture_state": "captured_in_repo",
+      "cases": [
+        {
+          "id": "put_valid_preboot",
+          "arch": "any",
+          "when": "Store MMDS networking configuration before boot after creating the referenced network interface",
+          "status_code": 204,
+          "outcome": "no_content",
+          "evidence_files": [
+            "run/WOR-20/api/step7-upstream-mmds-baseline.md"
+          ]
+        },
+        {
+          "id": "postboot_invalid_state",
+          "arch": "any",
+          "when": "Store MMDS networking configuration after boot",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidState",
+          "message": "The requested operation is not supported after starting the microVM.",
+          "evidence_files": [
+            "run/WOR-20/api/step87-upstream-mmds-config-postboot-baseline.md"
+          ]
+        },
+        {
+          "id": "empty_network_interface_list_preboot",
+          "arch": "any",
+          "when": "Store MMDS networking configuration before boot with an empty network interface list",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidRequest",
+          "message": "The list of network interface IDs that allow forwarding MMDS requests is empty.",
+          "evidence_files": [
+            "run/WOR-20/api/step72-upstream-mmds-config-empty-network-list-baseline.md"
+          ]
+        },
+        {
+          "id": "unknown_network_interface_preboot",
+          "arch": "any",
+          "when": "Store MMDS networking configuration before boot with a non-existent network interface ID",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidRequest",
+          "message": "The list of network interface IDs provided contains at least one ID that does not correspond to any existing network interface.",
+          "evidence_files": [
+            "run/WOR-20/api/step73-upstream-mmds-config-unknown-interface-baseline.md"
+          ]
+        },
+        {
+          "id": "invalid_ipv4_address_preboot",
+          "arch": "any",
+          "when": "Store MMDS networking configuration before boot with a non-link-local IPv4 address",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidRequest",
+          "message": "The MMDS IPv4 address is not link local.",
+          "evidence_files": [
+            "run/WOR-20/api/step7-upstream-mmds-baseline.md"
+          ]
+        }
+      ],
+      "capture_note": "Pins the current concrete-handler `PUT /mmds/config` preboot store plus postboot invalid-state, invalid-network-interface-list, and invalid-IPv4 fault surface from the pinned Firecracker controller behavior."
+    },
+    {
+      "method": "PUT",
+      "path": "/network-interfaces/{iface_id}",
+      "semantics": "PB",
+      "behavior_path": "concrete_handler",
+      "capture_state": "captured_in_repo",
+      "cases": [
+        {
+          "id": "id_mismatch_preboot",
+          "arch": "any",
+          "when": "Store a network interface before boot with a path/body id mismatch",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidRequest",
+          "message": "The id from the path [eth0] does not match the id from the body [eth1]!",
+          "evidence_files": [
+            "run/WOR-20/api/step15-upstream-network-update-baseline.md"
+          ]
+        },
+        {
+          "id": "put_valid_preboot",
+          "arch": "any",
+          "when": "Store a network interface before boot with a valid request body",
+          "status_code": 204,
+          "outcome": "no_content",
+          "evidence_files": [
+            "run/WOR-20/api/step61-upstream-network-create-baseline.md"
+          ]
+        },
+        {
+          "id": "duplicate_guest_mac_preboot",
+          "arch": "any",
+          "when": "Store a second network interface before boot reusing an existing guest MAC",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidRequest",
+          "message": "Network config error: The MAC address is already in use: 06:00:ac:10:00:02",
+          "evidence_files": [
+            "run/WOR-20/api/step62-upstream-network-create-conflict-baseline.md"
+          ]
+        },
+        {
+          "id": "duplicate_host_dev_name_preboot",
+          "arch": "any",
+          "when": "Store a second network interface before boot reusing an existing host tap name",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidRequest",
+          "message": "Network config error: Could not create the network device: Open tap device failed: Error while creating ifreq structure: Device or resource busy (os error 16). Invalid TUN/TAP Backend provided by tap0. Check our documentation on setting up the network devices.",
+          "evidence_files": [
+            "run/WOR-20/api/step62-upstream-network-create-conflict-baseline.md"
+          ]
+        }
+      ],
+      "capture_note": "Pins the current concrete-handler `PUT /network-interfaces/{iface_id}` preboot store success and conflict surface from the pinned Firecracker controller behavior."
+    },
+    {
+      "method": "PUT",
+      "path": "/pmem/{id}",
+      "semantics": "PB",
+      "behavior_path": "concrete_handler",
+      "capture_state": "captured_in_repo",
+      "cases": [
+        {
+          "id": "put_valid_preboot",
+          "arch": "any",
+          "when": "Store a valid pmem configuration before boot",
+          "status_code": 204,
+          "outcome": "no_content",
+          "evidence_files": [
+            "run/WOR-20/api/step16-upstream-pmem-create-baseline.md"
+          ]
+        },
+        {
+          "id": "missing_backing_file",
+          "arch": "any",
+          "when": "Store a pmem configuration before boot with a missing backing file path",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidRequest",
+          "message": "Pmem device error: Unable to create the virtio-pmem device: Error accessing backing file: No such file or directory (os error 2)",
+          "evidence_files": [
+            "run/WOR-20/api/step63-upstream-pmem-backing-file-baseline.md"
+          ]
+        },
+        {
+          "id": "zero_sized_backing_file",
+          "arch": "any",
+          "when": "Store a pmem configuration before boot with a zero-sized backing file",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidRequest",
+          "message": "Pmem device error: Unable to create the virtio-pmem device: Error backing file size is 0",
+          "evidence_files": [
+            "run/WOR-20/api/step63-upstream-pmem-backing-file-baseline.md"
+          ]
+        },
+        {
+          "id": "block_root_conflict_preboot",
+          "arch": "any",
+          "when": "Store a pmem root device before boot while a block root device already exists",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidRequest",
+          "message": "Pmem device error: Attempt to add pmem as a root device while the root device defined as a block device",
+          "evidence_files": [
+            "run/WOR-20/api/step16-upstream-pmem-create-baseline.md"
+          ]
+        },
+        {
+          "id": "duplicate_pmem_root_preboot",
+          "arch": "any",
+          "when": "Store a second pmem root device before boot while another pmem root device already exists",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidRequest",
+          "message": "Pmem device error: A root pmem device already exist",
+          "evidence_files": [
+            "run/WOR-20/api/step16-upstream-pmem-create-baseline.md"
+          ]
+        }
+      ],
+      "capture_note": "Pins the current concrete-handler `PUT /pmem/{id}` preboot store success path plus pinned backing-file and root-device conflict failures, including defaulted booleans and same-id replacement, from the pinned Firecracker controller behavior."
+    },
+    {
+      "method": "PUT",
+      "path": "/serial",
+      "semantics": "Any",
+      "behavior_path": "concrete_handler",
+      "capture_state": "captured_in_repo",
+      "cases": [
+        {
+          "id": "put_valid_any",
+          "arch": "any",
+          "when": "Store serial configuration with a valid request body",
+          "status_code": 204,
+          "outcome": "no_content",
+          "evidence_files": [
+            "run/WOR-20/api/step25-upstream-serial-store-baseline.md"
+          ]
+        },
+        {
+          "id": "runtime_put_valid",
+          "arch": "any",
+          "when": "Store serial configuration after boot with a valid request body",
+          "status_code": 204,
+          "outcome": "no_content",
+          "evidence_files": [
+            "run/WOR-20/api/step108-upstream-serial-runtime-baseline.md"
+          ]
+        }
+      ],
+      "capture_note": "Pins the current concrete-handler `PUT /serial` accepted preboot and runtime store success path from the pinned Firecracker controller behavior."
+    },
+    {
+      "method": "PUT",
+      "path": "/snapshot/create",
+      "semantics": "PO",
+      "behavior_path": "concrete_handler",
+      "capture_state": "captured_in_repo",
+      "cases": [
+        {
+          "id": "preboot_invalid_state",
+          "arch": "any",
+          "when": "Create a snapshot before boot with a valid request body",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidState",
+          "message": "The requested operation is not supported before starting the microVM.",
+          "evidence_files": [
+            "run/WOR-20/api/step103-upstream-snapshot-create-preboot-baseline.md"
+          ]
+        },
+        {
+          "id": "running_requires_paused",
+          "arch": "any",
+          "when": "Create a snapshot while the booted VM is still running",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidState",
+          "message": "operation PUT /snapshot/create is not allowed while instance state is running",
+          "evidence_files": [
+            "run/WOR-20/api/step34-upstream-snapshot-create-paused-baseline.md"
+          ]
+        },
+        {
+          "id": "paused_returns_no_content",
+          "arch": "any",
+          "when": "Create a snapshot after booting and pausing the VM",
+          "status_code": 204,
+          "outcome": "no_content",
+          "evidence_files": [
+            "run/WOR-20/api/step34-upstream-snapshot-create-paused-baseline.md",
+            "run/WOR-20/api/step65-upstream-snapshot-success-baseline.md"
+          ]
+        }
+      ],
+      "capture_note": "Pins the current concrete-handler `PUT /snapshot/create` preboot invalid-state rejection plus the paused-state guard and success surface from the pinned Firecracker controller behavior."
+    },
+    {
+      "method": "PUT",
+      "path": "/snapshot/load",
+      "semantics": "PB",
+      "behavior_path": "concrete_handler",
+      "capture_state": "captured_in_repo",
+      "cases": [
+        {
+          "id": "missing_memory_source",
+          "arch": "any",
+          "when": "Load a snapshot without either `mem_backend` or `mem_file_path`",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidRequest",
+          "message": "An error occurred when deserializing the json body of a request: missing field: either `mem_backend` or `mem_file_path` is required.",
+          "evidence_files": [
+            "run/WOR-20/api/step30-upstream-snapshot-load-parser-baseline.md"
+          ]
+        },
+        {
+          "id": "too_many_memory_sources",
+          "arch": "any",
+          "when": "Load a snapshot with both `mem_backend` and `mem_file_path`",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidRequest",
+          "message": "An error occurred when deserializing the json body of a request: too many fields: either `mem_backend` or `mem_file_path` exclusively is required.",
+          "evidence_files": [
+            "run/WOR-20/api/step30-upstream-snapshot-load-parser-baseline.md"
+          ]
+        },
+        {
+          "id": "allowed_after_logger_metrics_and_serial_returns_no_content",
+          "arch": "any",
+          "when": "Load a snapshot after configuring logger, metrics, and serial only",
+          "status_code": 204,
+          "outcome": "no_content",
+          "evidence_files": [
+            "run/WOR-20/api/step33-upstream-snapshot-load-nonboot-config-baseline.md",
+            "run/WOR-20/api/step65-upstream-snapshot-success-baseline.md"
+          ]
+        },
+        {
+          "id": "allowed_with_resume_vm_returns_no_content",
+          "arch": "any",
+          "when": "Load a snapshot with `resume_vm=true` before any blocked resources are configured",
+          "status_code": 204,
+          "outcome": "no_content",
+          "evidence_files": [
+            "run/WOR-20/api/step65-upstream-snapshot-success-baseline.md",
+            "run/WOR-20/api/step144-upstream-snapshot-load-resume-success-baseline.md"
+          ]
+        },
+        {
+          "id": "blocked_after_boot_source",
+          "arch": "any",
+          "when": "Load a snapshot after configuring boot source",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidState",
+          "message": "Load snapshot can only be called before configuring resources other than logger and metrics.",
+          "evidence_files": [
+            "run/WOR-20/api/step35-upstream-snapshot-load-boot-source-baseline.md"
+          ]
+        },
+        {
+          "id": "blocked_after_memory_hotplug",
+          "arch": "any",
+          "when": "Load a snapshot after configuring hotplug memory",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidState",
+          "message": "Load snapshot can only be called before configuring resources other than logger and metrics.",
+          "evidence_files": [
+            "run/WOR-20/api/step36-upstream-snapshot-load-memory-hotplug-baseline.md"
+          ]
+        },
+        {
+          "id": "blocked_after_cpu_config",
+          "arch": "any",
+          "when": "Load a snapshot after configuring custom CPU state",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidState",
+          "message": "Load snapshot can only be called before configuring resources other than logger and metrics.",
+          "evidence_files": [
+            "run/WOR-20/api/step66-upstream-snapshot-load-cpu-config-baseline.md"
+          ]
+        },
+        {
+          "id": "blocked_after_entropy",
+          "arch": "any",
+          "when": "Load a snapshot after configuring entropy",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidState",
+          "message": "Load snapshot can only be called before configuring resources other than logger and metrics.",
+          "evidence_files": [
+            "run/WOR-20/api/step69-upstream-snapshot-load-entropy-baseline.md"
+          ]
+        },
+        {
+          "id": "blocked_after_vsock",
+          "arch": "any",
+          "when": "Load a snapshot after configuring a vsock device",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidState",
+          "message": "Load snapshot can only be called before configuring resources other than logger and metrics.",
+          "evidence_files": [
+            "run/WOR-20/api/step67-upstream-snapshot-load-vsock-baseline.md"
+          ]
+        },
+        {
+          "id": "blocked_after_mmds_config",
+          "arch": "any",
+          "when": "Load a snapshot after configuring MMDS networking",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidState",
+          "message": "Load snapshot can only be called before configuring resources other than logger and metrics.",
+          "evidence_files": [
+            "run/WOR-20/api/step68-upstream-snapshot-load-mmds-baseline.md"
+          ]
+        },
+        {
+          "id": "blocked_after_balloon",
+          "arch": "any",
+          "when": "Load a snapshot after configuring a balloon device",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidState",
+          "message": "Load snapshot can only be called before configuring resources other than logger and metrics.",
+          "evidence_files": [
+            "run/WOR-20/api/step37-upstream-snapshot-load-balloon-baseline.md"
+          ]
+        },
+        {
+          "id": "blocked_after_network_interface",
+          "arch": "any",
+          "when": "Load a snapshot after configuring a network interface",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidState",
+          "message": "Load snapshot can only be called before configuring resources other than logger and metrics.",
+          "evidence_files": [
+            "run/WOR-20/api/step38-upstream-snapshot-load-network-interface-baseline.md"
+          ]
+        }
+      ],
+      "capture_note": "Pins the current concrete-handler `PUT /snapshot/load` parser, resource-guard, and success surface from the pinned Firecracker controller behavior."
+    },
+    {
+      "method": "PUT",
+      "path": "/vsock",
+      "semantics": "PB",
+      "behavior_path": "concrete_handler",
+      "capture_state": "captured_in_repo",
+      "cases": [
+        {
+          "id": "put_valid_preboot",
+          "arch": "any",
+          "when": "Store vsock configuration before boot with a valid request body",
+          "status_code": 204,
+          "outcome": "no_content",
+          "evidence_files": [
+            "run/WOR-20/api/step20-upstream-vsock-store-baseline.md"
+          ]
+        },
+        {
+          "id": "invalid_guest_cid_preboot",
+          "arch": "any",
+          "when": "Store vsock configuration before boot with `guest_cid` below the pinned minimum",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidRequest",
+          "message": "Guest CID must be greater than or equal to 3.",
+          "evidence_files": [
+            "run/WOR-20/api/step71-upstream-vsock-invalid-cid-baseline.md"
+          ]
+        },
+        {
+          "id": "postboot_invalid_state",
+          "arch": "any",
+          "when": "Store vsock configuration after boot",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidState",
+          "message": "The requested operation is not supported after starting the microVM.",
+          "evidence_files": [
+            "run/WOR-20/api/step92-upstream-vsock-postboot-baseline.md"
+          ]
+        }
+      ],
+      "capture_note": "Pins the current concrete-handler `PUT /vsock` preboot store success path, the invalid guest-CID rejection inferred from the pinned OpenAPI `minimum: 3` constraint, and the postboot invalid-state guard inferred from neighboring preboot-only configuration routes."
+    }
+  ]
+}

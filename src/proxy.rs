@@ -48,9 +48,7 @@ pub fn parse_target(raw: &str) -> Result<Target, String> {
             let host = url
                 .host_str()
                 .ok_or_else(|| "vsock target cid is required".to_string())?;
-            let cid: u32 = host
-                .parse()
-                .map_err(|_| "invalid vsock cid".to_string())?;
+            let cid: u32 = host.parse().map_err(|_| "invalid vsock cid".to_string())?;
             let port = url
                 .port()
                 .ok_or_else(|| "vsock target port is required".to_string())?;
@@ -73,7 +71,10 @@ pub struct ServerConfig {
     pub dial_timeout: Duration,
 }
 
-pub async fn run_server(config: ServerConfig, shutdown: impl std::future::Future<Output = ()>) -> Result<(), String> {
+pub async fn run_server(
+    config: ServerConfig,
+    shutdown: impl std::future::Future<Output = ()>,
+) -> Result<(), String> {
     if config.listen_path.trim().is_empty() {
         return Err("listen path is required".to_string());
     }
@@ -114,7 +115,11 @@ pub async fn run_server(config: ServerConfig, shutdown: impl std::future::Future
     }
 }
 
-async fn handle_client(client: UnixStream, target: Target, dial_timeout: Duration) -> Result<(), String> {
+async fn handle_client(
+    client: UnixStream,
+    target: Target,
+    dial_timeout: Duration,
+) -> Result<(), String> {
     match target.scheme.as_str() {
         "unix" => {
             let upstream = timeout(dial_timeout, UnixStream::connect(target.address))

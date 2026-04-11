@@ -1,74 +1,58 @@
-# Vesper Agent Workflow
+# Vesper Agent Map
 
-## Source Of Truth
+This repository is the system of record for Vesper work. Use this file as a map, not as the full manual.
 
-- Treat [docs/specs/design-v0.md](/Volumes/Workspace/github.com/cityhunteur/vesper/docs/specs/design-v0.md) and [docs/specs/firecracker-feature-parity.md](/Volumes/Workspace/github.com/cityhunteur/vesper/docs/specs/firecracker-feature-parity.md) as the authoritative parity and design references.
-- Do not mark parity complete based on issue closure, prior eval comments, or scaffolded route reachability alone.
-- If local code and GitHub issue state disagree, trust the code and update the issue status/comments to match reality.
+## Read in this order
 
-## Repository Layout
+1. [`docs/index.md`](docs/index.md)
+2. [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+3. [`docs/process/harness-engineering.md`](docs/process/harness-engineering.md)
+4. Task-specific sources:
+   - API / parity: [`docs/specs/design-v0.md`](docs/specs/design-v0.md), [`docs/specs/firecracker-feature-parity.md`](docs/specs/firecracker-feature-parity.md)
+   - baseline / compat: [`docs/process/baseline-governance.md`](docs/process/baseline-governance.md), [`docs/process/compat-exceptions.md`](docs/process/compat-exceptions.md)
+   - system VM / proxy: [`docs/process/systemvm-bringup.md`](docs/process/systemvm-bringup.md), [`docs/RELIABILITY.md`](docs/RELIABILITY.md), [`docs/SECURITY.md`](docs/SECURITY.md)
+   - planning / execution: [`docs/PLANS.md`](docs/PLANS.md), [`docs/progress/symphony-milestones.md`](docs/progress/symphony-milestones.md)
 
-```text
-src/
-  api.rs         Firecracker-compatible API surface, state machine, deterministic errors
-  baseline.rs    Baseline lock parsing and parity metadata validation
-  buildinfo.rs   Build metadata
-  compat.rs      Compatibility exception registry and lifecycle policy checks
-  platform.rs    Platform capability and entitlement validation
-  proxy.rs       Unix/TCP/vsock forwarding
-  spec.rs        Firecracker OpenAPI loading
-  systemvm.rs    System VM manifests, launch config, boot smoke helpers
-  bin/           vesperd, vesper-proxy, baselinectl, compatexctl, contractgen, systemvmctl
-tests/           Contract and regression suites
-docs/            Specs, process docs, devlog
-scripts/         CI, macOS, and System VM helper scripts
-third_party/     Vendored Firecracker OpenAPI
-```
+## Golden rules
 
-## Required Workflow
+- Code and durable artifacts beat tracker status.
+- If Linear or GitHub disagree with the code, restore truth before advancing state.
+- A reachable route is not parity.
+- `501 Not Implemented` is not parity.
+- One issue should map to one smallest verifiable parity or harness unit.
+- Runtime-sensitive claims require runtime evidence.
+- If the harness cannot prove the work, improve the harness before claiming completion.
+- A completed slice is not complete while it exists only as a local dirty diff;
+  accepted work must be captured in an issue-linked commit before review-state
+  promotion.
+- Prefer boring, inspectable, repo-legible solutions over opaque abstractions.
+- Encode repeated review feedback into docs, scripts, or templates.
+- Keep `AGENTS.md` short; put deep guidance in `docs/`.
 
-1. Pick the smallest parity unit that can be completed and verified independently.
-2. Tie that unit to the relevant GitHub issue before changing status claims.
-3. Implement the code and the regression tests together.
-4. Run the narrowest meaningful local checks first, then the broader suite before push.
-5. Commit each completed unit separately with an issue-linked message.
-6. Push after each unit so GitHub Actions and branch checks run against the actual commit.
-7. Monitor CI/checks to completion; do not assume success from local green runs.
-8. Update the linked GitHub issue with:
-   - what changed
-   - commit SHA
-   - local verification commands
-   - CI/check status
-   - remaining gaps, if any
-9. Close an issue only when its acceptance criteria and checklist items are actually satisfied in code and tests.
+## Working files by concern
 
-## Tracker Update Protocol
+- Control plane and state machine:
+  - `src/api.rs`
+  - `tests/api_contract.rs`
+  - `tests/contract_golden.rs`
+- Governance and parity metadata:
+  - `src/baseline.rs`
+  - `src/compat.rs`
+  - `src/spec.rs`
+  - `docs/specs/design-v0.baselines.lock.yaml`
+  - `docs/specs/compat-exceptions.yaml`
+- Runtime and transport:
+  - `src/proxy.rs`
+  - `src/systemvm.rs`
+  - `scripts/systemvm/*`
+- Repo harness:
+  - `WORKFLOW.md`
+  - `docs/ARCHITECTURE.md`
+  - `docs/QUALITY_SCORE.md`
+  - `scripts/harness/*`
+  - `.symphony/templates/*`
 
-- Every parity unit must leave a tracker artifact behind: issue comment, issue state change, checklist update, or all three.
-- Post the tracker update after push and after the first CI/check signal is available.
-- Include both local verification and remote verification in the tracker update.
-- If CI is still running, mark the issue comment as pending and follow up with the final result.
-- If CI fails, comment with the failing workflow/check name, the failing commit SHA, and the remediation plan before moving the issue forward.
-- Do not mark a checklist item complete from local testing alone if the branch or push checks are still red or pending.
-
-## Issue And Status Rules
-
-- Reopen issues if they were closed on scaffolding or partial behavior and the acceptance criteria are still unmet.
-- Do not collapse multiple parity units into one issue update if separate commits/issues exist.
-- Epic issues stay open until every child issue is complete and the epic-level verification passes.
-- Compat exceptions must be explicit; undocumented drift is not an acceptable temporary state.
-
-## Git Rules
-
-- Never commit unrelated user changes already present in the worktree.
-- If the worktree is dirty, stage only the files for the current unit.
-- Use commit messages that map back to the roadmap issue, for example:
-  - `feat(api): implement machine config + readback parity (#2)`
-  - `test(api): harden lifecycle parity regressions (#11)`
-
-## Verification Commands
-
-Use the commands that match the unit being changed:
+## Standard commands
 
 ```bash
 make contract-check
@@ -76,29 +60,31 @@ make contract-test
 make validate-entitlements
 cargo test
 cargo run --bin baselinectl -- --mode validate
-cargo run --bin baselinectl -- --mode generate
 cargo run --bin compatexctl -- --registry docs/specs/compat-exceptions.yaml
+python3 scripts/harness/check_docs.py --root .
+python3 scripts/harness/check_structure.py --root .
+python3 scripts/harness/compute_quality_score.py --root .
+python3 scripts/harness/janitor_scan.py --root .
+scripts/harness/init_issue_run.sh ISSUE-ID
+scripts/harness/collect_verification_bundle.sh ISSUE-ID
 ```
 
-## Per-Unit Verification Checklist
+## Issue execution
 
-Before pushing:
+1. Map the tracker ticket to the GitHub issue or PR that carries the evidence.
+2. Restore issue truth before coding and initialize `.symphony/runs/<ticket>/`.
+3. Implement one small unit plus its proof.
+4. Run narrow sensors, then a broader proof, then collect artifacts.
+5. Record keep / discard / crash in the verification bundle.
+6. Run the LLM council.
+7. Create an issue-linked commit for every accepted slice before any non-active
+   tracker transition.
+8. Update GitHub issue or PR, the milestone log, and then the tracker state.
 
-- Run the narrowest tests that cover the touched files and behavior.
-- Run at least one broader regression command if the unit changes API semantics or shared library code.
-- Confirm `git status` only contains the intended files for the unit.
+## What not to do
 
-After pushing:
-
-- Check the GitHub Actions runs or required checks for the pushed SHA.
-- Record the initial check state in the linked issue or tracker comment.
-- Follow the checks through completion and post the final success or failure result.
-- If the unit changes parity behavior, update the relevant tracker/checklist status to reflect what is now verified.
-
-## Phase 0 Expectations
-
-- Every route in `third_party/firecracker/firecracker.yaml` must be handled by `vesperd`.
-- `501 Not Implemented` is not parity.
-- State-dependent routes must enforce Firecracker-style preboot/runtime rules.
-- Error responses must stay deterministic and include the pinned baseline revision.
-- Contract tests must fail if a route regresses to reachability-only scaffolding.
+- Do not advance tracker state from labels or merged code alone.
+- Do not rely on Slack, memory, or chat as hidden requirements.
+- Do not ship new parity claims without updating tests or runtime artifacts.
+- Do not stage unrelated worktree changes.
+- Do not dump every new behavior into `src/api.rs` if a modular extraction is practical.
