@@ -9,6 +9,12 @@ description: |
 
 Use this skill for raw Linear GraphQL work during Symphony app-server sessions.
 
+If the current workflow enables `tracker.auto_manage_queue`, assume Symphony's
+orchestrator already owns routine `Backlog -> Todo -> In Progress` movement.
+Use this skill to verify tracker truth, repair mismatches, post evidence-rich
+updates, and handle milestone states such as `In Review`, `Human Review`, or
+`Done` rather than duplicating every routine queue transition manually.
+
 ## Primary tool
 
 Use the `linear_graphql` client tool exposed by Symphony's app-server session.
@@ -257,6 +263,67 @@ mutation MoveIssueToState($id: String!, $stateId: String!) {
 }
 ```
 
+### Query same-project issues for queue maintenance
+
+Use the same project slug that Symphony is already polling so queue decisions are
+based on the same candidate set as the orchestrator:
+
+```graphql
+query ProjectQueueIssues(
+  $projectSlug: String!
+  $stateNames: [String!]!
+  $first: Int!
+  $relationFirst: Int!
+) {
+  issues(
+    filter: {
+      project: { slugId: { eq: $projectSlug } }
+      state: { name: { in: $stateNames } }
+    }
+    first: $first
+  ) {
+    nodes {
+      id
+      identifier
+      title
+      priority
+      state {
+        id
+        name
+        type
+      }
+      project {
+        id
+        name
+      }
+      inverseRelations(first: $relationFirst) {
+        nodes {
+          type
+          issue {
+            id
+            identifier
+            state {
+              id
+              name
+              type
+            }
+          }
+        }
+      }
+      createdAt
+      updatedAt
+    }
+  }
+}
+```
+
+Normalize blockers the same way Symphony does:
+
+- Treat inverse relation type `blocks` as "this issue is blocked by that related
+  issue".
+- A `Backlog` issue is ready only when every blocker is terminal (`Done`,
+  `Closed`, `Cancelled`, `Canceled`, or `Duplicate`) or there are no blockers.
+
 ### Attach a GitHub PR to an issue
 
 Use the GitHub-specific attachment mutation when linking a PR:
@@ -386,3 +453,64 @@ mutation FileUpload(
 - Do not introduce new raw-token shell helpers for GraphQL access.
 - If you need shell work for uploads, only use it for signed upload URLs
   returned by `fileUpload`; those URLs already carry the needed authorization.
+
+## Progress bookkeeping protocol
+
+Keep Linear truthful. Do not only update the current issue; maintain the next
+ready queue as well.
+
+### Current issue state
+
+- Move `Todo -> In Progress` only after baseline capture or initial repro is
+  recorded.
+- Do not move an issue into `In Review`, `Human Review`, `Done`, or another
+  completed downstream state while the accepted work exists only as a local
+  dirty diff. Commit accepted work first, and prefer a pushed branch or PR for
+  review states.
+- Move to `In Review`, `Human Review`, `Done`, or another downstream state only
+  when the evidence for that state already exists in the repo, PR, and tracker
+  comment.
+- If the code and Linear disagree, fix Linear to match the code and explain the
+  correction in the progress comment or workpad.
+
+### Queue maintenance
+
+When `tracker.auto_manage_queue` is enabled, treat the orchestrator as the
+primary queue manager. The planner should not churn states redundantly, but it
+must repair the queue when:
+
+- automation is disabled,
+- automation failed to move the next ready ticket,
+- or the project is idle while ready backlog work exists.
+
+Before ending a run, parking a ticket in a non-active review state, or closing a
+ticket, reconcile the next ready work in the same project:
+
+1. Query same-project issues in `Backlog`, `Todo`, `In Progress`, and any local
+   review/checkpoint states used by the workflow.
+2. Identify ready `Backlog` issues:
+   - state is exactly `Backlog`
+   - all explicit blockers are terminal
+   - no higher-priority ready issue in the same dependency frontier should go
+     first
+3. Promote the next ready issue(s) from `Backlog -> Todo` with `issueUpdate`.
+4. Default to the smallest truthful queue:
+   - for serial dependency chains, promote only the single next issue
+   - only promote multiple issues when the workflow intentionally supports
+     parallel execution and the issues are independently ready
+5. If a `Todo` issue is discovered to be blocked again before work actually
+   starts, move it back to `Backlog`.
+6. Mention every queue change in the tracker update so humans can see why an
+   issue was promoted or parked.
+
+### Ordering rules
+
+When choosing which ready `Backlog` issue to promote:
+
+1. Dependency order first: an issue unblocked by the current work should go
+   ahead of unrelated future work.
+2. Then priority: lower numeric Linear priority wins (`1` before `2`, etc.).
+3. Then age: older created issues win when priority is tied.
+
+Do not leave the next dependency slice stranded in `Backlog` when it is now the
+truthful next item.

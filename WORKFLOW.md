@@ -2,6 +2,10 @@
 tracker:
   kind: linear
   project_slug: "vesper-d61461c63277"
+  auto_manage_queue: true
+  backlog_state: Backlog
+  todo_state: Todo
+  in_progress_state: In Progress
   active_states:
     - Todo
     - In Progress
@@ -141,7 +145,7 @@ If the answer to any of the first four is yes, add the missing harness piece bef
 - `Backlog`: parked work that is not yet selected for an execution run.
 - `Todo`: eligible for execution, no verified implementation work started.
 - `In Progress`: code or harness changes are in flight.
-- `In Review`: non-executing checkpoint state. Use this when a local `keep`
+- `In Review`: non-executing checkpoint state. Use this when a committed `keep`
   exists but the slice still needs a pushed branch, PR, CI signal, or human
   review before more execution should continue.
 - `Done`: merged and documented.
@@ -150,6 +154,44 @@ If the answer to any of the first four is yes, add the missing harness piece bef
 Local verification phases such as `Verification` and `Council` still belong in
 `verification.yaml`, `notes.md`, and the GitHub update, but they are not
 separate Linear workflow states for this project.
+
+## Linear queue hygiene
+
+Use `.codex/skills/linear/SKILL.md` for tracker writes and queue decisions.
+
+When `tracker.auto_manage_queue` is enabled, Symphony's orchestrator should own
+the routine execution queue:
+- park blocked queued work from `Todo -> Backlog`,
+- promote the next ready dependency slice from `Backlog -> Todo`, and
+- move dispatched work from `Todo -> In Progress`.
+
+The agent still owns truthfulness:
+- verify those transitions happened,
+- repair them when the tracker drifted or a checkpoint changed the right state,
+- and explain any promotion or parking decision in the tracker update.
+
+If the orchestrator is unavailable, misconfigured, or leaves the project idle
+while ready backlog work exists, the planner becomes the fallback queue
+manager:
+- identify the next ready backlog slice by dependency order first, then
+  priority, then age,
+- promote only the single truthful next slice to `Todo`,
+- and avoid waking blocked or speculative future work.
+
+Before ending a run, parking an issue in `In Review`, or marking an issue
+`Done`, reconcile the next ready work in the same Linear project:
+
+1. Query same-project issues in `Backlog`, `Todo`, `In Progress`, and `In Review`.
+2. Identify ready `Backlog` issues:
+   - all explicit blockers are terminal,
+   - the issue is the next dependency slice unblocked by the current work, and
+   - no higher-priority ready issue should go first.
+3. Promote the next ready issue from `Backlog -> Todo`.
+4. Only promote multiple issues when they are independently ready and the
+   workflow intentionally supports parallel execution.
+5. If a `Todo` issue is found to be blocked again before active work starts,
+   move it back to `Backlog`.
+6. Mention any queue promotion or parking decision in the tracker update.
 
 ## Step 0: Resolve ticket identity and restore truth
 
@@ -177,7 +219,8 @@ separate Linear workflow states for this project.
    - missing route parity,
    - missing transport or system VM evidence,
    - missing doc or structure sensor when the issue is a harness issue.
-7. Move `Todo -> In Progress` only after baseline capture.
+7. If the orchestrator has not already done it, repair `Todo -> In Progress`
+   once baseline capture confirms active work has started.
 
 ## Step 2: Implement one verifiable unit
 
@@ -274,13 +317,23 @@ Council gate:
 - Persist all verdicts under `.symphony/runs/{{ issue.identifier }}/current/council/`.
 - If true parallel council execution is unavailable, run the same rubric sequentially and record `council_mode: sequential`.
 
+Before any checkpoint or review-style tracker transition:
+
+1. Create at least one issue-linked commit for the accepted slice.
+2. Record the resulting short SHA in `notes.md`, `verification.yaml`, and the
+   GitHub update draft.
+3. A local-only dirty workspace with `status: keep` is not a completed
+   checkpoint.
+
 After council, decide whether the run may continue:
 
 1. If the issue still maps to an umbrella GitHub tracker, or the accepted slice
-   still lives in a dirty workspace, or there is no issue-specific branch,
-   commit, or PR yet:
+   still lives only as a local commit without a pushed branch or PR, or there is
+   no issue-specific branch or PR yet:
    - write a checkpoint request in `notes.md` and the GitHub update draft,
    - move the Linear issue to `In Review`,
+   - promote the next ready dependency slice from `Backlog` to `Todo` when it
+     is now the truthful next item,
    - stop after the current slice instead of starting another parity unit in
      the same run.
 2. Only continue past the current slice when the accepted work already has a
@@ -305,8 +358,10 @@ After council, decide whether the run may continue:
    - current or pending CI signal.
 4. For checkpoint stops, the update must explicitly say:
    - the workspace is intentionally parked,
+   - the accepted slice is already committed,
    - the branch / PR / CI step is now required,
    - the tracker was moved to `In Review`,
+   - whether the next ready issue was promoted to `Todo`,
    - no further parity slices should start from this issue until the checkpoint
      is resolved.
 
@@ -323,6 +378,7 @@ If this attempt uncovered recurring review comments, stale guidance, or repeated
 Move to `In Review` and stop the run when all are true:
 - attempt status is `keep`,
 - the council has no rejects,
+- the accepted slice already exists as an issue-linked commit,
 - and any of these are still true:
   - the issue is an umbrella tracker,
   - the workspace is dirty after the accepted slice,
@@ -341,6 +397,8 @@ Move to `Done` only when all are true:
 - the branch is pushed,
 - CI is green or clearly pending with no known local failure,
 - tracker state matches reality,
+- the next ready backlog issue is promoted to `Todo`, or the tracker update
+  explains why no follow-up issue is ready yet,
 - the bounded issue has actually been merged or otherwise fully landed.
 
 If approved by a human:

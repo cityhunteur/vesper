@@ -22,6 +22,9 @@ This repository is the system of record for Vesper work. Use this file as a map,
 - One issue should map to one smallest verifiable parity or harness unit.
 - Runtime-sensitive claims require runtime evidence.
 - If the harness cannot prove the work, improve the harness before claiming completion.
+- A completed slice is not complete while it exists only as a local dirty diff;
+  accepted work must be captured in an issue-linked commit before review-state
+  promotion.
 - Prefer boring, inspectable, repo-legible solutions over opaque abstractions.
 - Encode repeated review feedback into docs, scripts, or templates.
 - Keep `AGENTS.md` short; put deep guidance in `docs/`.
@@ -74,7 +77,9 @@ scripts/harness/collect_verification_bundle.sh ISSUE-ID
 4. Run narrow sensors, then a broader proof, then collect artifacts.
 5. Record keep / discard / crash in the verification bundle.
 6. Run the LLM council.
-7. Update GitHub issue or PR, the milestone log, and then the tracker state.
+7. Create an issue-linked commit for every accepted slice before any non-active
+   tracker transition.
+8. Update GitHub issue or PR, the milestone log, and then the tracker state.
 
 ## What not to do
 
