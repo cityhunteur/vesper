@@ -2,6 +2,11 @@
 /target/
 /build/
 /run/*
+!/run/WOR-*/
+/run/WOR-*/*
+!/run/WOR-*/api/
+/run/WOR-*/api/*
+!/run/WOR-*/api/*-endpoint-baseline-packet.md
 !/run/WOR-20/
 /run/WOR-20/*
 !/run/WOR-20/api/
