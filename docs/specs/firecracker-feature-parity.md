@@ -39,7 +39,7 @@
 | [#5](https://github.com/cityhunteur/vesper/issues/5) | 3 | CLOSED | Pass | Epic closed but shim/runtime contract implementation evidence is absent in current codebase. |
 | [#6](https://github.com/cityhunteur/vesper/issues/6) | 4 | CLOSED | Pass | Epic closed but Docker UX parity implementation evidence is absent in current codebase. |
 | [#7](https://github.com/cityhunteur/vesper/issues/7) | 5 | CLOSED | Pass | Epic closed but native backend parity implementation evidence is absent in current codebase. |
-| [#8](https://github.com/cityhunteur/vesper/issues/8) | 0 | CLOSED | Pass | Partial: Preboot/runtime guards exist for a subset; semantics not full Firecracker parity. |
+| [#8](https://github.com/cityhunteur/vesper/issues/8) | 0 | CLOSED | Pass | Implemented: explicit `preboot`/`running`/`paused` lifecycle state is modeled in `src/api.rs`; `tests/api_contract.rs` now asserts deterministic `InvalidState` envelopes across all `24` documented preboot-only and postboot-only routed operations; and the generated behavior matrix carries pinned lifecycle cases for `GET /`, `PUT /actions`, and `PATCH /vm`, including pause/resume and post-boot action guards. |
 | [#9](https://github.com/cityhunteur/vesper/issues/9) | 0 | CLOSED | Pass after prior fail | Partial: Unix/TCP forwarding works; vsock dial path is explicitly unimplemented. |
 | [#10](https://github.com/cityhunteur/vesper/issues/10) | 0 | CLOSED | Pass after prior fail | Implemented: macOS entitlement validation + Linux-safe fallback script. |
 | [#11](https://github.com/cityhunteur/vesper/issues/11) | 0 | CLOSED | Pass | Implemented: Contract golden + route reachability tests are wired in CI. |
