@@ -1,5 +1,18 @@
 # Symphony milestones
 
+### 2026-04-12 — WOR-105 — `src/api.rs` structure budget restored with route-family extractions
+- GitHub issue: #110
+- PR: none
+- Commit: pending local commit
+- Phase: 0
+- Parity unit: extract coherent `actions`, `boot_source`, `logger_metrics`, and `machine_config` route families plus the inline API tests out of `src/api.rs` without changing pinned contract behavior
+- Result: keep
+- Verification bundle: `.symphony/runs/WOR-105/current/`
+- Council summary: local review found no parity or dispatch regression in the module split; the main residual risk is that `src/api.rs` still sits above the warning budget and will need additional extraction work in later slices
+- Harness update: added `src/api/{actions,boot_source,logger_metrics,machine_config}.rs`, moved the inline API tests to `src/api/tests.rs`, kept route dispatch legible in `src/api.rs`, restored the structure sensor from an error to a warning at `3153` lines, and kept `make contract-test`, `make surface-matrix-check`, `make behavior-matrix-check`, and `python3 scripts/harness/check_docs.py --root .` green
+- Remaining risks: `src/api.rs` remains above the warning budget and still contains other route families plus `/vm/config` export logic; issue update, push, CI, and human review are still pending
+- Truthful project state after this milestone: the repo no longer fails the structure budget on `src/api.rs`, and the extracted route families retain the existing pinned Firecracker behavior, but the broader architecture hotspot is only partially decomposed
+
 ### 2026-04-12 — WOR-104 — Network-interface endpoint baseline packet captured
 - GitHub issue: #109
 - PR: none
