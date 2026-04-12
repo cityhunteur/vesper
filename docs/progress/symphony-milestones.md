@@ -1,5 +1,18 @@
 # Symphony milestones
 
+### 2026-04-12 — WOR-15 — State-machine umbrella reconciled to current repo truth
+- GitHub issue: #8
+- PR: none
+- Commit: pending local commit
+- Phase: 0
+- Parity unit: reconcile the stale-open state-machine umbrella to the current explicit lifecycle model, guarded-route contract coverage, and generated behavior-matrix evidence
+- Result: keep
+- Verification bundle: `.symphony/runs/WOR-15/current/`
+- Council summary: not run for this docs/tracker truth-repair slice; local review found no code-path changes and confirmed the existing state-machine evidence already satisfies the scoped acceptance bar
+- Harness update: refreshed the `#8` parity audit entry in `docs/specs/firecracker-feature-parity.md` to point at the current `preboot`/`running`/`paused` model in `src/api.rs`, the `documented_preboot_only_routes_reject_after_start` and `documented_postboot_only_routes_reject_before_start` contract assertions covering `24` guarded routes in `tests/api_contract.rs`, and the pinned `GET /`, `PUT /actions`, and `PATCH /vm` lifecycle cases in `docs/generated/firecracker-api-behavior-matrix.json`
+- Remaining risks: the broader GH `#2` parity umbrella remains partial, and GitHub mirror issue `#58` plus Linear duplicate `WOR-65` still need cleanup after the source issue state is reconciled
+- Truthful project state after this milestone: GH `#8` no longer needs to remain open for missing state-machine implementation work, because the current repo already carries explicit lifecycle state, deterministic invalid-state envelopes, and guarded-route verification across the routed phase-0 surface
+
 ### 2026-04-12 — WOR-105 — `src/api.rs` structure budget restored with route-family extractions
 - GitHub issue: #110
 - PR: none
