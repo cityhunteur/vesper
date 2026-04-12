@@ -22,3 +22,12 @@ This project includes a deterministic scaffold for System VM image metadata, NAT
 ## Reproducibility
 
 `image-manifest.json` contains deterministic SHA256 digests for kernel/rootfs and a stable `image_id` derived from these digests.
+
+## Proxy bridge convention
+
+Phase 0 keeps the proxy-side vsock bridge inspectable by resolving
+`vsock://<cid>:<port>` upstreams through a host Unix socket at
+`<vsock_socket_dir>/<cid>.sock` and sending a Firecracker-style
+`CONNECT <port>\n` preface before relaying traffic. This is the current
+host-initiated bridge skeleton for `vesper-proxy`; the broader control-channel
+protocol work remains tracked separately under the Phase 1 vsock issue.
