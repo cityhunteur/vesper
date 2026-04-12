@@ -1,5 +1,18 @@
 # Symphony milestones
 
+### 2026-04-11 — WOR-106 — Hotplug-memory endpoint baseline packet reconciled to the current harness model
+- GitHub issue: #108
+- PR: none
+- Commit: pending local commit
+- Phase: 0
+- Parity unit: package the existing `/hotplug/memory` family baseline into an issue-local endpoint packet and clarify that concrete routes stay out of the placeholder capture registry
+- Result: keep
+- Verification bundle: `.symphony/runs/WOR-106/current/`
+- Council summary: not run for this docs/harness truth-repair slice; local review confirmed no code-path change and the acceptance gate stayed green
+- Harness update: added `run/WOR-106/api/hotplug-memory-endpoint-baseline-packet.md`, clarified `docs/process/baseline-governance.md` and `docs/specs/firecracker-api-baseline-captures.yaml` so concrete route families use issue-local packets plus `docs/specs/firecracker-api-behavior-captures.yaml` instead of the placeholder capture registry, and kept the generated surface and behavior matrices unchanged and valid
+- Remaining risks: GH `#2` still needs broader endpoint-level parity beyond the seeded route matrix; `src/api.rs` remains the long-standing architectural hotspot; `WOR-104` is the next ready backlog slice after this issue lands
+- Truthful project state after this milestone: `/hotplug/memory` now has a durable issue-local endpoint baseline packet tied to GH `#108`/WOR-106, and the repo no longer instructs agents to repopulate the placeholder-only capture registry for concrete routes; no new hotplug handler behavior is claimed by this slice
+
 ### 2026-04-07 — WOR-20 — Runtime `PATCH /hotplug/memory` invalid-requested-size rejection captured in the behavior matrix
 - GitHub issue: #2
 - PR: none

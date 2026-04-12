@@ -10,7 +10,7 @@ This document defines the required workflow for updating `docs/specs/design-v0.b
 3. Validate metadata with:
    `cargo run --bin baselinectl -- --mode validate --metadata artifacts/parity-metadata.json`
 4. Update `docs/specs/firecracker-api-baseline-captures.yaml` for any route whose current matrix-backed placeholder behavior has newly pinned upstream evidence.
-   Routes handled by concrete code should remain `not_applicable` in the generated matrix instead of being added to the capture registry.
+   Routes handled by concrete code should remain `not_applicable` in the generated matrix instead of being added to the capture registry; capture concrete route-family endpoint packets in issue-local `run/<ISSUE>/...` notes and keep `docs/specs/firecracker-api-behavior-captures.yaml` plus milestone references aligned instead.
 5. Regenerate the pinned API surface stub matrix with:
    `cargo run --bin baselinectl -- --mode generate-api-matrix --matrix docs/generated/firecracker-api-surface-stub-matrix.json --captures docs/specs/firecracker-api-baseline-captures.yaml`
 6. Validate the API surface stub matrix with:

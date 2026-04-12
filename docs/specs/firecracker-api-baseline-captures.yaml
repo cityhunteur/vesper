@@ -1,2 +1,7 @@
+# Matrix-backed placeholder capture registry only.
+# Concrete route families such as `/hotplug/memory` stay `not_applicable` here
+# and should record endpoint-level packets in issue-local `run/<ISSUE>/...`
+# notes plus route-level status/error evidence in
+# `docs/specs/firecracker-api-behavior-captures.yaml`.
 version: 1
 captures: []
