@@ -8,6 +8,8 @@ struct Args {
     listen: String,
     #[arg(long, default_value = "vsock://3:2375")]
     upstream: String,
+    #[arg(long, default_value = "/tmp/vesper/vsock")]
+    vsock_socket_dir: String,
     #[arg(long, default_value_t = 5)]
     dial_timeout_seconds: u64,
 }
@@ -25,6 +27,7 @@ async fn main() {
             listen_path: args.listen.clone(),
             upstream_raw: args.upstream.clone(),
             dial_timeout: Duration::from_secs(args.dial_timeout_seconds.max(1)),
+            vsock_socket_dir: args.vsock_socket_dir.clone(),
         },
         shutdown,
     )

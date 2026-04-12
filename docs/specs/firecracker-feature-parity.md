@@ -40,11 +40,11 @@
 | [#6](https://github.com/cityhunteur/vesper/issues/6) | 4 | CLOSED | Pass | Epic closed but Docker UX parity implementation evidence is absent in current codebase. |
 | [#7](https://github.com/cityhunteur/vesper/issues/7) | 5 | CLOSED | Pass | Epic closed but native backend parity implementation evidence is absent in current codebase. |
 | [#8](https://github.com/cityhunteur/vesper/issues/8) | 0 | CLOSED | Pass | Implemented: explicit `preboot`/`running`/`paused` lifecycle state is modeled in `src/api.rs`; `tests/api_contract.rs` now asserts deterministic `InvalidState` envelopes across all `24` documented preboot-only and postboot-only routed operations; and the generated behavior matrix carries pinned lifecycle cases for `GET /`, `PUT /actions`, and `PATCH /vm`, including pause/resume and post-boot action guards. |
-| [#9](https://github.com/cityhunteur/vesper/issues/9) | 0 | CLOSED | Pass after prior fail | Partial: Unix/TCP forwarding works; vsock dial path is explicitly unimplemented. |
+| [#9](https://github.com/cityhunteur/vesper/issues/9) | 0 | CLOSED | Pass after prior fail | Implemented: `src/proxy.rs` now forwards unix, tcp, and `vsock://<cid>:<port>` upstreams, resolving the Phase 0 vsock path through a host UDS bridge and issuing the Firecracker-style `CONNECT <port>` preface before relaying traffic. |
 | [#10](https://github.com/cityhunteur/vesper/issues/10) | 0 | CLOSED | Pass after prior fail | Implemented: macOS entitlement validation + Linux-safe fallback script. |
 | [#11](https://github.com/cityhunteur/vesper/issues/11) | 0 | CLOSED | Pass | Implemented: Contract golden + route reachability tests are wired in CI. |
 | [#12](https://github.com/cityhunteur/vesper/issues/12) | 1 | CLOSED | Pass | Partial: System VM manifest/launch/boot-smoke scaffolding exists, not full VM lifecycle. |
-| [#13](https://github.com/cityhunteur/vesper/issues/13) | 1 | CLOSED | Pass | Partial: vsock target parsing exists, but no vsock transport implementation. |
+| [#13](https://github.com/cityhunteur/vesper/issues/13) | 1 | CLOSED | Pass | Partial: the proxy now has a Phase 0 UDS-backed vsock CONNECT bridge, but the broader host <-> System VM control channel still lacks dedicated handshake/versioning, keepalive, reconnect, and large-payload proof. |
 | [#14](https://github.com/cityhunteur/vesper/issues/14) | 1 | CLOSED | Pass | No code evidence of containerd/dockerd install/supervision logic. |
 | [#15](https://github.com/cityhunteur/vesper/issues/15) | 1 | CLOSED | Pass | Partial: Proxy socket exists, but no end-to-end Docker API boundary enforcement. |
 | [#16](https://github.com/cityhunteur/vesper/issues/16) | 1 | CLOSED | Pass | Partial: boot-smoke loop exists; missing full reliability/socket/leak suite. |

@@ -1,5 +1,18 @@
 # Symphony milestones
 
+### 2026-04-12 — WOR-71 — `vesper-proxy` gains a Phase 0 vsock CONNECT bridge
+- GitHub issue: #9
+- PR: none
+- Commit: pending local commit
+- Phase: 0
+- Parity unit: replace the explicit `vsock` dial stub in `vesper-proxy` with a testable host UDS bridge that speaks Firecracker's `CONNECT <port>` preface and prove the proxy survives a failed upstream dial
+- Result: keep
+- Verification bundle: `.symphony/runs/WOR-71/current/`
+- Council summary: local review found the bridge intentionally narrow and legible; this slice satisfies the Phase 0 proxy-forwarding acceptance bar without claiming the broader Phase 1 keepalive, reconnect, or large-payload control-channel work
+- Harness update: `src/proxy.rs` now resolves `vsock://<cid>:<port>` through a configurable `vsock_socket_dir`, writes the `CONNECT <port>` preface before relay, and adds focused tests for valid/invalid vsock target parsing, end-to-end vsock forwarding, and recovery after a failed upstream dial; `src/bin/vesper-proxy.rs` now exposes `--vsock-socket-dir`; `docs/specs/firecracker-feature-parity.md` and `docs/process/systemvm-bringup.md` now document the new Phase 0 bridge truth
+- Remaining risks: the broader GH `#13` / WOR-73 control-channel issue still needs handshake/versioning, keepalive, reconnect, and larger transfer proof; this slice proves the proxy bridge skeleton, not the full System VM vsock transport contract
+- Truthful project state after this milestone: `vesper-proxy` no longer treats `vsock://<cid>:<port>` as unimplemented, and the repo now carries executable proof that unix-socket ingress can relay through the Phase 0 host UDS bridge while surviving a failed upstream dial
+
 ### 2026-04-12 — WOR-15 — State-machine umbrella reconciled to current repo truth
 - GitHub issue: #8
 - PR: none

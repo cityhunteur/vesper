@@ -1,7 +1,7 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use tokio::io::copy_bidirectional;
+use tokio::io::{AsyncWriteExt, copy_bidirectional};
 use tokio::net::{TcpStream, UnixListener, UnixStream};
 use tokio::time::timeout;
 use url::Url;
@@ -69,6 +69,7 @@ pub struct ServerConfig {
     pub listen_path: String,
     pub upstream_raw: String,
     pub dial_timeout: Duration,
+    pub vsock_socket_dir: String,
 }
 
 pub async fn run_server(
@@ -102,9 +103,10 @@ pub async fn run_server(
                 .map_err(|err| format!("accept client connection: {err}"))?;
             let target = target.clone();
             let dial_timeout = config.dial_timeout;
+            let vsock_socket_dir = config.vsock_socket_dir.clone();
 
             tokio::spawn(async move {
-                let _ = handle_client(client, target, dial_timeout).await;
+                let _ = handle_client(client, target, dial_timeout, &vsock_socket_dir).await;
             });
         }
     };
@@ -119,6 +121,7 @@ async fn handle_client(
     client: UnixStream,
     target: Target,
     dial_timeout: Duration,
+    vsock_socket_dir: &str,
 ) -> Result<(), String> {
     match target.scheme.as_str() {
         "unix" => {
@@ -135,12 +138,34 @@ async fn handle_client(
                 .map_err(|err| format!("dial tcp upstream: {err}"))?;
             relay(client, upstream).await
         }
-        "vsock" => Err(format!(
-            "vsock dialing not implemented on this build (target {}:{})",
-            target.cid, target.port
-        )),
+        "vsock" => {
+            let socket_path = vsock_socket_path(vsock_socket_dir, target.cid)?;
+            let mut upstream = timeout(dial_timeout, UnixStream::connect(&socket_path))
+                .await
+                .map_err(|_| "upstream dial timeout".to_string())?
+                .map_err(|err| format!("dial vsock bridge {socket_path}: {err}"))?;
+            upstream
+                .write_all(format!("CONNECT {}\n", target.port).as_bytes())
+                .await
+                .map_err(|err| format!("write vsock CONNECT preface: {err}"))?;
+            upstream
+                .flush()
+                .await
+                .map_err(|err| format!("flush vsock CONNECT preface: {err}"))?;
+            relay(client, upstream).await
+        }
         _ => Err("unsupported target scheme".to_string()),
     }
+}
+
+fn vsock_socket_path(vsock_socket_dir: &str, cid: u32) -> Result<String, String> {
+    if vsock_socket_dir.trim().is_empty() {
+        return Err("vsock socket dir is required".to_string());
+    }
+
+    let mut path = PathBuf::from(vsock_socket_dir);
+    path.push(format!("{cid}.sock"));
+    Ok(path.to_string_lossy().into_owned())
 }
 
 async fn relay<Upstream>(mut client: UnixStream, mut upstream: Upstream) -> Result<(), String>
@@ -157,9 +182,19 @@ where
 mod tests {
     use super::*;
     use std::sync::Arc;
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::io::AsyncReadExt;
     use tokio::net::TcpListener;
     use tokio::sync::Notify;
+    use tempfile::tempdir;
+
+    async fn wait_for_socket(path: &Path) {
+        for _ in 0..100 {
+            if path.exists() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
 
     #[test]
     fn parses_vsock_target() {
@@ -167,6 +202,12 @@ mod tests {
         assert_eq!(target.scheme, "vsock");
         assert_eq!(target.cid, 3);
         assert_eq!(target.port, 2375);
+    }
+
+    #[test]
+    fn rejects_invalid_vsock_target() {
+        assert!(parse_target("vsock://cid:2375").is_err());
+        assert!(parse_target("vsock://3").is_err());
     }
 
     #[tokio::test]
@@ -194,7 +235,8 @@ mod tests {
             }
         });
 
-        let socket_path = format!("/tmp/vesper-proxy-test-{}.sock", std::process::id());
+        let tempdir = tempdir().unwrap();
+        let socket_path = tempdir.path().join("proxy.sock");
         let notify = Arc::new(Notify::new());
         let done = notify.clone();
         let socket_path_for_task = socket_path.clone();
@@ -202,9 +244,10 @@ mod tests {
         tokio::spawn(async move {
             let _ = run_server(
                 ServerConfig {
-                    listen_path: socket_path_for_task,
+                    listen_path: socket_path_for_task.to_string_lossy().into_owned(),
                     upstream_raw: format!("tcp://{}", echo_addr),
                     dial_timeout: Duration::from_secs(1),
+                    vsock_socket_dir: tempdir.path().join("vsock").to_string_lossy().into_owned(),
                 },
                 async move {
                     done.notified().await;
@@ -213,12 +256,153 @@ mod tests {
             .await;
         });
 
-        for _ in 0..100 {
-            if Path::new(&socket_path).exists() {
-                break;
+        wait_for_socket(&socket_path).await;
+
+        let mut client = UnixStream::connect(&socket_path).await.unwrap();
+        client.write_all(b"ping\n").await.unwrap();
+
+        let mut buf = [0u8; 5];
+        client.read_exact(&mut buf).await.unwrap();
+        assert_eq!(&buf, b"ping\n");
+
+        notify.notify_waiters();
+        let _ = tokio::fs::remove_file(&socket_path).await;
+    }
+
+    #[tokio::test]
+    async fn forwards_vsock_round_trip_traffic() {
+        let tempdir = tempdir().unwrap();
+        let vsock_dir = tempdir.path().join("vsock");
+        tokio::fs::create_dir_all(&vsock_dir).await.unwrap();
+        let bridge_path = vsock_dir.join("3.sock");
+        let bridge_listener = UnixListener::bind(&bridge_path).unwrap();
+
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut socket, _)) = bridge_listener.accept().await else {
+                    break;
+                };
+                tokio::spawn(async move {
+                    let mut preface = Vec::new();
+                    loop {
+                        let mut byte = [0u8; 1];
+                        let Ok(read) = socket.read(&mut byte).await else {
+                            return;
+                        };
+                        if read == 0 {
+                            return;
+                        }
+                        preface.push(byte[0]);
+                        if byte[0] == b'\n' {
+                            break;
+                        }
+                    }
+
+                    assert_eq!(String::from_utf8(preface).unwrap(), "CONNECT 2375\n");
+
+                    let mut buffer = [0u8; 1024];
+                    loop {
+                        let Ok(read) = socket.read(&mut buffer).await else {
+                            return;
+                        };
+                        if read == 0 {
+                            return;
+                        }
+                        let _ = socket.write_all(&buffer[..read]).await;
+                    }
+                });
             }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
+        });
+
+        let socket_path = tempdir.path().join("proxy.sock");
+        let notify = Arc::new(Notify::new());
+        let done = notify.clone();
+        let socket_path_for_task = socket_path.clone();
+        let vsock_dir_for_task = vsock_dir.clone();
+
+        tokio::spawn(async move {
+            let _ = run_server(
+                ServerConfig {
+                    listen_path: socket_path_for_task.to_string_lossy().into_owned(),
+                    upstream_raw: "vsock://3:2375".to_string(),
+                    dial_timeout: Duration::from_secs(1),
+                    vsock_socket_dir: vsock_dir_for_task.to_string_lossy().into_owned(),
+                },
+                async move {
+                    done.notified().await;
+                },
+            )
+            .await;
+        });
+
+        wait_for_socket(&socket_path).await;
+
+        let mut client = UnixStream::connect(&socket_path).await.unwrap();
+        client.write_all(b"ping\n").await.unwrap();
+
+        let mut buf = [0u8; 5];
+        client.read_exact(&mut buf).await.unwrap();
+        assert_eq!(&buf, b"ping\n");
+
+        notify.notify_waiters();
+        let _ = tokio::fs::remove_file(&socket_path).await;
+    }
+
+    #[tokio::test]
+    async fn survives_failed_upstream_dial_and_accepts_next_client() {
+        let tempdir = tempdir().unwrap();
+        let socket_path = tempdir.path().join("proxy.sock");
+        let upstream_path = tempdir.path().join("upstream.sock");
+        let notify = Arc::new(Notify::new());
+        let done = notify.clone();
+        let socket_path_for_task = socket_path.clone();
+        let upstream_path_for_task = upstream_path.clone();
+
+        tokio::spawn(async move {
+            let _ = run_server(
+                ServerConfig {
+                    listen_path: socket_path_for_task.to_string_lossy().into_owned(),
+                    upstream_raw: format!("unix://{}", upstream_path_for_task.to_string_lossy()),
+                    dial_timeout: Duration::from_millis(200),
+                    vsock_socket_dir: tempdir.path().join("vsock").to_string_lossy().into_owned(),
+                },
+                async move {
+                    done.notified().await;
+                },
+            )
+            .await;
+        });
+
+        wait_for_socket(&socket_path).await;
+
+        let mut failed_client = UnixStream::connect(&socket_path).await.unwrap();
+        failed_client.write_all(b"first\n").await.unwrap();
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        let mut scratch = [0u8; 8];
+        let read = failed_client.read(&mut scratch).await.unwrap_or(0);
+        assert_eq!(read, 0);
+        drop(failed_client);
+
+        let upstream_listener = UnixListener::bind(&upstream_path).unwrap();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut socket, _)) = upstream_listener.accept().await else {
+                    break;
+                };
+                tokio::spawn(async move {
+                    let mut buffer = [0u8; 1024];
+                    loop {
+                        let Ok(read) = socket.read(&mut buffer).await else {
+                            return;
+                        };
+                        if read == 0 {
+                            return;
+                        }
+                        let _ = socket.write_all(&buffer[..read]).await;
+                    }
+                });
+            }
+        });
 
         let mut client = UnixStream::connect(&socket_path).await.unwrap();
         client.write_all(b"ping\n").await.unwrap();
