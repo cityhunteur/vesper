@@ -639,10 +639,8 @@ async fn balloon_patch_rejects_preboot_updates_on_full_router() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
-    let payload: serde_json::Value = serde_json::from_slice(
-        &to_bytes(response.into_body(), usize::MAX).await.unwrap(),
-    )
-    .unwrap();
+    let payload: serde_json::Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
     assert_eq!(payload["code"], "InvalidState");
     assert_eq!(
         payload["fault_message"],
@@ -667,10 +665,8 @@ async fn balloon_stats_get_rejects_preboot_reads_on_full_router() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
-    let payload: serde_json::Value = serde_json::from_slice(
-        &to_bytes(response.into_body(), usize::MAX).await.unwrap(),
-    )
-    .unwrap();
+    let payload: serde_json::Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
     assert_eq!(payload["code"], "InvalidState");
     assert_eq!(
         payload["fault_message"],
@@ -696,10 +692,8 @@ async fn balloon_stats_patch_rejects_preboot_updates_on_full_router() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
-    let payload: serde_json::Value = serde_json::from_slice(
-        &to_bytes(response.into_body(), usize::MAX).await.unwrap(),
-    )
-    .unwrap();
+    let payload: serde_json::Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
     assert_eq!(payload["code"], "InvalidState");
     assert_eq!(
         payload["fault_message"],
@@ -1078,10 +1072,8 @@ async fn balloon_hinting_status_rejects_preboot_reads_on_full_router() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
-    let payload: serde_json::Value = serde_json::from_slice(
-        &to_bytes(response.into_body(), usize::MAX).await.unwrap(),
-    )
-    .unwrap();
+    let payload: serde_json::Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
     assert_eq!(payload["code"], "InvalidState");
     assert_eq!(
         payload["fault_message"],
@@ -1107,10 +1099,8 @@ async fn balloon_hinting_start_rejects_preboot_updates_on_full_router() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
-    let payload: serde_json::Value = serde_json::from_slice(
-        &to_bytes(response.into_body(), usize::MAX).await.unwrap(),
-    )
-    .unwrap();
+    let payload: serde_json::Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
     assert_eq!(payload["code"], "InvalidState");
     assert_eq!(
         payload["fault_message"],
@@ -1136,10 +1126,8 @@ async fn balloon_hinting_stop_rejects_preboot_updates_on_full_router() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
-    let payload: serde_json::Value = serde_json::from_slice(
-        &to_bytes(response.into_body(), usize::MAX).await.unwrap(),
-    )
-    .unwrap();
+    let payload: serde_json::Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
     assert_eq!(payload["code"], "InvalidState");
     assert_eq!(
         payload["fault_message"],
@@ -1697,10 +1685,8 @@ async fn vsock_put_rejects_invalid_guest_cid_on_full_router() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    let payload: serde_json::Value = serde_json::from_slice(
-        &to_bytes(response.into_body(), usize::MAX).await.unwrap(),
-    )
-    .unwrap();
+    let payload: serde_json::Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
     assert_eq!(payload["code"], "InvalidRequest");
     assert_eq!(
         payload["fault_message"],
@@ -1731,10 +1717,8 @@ async fn vsock_put_rejects_postboot_updates_on_full_router() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    let payload: serde_json::Value = serde_json::from_slice(
-        &to_bytes(response.into_body(), usize::MAX).await.unwrap(),
-    )
-    .unwrap();
+    let payload: serde_json::Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
     assert_eq!(payload["code"], "InvalidState");
     assert_eq!(
         payload["fault_message"],
@@ -1862,10 +1846,8 @@ async fn entropy_put_rejects_postboot_updates_on_full_router() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
-    let payload: serde_json::Value = serde_json::from_slice(
-        &to_bytes(response.into_body(), usize::MAX).await.unwrap(),
-    )
-    .unwrap();
+    let payload: serde_json::Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
     assert_eq!(payload["code"], "InvalidState");
     assert_eq!(
         payload["fault_message"],
@@ -2041,10 +2023,8 @@ async fn boot_source_put_rejects_postboot_updates_on_full_router() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
-    let payload: serde_json::Value = serde_json::from_slice(
-        &to_bytes(response.into_body(), usize::MAX).await.unwrap(),
-    )
-    .unwrap();
+    let payload: serde_json::Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
     assert_eq!(payload["code"], "InvalidState");
     assert_eq!(
         payload["fault_message"],
@@ -2347,10 +2327,8 @@ async fn cpu_config_put_rejects_postboot_updates_on_full_router() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
-    let payload: serde_json::Value = serde_json::from_slice(
-        &to_bytes(response.into_body(), usize::MAX).await.unwrap(),
-    )
-    .unwrap();
+    let payload: serde_json::Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
     assert_eq!(payload["code"], "InvalidState");
     assert_eq!(
         payload["fault_message"],
@@ -4065,10 +4043,8 @@ async fn drive_patch_rejects_preboot_updates_on_full_router() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
-    let payload: serde_json::Value = serde_json::from_slice(
-        &to_bytes(response.into_body(), usize::MAX).await.unwrap(),
-    )
-    .unwrap();
+    let payload: serde_json::Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
     assert_eq!(payload["code"], "InvalidState");
     assert_eq!(
         payload["fault_message"],
@@ -4790,10 +4766,8 @@ async fn network_patch_rejects_preboot_updates_on_full_router() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
-    let payload: serde_json::Value = serde_json::from_slice(
-        &to_bytes(response.into_body(), usize::MAX).await.unwrap(),
-    )
-    .unwrap();
+    let payload: serde_json::Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
     assert_eq!(payload["code"], "InvalidState");
     assert_eq!(
         payload["fault_message"],
@@ -5541,10 +5515,8 @@ async fn memory_hotplug_get_rejects_preboot_reads_on_full_router() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
-    let payload: serde_json::Value = serde_json::from_slice(
-        &to_bytes(response.into_body(), usize::MAX).await.unwrap(),
-    )
-    .unwrap();
+    let payload: serde_json::Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
     assert_eq!(payload["code"], "InvalidState");
     assert_eq!(
         payload["fault_message"],
@@ -5570,10 +5542,8 @@ async fn memory_hotplug_patch_rejects_preboot_updates_on_full_router() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
-    let payload: serde_json::Value = serde_json::from_slice(
-        &to_bytes(response.into_body(), usize::MAX).await.unwrap(),
-    )
-    .unwrap();
+    let payload: serde_json::Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
     assert_eq!(payload["code"], "InvalidState");
     assert_eq!(
         payload["fault_message"],
@@ -5602,10 +5572,8 @@ async fn memory_hotplug_put_rejects_postboot_updates_on_full_router() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
-    let payload: serde_json::Value = serde_json::from_slice(
-        &to_bytes(response.into_body(), usize::MAX).await.unwrap(),
-    )
-    .unwrap();
+    let payload: serde_json::Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
     assert_eq!(payload["code"], "InvalidState");
     assert_eq!(
         payload["fault_message"],
@@ -6129,12 +6097,13 @@ async fn mmds_put_rejects_oversized_store_on_full_router() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
 
-    let payload: serde_json::Value = serde_json::from_slice(
-        &to_bytes(response.into_body(), usize::MAX).await.unwrap(),
-    )
-    .unwrap();
+    let payload: serde_json::Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
     assert_eq!(payload["code"], "PayloadTooLarge");
-    assert_eq!(payload["fault_message"], "The MMDS patch request doesn't fit.");
+    assert_eq!(
+        payload["fault_message"],
+        "The MMDS patch request doesn't fit."
+    );
     assert_eq!(
         payload["baseline_firecracker_revision"].as_str().unwrap(),
         firecracker
@@ -6174,12 +6143,13 @@ async fn mmds_put_requires_runtime_config_on_full_router() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
-    let payload: serde_json::Value = serde_json::from_slice(
-        &to_bytes(response.into_body(), usize::MAX).await.unwrap(),
-    )
-    .unwrap();
+    let payload: serde_json::Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
     assert_eq!(payload["code"], "InvalidRequest");
-    assert_eq!(payload["fault_message"], "The MMDS data store is not initialized.");
+    assert_eq!(
+        payload["fault_message"],
+        "The MMDS data store is not initialized."
+    );
     assert_eq!(
         payload["baseline_firecracker_revision"].as_str().unwrap(),
         firecracker
@@ -6203,12 +6173,13 @@ async fn mmds_patch_requires_initialized_store_on_full_router() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
-    let payload: serde_json::Value = serde_json::from_slice(
-        &to_bytes(response.into_body(), usize::MAX).await.unwrap(),
-    )
-    .unwrap();
+    let payload: serde_json::Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
     assert_eq!(payload["code"], "InvalidRequest");
-    assert_eq!(payload["fault_message"], "The MMDS data store is not initialized.");
+    assert_eq!(
+        payload["fault_message"],
+        "The MMDS data store is not initialized."
+    );
     assert_eq!(
         payload["baseline_firecracker_revision"].as_str().unwrap(),
         firecracker
@@ -6248,12 +6219,13 @@ async fn mmds_patch_requires_runtime_config_on_full_router() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
-    let payload: serde_json::Value = serde_json::from_slice(
-        &to_bytes(response.into_body(), usize::MAX).await.unwrap(),
-    )
-    .unwrap();
+    let payload: serde_json::Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
     assert_eq!(payload["code"], "InvalidRequest");
-    assert_eq!(payload["fault_message"], "The MMDS data store is not initialized.");
+    assert_eq!(
+        payload["fault_message"],
+        "The MMDS data store is not initialized."
+    );
     assert_eq!(
         payload["baseline_firecracker_revision"].as_str().unwrap(),
         firecracker
@@ -6292,12 +6264,13 @@ async fn mmds_patch_rejects_oversized_merge_on_full_router() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
 
-    let payload: serde_json::Value = serde_json::from_slice(
-        &to_bytes(response.into_body(), usize::MAX).await.unwrap(),
-    )
-    .unwrap();
+    let payload: serde_json::Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
     assert_eq!(payload["code"], "PayloadTooLarge");
-    assert_eq!(payload["fault_message"], "The MMDS patch request doesn't fit.");
+    assert_eq!(
+        payload["fault_message"],
+        "The MMDS patch request doesn't fit."
+    );
     assert_eq!(
         payload["baseline_firecracker_revision"].as_str().unwrap(),
         firecracker
@@ -6321,12 +6294,8 @@ async fn mmds_config_put_rejects_empty_network_interface_list_on_full_router() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
-    let payload: serde_json::Value = serde_json::from_slice(
-        &to_bytes(response.into_body(), usize::MAX)
-            .await
-            .unwrap(),
-    )
-    .unwrap();
+    let payload: serde_json::Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
     assert_eq!(payload["code"], "InvalidRequest");
     assert_eq!(
         payload["fault_message"],
@@ -6354,7 +6323,10 @@ async fn mmds_config_put_rejects_unknown_network_interface_on_full_router() {
         )
         .await
         .unwrap();
-    assert_eq!(put_network_interface_response.status(), StatusCode::NO_CONTENT);
+    assert_eq!(
+        put_network_interface_response.status(),
+        StatusCode::NO_CONTENT
+    );
 
     let response = router
         .oneshot(
@@ -6369,10 +6341,8 @@ async fn mmds_config_put_rejects_unknown_network_interface_on_full_router() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
-    let payload: serde_json::Value = serde_json::from_slice(
-        &to_bytes(response.into_body(), usize::MAX).await.unwrap(),
-    )
-    .unwrap();
+    let payload: serde_json::Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
     assert_eq!(payload["code"], "InvalidRequest");
     assert_eq!(
         payload["fault_message"],
@@ -6400,7 +6370,10 @@ async fn mmds_config_put_rejects_non_link_local_ipv4_on_full_router() {
         )
         .await
         .unwrap();
-    assert_eq!(put_network_interface_response.status(), StatusCode::NO_CONTENT);
+    assert_eq!(
+        put_network_interface_response.status(),
+        StatusCode::NO_CONTENT
+    );
 
     let response = router
         .oneshot(
@@ -6417,10 +6390,8 @@ async fn mmds_config_put_rejects_non_link_local_ipv4_on_full_router() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
-    let payload: serde_json::Value = serde_json::from_slice(
-        &to_bytes(response.into_body(), usize::MAX).await.unwrap(),
-    )
-    .unwrap();
+    let payload: serde_json::Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
     assert_eq!(payload["code"], "InvalidRequest");
     assert_eq!(
         payload["fault_message"],
@@ -6448,7 +6419,10 @@ async fn mmds_config_put_rejects_runtime_updates_on_full_router() {
         )
         .await
         .unwrap();
-    assert_eq!(put_network_interface_response.status(), StatusCode::NO_CONTENT);
+    assert_eq!(
+        put_network_interface_response.status(),
+        StatusCode::NO_CONTENT
+    );
 
     boot_instance(router.clone()).await;
 
@@ -6465,10 +6439,8 @@ async fn mmds_config_put_rejects_runtime_updates_on_full_router() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
-    let payload: serde_json::Value = serde_json::from_slice(
-        &to_bytes(response.into_body(), usize::MAX).await.unwrap(),
-    )
-    .unwrap();
+    let payload: serde_json::Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
     assert_eq!(payload["code"], "InvalidState");
     assert_eq!(
         payload["fault_message"],
