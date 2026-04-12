@@ -1,5 +1,18 @@
 # Symphony milestones
 
+### 2026-04-12 — WOR-104 — Network-interface endpoint baseline packet captured
+- GitHub issue: #109
+- PR: none
+- Commit: pending local commit
+- Phase: 0
+- Parity unit: package the existing `/network-interfaces/{iface_id}` family baseline into an issue-local endpoint packet without repopulating the placeholder capture registry
+- Result: keep
+- Verification bundle: `.symphony/runs/WOR-104/current/`
+- Council summary: not run for this docs/harness truth-repair slice; local review confirmed no code-path change and the acceptance gate stayed green
+- Harness update: added `run/WOR-104/api/network-interface-endpoint-baseline-packet.md` tying together the existing network create, conflict, runtime patch, and `/vm/config` export evidence, reused the placeholder-registry boundary clarified in WOR-106, and kept the generated surface and behavior matrices unchanged and valid
+- Remaining risks: GH `#2` still needs broader endpoint-level parity beyond the seeded route matrix; `src/api.rs` remains the long-standing architectural hotspot; `WOR-105` is the next ready backlog slice after this issue lands
+- Truthful project state after this milestone: `/network-interfaces/{iface_id}` now has a durable issue-local endpoint baseline packet tied to GH `#109`/WOR-104, and this slice does not claim new network-interface handler behavior or broader GH `#2` completion
+
 ### 2026-04-11 — WOR-106 — Hotplug-memory endpoint baseline packet reconciled to the current harness model
 - GitHub issue: #108
 - PR: none
