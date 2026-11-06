@@ -1,0 +1,118 @@
+#!/bin/sh
+# Vesper workloads (GH #20): one container-style workload = one jailed Firecracker microVM with its own rootfs copy.
+# usage: vesper-workload run NAME IMAGE -- CMD...   build (cached) the image's rootfs, copy it, launch the microVM, run CMD inside
+#        vesper-workload ps                          one line per workload: NAME STATE pid=N image=ID
+#        vesper-workload logs NAME                   workload output (between the START and EXIT markers)
+#        vesper-workload wait NAME [TIMEOUT]         wait for the command to finish; tears the microVM down; EXITED NAME code=N
+#        vesper-workload stop NAME                   stop the microVM (SIGTERM) and tear it down; STOPPED NAME
+#        vesper-workload rm NAME                     stop if needed, remove the jail, cgroup, rootfs copy and record
+#        vesper-workload isolation NAME              the microVM manager's isolation JSON
+set -u
+WL=/var/lib/vesper/workloads
+MV=/usr/local/bin/vesper-microvm
+RF=/usr/local/bin/vesper-rootfs
+mkdir -p "$WL"
+
+rec() { echo "${WL:?}/${1:?}.json"; }
+field() { sed -n "s/.*\"$2\":\"\([^\"]*\)\".*/\1/p" "$(rec "$1")" 2>/dev/null; }
+mvid() { echo "wl-${1:?}"; }
+logfile() { echo "/var/log/vesper-microvm-$(mvid "$1").log"; }
+
+run() {
+  name=${1:-}; image=${2:-}; shift 2
+  [ "${1:-}" = "--" ] && shift
+  [ -n "$name" ] && [ -n "$image" ] && [ $# -gt 0 ] || { echo "ERR usage: run NAME IMAGE -- CMD..."; return 2; }
+  [ -f "$(rec "$name")" ] && { echo "ERR workload $name exists (rm it first)"; return 1; }
+  built=$("$RF" build "$image" 2>&1) || { echo "ERR rootfs build failed: $(printf '%s' "$built" | head -1)"; return 1; }
+  src=$(printf '%s' "$built" | head -1 | awk '{print $2}')
+  imgid=$(sed -n 's/.*"image_id":"\([^"]*\)".*/\1/p' "$src.provenance.json" 2>/dev/null)
+  copy="${WL:?}/${name:?}.ext4"
+  cp "$src" "$copy" || { echo "ERR rootfs copy failed"; return 1; }
+  cmd="$*"
+  b64=$(printf '%s' "$cmd" | base64 | tr -d '\n')
+  printf '{"name":"%s","image":"%s","image_id":"%s","microvm":"%s","rootfs":"%s","cmd_b64":"%s"}\n' "$name" "$image" "$imgid" "$(mvid "$name")" "$copy" "$b64" > "$(rec "$name")"
+  if ! out=$("$MV" launch "$(mvid "$name")" --rootfs "$copy" --cmd "$b64" 2>&1); then
+    echo "ERR launch failed: $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-200)"
+    rm -f "$(rec "$name")" "$copy"
+    return 1
+  fi
+  lf=$(logfile "$name")
+  for _ in $(seq 1 120); do grep -q "VESPER-WORKLOAD-START" "$lf" 2>/dev/null && break; sleep 0.25; done
+  grep -q "VESPER-WORKLOAD-START" "$lf" 2>/dev/null || { echo "ERR workload did not start: $(tail -n 3 "$lf" | tr '\n' ' ')"; return 1; }
+  pid=$(printf '%s' "$out" | sed -n 's/.*pid=\([0-9]*\).*/\1/p')
+  echo "STARTED $name microvm=$(mvid "$name") pid=${pid:-?} image=$imgid"
+}
+
+state() { # NAME -> RUNNING|EXITED <code>|STOPPED|ABSENT
+  name=$1; lf=$(logfile "$name")
+  st=$("$MV" status "$(mvid "$name")" 2>/dev/null | awk '{print $1}')
+  code=$(sed -n 's/^VESPER-WORKLOAD-EXIT \([0-9]*\).*/\1/p' "$lf" 2>/dev/null | tail -1)
+  if [ "$st" = "RUNNING" ]; then echo RUNNING
+  elif [ -n "$code" ]; then echo "EXITED $code"
+  elif [ -f "$(rec "$name")" ]; then echo STOPPED
+  else echo ABSENT; fi
+}
+
+ps_() {
+  for r in "$WL"/*.json; do
+    [ -f "$r" ] || continue
+    n=$(sed -n 's/.*"name":"\([^"]*\)".*/\1/p' "$r")
+    pid=$(pgrep -f "firecracker --id $(mvid "$n") " 2>/dev/null | head -1)
+    echo "$n $(state "$n" | awk '{print $1}') pid=${pid:--} image=$(field "$n" image_id)"
+  done
+}
+
+logs() {
+  name=${1:-}; lf=$(logfile "$name")
+  [ -f "$lf" ] || { echo "ERR no log for $name"; return 1; }
+  sed -n '/^VESPER-WORKLOAD-START/,/^VESPER-WORKLOAD-EXIT/p' "$lf" | grep -vE '^VESPER-WORKLOAD-(START|EXIT)'
+}
+
+wait_() {
+  name=${1:-}; timeout=${2:-60}
+  [ -f "$(rec "$name")" ] || { echo "ERR unknown workload $name"; return 1; }
+  i=0
+  while [ "$i" -lt "$((timeout * 4))" ]; do
+    s=$(state "$name")
+    case "$s" in EXITED*) break ;; esac
+    i=$((i + 1)); sleep 0.25
+  done
+  s=$(state "$name")
+  case "$s" in
+    EXITED*) code=${s#EXITED }; "$MV" cleanup "$(mvid "$name")" >/dev/null 2>&1; echo "EXITED $name code=$code" ;;
+    *) echo "ERR $name still $s after ${timeout}s"; return 1 ;;
+  esac
+}
+
+stop() {
+  name=${1:-}
+  [ -f "$(rec "$name")" ] || { echo "ERR unknown workload $name"; return 1; }
+  "$MV" stop "$(mvid "$name")" >/dev/null 2>&1
+  out=$("$MV" cleanup "$(mvid "$name")" 2>&1) || { echo "ERR teardown incomplete: $out"; return 1; }
+  echo "STOPPED $name teardown=$(printf '%s' "$out" | awk '{print $1}')"
+}
+
+rm_() {
+  name=${1:-}
+  [ -f "$(rec "$name")" ] || { echo "ERR unknown workload $name"; return 1; }
+  "$MV" stop "$(mvid "$name")" >/dev/null 2>&1
+  "$MV" cleanup "$(mvid "$name")" >/dev/null 2>&1
+  rm -f "${WL:?}/${name:?}.ext4" "$(rec "$name")" "$(logfile "$name")"
+  left=""
+  [ -n "$(pgrep -f "firecracker --id $(mvid "$name") " 2>/dev/null)" ] && left="$left process"
+  [ -e "/srv/jailer/firecracker/$(mvid "$name")" ] && left="$left jail"
+  [ -e "${WL:?}/${name:?}.ext4" ] && left="$left rootfs"
+  if [ -z "$left" ]; then echo "REMOVED $name"; else echo "ERR leftovers for $name:$left"; return 1; fi
+}
+
+cmd=${1:-}; shift 2>/dev/null
+case "$cmd" in
+  run) run "$@" ;;
+  ps) ps_ ;;
+  logs) logs "$@" ;;
+  wait) wait_ "$@" ;;
+  stop) stop "$@" ;;
+  rm) rm_ "$@" ;;
+  isolation) "$MV" isolation "$(mvid "${1:-}")" ;;
+  *) echo "ERR usage: vesper-workload run|ps|logs|wait|stop|rm|isolation"; exit 2 ;;
+esac

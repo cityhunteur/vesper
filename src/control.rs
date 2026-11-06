@@ -242,6 +242,11 @@ impl Session {
         self.guest_tool("ROOTFS", args)
     }
 
+    /// Runs `vesper-workload <args>` in the guest; returns its exit code and output lines.
+    pub fn workload(&mut self, args: &[&str]) -> Result<(i32, Vec<String>), String> {
+        self.guest_tool("WORKLOAD", args)
+    }
+
     /// Runs a guest tool command (`MICROVM`, `ROOTFS`): waits up to 120 s because launches and image
     /// builds take longer than the default I/O timeout.
     fn guest_tool(&mut self, tool: &str, args: &[&str]) -> Result<(i32, Vec<String>), String> {

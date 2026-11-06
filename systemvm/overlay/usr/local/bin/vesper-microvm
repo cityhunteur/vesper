@@ -1,10 +1,12 @@
 #!/bin/sh
 # Vesper microVM manager (GH #18): stock Firecracker under the jailer inside the System VM.
 # usage: vesper-microvm prepare
-#        vesper-microvm launch ID [--exit] [--rootfs PATH]
+#        vesper-microvm launch ID [--exit] [--rootfs PATH] [--cmd BASE64]
 #                                             boot a microVM (kernel + busybox initramfs); --exit powers off after the
 #                                             marker; --rootfs attaches an ext4 image as /dev/vda, mounts it, prints
-#                                             VESPER-ROOTFS-OK <source digest> from its provenance and switches root
+#                                             VESPER-ROOTFS-OK <source digest> from its provenance and switches root;
+#                                             --cmd runs the base64-encoded shell command inside the rootfs, prints
+#                                             VESPER-WORKLOAD-START, its output, VESPER-WORKLOAD-EXIT <code>, then powers off
 #        vesper-microvm status ID            RUNNING ID pid=N | EXITED ID | ABSENT ID
 #        vesper-microvm isolation ID         JSON with uid, chroot, cgroup and seccomp checks
 #        vesper-microvm stop ID              SIGTERM, wait up to 10 s
@@ -70,6 +72,18 @@ if /bin/busybox grep -q vesper_rootfs=1 /proc/cmdline; then
   if /bin/busybox mount -t ext4 /dev/vda /newroot; then
     src=$(/bin/busybox sed -n 's/.*"image_id":"\([^"]*\)".*/\1/p' /newroot/etc/vesper-provenance.json 2>/dev/null)
     echo "VESPER-ROOTFS-OK ${src:-no-provenance}"
+    cmd64=$(/bin/busybox sed -n 's/.*vesper_cmd=\([A-Za-z0-9+/=]*\).*/\1/p' /proc/cmdline)
+    if [ -n "$cmd64" ]; then
+      cmd=$(echo "$cmd64" | /bin/busybox base64 -d)
+      /bin/busybox mkdir -p /newroot/proc /newroot/dev /newroot/tmp
+      /bin/busybox mount -t proc proc /newroot/proc 2>/dev/null
+      /bin/busybox mount -t devtmpfs devtmpfs /newroot/dev 2>/dev/null
+      echo "VESPER-WORKLOAD-START"
+      /bin/busybox chroot /newroot /bin/sh -c "$cmd"
+      rc=$?
+      echo "VESPER-WORKLOAD-EXIT $rc"
+      /bin/busybox poweroff -f
+    fi
     if [ -x /newroot/sbin/init ]; then
       exec /bin/busybox switch_root /newroot /sbin/init
     fi
@@ -88,11 +102,12 @@ INIT
 
 launch() {
   id=$1; shift
-  mode=""; rootfs=""
+  mode=""; rootfs=""; cmd64=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --exit) mode=--exit ;;
       --rootfs) rootfs=$2; shift ;;
+      --cmd) cmd64=$2; shift ;;
       *) echo "ERR unknown launch option $1"; return 2 ;;
     esac
     shift
@@ -108,6 +123,10 @@ launch() {
   extra=""
   [ "$mode" = "--exit" ] && extra=" vesper_exit=1"
   drives="[]"
+  if [ -n "$cmd64" ]; then
+    [ -n "$rootfs" ] || { echo "ERR --cmd needs --rootfs"; return 2; }
+    extra="$extra vesper_cmd=$cmd64"
+  fi
   if [ -n "$rootfs" ]; then
     cp "$rootfs" "$root/rootfs.ext4"
     extra="$extra vesper_rootfs=1"

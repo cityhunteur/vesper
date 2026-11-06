@@ -106,13 +106,14 @@ Public symbols by file:
   `ControlEndpoint { bridge_path, port, io_timeout }` with
   `new(bridge, port)` (10 s timeouts), `Handshake { protocol_version,
   hostname, connect_ms }`, `Session` with `ping`, `version`, `echo(payload)`,
-  `health`, `kill_service(name)`, `logs(name, count)`, `microvm(args)` and
-  `rootfs(args)` (guest tools; 120 s read timeout), `drop_connection`,
+  `health`, `kill_service(name)`, `logs(name, count)`, `microvm(args)`,
+  `rootfs(args)` and `workload(args)` (guest tools; 120 s read timeout), `drop_connection`,
   `shutdown`, `keepalive(interval, total)`,
   `connect(&endpoint)`, `connect_with_retry(&endpoint, attempts, backoff)`,
   `SuiteStep`, `SuiteReport`, `run_suite(&endpoint, interval, total,
   payload_bytes)`, `run_services_suite(&endpoint, &[service], recovery_timeout)`,
   `run_microvm_suite(&endpoint, id)`, `run_rootfs_suite(&endpoint, id)`,
+  `run_workload_suite(&endpoint)`,
   `write_report(path, &report)`; constants
   `AGENT_PROTOCOL_VERSION` (1), `DEFAULT_AGENT_PORT` (1024).
 - `systemvm.rs` (manifest, launch config, boot smoke),
@@ -313,6 +314,16 @@ Public symbols by file:
   `launch_with_rootfs`, `rootfs_boots` (`VESPER-ROOTFS-OK <image id>` and
   `VESPER-ROOTFS-EXEC-OK` in the microVM log within 30 s) and
   `cleanup_after_rootfs_boot`; `passed` requires every step ok.
+- `control/suites.rs:run_workload_suite` removes `wa`..`wd`, then runs
+  `handshake`, `import_trivial_image`, `run_wa`, `run_wb_concurrent`,
+  `run_wc_concurrent` (`STARTED`), `three_microvms_running` (three `RUNNING`
+  rows with distinct `pid=`), `isolation_between_microvms` (every isolation
+  flag true, three distinct cgroups, `wb` sees `absent` for `wa`'s file),
+  `stop_wa_tears_down_its_microvm` (`STOPPED`), `others_unaffected_by_stop`
+  (`wa` not RUNNING, `wb`/`wc` RUNNING, `wl-wa` CLEAN), `run_wd_short`,
+  `wait_maps_exit_code_and_output` (`EXITED wd code=3`, output present),
+  `rm_wa`..`rm_wd` (`REMOVED`) and `nothing_left` (empty `ps`); `passed`
+  requires every step ok and at least 14 steps.
 - `systemvm/packages.rs:validate_packages_lock` requires schema `2`,
   non-blank branch and arch, every requested package in the closure,
   packages sorted by name without duplicates, `file ==

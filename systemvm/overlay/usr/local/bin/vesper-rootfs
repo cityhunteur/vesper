@@ -19,7 +19,8 @@ import_trivial() {
   mkdir -p "$work/root/bin" "$work/root/lib" "$work/root/etc"
   cp /bin/busybox "$work/root/bin/busybox"
   cp /lib/ld-musl-aarch64.so.1 "$work/root/lib/ld-musl-aarch64.so.1"
-  ln -s busybox "$work/root/bin/sh"
+  for a in $(/bin/busybox --list); do ln -s busybox "$work/root/bin/$a"; done
+  mkdir -p "$work/root/tmp" "$work/root/proc" "$work/root/dev"
   echo "vesper trivial image" > "$work/root/etc/vesper-trivial"
   find "$work/root" -exec touch -h -t 197001010000.00 {} + 2>/dev/null
   (cd "$work/root" && find . | sort | cpio -o -H ustar 2>/dev/null > "$work/trivial.tar") || tar -C "$work/root" -cf "$work/trivial.tar" .

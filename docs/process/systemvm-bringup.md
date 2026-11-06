@@ -233,6 +233,21 @@ initramfs (now carrying virtio-mmio, virtio-blk, crc32c and ext4 modules from th
 executes a command from the rootfs. `make systemvm-rootfs-suite` runs the GH #19 checklist (11 steps) and writes
 `run/systemvm/rootfs-report.json`. Reproducibility is keyed by the image id (TD-031).
 
+## MicroVM per container (GH #20)
+
+`vesper-workload` (overlay, `usr/local/bin`) maps one workload to one jailed microVM. `run NAME IMAGE -- CMD…`
+builds (or reuses) the image's rootfs with `vesper-rootfs`, copies it to `/var/lib/vesper/workloads/NAME.ext4`,
+and launches `vesper-microvm launch wl-NAME --rootfs … --cmd <base64 CMD>`; the microVM init mounts the rootfs,
+chroots into it, prints `VESPER-WORKLOAD-START`, the command's output and `VESPER-WORKLOAD-EXIT <code>`, then
+powers off. `ps` lists `NAME STATE pid=N image=ID` (RUNNING from the microVM manager, EXITED from the console
+log's exit marker, STOPPED otherwise), `logs NAME` returns the output between the markers, `wait NAME [TIMEOUT]`
+blocks until the exit marker and tears the microVM down (`EXITED NAME code=N`), `stop NAME` sends SIGTERM and
+cleans the jail and cgroup (`STOPPED NAME teardown=CLEAN`), `rm NAME` removes the jail, cgroup, rootfs copy,
+record and log (`REMOVED NAME` or `ERR leftovers`), `isolation NAME` returns the microVM manager's isolation
+JSON. `make systemvm-workload-suite` runs the GH #20 checklist (16 steps: three concurrent microVMs with distinct
+pids and cgroups, a file written in one rootfs invisible to another, stop of one leaving the others running,
+exit-code and output mapping, full removal) and writes `run/systemvm/workload-report.json`. Limits: TD-032.
+
 ## Proxy bridge convention
 
 Phase 0 keeps the proxy-side vsock bridge inspectable by resolving
