@@ -45,7 +45,9 @@ The durable signals this project relies on are artifacts rather than live teleme
   (`steps[]` with `name`, `ok`, `detail`, `elapsed_ms`, and `passed`) from `systemvmctl control suite` and
   `services-suite`; the agent's `HEALTH` line (`packages_ready`, `services_ready`, OpenRC state per service,
   `containerd_ok`, `docker_ok`, `docker_version`); guest logs through `systemvmctl control logs
-  <messages|containerd|docker>` (`/var/log/messages` holds the `supervise-daemon` respawn lines).
+  <messages|containerd|docker>` (`/var/log/messages` holds the `supervise-daemon` respawn lines);
+  `run/vesper/vesper-proxy.log` and `run/systemvm/docker-smoke-report.json` from `make docker-up` and
+  `make docker-smoke`.
 - `build/systemvm/image-manifest.json` (SHA-256 digests, stable `image_id`) and `build/systemvm/launch-config.json`.
 - `artifacts/parity-metadata.json` from `baselinectl --mode generate`.
 - JSON and Markdown reports from the Python sensors (`--json-out`, `--markdown-out`), uploaded by the `harness-*`
