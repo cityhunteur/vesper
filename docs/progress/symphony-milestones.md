@@ -6,6 +6,19 @@ last_reviewed: 2026-11-05
 
 # Symphony milestones
 
+### 2026-11-06 — WOR-24 — Nested virtualization detection and backend gating, GH #17 complete
+- GitHub issue: #17 (mirror #66)
+- PR: #127
+- Commit: `8469d90` (squash merge of PR #127; remote CI green, incl. the M2 runner's fallback path)
+- Phase: 2
+- Parity unit: host capability probe through Apple's API, `auto|require|off` nested policy in the lock and launch config, Backend A/B selection with diagnostics, KVM presence reported by the guest
+- Result: keep
+- Verification bundle: `.symphony/runs/WOR-24/current/` (evidence in `run/WOR-24/systemvm/`)
+- Council summary: skipped; no control-plane path changed; six remote workflows green
+- Harness update: `vesper-vmlauncher --host-capabilities`; `platform::HostCapabilities`, `NestedPolicy`, `select_backend`; `systemvmctl backend-select`; lock schema 6; `HEALTH.kvm`; CI gating step on the M-series runner; a structure-checker ERROR was caught in CI after a `tail -2` hid it locally
+- Remaining risks: Backend B fallback is not implemented (design-v0 Phase 5); no M1/M2 host booted a guest (CI's M2 runner cannot boot at all)
+- Truthful project state after this milestone: an M3 Pro boots the System VM with `/dev/kvm` available for Backend A; unsupported hosts get a diagnostic and the fallback selection; Phase 2 continues with WOR-31 (Firecracker and jailer lifecycle in the System VM)
+
 ### 2026-11-06 — WOR-12 — Phase 1 System VM bring-up complete on developer hardware
 - GitHub issue: #3 (mirror #54)
 - PR: none (epic close-out; sub-issues landed as PRs #119 to #126)
