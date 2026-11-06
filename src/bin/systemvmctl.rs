@@ -2,6 +2,7 @@ use clap::{Parser, Subcommand};
 
 const DEFAULT_IMAGE_LOCK: &str = "docs/specs/systemvm-image.lock.yaml";
 const DEFAULT_IMAGE_DIR: &str = "build/systemvm";
+const DEFAULT_PACKAGES_LOCK: &str = "docs/specs/systemvm-packages.lock.yaml";
 const DEFAULT_MANIFEST: &str = "build/systemvm/image-manifest.json";
 
 #[derive(Parser, Debug)]
@@ -59,6 +60,18 @@ enum Commands {
         #[arg(long, default_value = DEFAULT_IMAGE_LOCK)]
         lock: String,
     },
+    /// Print `file<TAB>url<TAB>sha256` for every pinned package.
+    PackageList {
+        #[arg(long, default_value = DEFAULT_PACKAGES_LOCK)]
+        lock: String,
+    },
+    /// Check downloaded packages against the packages lock.
+    VerifyPackages {
+        #[arg(long, default_value = DEFAULT_PACKAGES_LOCK)]
+        lock: String,
+        #[arg(long, default_value = "build/systemvm/cache/apks")]
+        dir: String,
+    },
     /// Check fetched artifacts against the lock and write the manifest.
     VerifyImage {
         #[arg(long, default_value = DEFAULT_IMAGE_LOCK)]
@@ -67,6 +80,9 @@ enum Commands {
         dir: String,
         #[arg(long, default_value = DEFAULT_MANIFEST)]
         out: String,
+        /// Fail when the lock has an overlay but the derived initramfs has not been built.
+        #[arg(long)]
+        require_overlay: bool,
     },
     BootSmoke {
         #[arg(long, default_value_t = 5)]
@@ -153,9 +169,25 @@ fn run() -> Result<(), String> {
             print!("{}", vesper::systemvm::image_lock_env(&lock));
             Ok(())
         }
-        Commands::VerifyImage { lock, dir, out } => {
+        Commands::PackageList { lock } => {
+            let lock = vesper::systemvm::load_packages_lock(&lock)?;
+            print!("{}", vesper::systemvm::packages_list(&lock));
+            Ok(())
+        }
+        Commands::VerifyPackages { lock, dir } => {
+            let lock = vesper::systemvm::load_packages_lock(&lock)?;
+            let count = vesper::systemvm::verify_packages(&lock, &dir)?;
+            println!("verified {count} pinned packages in {dir}");
+            Ok(())
+        }
+        Commands::VerifyImage {
+            lock,
+            dir,
+            out,
+            require_overlay,
+        } => {
             let lock = vesper::systemvm::load_image_lock(&lock)?;
-            let manifest = vesper::systemvm::verify_image(&lock, &dir)?;
+            let manifest = vesper::systemvm::verify_image(&lock, &dir, require_overlay)?;
             vesper::systemvm::write_manifest(&out, &manifest)?;
             println!(
                 "verified {} {} {} image in {dir}: image_id={} (manifest: {out})",

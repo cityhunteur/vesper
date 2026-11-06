@@ -4,13 +4,15 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 mod image_lock;
+mod packages;
 pub use image_lock::*;
+pub use packages::*;
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
 pub const MANIFEST_SCHEMA_VERSION: &str = "2";
-pub const IMAGE_LOCK_SCHEMA_VERSION: u32 = 3;
+pub const IMAGE_LOCK_SCHEMA_VERSION: u32 = 4;
 pub const DEFAULT_KERNEL_CMDLINE: &str = "console=hvc0";
 pub const DEFAULT_READY_PATTERN: &str = "login:";
 
@@ -43,6 +45,11 @@ pub struct ImageManifest {
     pub boot_media_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub boot_media_sha256: Option<String>,
+    /// Derived initramfs (pinned initramfs + overlay archive) when the lock has an `overlay` section.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overlay_initrd_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overlay_initrd_sha256: Option<String>,
     pub image_id: String,
 }
 
@@ -204,6 +211,8 @@ pub fn build_manifest(config: &ImageBuildConfig) -> Result<ImageManifest, String
         initrd_sha256: initrd_sha,
         boot_media_path,
         boot_media_sha256: boot_media_sha,
+        overlay_initrd_path: None,
+        overlay_initrd_sha256: None,
     })
 }
 

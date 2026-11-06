@@ -1,0 +1,21 @@
+#!/bin/sh
+# Install the pinned extras (docs/specs/systemvm-packages.lock.yaml) that
+# scripts/systemvm/build-initramfs.py placed under /var/lib/vesper/apks in
+# the overlay. The packages are Alpine-signed; apk verifies them against the
+# keys on the boot media. Writes /run/vesper/packages-ready on success.
+set -eu
+mkdir -p /run/vesper
+log() { echo "vesper: $*" > /dev/console; }
+if ls /var/lib/vesper/apks/*.apk >/dev/null 2>&1; then
+  log "installing $(ls /var/lib/vesper/apks/*.apk | wc -l) pinned packages"
+  if apk add --quiet --no-progress --force-non-repository /var/lib/vesper/apks/*.apk; then
+    touch /run/vesper/packages-ready
+    log "packages ready"
+  else
+    log "package install FAILED"
+    exit 1
+  fi
+else
+  log "no extra packages in the overlay"
+  touch /run/vesper/packages-ready
+fi

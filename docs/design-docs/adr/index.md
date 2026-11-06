@@ -15,6 +15,7 @@ new ADR, and the old ADR then links forward to it. The repository had no ADR ser
 | ADR | Title | Status | Date | Supersedes |
 |---|---|---|---|---|
 | [0001](0001-systemvm-launcher-swift-helper.md) | Boot the System VM through a thin Swift Virtualization.framework helper | accepted | 2026-11-06 | none |
+| [0002](0002-systemvm-overlay-via-initramfs.md) | Customise the System VM with an Alpine overlay delivered through the initramfs | accepted | 2026-11-06 | none |
 
 ## Candidates
 
