@@ -44,9 +44,10 @@ None of these are secrets.
 
 ## Local infrastructure
 
-None. There is no database, queue or container dependency. `assets/systemvm/vmlinux` and `assets/systemvm/rootfs.ext4`
-are 47-byte placeholders; a real System VM boot needs real images supplied by path (**Unknown** where they come from;
-see [process/systemvm-bringup.md](process/systemvm-bringup.md)).
+None. There is no database, queue or container dependency. The System VM kernel and initramfs are not checked in:
+`make systemvm-fetch` downloads the release pinned in `docs/specs/systemvm-image.lock.yaml` (Alpine netboot, about
+330 MB, cached under `build/systemvm/cache/`) and verifies every digest before writing `build/systemvm/`
+(see [process/systemvm-bringup.md](process/systemvm-bringup.md)). Nothing boots the image yet (TD-005).
 
 ## Build and run
 
@@ -92,7 +93,7 @@ All generated files are committed and checked in CI.
 | `baselinectl --mode generate-api-matrix` | swagger + `docs/specs/firecracker-api-baseline-captures.yaml` | `docs/generated/firecracker-api-surface-stub-matrix.json` | `make surface-matrix-generate` | `make surface-matrix-check` (CI: `rust-tests.yml`) |
 | `baselinectl --mode generate-api-behavior-matrix` | swagger + `docs/specs/firecracker-api-behavior-captures.yaml` | `docs/generated/firecracker-api-behavior-matrix.json` | `make behavior-matrix-generate` | `make behavior-matrix-check` (CI: `rust-tests.yml`) |
 | `baselinectl --mode generate` | baseline lock + `--backend/--host-os/--host-cpu` | `artifacts/parity-metadata.json` (not committed) | `cargo run --bin baselinectl -- --mode generate --backend backend-a --host-os macos --host-cpu arm64 --metadata artifacts/parity-metadata.json` | `cargo run --bin baselinectl -- --mode validate --metadata artifacts/parity-metadata.json` (CI: `baseline-governance.yml`) |
-| `systemvmctl` | kernel + rootfs paths | `build/systemvm/*.json` (not committed) | `make systemvm-build`, `make systemvm-launch-config` | none |
+| `systemvmctl` | `docs/specs/systemvm-image.lock.yaml`, fetched kernel + initramfs | `build/systemvm/{vmlinuz-virt,initramfs-virt,image-manifest.json,launch-config.json}` (not committed) | `make systemvm-fetch`, `make systemvm-build`, `make systemvm-launch-config` | `make systemvm-fetch` (CI: `systemvm-image.yml`) |
 
 ## Documentation checks
 

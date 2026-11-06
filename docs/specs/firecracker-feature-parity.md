@@ -30,7 +30,7 @@ last_reviewed: 2026-11-05
 - `src/api.rs` initializes route handlers as `NotImplemented` by default and only implements `PUT /actions` `InstanceStart` with partial preboot/runtime guards.
 - `tests/api_contract.rs` checks route reachability plus baseline revision envelope, not full endpoint behavior parity.
 - `src/proxy.rs` forwards `unix`/`tcp` sockets but explicitly returns `vsock dialing not implemented on this build`.
-- `src/systemvm.rs` provides deterministic manifest, launch-config, and boot-smoke scaffolding rather than full runtime orchestration.
+- `src/systemvm.rs` provides deterministic image-lock verification, manifest, launch-config, and boot-smoke scaffolding rather than full runtime orchestration.
 - `src/baseline.rs`, `src/compat.rs`, `.github/workflows/baseline-governance.yml`, `.github/workflows/compat-exceptions.yml`, and `.github/workflows/eval-on-review.yml` provide governance/eval automation.
 - `scripts/ci/validate-entitlements.sh` provides a Linux-compatible entitlement validation fallback (the blocker tracked by `#41`).
 
@@ -49,7 +49,7 @@ last_reviewed: 2026-11-05
 | [#9](https://github.com/cityhunteur/vesper/issues/9) | 0 | CLOSED | Pass after prior fail | Implemented: `src/proxy.rs` now forwards unix, tcp, and `vsock://<cid>:<port>` upstreams, resolving the Phase 0 vsock path through a host UDS bridge and issuing the Firecracker-style `CONNECT <port>` preface before relaying traffic. |
 | [#10](https://github.com/cityhunteur/vesper/issues/10) | 0 | CLOSED | Pass after prior fail | Implemented: macOS entitlement validation + Linux-safe fallback script. |
 | [#11](https://github.com/cityhunteur/vesper/issues/11) | 0 | CLOSED | Pass | Implemented: Contract golden + route reachability tests are wired in CI. |
-| [#12](https://github.com/cityhunteur/vesper/issues/12) | 1 | CLOSED | Pass | Partial: System VM manifest/launch/boot-smoke scaffolding exists, not full VM lifecycle. |
+| [#12](https://github.com/cityhunteur/vesper/issues/12) | 1 | CLOSED | Pass | Partial: `docs/specs/systemvm-image.lock.yaml` pins an Alpine 3.22.8 aarch64 netboot kernel and initramfs; `make systemvm-fetch` downloads, digest-verifies and manifests them, and `systemvm-image.yml` reproduces the `image_id` in CI (WOR-27 slice 1, 2026-11-06). Launch config carries `initrd_path` and `kernel_cmdline`. No launcher boots the image yet, so the boot-reliability, console, NAT and boot-time checklist items remain open (TD-005). |
 | [#13](https://github.com/cityhunteur/vesper/issues/13) | 1 | CLOSED | Pass | Partial: the proxy now has a Phase 0 UDS-backed vsock CONNECT bridge, but the broader host <-> System VM control channel still lacks dedicated handshake/versioning, keepalive, reconnect, and large-payload proof. |
 | [#14](https://github.com/cityhunteur/vesper/issues/14) | 1 | CLOSED | Pass | No code evidence of containerd/dockerd install/supervision logic. |
 | [#15](https://github.com/cityhunteur/vesper/issues/15) | 1 | CLOSED | Pass | Partial: Proxy socket exists, but no end-to-end Docker API boundary enforcement. |

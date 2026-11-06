@@ -65,7 +65,8 @@ Normative design references are `docs/specs/design-v0.md` and
   validated by `src/platform.rs` and `scripts/ci/validate-entitlements.sh`.
 - testdata/contracts: `firecracker-routes.golden.json`, written and checked
   by `contractgen`.
-- assets/systemvm: System VM kernel and rootfs inputs for `systemvmctl`.
+- docs/specs/systemvm-image.lock.yaml: pinned System VM kernel and initramfs,
+  fetched into `build/systemvm/` by `make systemvm-fetch`.
 
 ## Global Invariants
 

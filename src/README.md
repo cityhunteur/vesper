@@ -90,9 +90,17 @@ Public symbols by file:
   vsock_socket_dir }`, `async run_server(config, shutdown)`.
 - `spec.rs`: `Route { method, path }`, `load_routes(path)`,
   `load_info_version(path)`.
-- `systemvm.rs`: `ImageBuildConfig`, `ImageManifest`, `LaunchConfig`,
-  `BootCheckConfig`, `BootCheckReport`, `build_manifest`, `write_manifest`,
-  `default_launch_config`, `write_launch_config`, `run_boot_check`.
+- `systemvm.rs`: `ImageBuildConfig { kernel_path, rootfs_path: Option,
+  initrd_path: Option }`, `ImageManifest` (schema `"2"`, optional rootfs and
+  initrd digests), `LaunchConfig` (adds `initrd_path: Option` and
+  `kernel_cmdline`), `BootCheckConfig`, `BootCheckReport`, `ImageLock {
+  source: ImageSource, artifacts: ImageArtifacts { kernel, initrd:
+  ImageArtifact }, expected_image_id }`, `build_manifest`, `image_id`,
+  `write_manifest`, `load_image_lock`, `validate_image_lock`,
+  `image_lock_env`, `verify_image`, `default_launch_config`,
+  `write_launch_config`, `run_boot_check`; constants
+  `MANIFEST_SCHEMA_VERSION`, `IMAGE_LOCK_SCHEMA_VERSION`,
+  `DEFAULT_KERNEL_CMDLINE` (`console=hvc0`).
 
 ## Invariants
 
@@ -182,6 +190,19 @@ Public symbols by file:
   `command`, `log_path`, and `report_path`, clamps `timeout_seconds` to at
   least 1, and returns `Err` if any iteration fails, after writing the log and
   report.
+- `systemvm.rs:build_manifest` and `default_launch_config` require a kernel
+  plus at least one of rootfs or initrd; `image_id` is
+  `sha256("<kernel>:<rootfs or empty>:<initrd or empty>")` over hex digests,
+  so the same blob as rootfs and as initrd yields different ids.
+  `default_launch_config` appends ` root=/dev/vda rw` to the cmdline only when
+  a rootfs is given.
+- `systemvm.rs:load_image_lock` parses the YAML into `ImageLock` with
+  `deny_unknown_fields`, then `validate_image_lock` requires schema version
+  `1`, an `https://` URL, non-zero `size_bytes`, 64-char lowercase hex for
+  every digest and `expected_image_id`, and distinct kernel and initrd file
+  names. `verify_image(lock, dir)` requires `dir/<member file name>` to exist
+  for both artifacts, match the pinned digests, and produce
+  `expected_image_id`.
 
 ## Side Effects
 

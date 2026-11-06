@@ -1,0 +1,31 @@
+# Pinned System VM boot image for Phase 1 (WOR-27 / GH #12).
+# Read by: src/systemvm.rs (load_image_lock, verify_image) via systemvmctl lock-env / verify-image,
+#          scripts/systemvm/fetch-image.sh, .github/workflows/systemvm-image.yml.
+# Change procedure: update every field from the upstream release manifest
+# (https://dl-cdn.alpinelinux.org/alpine/<branch>/releases/<arch>/latest-releases.yaml), run
+# make systemvm-fetch, copy the printed image_id into expected_image_id, and record the bump in
+# docs/process/systemvm-bringup.md.
+schema_version: 1
+distribution: alpine
+branch: v3.22
+release: 3.22.8
+arch: aarch64
+flavor: netboot
+kernel_version: 6.12.115-0-virt
+source:
+  url: https://dl-cdn.alpinelinux.org/alpine/v3.22/releases/aarch64/alpine-netboot-3.22.8-aarch64.tar.gz
+  sha256: 619d568696faf045b63b459259ebe4c347553320a0217a1658e5d277c3d3e1d1
+  size_bytes: 342369530
+  published: "2026-11-05"
+artifacts:
+  kernel:
+    member: boot/vmlinuz-virt
+    sha256: ebf299aa6829b15166008db24b076ac0a8b3e778c72ed66be488742aaf05d741
+    format: arm64 Linux Image with EFI stub (PE32+), uncompressed
+  initrd:
+    member: boot/initramfs-virt
+    sha256: 0f7da92ca19e6b87b8f0a250e3ce84cc8335c16b2369b18d96f68cc486d638b8
+    format: gzip-compressed cpio initramfs
+# sha256("<kernel_sha256>:<rootfs_sha256 or empty>:<initrd_sha256 or empty>"), as computed by
+# systemvm::build_manifest. systemvmctl verify-image fails if the fetched artifacts do not produce it.
+expected_image_id: 40bd82424e8154232b1bc61923e6a9cca9b665e901ff161150e8c90e1423cca6

@@ -1,0 +1,66 @@
+name: System VM Image
+
+on:
+  pull_request:
+    paths:
+      - docs/specs/systemvm-image.lock.yaml
+      - scripts/systemvm/**
+      - src/systemvm.rs
+      - src/bin/systemvmctl.rs
+      - Makefile
+      - .github/workflows/systemvm-image.yml
+  push:
+    branches: [main]
+    paths:
+      - docs/specs/systemvm-image.lock.yaml
+      - scripts/systemvm/**
+      - src/systemvm.rs
+      - src/bin/systemvmctl.rs
+      - Makefile
+      - .github/workflows/systemvm-image.yml
+
+jobs:
+  reproducible-image:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Cache pinned image archive
+        uses: actions/cache@v4
+        with:
+          path: build/systemvm/cache
+          key: systemvm-image-${{ hashFiles('docs/specs/systemvm-image.lock.yaml') }}
+
+      - name: systemvm unit tests
+        run: cargo test systemvm
+
+      - name: Fetch and verify pinned image (digests + expected image_id)
+        run: make systemvm-fetch
+
+      - name: Build manifest from fetched artifacts
+        run: make systemvm-build
+
+      - name: Generate NAT-default launch config
+        run: make systemvm-launch-config
+
+      - name: Manifest image_id equals the pinned expected_image_id
+        run: |
+          expected="$(grep '^expected_image_id:' docs/specs/systemvm-image.lock.yaml | awk '{print $2}')"
+          actual="$(python3 -c 'import json;print(json.load(open("build/systemvm/image-manifest.json"))["image_id"])')"
+          echo "expected=${expected} actual=${actual}"
+          test "${expected}" = "${actual}"
+
+      - name: Upload manifest and launch config
+        uses: actions/upload-artifact@v4
+        with:
+          name: systemvm-image-${{ github.sha }}
+          path: |
+            build/systemvm/image-manifest.json
+            build/systemvm/launch-config.json

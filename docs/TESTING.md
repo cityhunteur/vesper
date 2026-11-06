@@ -18,10 +18,11 @@ the broader suite. `cargo test` was run successfully on 2026-11-05.
 | Component | Yes (router level) | `src/api/tests.rs`, `tests/api_contract.rs` drive the axum router with `tower::ServiceExt::oneshot` | Rust, `tower` | `cargo test --test api_contract` | nothing |
 | Integration | Partial | `tests/contract_golden.rs` loads the vendored swagger and golden JSON from disk | Rust | `cargo test --test contract_golden` | repo checkout |
 | Contract | Yes | `contractgen --mode check`, `tests/api_contract.rs`, generated matrix validation | Rust binaries | `make contract-test`, `make surface-matrix-check`, `make behavior-matrix-check` | nothing |
-| End-to-end | **Not implemented** | design-v0 describes Docker-replacement e2e; no code | n/a | n/a | real System VM images (TD-010) |
+| End-to-end | **Not implemented** | design-v0 describes Docker-replacement e2e; no code | n/a | n/a | a System VM launcher (TD-005) |
 | Performance | **Not implemented** | design-v0 describes regression and perf gates; no code | n/a | n/a | n/a |
 | Security / static analysis | Partial | `scripts/ci/validate-entitlements.sh`, `scripts/harness/check_structure.py` | bash, Python | `make validate-entitlements` (CI: `rust-tests.yml`), `python3 scripts/harness/check_structure.py --root .` | Python 3 |
 | Runtime smoke | Scaffold | `systemvmctl boot-smoke` runs a command N times and writes a report; proves the harness, not a VM boot | Rust | `make systemvm-boot-smoke` | nothing (defaults to `sh -c 'echo boot-ok'`) |
+| Image reproducibility | Yes | `systemvmctl verify-image` checks fetched kernel and initramfs digests and the `expected_image_id` against `docs/specs/systemvm-image.lock.yaml` | Rust, bash | `make systemvm-fetch` (CI: `systemvm-image.yml`, Linux) | network on first run (archive cached afterwards) |
 | Documentation | Yes | `harness/tests/`, `harness/check_docs.py`, `scripts/harness/check_docs.py` | unittest | `python3 harness/check_docs.py --strict`, `python3 -m unittest discover -s harness/tests`, `python3 scripts/harness/check_docs.py --root .` | Python 3.11+ |
 
 Suite sizes on 2026-11-05: `tests/api_contract.rs` 115 tests, `tests/contract_golden.rs` 1, `src/api/tests.rs` 67,
