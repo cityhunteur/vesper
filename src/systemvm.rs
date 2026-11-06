@@ -3,6 +3,8 @@ use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+pub(crate) use crate::platform::NestedPolicy;
+
 mod image_lock;
 mod packages;
 pub use image_lock::*;
@@ -291,7 +293,7 @@ pub fn default_launch_config(inputs: &LaunchInputs<'_>) -> Result<LaunchConfig, 
     }
     let nested_virtualization = match non_blank(inputs.nested_virtualization) {
         Some(value) => {
-            crate::platform::NestedPolicy::parse(&value)?;
+            NestedPolicy::parse(&value)?;
             Some(value.to_ascii_lowercase())
         }
         None => None,

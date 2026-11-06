@@ -173,7 +173,7 @@ pub fn validate_image_lock(lock: &ImageLock) -> Result<(), String> {
             return Err(format!("image lock field {name} must not be blank"));
         }
     }
-    crate::platform::NestedPolicy::parse(&lock.boot.nested_virtualization)
+    super::NestedPolicy::parse(&lock.boot.nested_virtualization)
         .map_err(|err| format!("image lock boot.nested_virtualization: {err}"))?;
     if lock.boot.max_boot_ms == 0 {
         return Err("image lock boot.max_boot_ms must be > 0".to_string());
