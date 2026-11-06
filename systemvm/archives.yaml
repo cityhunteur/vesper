@@ -1,0 +1,19 @@
+# Binary archives placed into the guest overlay (not Alpine packages). Appended to the packages lock by
+# scripts/systemvm/resolve-apks.py --extra-yaml. Every archive and member is digest-pinned.
+archives:
+  - name: firecracker
+    # First upstream release that contains the baseline revision 083c4cf69281 pinned in
+    # docs/specs/design-v0.baselines.lock.yaml (v1.15.x diverged before it).
+    version: v1.16.0
+    url: https://github.com/firecracker-microvm/firecracker/releases/download/v1.16.0/firecracker-v1.16.0-aarch64.tgz
+    sha256: 531c713cdbc37d4b8bc2533d851aabc0267096afa1768086a37672abb668efd7
+    size_bytes: 7307463
+    members:
+      - member: release-v1.16.0-aarch64/firecracker-v1.16.0-aarch64
+        guest_path: /var/lib/vesper/firecracker/firecracker
+        sha256: 24b0052659e9812040059effa00f3de25551558b9ac0079365e2da65f6a2b400
+        mode: "0755"
+      - member: release-v1.16.0-aarch64/jailer-v1.16.0-aarch64
+        guest_path: /var/lib/vesper/firecracker/jailer
+        sha256: 6af9dd0746fb675c0e2be933da7f8dbb8e1bf094382f1fb7f1e7e005c2d43062
+        mode: "0755"

@@ -68,12 +68,19 @@ enum Commands {
         #[arg(long, default_value = DEFAULT_PACKAGES_LOCK)]
         lock: String,
     },
-    /// Check downloaded packages against the packages lock.
+    /// Check downloaded packages (and extracted archive members) against the packages lock.
     VerifyPackages {
         #[arg(long, default_value = DEFAULT_PACKAGES_LOCK)]
         lock: String,
         #[arg(long, default_value = "build/systemvm/cache/apks")]
         dir: String,
+        #[arg(long, default_value = "build/systemvm/cache/archives")]
+        archives_dir: String,
+    },
+    /// Print one tab-separated line per pinned archive member.
+    ArchiveList {
+        #[arg(long, default_value = DEFAULT_PACKAGES_LOCK)]
+        lock: String,
     },
     /// Check fetched artifacts against the lock and write the manifest.
     VerifyImage {
@@ -169,6 +176,17 @@ enum ControlAction {
         #[arg(long, default_value_t = 60)]
         recovery_seconds: u64,
     },
+    /// Run `vesper-microvm <args>` in the guest (prepare|launch ID [--exit]|status|isolation|stop|crash|cleanup|log).
+    Microvm {
+        args: Vec<String>,
+    },
+    /// Run the GH #18 checklist (launch, jailer isolation, stop, crash, poweroff, cleanup) and write a JSON report.
+    MicrovmSuite {
+        #[arg(long, default_value = "run/systemvm/microvm-report.json")]
+        report: String,
+        #[arg(long, default_value = "vesper-test")]
+        id: String,
+    },
     /// Run the GH #13 checklist and write a JSON report.
     Suite {
         #[arg(long, default_value = "run/systemvm/control-report.json")]
@@ -242,6 +260,34 @@ fn run_control(endpoint: vesper::control::ControlEndpoint, action: ControlAction
             let mut session = control::connect(&endpoint)?;
             session.shutdown()?;
             println!("guest acknowledged shutdown");
+        }
+        ControlAction::Microvm { args } => {
+            let mut session = control::connect(&endpoint)?;
+            let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+            let (rc, lines) = session.microvm(&refs)?;
+            for line in &lines {
+                println!("{line}");
+            }
+            if rc != 0 {
+                return Err(format!("vesper-microvm exited with {rc}"));
+            }
+        }
+        ControlAction::MicrovmSuite { report, id } => {
+            let result = control::run_microvm_suite(&endpoint, &id);
+            control::write_report(&report, &result)?;
+            for step in &result.steps {
+                println!(
+                    "{} {}: {} ({} ms)",
+                    if step.ok { "ok  " } else { "FAIL" },
+                    step.name,
+                    step.detail.chars().take(200).collect::<String>(),
+                    step.elapsed_ms
+                );
+            }
+            if !result.passed {
+                return Err(format!("microvm suite failed (report: {report})"));
+            }
+            println!("microvm suite passed (report: {report})");
         }
         ControlAction::Kill { service } => {
             let mut session = control::connect(&endpoint)?;
@@ -385,10 +431,16 @@ fn run() -> Result<(), String> {
             print!("{}", vesper::systemvm::packages_list(&lock));
             Ok(())
         }
-        Commands::VerifyPackages { lock, dir } => {
+        Commands::VerifyPackages { lock, dir, archives_dir } => {
             let lock = vesper::systemvm::load_packages_lock(&lock)?;
             let count = vesper::systemvm::verify_packages(&lock, &dir)?;
-            println!("verified {count} pinned packages in {dir}");
+            let members = vesper::systemvm::verify_archives(&lock, &archives_dir)?;
+            println!("verified {count} pinned packages in {dir} and {members} archive members in {archives_dir}");
+            Ok(())
+        }
+        Commands::ArchiveList { lock } => {
+            let lock = vesper::systemvm::load_packages_lock(&lock)?;
+            print!("{}", vesper::systemvm::archive_list(&lock)?);
             Ok(())
         }
         Commands::VerifyImage {

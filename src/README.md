@@ -105,19 +105,24 @@ Public symbols by file:
 - `control.rs`: `ControlEndpoint { bridge_path, port, io_timeout }` with
   `new(bridge, port)` (10 s timeouts), `Handshake { protocol_version,
   hostname, connect_ms }`, `Session` with `ping`, `version`, `echo(payload)`,
-  `health`, `kill_service(name)`, `logs(name, count)`, `drop_connection`,
+  `health`, `kill_service(name)`, `logs(name, count)`, `microvm(args)` (120 s
+  read timeout for the launch wait), `drop_connection`,
   `shutdown`, `keepalive(interval, total)`,
   `connect(&endpoint)`, `connect_with_retry(&endpoint, attempts, backoff)`,
   `SuiteStep`, `SuiteReport`, `run_suite(&endpoint, interval, total,
   payload_bytes)`, `run_services_suite(&endpoint, &[service], recovery_timeout)`,
+  `run_microvm_suite(&endpoint, id)`,
   `write_report(path, &report)`; constants
   `AGENT_PROTOCOL_VERSION` (1), `DEFAULT_AGENT_PORT` (1024).
 - `systemvm.rs` (manifest, launch config, boot smoke),
   `systemvm/image_lock.rs` (`ImageLock` and everything lock-related) and
   `systemvm/packages.rs` (`PackagesLock { schema_version, branch, arch,
   requested, packages: Vec<Package { name, version, repo, file, url, sha256,
-  size_bytes }> }`, `load_packages_lock`, `validate_packages_lock`,
-  `packages_list`, `verify_packages`, `PACKAGES_LOCK_SCHEMA_VERSION`):
+  size_bytes }>, archives: Vec<Archive { name, version, url, sha256,
+  size_bytes, members: Vec<ArchiveMember { member, guest_path, sha256,
+  mode }> }> }`, `load_packages_lock`, `validate_packages_lock`,
+  `packages_list`, `archive_list`, `verify_packages`, `verify_archives`,
+  `PACKAGES_LOCK_SCHEMA_VERSION` (2)):
   `ImageBuildConfig { kernel_path, rootfs_path: Option,
   initrd_path: Option, boot_media_path: Option }`, `ImageManifest` (schema
   `"2"`, optional rootfs, initrd and boot-media digests), `LaunchConfig {
@@ -291,12 +296,22 @@ Public symbols by file:
   diagnostics naming the missing requirement (macOS 15, M3 or later);
   `require` on such a host returns `Err` with the same text; `off` returns
   `BackendB` without nested virtualization even on an M3.
-- `systemvm/packages.rs:validate_packages_lock` requires schema `1`,
+- `control.rs:run_microvm_suite` runs `handshake`, a tolerated `cleanup_before`,
+  `prepare`, `launch`, `jailer_isolation` (all of `uid_ok`, `chroot_ok`,
+  `cgroup_ok`, `seccomp_ok` true in the manager's JSON), `stop`,
+  `cleanup_after_stop`, `relaunch`, `abnormal_termination`,
+  `cleanup_after_crash`, `guest_poweroff_launch`, `guest_poweroff_exits`
+  (status `EXITED` within 15 s) and `cleanup_after_poweroff`; `passed`
+  requires every step ok.
+- `systemvm/packages.rs:validate_packages_lock` requires schema `2`,
   non-blank branch and arch, every requested package in the closure,
   packages sorted by name without duplicates, `file ==
   <name>-<version>.apk`, an `https://` URL ending in the file name, 64-char
-  lowercase hex digests and non-zero sizes. `verify_packages(lock, dir)`
-  requires every file in `dir` with its digest.
+  lowercase hex digests and non-zero sizes; archives need unique names,
+  https URLs, digests, sizes, at least one member, absolute `guest_path`s and
+  octal modes. `verify_packages(lock, dir)` requires every file in `dir` with
+  its digest; `verify_archives(lock, dir)` requires every member under
+  `dir/<archive>/` with its digest.
 
 ## Side Effects
 

@@ -61,8 +61,10 @@ errors to stderr and exits with code 1 on failure.
   `build/systemvm/launch-config.json`), `lock-env` (`--lock` default
   `docs/specs/systemvm-image.lock.yaml`; prints `KEY='VALUE'` lines),
   `package-list` (`--lock` default `docs/specs/systemvm-packages.lock.yaml`;
-  prints `file<TAB>url<TAB>sha256` lines), `verify-packages` (`--lock`,
-  `--dir` default `build/systemvm/cache/apks`),
+  prints `file<TAB>url<TAB>sha256` lines), `archive-list` (`--lock`; one
+  tab-separated line per archive member), `verify-packages` (`--lock`,
+  `--dir` default `build/systemvm/cache/apks`, `--archives-dir` default
+  `build/systemvm/cache/archives`),
   `verify-image` (`--lock`, `--dir` default `build/systemvm`, `--out` default
   `build/systemvm/image-manifest.json`, `--require-overlay`),
   `backend-select` (`--launcher` default `build/vmlauncher/vesper-vmlauncher`,
@@ -75,7 +77,9 @@ errors to stderr and exits with code 1 on failure.
   `keepalive --interval 5 --seconds 30`, `shutdown`, `kill <service>`, `logs
   <messages|containerd|docker> --lines 50`, `services-suite --report
   run/systemvm/services-report.json --services containerd,docker
-  --recovery-seconds 60`, `suite --report
+  --recovery-seconds 60`, `microvm <args…>` (runs `vesper-microvm` in the
+  guest, prints its output, exits non-zero on its failure), `microvm-suite
+  --report run/systemvm/microvm-report.json --id vesper-test`, `suite --report
   run/systemvm/control-report.json --keepalive-interval 2 --keepalive-seconds
   20 --payload-bytes 2097152`), `boot-smoke` (`--iterations` 5,
   `--timeout-seconds` 20, `--command` `sh`, `--args` `-c,echo boot-ok`,

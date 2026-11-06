@@ -169,6 +169,7 @@ control-plane modules.
   `scripts/macos/build-vmlauncher.sh` at signing time; all three are linted by `scripts/ci/validate-entitlements.sh`
   (syntax lint on macOS, required-key check on Linux CI, TD-010).
 - `launcher/`: Swift package for `vesper-vmlauncher` ([launcher/README.md](launcher/README.md)).
+- `systemvm/archives.yaml`: digest-pinned binary archives (Firecracker and jailer) appended to the packages lock.
 - `systemvm/overlay/`: Alpine overlay applied to the guest at boot ([systemvm/overlay/README.md](systemvm/overlay/README.md),
   [ADR 0002](docs/design-docs/adr/0002-systemvm-overlay-via-initramfs.md)); `docs/specs/systemvm-packages.lock.yaml`
   pins the packages it installs; it carries the supervised guest agent (`vesper-agent`, [ADR 0003](docs/design-docs/adr/0003-systemvm-control-channel.md)).
@@ -278,7 +279,10 @@ Docker relay, so the macOS Docker CLI talks to Docker 28 in the VM; `make docker
 built offline from the pinned ISO. That is design-v0's Phase 1 exit criterion, met on developer hardware.
 `systemvmctl backend-select` decides between Backend A (nested virtualization on macOS 15+ with an M3 or later;
 the guest then has `/dev/kvm`) and the unimplemented Backend B fallback, with diagnostics; the lock's
-`boot.nested_virtualization: auto` drives the launcher.
+`boot.nested_virtualization: auto` drives the launcher. Backend A itself runs: `make systemvm-microvm-suite`
+launches a stock Firecracker v1.16.0 microVM under the jailer (uid 10000, pivot-root jail, cgroup, seccomp) inside
+the System VM in about 1.5 s and proves stop, SIGKILL cleanup and guest power-off; the microVM has no rootfs or
+network yet (WOR-28, WOR-30).
 
 **Intended:** design-v0 describes a packaged macOS host process plus a Linux System VM running containerd and
 Firecracker.

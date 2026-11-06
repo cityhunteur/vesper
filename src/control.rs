@@ -229,6 +229,32 @@ impl Session {
         (0..n).map(|_| self.read_line()).collect()
     }
 
+    /// Runs `vesper-microvm <args>` in the guest; returns its exit code and output lines.
+    pub fn microvm(&mut self, args: &[&str]) -> Result<(i32, Vec<String>), String> {
+        // A launch waits for the guest's boot marker (up to 30 s), longer than the default I/O timeout.
+        let stream = self.reader.get_ref();
+        let previous = stream.read_timeout().map_err(|err| format!("read timeout: {err}"))?;
+        stream
+            .set_read_timeout(Some(Duration::from_secs(120)))
+            .map_err(|err| format!("set read timeout: {err}"))?;
+        let result = self.microvm_inner(args);
+        let _ = self.reader.get_ref().set_read_timeout(previous);
+        result
+    }
+
+    fn microvm_inner(&mut self, args: &[&str]) -> Result<(i32, Vec<String>), String> {
+        self.send(&format!("MICROVM {}", args.join(" ")))?;
+        let line = self.read_line()?;
+        let mut parts = line.split_whitespace();
+        let (Some("MICROVM"), Some(rc), Some(count)) = (parts.next(), parts.next(), parts.next()) else {
+            return Err(format!("MICROVM: unexpected reply {line:?}"));
+        };
+        let rc: i32 = rc.parse().map_err(|_| format!("MICROVM: bad rc in {line:?}"))?;
+        let count: usize = count.parse().map_err(|_| format!("MICROVM: bad count in {line:?}"))?;
+        let lines = (0..count).map(|_| self.read_line()).collect::<Result<Vec<_>, _>>()?;
+        Ok((rc, lines))
+    }
+
     /// Asks the agent to close this connection (server-side drop).
     pub fn drop_connection(&mut self) -> Result<(), String> {
         self.expect("DROP", "DROP").map(|_| ())
@@ -415,6 +441,87 @@ pub fn run_services_suite(
     SuiteReport { bridge_path: endpoint.bridge_path.display().to_string(), port: endpoint.port, steps, passed }
 }
 
+fn microvm_step(
+    session: &mut Session,
+    steps: &mut Vec<SuiteStep>,
+    name: &str,
+    args: &[&str],
+    expect: &str,
+) -> Option<Vec<String>> {
+    step(steps, name, || {
+        let (rc, lines) = session.microvm(args)?;
+        let first = lines.first().cloned().unwrap_or_default();
+        if rc != 0 || !first.starts_with(expect) {
+            return Err(format!("`vesper-microvm {}` rc={rc}: {}", args.join(" "), lines.join(" | ")));
+        }
+        Ok((lines.clone(), first))
+    })
+}
+
+/// Runs the GH #18 checklist: launch under the jailer, isolation (uid, chroot, cgroup, seccomp), clean
+/// stop and cleanup, cleanup after SIGKILL, and a guest-initiated power-off.
+pub fn run_microvm_suite(endpoint: &ControlEndpoint, id: &str) -> SuiteReport {
+    let mut steps = Vec::new();
+    let session = step(&mut steps, "handshake", || {
+        let session = connect(endpoint)?;
+        let detail = format!("protocol {} host {}", session.handshake.protocol_version, session.handshake.hostname);
+        Ok((session, detail))
+    });
+    let Some(mut session) = session else {
+        return SuiteReport { bridge_path: endpoint.bridge_path.display().to_string(), port: endpoint.port, steps, passed: false };
+    };
+    let _ = microvm_step(&mut session, &mut steps, "cleanup_before", &["cleanup", id], "CLEAN");
+    if steps.last().map(|s| !s.ok).unwrap_or(true) {
+        steps.pop(); // a dirty pre-state is cleaned, not a failure
+    }
+    let prepared = microvm_step(&mut session, &mut steps, "prepare", &["prepare"], "PREPARED");
+    if prepared.is_none() {
+        return SuiteReport { bridge_path: endpoint.bridge_path.display().to_string(), port: endpoint.port, steps, passed: false };
+    }
+    if microvm_step(&mut session, &mut steps, "launch", &["launch", id], "LAUNCHED").is_some() {
+        let isolation = microvm_step(&mut session, &mut steps, "isolation_output", &["isolation", id], "{");
+        steps.pop();
+        if let Some(lines) = isolation {
+            step(&mut steps, "jailer_isolation", || {
+                let json: serde_json::Value = serde_json::from_str(&lines[0]).map_err(|e| format!("isolation JSON: {e}: {}", lines[0]))?;
+                let checks = ["uid_ok", "chroot_ok", "cgroup_ok", "seccomp_ok"];
+                let failed: Vec<&str> = checks.iter().copied().filter(|k| json[k] != serde_json::Value::Bool(true)).collect();
+                if !failed.is_empty() {
+                    return Err(format!("isolation checks failed: {}; {}", failed.join(", "), lines[0]));
+                }
+                Ok(((), format!("uid {}, jail files {}, cgroup {}, seccomp mode {}", json["uid"], json["jail_files"], json["cgroup"], json["seccomp_mode"])))
+            });
+        } else {
+            steps.push(SuiteStep { name: "jailer_isolation".into(), ok: false, detail: "no isolation output".into(), elapsed_ms: 0 });
+        }
+        microvm_step(&mut session, &mut steps, "stop", &["stop", id], "STOPPED");
+        microvm_step(&mut session, &mut steps, "cleanup_after_stop", &["cleanup", id], "CLEAN");
+        if microvm_step(&mut session, &mut steps, "relaunch", &["launch", id], "LAUNCHED").is_some() {
+            microvm_step(&mut session, &mut steps, "abnormal_termination", &["crash", id], "CRASHED");
+            microvm_step(&mut session, &mut steps, "cleanup_after_crash", &["cleanup", id], "CLEAN");
+        }
+        if microvm_step(&mut session, &mut steps, "guest_poweroff_launch", &["launch", id, "--exit"], "LAUNCHED").is_some() {
+            step(&mut steps, "guest_poweroff_exits", || {
+                let deadline = Instant::now() + Duration::from_secs(15);
+                loop {
+                    let (_, lines) = session.microvm(&["status", id])?;
+                    let first = lines.first().cloned().unwrap_or_default();
+                    if first.starts_with("EXITED") {
+                        return Ok(((), "firecracker exited after the guest powered off".to_string()));
+                    }
+                    if Instant::now() >= deadline {
+                        return Err(format!("still {first} after 15 s"));
+                    }
+                    thread::sleep(Duration::from_millis(500));
+                }
+            });
+            microvm_step(&mut session, &mut steps, "cleanup_after_poweroff", &["cleanup", id], "CLEAN");
+        }
+    }
+    let passed = steps.iter().all(|s| s.ok) && steps.len() >= 11;
+    SuiteReport { bridge_path: endpoint.bridge_path.display().to_string(), port: endpoint.port, steps, passed }
+}
+
 pub fn write_report(path: impl AsRef<Path>, report: &SuiteReport) -> Result<(), String> {
     let path = path.as_ref();
     if let Some(parent) = path.parent() {
@@ -467,6 +574,20 @@ mod tests {
                             Some("HEALTH") => writer
                                 .write_all(b"HEALTH {\"packages_ready\":true,\"services\":{\"vesper-agent\":\"started\",\"containerd\":\"started\",\"docker\":\"started\"},\"containerd_ok\":true,\"docker_ok\":true}\n")
                                 .unwrap(),
+                            Some("MICROVM") => {
+                                let sub = parts.next().unwrap_or("");
+                                let body: &str = match sub {
+                                    "cleanup" => "CLEAN demo\n",
+                                    "prepare" => "PREPARED kernel=1 initrd=1\n",
+                                    "launch" => "LAUNCHED demo pid=77 boot_ms=400\n",
+                                    "isolation" => "{\"id\":\"demo\",\"pid\":77,\"uid\":10000,\"root\":\"/srv/jailer/firecracker/demo/root\",\"cgroup\":\"/firecracker/demo\",\"seccomp_mode\":2,\"uid_ok\":true,\"chroot_ok\":true,\"cgroup_ok\":true,\"seccomp_ok\":true}\n",
+                                    "stop" => "STOPPED demo\n",
+                                    "crash" => "CRASHED demo pid=77\n",
+                                    "status" => "EXITED demo\n",
+                                    _ => "ERR usage\n",
+                                };
+                                writer.write_all(format!("MICROVM 0 {}\n{body}", body.lines().count()).as_bytes()).unwrap();
+                            }
                             Some("KILL") => {
                                 let name = parts.next().unwrap_or("");
                                 writer.write_all(format!("KILL {name} 4242\n").as_bytes()).unwrap();
@@ -542,6 +663,23 @@ mod tests {
         write_report(&out, &report).unwrap();
         let written: SuiteReport = serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
         assert!(written.passed);
+    }
+
+    #[test]
+    fn microvm_suite_covers_launch_isolation_stop_crash_and_poweroff() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("3.sock");
+        fake_bridge(&path, "VESPER-AGENT 1 vesper", false);
+        let endpoint = ControlEndpoint::new(&path, DEFAULT_AGENT_PORT);
+        let mut session = connect(&endpoint).unwrap();
+        let (rc, lines) = session.microvm(&["status", "demo"]).unwrap();
+        assert_eq!((rc, lines[0].as_str()), (0, "EXITED demo"));
+        let report = run_microvm_suite(&endpoint, "demo");
+        let names: Vec<&str> = report.steps.iter().map(|s| s.name.as_str()).collect();
+        for n in ["launch", "jailer_isolation", "stop", "cleanup_after_stop", "abnormal_termination", "cleanup_after_crash", "guest_poweroff_exits", "cleanup_after_poweroff"] {
+            assert!(names.contains(&n), "missing {n} in {names:?}");
+        }
+        assert!(report.passed, "{:?}", report.steps);
     }
 
     #[test]

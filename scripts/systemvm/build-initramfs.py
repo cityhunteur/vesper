@@ -60,10 +60,38 @@ def add_path(tar, arcname, path):
             tar.addfile(info, handle)
 
 
-def build_apkovl(overlay_dir, apks, out_path):
+def add_file(tar, src, guest_path, mode, seen_dirs):
+    parts = guest_path.strip("/").split("/")
+    for depth in range(1, len(parts)):
+        d = "/".join(parts[:depth])
+        if d in seen_dirs:
+            continue
+        seen_dirs.add(d)
+        info = tarfile.TarInfo(d)
+        info.type = tarfile.DIRTYPE
+        info.mode = 0o755
+        info.mtime = 0
+        info.uname = info.gname = "root"
+        tar.addfile(info)
+    info = tarfile.TarInfo("/".join(parts))
+    info.type = tarfile.REGTYPE
+    info.mode = mode
+    info.mtime = 0
+    info.uname = info.gname = "root"
+    info.size = os.path.getsize(src)
+    with open(src, "rb") as handle:
+        tar.addfile(info, handle)
+
+
+def build_apkovl(overlay_dir, apks, out_path, files=()):
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode="w", format=tarfile.USTAR_FORMAT) as tar:
         add_tree(tar, overlay_dir)
+        seen_dirs = set()
+        for spec in sorted(files, key=lambda s: s.split(":")[1]):
+            src, guest_path, *rest = spec.split(":")
+            mode = int(rest[0], 8) if rest else 0o644
+            add_file(tar, src, guest_path, mode, seen_dirs)
         if apks:
             for part in ("var", "var/lib", "var/lib/vesper", "var/lib/vesper/apks"):
                 info = tarfile.TarInfo(part)
@@ -117,6 +145,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--overlay-dir", required=True)
     parser.add_argument("--apk", action="append", default=[])
+    parser.add_argument("--file", action="append", default=[], help="SRC:GUEST_PATH[:MODE] placed into the overlay")
     parser.add_argument("--base-initrd", required=True)
     parser.add_argument("--apkovl-path", required=True)
     parser.add_argument("--out-apkovl", required=True)
@@ -127,7 +156,10 @@ def main():
     for apk in args.apk:
         if not os.path.isfile(apk):
             sys.exit(f"package {apk} is missing; run make systemvm-overlay (fetch-packages.sh)")
-    build_apkovl(args.overlay_dir, args.apk, args.out_apkovl)
+    for spec in args.file:
+        if not os.path.isfile(spec.split(":")[0]):
+            sys.exit(f"file {spec.split(':')[0]} is missing; run make systemvm-overlay (fetch-packages.sh)")
+    build_apkovl(args.overlay_dir, args.apk, args.out_apkovl, args.file)
     with open(args.out_apkovl, "rb") as handle:
         apkovl = handle.read()
     build_initrd(args.base_initrd, args.apkovl_path, apkovl, args.out_initrd)

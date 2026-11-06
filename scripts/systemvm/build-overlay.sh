@@ -19,12 +19,16 @@ fi
 [ -f "${IMAGE_DIR}/${VESPER_IMAGE_INITRD_FILE}" ] || { echo "build-overlay: ${IMAGE_DIR}/${VESPER_IMAGE_INITRD_FILE} missing; run 'make systemvm-fetch' first" >&2; exit 2; }
 
 PACKAGES_LOCK="${ROOT_DIR}/${VESPER_IMAGE_OVERLAY_PACKAGES_LOCK}"
-cargo run -q --bin systemvmctl -- verify-packages --lock "${PACKAGES_LOCK}" --dir "${APKS_DIR}" >/dev/null
+ARCHIVES_DIR="${IMAGE_DIR}/cache/archives"
+cargo run -q --bin systemvmctl -- verify-packages --lock "${PACKAGES_LOCK}" --dir "${APKS_DIR}" --archives-dir "${ARCHIVES_DIR}" >/dev/null
 
 APK_ARGS=()
 while IFS=$'\t' read -r file url sha; do
   APK_ARGS+=(--apk "${APKS_DIR}/${file}")
 done < <(cargo run -q --bin systemvmctl -- package-list --lock "${PACKAGES_LOCK}")
+while IFS=$'\t' read -r name url sha member file msha guest mode; do
+  APK_ARGS+=(--file "${ARCHIVES_DIR}/${name}/${file}:${guest}:${mode}")
+done < <(cargo run -q --bin systemvmctl -- archive-list --lock "${PACKAGES_LOCK}")
 
 python3 -I "${ROOT_DIR}/scripts/systemvm/build-initramfs.py" \
   --overlay-dir "${ROOT_DIR}/${VESPER_IMAGE_OVERLAY_DIR}" \
