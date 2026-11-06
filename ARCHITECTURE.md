@@ -74,15 +74,17 @@ flowchart LR
 | `baselinectl` | Parity metadata, surface stub matrix, behavior matrix | [src/bin/baselinectl.rs](src/bin/baselinectl.rs) | `docs/generated/*.json`, `artifacts/parity-metadata.json` | [src/baseline.rs](src/baseline.rs), [src/spec.rs](src/spec.rs), [src/api_matrix.rs](src/api_matrix.rs), [src/api_behavior_matrix.rs](src/api_behavior_matrix.rs) |
 | `compatexctl` | Compat exception registry validation | [src/bin/compatexctl.rs](src/bin/compatexctl.rs) | None | [src/compat.rs](src/compat.rs) |
 | `contractgen` | Golden route contract generate/check | [src/bin/contractgen.rs](src/bin/contractgen.rs) | `testdata/contracts/firecracker-routes.golden.json` | [src/spec.rs](src/spec.rs) |
-| `systemvmctl` | System VM image manifest, launch config, boot smoke (a repeated spawn-and-timeout check) | [src/bin/systemvmctl.rs](src/bin/systemvmctl.rs) | `build/systemvm/*.json`, `run/systemvm/*` | [src/systemvm.rs](src/systemvm.rs) |
+| `systemvmctl` | System VM image lock verification, manifest, launch config, boot smoke (repeated launcher runs with timing) | [src/bin/systemvmctl.rs](src/bin/systemvmctl.rs) | `build/systemvm/*.json`, `run/systemvm/*` | [src/systemvm.rs](src/systemvm.rs) |
+| `vesper-vmlauncher` | Boot one launch config on Virtualization.framework (NAT, virtio console), report ready or failure (contract: [launcher/README.md](launcher/README.md); decision: [ADR 0001](docs/design-docs/adr/0001-systemvm-launcher-swift-helper.md)) | [launcher/Sources/vesper-vmlauncher/main.swift](launcher/Sources/vesper-vmlauncher/main.swift) | `run/systemvm/console.log` | Swift, not part of the crate |
 
-All six are discovered by Cargo from `src/bin/*.rs`; see [src/bin/README.md](src/bin/README.md).
+The six Rust binaries are discovered by Cargo from `src/bin/*.rs`; see [src/bin/README.md](src/bin/README.md). The
+launcher is a separate Swift package built by `make vmlauncher-build`.
 
 ## Domain boundaries and dependency rules
 
-**Verified** for single-path `crate::x` and `vesper::x` references in the 15 files enumerated in the `RULES`
+**Verified** for single-path `crate::x` and `vesper::x` references in the 16 files enumerated in the `RULES`
 allowlist of [scripts/harness/check_structure.py](scripts/harness/check_structure.py) (the top-level `src/*.rs`
-modules and the four route-family modules under `src/api/`), which CI checks. The allowlist is a fixed list, not a
+modules, the four route-family modules under `src/api/` and `src/systemvm/image_lock.rs`), which CI checks. The allowlist is a fixed list, not a
 glob: a new module is unchecked until a `RULES` row is added. Grouped `use crate::{..}` imports, `super::super`
 paths, `src/lib.rs`, the binaries and `tests/` are not checked (TD-018); `src/api/tests.rs` is outside both the
 allowlist and the line budgets (TD-015).
@@ -94,7 +96,7 @@ allowlist and the line budgets (TD-015).
 | 2. Control plane: `api` | State machine, dispatch, deterministic errors | `api` | `api_matrix`, `baseline`, `buildinfo`, `compat`, `platform`, `spec` | mechanical |
 | 2. Control plane: matrices | Generated route matrices | `api_matrix`, `api_behavior_matrix` | `api`, `baseline`, `spec`; `api_behavior_matrix` also `api_matrix` | mechanical |
 | 2. Control plane: families | Extracted route-family handlers | `api/*` | `super` only (no `crate::` references) | mechanical |
-| 3. Runtime adapters | Socket proxying and System VM artifacts | `proxy`, `systemvm` | `buildinfo`, `platform` | mechanical |
+| 3. Runtime adapters | Socket proxying and System VM artifacts | `proxy`, `systemvm` (+ `systemvm/image_lock`, `super` only) | `buildinfo`, `platform` | mechanical |
 | 4. Entry points | `clap` binaries | `src/bin/*` | any library layer | review |
 | 5. Tests and harness | Contract tests, sensors (CI scripts that detect drift), docs, Symphony templates | `tests/`, `src/api/tests.rs`, `scripts/harness/`, `harness/`, `.github/workflows/`, `docs/`, `.symphony/templates/` | may import the library; nothing imports them | review |
 
@@ -161,13 +163,16 @@ control-plane modules.
   machine-written.
 - `third_party/firecracker/`: vendored Firecracker OpenAPI, read by `spec::load_routes` (route table) and
   `spec::load_info_version` (pinned version string).
-- `packaging/macos/`: entitlement plists. The `vesperd` plist is validated by `platform` at startup when
-  `--entitlements-file` is given; both plists are linted by `scripts/ci/validate-entitlements.sh` (syntax lint on macOS,
-  required-key check on Linux CI, TD-010).
+- `packaging/macos/`: entitlement plists for `vesperd`, `vesper-proxy` and `vesper-vmlauncher`. The `vesperd` plist
+  is validated by `platform` at startup when `--entitlements-file` is given; the launcher plist is applied by
+  `scripts/macos/build-vmlauncher.sh` at signing time; all three are linted by `scripts/ci/validate-entitlements.sh`
+  (syntax lint on macOS, required-key check on Linux CI, TD-010).
+- `launcher/`: Swift package for `vesper-vmlauncher` ([launcher/README.md](launcher/README.md)).
 - `testdata/contracts/`: golden route list written by `contractgen`.
-- `docs/specs/systemvm-image.lock.yaml`: the pinned System VM boot image (Alpine netboot kernel and initramfs,
-  archive URL and SHA-256 digests, expected `image_id`). `make systemvm-fetch` downloads it into `build/systemvm/`
-  (gitignored) and `systemvmctl verify-image` checks the digests; nothing boots it yet (TD-005).
+- `docs/specs/systemvm-image.lock.yaml`: the pinned System VM boot image (Alpine virt ISO: URL and SHA-256, the
+  kernel and initramfs members with unpack method and digests, the ISO as boot media, kernel command line, console
+  ready pattern, expected `image_id`). `make systemvm-fetch` downloads it into `build/systemvm/` (gitignored) and
+  `systemvmctl verify-image` checks the digests; `make systemvm-boot-smoke` boots it through the launcher.
 - `.symphony/templates/`: templates for Symphony (see [Terms](#terms)):
   `verification-manifest-template.yaml` (used by WORKFLOW.md), `symphony-milestones-template.md` and
   `milestone-report-template.md` (used by [docs/progress/index.md](docs/progress/index.md)), and `council-rubric.md`
@@ -253,9 +258,10 @@ its upstream set to `vesperd`'s socket, so `run/docker.sock` is a second path to
 `--entitlements-file packaging/macos/vesperd.entitlements`, so the entitlement check runs and the plist must exist.
 `vesper-proxy` sets no mode on its listener (TD-017) and handles Ctrl-C only (TD-021;
 [scripts/macos/README.md](scripts/macos/README.md)). Entitlement
-plists live in `packaging/macos/`. No installer, launchd or packaging manifests exist; `systemvmctl` fetches and
-verifies a pinned kernel and initramfs and writes an image manifest and launch config, but no launcher boots them
-(TD-005).
+plists live in `packaging/macos/`. No installer, launchd or packaging manifests exist. The System VM path is
+`make systemvm-fetch` (pinned Alpine ISO, verified), `make systemvm-launch-config`, `make vmlauncher-build`
+(ad-hoc signed Swift helper) and `make systemvm-boot-smoke`, which boots the VM to its login prompt N times with
+NAT networking and records timings; nothing yet runs inside the guest (TD-005).
 
 **Intended:** design-v0 describes a packaged macOS host process plus a Linux System VM running containerd and
 Firecracker.
@@ -271,7 +277,7 @@ or parity documents.
 |---|---|---|---|---|---|
 | 1a | `vesperd` is the only binary that serves the control-plane API; `vesper-proxy` is the only other host-visible socket and only relays bytes (plus the vsock `CONNECT` preface) | Verified | Review only; no mechanical check (TD-008) | `grep -n 'UnixListener::bind' src/bin/vesperd.rs src/proxy.rs` (expect 1 hit in `vesperd.rs` and 3 in `proxy.rs`, of which the two inside the `#[cfg(test)]` module are test fixtures) | [src/bin/vesperd.rs](src/bin/vesperd.rs), [src/proxy.rs](src/proxy.rs) |
 | 1b | Raw Firecracker and containerd sockets stay private to the System VM | Intended | Nothing yet; the System VM does not exist here | n/a | [design-v0](docs/specs/design-v0.md#security-model-firecrackerequivalent-hardening-on-macos), [docs/SECURITY.md](docs/SECURITY.md) |
-| 2 | Intra-crate single-path references in the 15 `RULES` files follow the layer table | Verified | `RULES` in `check_structure.py`, run by `harness-structure.yml` on `src/**` changes; a new module needs a `RULES` row (TD-018) | `python3 scripts/harness/check_structure.py --root .` | [scripts/harness/check_structure.py](scripts/harness/check_structure.py) |
+| 2 | Intra-crate single-path references in the 16 `RULES` files follow the layer table | Verified | `RULES` in `check_structure.py`, run by `harness-structure.yml` on `src/**` changes; a new module needs a `RULES` row (TD-018) | `python3 scripts/harness/check_structure.py --root .` | [scripts/harness/check_structure.py](scripts/harness/check_structure.py) |
 | 3 | Every error response produced by `handle_all` is an `ErrorEnvelope` with the pinned baseline revision. Exceptions before extraction: a body over axum's default 2 MiB limit gets a plain `413`, a body-read failure gets a plain `400`, and a poisoned `RwLock` panics the task (TD-019) | Verified | `AppState::new_with_matrix` rejects a blank revision; `tests/api_contract.rs` asserts envelopes; `rust-tests.yml` runs `cargo test` for every `src/**` change | `make contract-test` | [tests/api_contract.rs](tests/api_contract.rs) |
 | 4 | The golden route list equals `contractgen`'s serialisation of the pinned swagger | Verified | `contractgen --mode check` and `tests/contract_golden.rs` in `contract-tests.yml`; `tests/**` changes are covered by `rust-tests.yml` | `make contract-check` | [tests/contract_golden.rs](tests/contract_golden.rs) |
 | 5 | Generated surface stub and behavior matrices are complete and fresh | Verified | `baselinectl --mode validate-api-matrix` and `validate-api-behavior-matrix` in `rust-tests.yml`; the `validates_repo_generated_*` unit tests also fail under `cargo test` | `make surface-matrix-check`, `make behavior-matrix-check` | [docs/process/baseline-governance.md](docs/process/baseline-governance.md) |
@@ -294,7 +300,9 @@ or parity documents.
   [src/README.md](src/README.md) and [src/bin/README.md](src/bin/README.md).
 - `make dev-up` has no idempotency guard and does not wait for `vesperd`'s socket before starting the proxy
   ([scripts/macos/README.md](scripts/macos/README.md)).
-- `systemvmctl boot-smoke` runs an arbitrary host command per iteration; it proves the harness, not a VM boot (TD-005).
+- `vesper-vmlauncher` stops the VM as soon as the ready pattern appears (no clean guest shutdown), is ad-hoc signed
+  (runs only on the building machine), and nothing yet executes inside the guest, so NAT is attached but unproven
+  from the guest side (TD-005). GitHub's macOS runners cannot boot it; boot evidence comes from developer hardware.
 
 ## Guardrails for future work
 

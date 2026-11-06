@@ -6,76 +6,92 @@ last_reviewed: 2026-11-06
 
 # System VM Build and Boot Pipeline (Phase 1)
 
-This project pins a real System VM boot image and verifies it end to end, generates a NAT-default launch
-configuration, and captures repeated boot diagnostics. A launcher that boots the image on Virtualization.framework is
-the next WOR-27 slice (TD-005).
+This project pins a real System VM boot image, verifies it end to end, generates a NAT-default launch
+configuration, boots it on Virtualization.framework through `vesper-vmlauncher` (ADR
+[0001](../design-docs/adr/0001-systemvm-launcher-swift-helper.md)), and captures repeated boot diagnostics.
 
 ## Pinned image
 
-`docs/specs/systemvm-image.lock.yaml` names the upstream release (Alpine Linux 3.22.8 `netboot` flavour for
-`aarch64`, kernel `6.12.115-0-virt`), the archive URL and SHA-256, the two archive members that are used
-(`boot/vmlinuz-virt`, an uncompressed arm64 Image with EFI stub, and `boot/initramfs-virt`, a gzip cpio initramfs)
-with their SHA-256 digests, and `expected_image_id`. The lock is parsed only in Rust
-(`systemvm::load_image_lock`, `deny_unknown_fields`); the shell never interprets the YAML.
+`docs/specs/systemvm-image.lock.yaml` names the upstream release (Alpine Linux 3.22.8 `virt` ISO for `aarch64`,
+kernel `6.12.115-0-virt`), its URL and SHA-256, the two ISO members that are used and how each is unpacked, the
+boot media, the kernel command line, the console ready pattern, and `expected_image_id`. The lock is parsed only in
+Rust (`systemvm::load_image_lock`, `deny_unknown_fields`); the shell never interprets the YAML.
 
-The netboot initramfs boots to an Alpine login prompt with no block rootfs, which is enough for boot-reliability
-proof. A block rootfs for containerd arrives with the Phase 1 containerd slice.
+- Kernel: `boot/vmlinuz-virt` is a Linux EFI zboot PE (`MZ..zimg`) wrapping a gzip payload, which
+  Virtualization.framework cannot start. `scripts/systemvm/unpack-zboot.py` extracts the raw ARM64 `Image`
+  (`build/systemvm/Image-virt`); both the member and the unpacked file are digest-pinned.
+- Initramfs: `boot/initramfs-virt` is used as is (`build/systemvm/initramfs-virt`).
+- Boot media: the ISO itself is copied to `build/systemvm/` and attached read-only as the first virtio block
+  device, so the initramfs finds its modloop and apks offline and boots to a login prompt. No block rootfs is
+  written; a writable rootfs for containerd arrives with the Phase 1 containerd slice.
+- Boot: `kernel_cmdline` is the ISO's grub line with the console moved to the virtio console (`console=hvc0
+  modules=loop,squashfs,sd-mod,usb-storage`); `ready_pattern` is `login:`.
 
 ## Commands
 
-1. Fetch and verify the pinned image (first run downloads about 330 MB; later runs reuse
-   `build/systemvm/cache/`):
-   `make systemvm-fetch` (wraps `scripts/systemvm/fetch-image.sh [LOCK]`), which runs
-   `systemvmctl lock-env`, downloads the archive with `curl --retry 3`, checks the archive digest, extracts the two
-   members to `build/systemvm/vmlinuz-virt` and `build/systemvm/initramfs-virt`, and runs
-   `systemvmctl verify-image`, which checks both member digests and the `image_id` and writes
-   `build/systemvm/image-manifest.json`.
+1. Fetch and verify the pinned image (first run downloads about 80 MB; later runs reuse `build/systemvm/cache/`):
+   `make systemvm-fetch` (wraps `scripts/systemvm/fetch-image.sh [LOCK]`), which runs `systemvmctl lock-env`,
+   downloads the ISO with `curl --retry 3`, checks its digest, extracts the two members with `bsdtar` and checks
+   their digests, unpacks the kernel, copies the ISO as boot media, and runs `systemvmctl verify-image`, which
+   checks the three final digests and the `image_id` and writes `build/systemvm/image-manifest.json`.
 
-2. Build an image manifest from explicit inputs:
-   `cargo run --bin systemvmctl -- build --kernel <path> [--initrd <path>] [--rootfs <path>] --out build/systemvm/image-manifest.json`
-   At least one of `--initrd` and `--rootfs` is required.
+2. Generate the NAT-default launch configuration from the lock:
+   `make systemvm-launch-config` (runs `systemvmctl launch-config --from-lock --dir build/systemvm`), which writes
+   `build/systemvm/launch-config.json` with the kernel, initramfs, boot media, command line and ready pattern.
+   Explicit inputs: `cargo run --bin systemvmctl -- launch-config --kernel <path> [--initrd <path>] [--rootfs <path>]
+   [--boot-media <path>] [--cmdline <text>] [--ready-pattern <text>] --console-log run/systemvm/console.log --out
+   build/systemvm/launch-config.json`. With no `--cmdline` the line is `console=hvc0`, plus ` root=/dev/vda rw`
+   (or `/dev/vdb` behind boot media) when a rootfs is given.
 
-3. Generate NAT-default launch configuration:
-   `cargo run --bin systemvmctl -- launch-config --kernel <path> [--initrd <path>] [--rootfs <path>] --console-log run/systemvm/console.log --out build/systemvm/launch-config.json`
-   Only `build` and `verify-image` read the files; `launch-config` checks that the paths are non-blank strings.
-   `kernel_cmdline` defaults to `console=hvc0`, plus ` root=/dev/vda rw` when a rootfs is given.
+3. Build and sign the launcher (macOS, Xcode command line tools):
+   `make vmlauncher-build` (`scripts/macos/build-vmlauncher.sh`), output `build/vmlauncher/vesper-vmlauncher`.
 
-4. Execute repeated boot smoke diagnostics:
-   `cargo run --bin systemvmctl -- boot-smoke --iterations 5 --timeout-seconds 20 --command sh --args=-c,echo\ boot-ok --log run/systemvm/boot.log --report run/systemvm/boot-report.json`
-   The defaults shown run a host shell command per iteration; nothing boots a VM yet (TD-005). Supply a real launcher
-   via `--command` and comma-separated `--args`.
+4. Boot repeatedly and record diagnostics:
+   `make systemvm-boot-smoke` (`scripts/systemvm/boot-smoke.sh [ITERATIONS] [TIMEOUT] [COMMAND] [ARGS]`, defaults
+   5 boots, 60 s each, through the launcher with `--config build/systemvm/launch-config.json`). Each iteration boots
+   the VM until the ready pattern appears on the console, then stops it. Outputs: `run/systemvm/console.log` (last
+   boot), `run/systemvm/boot.log` (one `result=… duration_ms=…` line per iteration) and
+   `run/systemvm/boot-report.json` (`iterations`, `successful`, `failed`, `failures`, `durations_ms`,
+   `max_duration_ms`, `mean_duration_ms`). On 2026-11-06 a MacBook Pro (M3, macOS 27.0.1) booted to the login
+   prompt in about 1.1 s per iteration.
+
+5. Re-verify the fetched files or digest explicit ones into a manifest:
+   `make systemvm-build` (no arguments re-runs `verify-image`; `scripts/systemvm/build-image.sh KERNEL [INITRD]
+   [ROOTFS]` digests explicit files with `systemvmctl build`).
 
 ## Make targets
 
-- `make systemvm-fetch`
-- `make systemvm-build`
-- `make systemvm-launch-config`
-- `make systemvm-boot-smoke`
+- `make systemvm-fetch`, `make systemvm-launch-config`, `make vmlauncher-build`, `make systemvm-boot-smoke`,
+  `make systemvm-build`.
 
-Each wraps a script under `scripts/systemvm/`. `build-image.sh` and `generate-launch-config.sh` default to the
-fetched `build/systemvm/vmlinuz-virt` and `build/systemvm/initramfs-virt` and exit 2 with a pointer to
-`make systemvm-fetch` when either is missing; positional overrides are `KERNEL INITRD [ROOTFS]`. `boot-smoke.sh`
-takes `ITERATIONS TIMEOUT COMMAND ARGS`. `make` does not forward arguments, so invoke the script directly to
-override. The scripts must be run from inside the crate tree; see `scripts/systemvm/README.md`.
+Each wraps a script under `scripts/systemvm/` or `scripts/macos/`. `make` does not forward arguments, so invoke the
+script directly to override. The scripts must be run from inside the crate tree; see `scripts/systemvm/README.md`.
 
 ## Reproducibility
 
-`image-manifest.json` contains SHA-256 digests for the kernel and the initramfs or rootfs, plus a stable `image_id`
-(`sha256("<kernel>:<rootfs or empty>:<initrd or empty>")` over the hex digests), `schema_version` `"2"` and the raw
-input paths. Two manifests built from identical bytes at different paths share `image_id` but are not byte-identical.
-The `System VM Image` workflow (`.github/workflows/systemvm-image.yml`) runs `make systemvm-fetch`, `make
-systemvm-build` and `make systemvm-launch-config` on Linux, asserts the manifest `image_id` equals the lock's
-`expected_image_id`, and uploads both JSON artifacts. The archive is cached by the lock file's hash.
+`image-manifest.json` contains SHA-256 digests for the kernel, the initramfs or rootfs, and the boot media, plus a
+stable `image_id` (`sha256("<kernel>:<rootfs or empty>:<initrd or empty>:<boot media or empty>")` over the hex
+digests), `schema_version` `"2"` and the raw input paths. Two manifests built from identical bytes at different
+paths share `image_id` but are not byte-identical. The `System VM Image` workflow
+(`.github/workflows/systemvm-image.yml`) runs `make systemvm-fetch`, `make systemvm-build` and
+`make systemvm-launch-config` on Linux (after installing `libarchive-tools` for `bsdtar`), asserts the manifest
+`image_id` equals the lock's `expected_image_id`, and uploads both JSON artifacts; its `launcher-build` job builds
+and signs the launcher on macOS. GitHub's macOS runners are VMs without nested virtualisation, so boot evidence is
+produced on developer hardware and attached to the issue (`run/WOR-27/systemvm/`).
 
 ## Bumping the pinned image
 
 1. Read the new release's `latest-releases.yaml` under
-   `https://dl-cdn.alpinelinux.org/alpine/<branch>/releases/<arch>/` and update `source.url`, `source.sha256`,
-   `source.size_bytes`, `source.published`, `release`, `branch` and `kernel_version` in the lock.
-2. Download and extract the two members once, compute their SHA-256 digests, and update `artifacts.*.sha256`.
-3. Run `make systemvm-fetch`; it fails on `expected_image_id`. Copy the printed `image_id` into the lock and rerun.
-4. Run `cargo test systemvm` (the `validates_repo_image_lock` test recomputes `expected_image_id`), then record the
-   bump in the milestone log.
+   `https://dl-cdn.alpinelinux.org/alpine/<branch>/releases/<arch>/` (flavor `alpine-virt`) and update
+   `source.url`, `source.sha256`, `source.size_bytes`, `source.published`, `release`, `branch`, `kernel_version`,
+   `boot_media.file` and `boot_media.sha256` (equal to `source.sha256`) in the lock.
+2. Extract `boot/vmlinuz-virt` and `boot/initramfs-virt` once (`bsdtar -xf <iso>`), compute their SHA-256 into
+   `member_sha256`; run `python3 -I scripts/systemvm/unpack-zboot.py boot/vmlinuz-virt Image-virt` and put the
+   result's SHA-256 into `artifacts.kernel.sha256` (`artifacts.initrd.sha256` equals its `member_sha256`).
+3. Check `boot/grub/grub.cfg` on the ISO for a changed `modules=` list and update `boot.kernel_cmdline`.
+4. Run `make systemvm-fetch`; it fails on `expected_image_id`. Copy the printed `image_id` into the lock and rerun.
+5. Run `cargo test systemvm`, `make systemvm-launch-config`, `make systemvm-boot-smoke`, then record the bump in
+   the milestone log.
 
 ## Proxy bridge convention
 

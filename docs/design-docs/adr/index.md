@@ -8,14 +8,13 @@ last_reviewed: 2026-11-06
 
 An ADR records one significant decision: its context, the options considered, what was chosen and the consequences.
 ADRs are never edited after acceptance except to change their status. A new decision supersedes an old one through a
-new ADR, and the old ADR then links forward to it. The repository had no ADR series before 2026-11-05; this is the
-only one.
+new ADR, and the old ADR then links forward to it. The repository had no ADR series before 2026-11-05.
 
 ## Records
 
 | ADR | Title | Status | Date | Supersedes |
 |---|---|---|---|---|
-| | *None yet* | | | |
+| [0001](0001-systemvm-launcher-swift-helper.md) | Boot the System VM through a thin Swift Virtualization.framework helper | accepted | 2026-11-06 | none |
 
 ## Candidates
 

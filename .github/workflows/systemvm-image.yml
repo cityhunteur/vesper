@@ -5,6 +5,9 @@ on:
     paths:
       - docs/specs/systemvm-image.lock.yaml
       - scripts/systemvm/**
+      - scripts/macos/build-vmlauncher.sh
+      - launcher/**
+      - packaging/macos/vesper-vmlauncher.entitlements
       - src/systemvm.rs
       - src/bin/systemvmctl.rs
       - Makefile
@@ -14,6 +17,9 @@ on:
     paths:
       - docs/specs/systemvm-image.lock.yaml
       - scripts/systemvm/**
+      - scripts/macos/build-vmlauncher.sh
+      - launcher/**
+      - packaging/macos/vesper-vmlauncher.entitlements
       - src/systemvm.rs
       - src/bin/systemvmctl.rs
       - Makefile
@@ -38,16 +44,19 @@ jobs:
           path: build/systemvm/cache
           key: systemvm-image-${{ hashFiles('docs/specs/systemvm-image.lock.yaml') }}
 
+      - name: Install bsdtar (reads ISO 9660)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libarchive-tools
+
       - name: systemvm unit tests
         run: cargo test systemvm
 
       - name: Fetch and verify pinned image (digests + expected image_id)
         run: make systemvm-fetch
 
-      - name: Build manifest from fetched artifacts
+      - name: Re-verify fetched artifacts into the manifest
         run: make systemvm-build
 
-      - name: Generate NAT-default launch config
+      - name: Generate NAT-default launch config from the lock
         run: make systemvm-launch-config
 
       - name: Manifest image_id equals the pinned expected_image_id
@@ -64,3 +73,22 @@ jobs:
           path: |
             build/systemvm/image-manifest.json
             build/systemvm/launch-config.json
+
+  launcher-build:
+    # Virtualization.framework helper: build and ad-hoc sign on macOS. GitHub's macOS runners are
+    # themselves VMs without nested virtualization, so this job proves the build and signature, not a boot.
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build and sign vesper-vmlauncher
+        run: make vmlauncher-build
+
+      - name: Launcher runs and rejects a missing config
+        run: |
+          build/vmlauncher/vesper-vmlauncher --help
+          if build/vmlauncher/vesper-vmlauncher --config /nonexistent.json; then exit 1; fi
+
+      - name: Entitlement plists are valid
+        run: make validate-entitlements

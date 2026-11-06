@@ -1,23 +1,26 @@
 #!/usr/bin/env bash
+# Write build/systemvm/launch-config.json. With no arguments the config is derived
+# from the image lock and the fetched files (kernel, initramfs, boot media, kernel
+# command line, ready pattern). Positional overrides: KERNEL INITRD [ROOTFS].
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-KERNEL_PATH="${1:-${ROOT_DIR}/build/systemvm/vmlinuz-virt}"
-INITRD_PATH="${2:-${ROOT_DIR}/build/systemvm/initramfs-virt}"
+IMAGE_DIR="${ROOT_DIR}/build/systemvm"
+OUT="${IMAGE_DIR}/launch-config.json"
+CONSOLE_LOG="${ROOT_DIR}/run/systemvm/console.log"
+
+mkdir -p "${IMAGE_DIR}" "${ROOT_DIR}/run/systemvm"
+cd "${ROOT_DIR}"
+
+if [ $# -eq 0 ]; then
+  [ -f "${IMAGE_DIR}/image-manifest.json" ] || { echo "generate-launch-config: ${IMAGE_DIR}/image-manifest.json missing; run 'make systemvm-fetch' first" >&2; exit 2; }
+  exec cargo run --bin systemvmctl -- launch-config --from-lock --dir "${IMAGE_DIR}" --console-log "${CONSOLE_LOG}" --out "${OUT}"
+fi
+
+KERNEL_PATH="$1"
+INITRD_PATH="${2:-}"
 ROOTFS_PATH="${3:-}"
-
-if [ ! -f "${KERNEL_PATH}" ] || [ ! -f "${INITRD_PATH}" ]; then
-  echo "generate-launch-config: missing ${KERNEL_PATH} or ${INITRD_PATH}; run 'make systemvm-fetch' first" >&2
-  exit 2
-fi
-
-mkdir -p "${ROOT_DIR}/build/systemvm" "${ROOT_DIR}/run/systemvm"
-
-ARGS=(--kernel "${KERNEL_PATH}" --initrd "${INITRD_PATH}")
-if [ -n "${ROOTFS_PATH}" ]; then
-  ARGS+=(--rootfs "${ROOTFS_PATH}")
-fi
-
-cargo run --bin systemvmctl -- launch-config "${ARGS[@]}" \
-  --console-log "${ROOT_DIR}/run/systemvm/console.log" \
-  --out "${ROOT_DIR}/build/systemvm/launch-config.json"
+ARGS=(--kernel "${KERNEL_PATH}")
+[ -n "${INITRD_PATH}" ] && ARGS+=(--initrd "${INITRD_PATH}")
+[ -n "${ROOTFS_PATH}" ] && ARGS+=(--rootfs "${ROOTFS_PATH}")
+exec cargo run --bin systemvmctl -- launch-config "${ARGS[@]}" --console-log "${CONSOLE_LOG}" --out "${OUT}"
