@@ -24,10 +24,14 @@ with console output. The parity unit for slice 1 is "pinned, verified, CI-reprod
   `launch-config.json` with NAT and a virtio console and writes `console_log_path`; lock moved to the Alpine virt
   ISO with zboot kernel unpacking and the ISO as read-only boot media; `boot-smoke` drives the launcher and records
   per-boot durations; 5/5 and 200/200 boots to the login prompt recorded under `run/WOR-27/systemvm/`.
-- [ ] Slice 2: PR merged, CI green (Linux image job + macOS launcher build), GH #74 and WOR-27 updated, milestone
-  entry written.
-- [ ] Slice 3: NAT connectivity proof from the guest (guest-side command over the console or a guest agent);
-  clean guest shutdown; boot-time threshold agreed; GH #12 checklist updated.
+- [x] (2026-11-06 17:40Z) Slice 2: PR #120 merged as `a638c34`, CI green (Linux image job + macOS launcher build),
+  GH #74 and WOR-27 updated, milestone entry `6866681`.
+- [x] (2026-11-06 18:30Z) Slice 3: owner set the threshold to 5 s and chose the console-driven probe; lock schema 3
+  carries `boot.max_boot_ms` and `boot.probe`; the launcher logs in, runs `udhcpc`, pings the NAT gateway, prints
+  `VESPER-NAT-OK` and powers off; boot smoke parses the launcher's ready time and enforces the threshold; 5/5 and
+  200/200 probed boots recorded.
+- [ ] Slice 3: PR merged, CI green, GH #74, GH #12 checklist and WOR-27 updated, milestone entry written; plan
+  moved to completed.
 
 ## Surprises & Discoveries
 
@@ -52,6 +56,9 @@ with console output. The parity unit for slice 1 is "pinned, verified, CI-reprod
 - Observation: ad-hoc signing with only `com.apple.security.virtualization` is enough to boot on macOS 27 (no
   Developer ID, no sandbox).
   Evidence: `codesign -d --entitlements -` on `build/vmlauncher/vesper-vmlauncher`; boot-smoke 200/200.
+- Observation: the live ISO leaves `eth0` down; `udhcpc` alone loops on "Network is down". `ip link set eth0 up`
+  first gives a lease from 192.168.64.1 within a second.
+  Evidence: `run/WOR-27/systemvm/single-boot-probe.txt` and the console log (first probe attempt timed out).
 
 ## Decision Log
 
@@ -83,14 +90,26 @@ with console output. The parity unit for slice 1 is "pinned, verified, CI-reprod
 - Decision: the launch config carries `ready_pattern` and `boot_media_path`, and the launcher reads both.
   Rationale: the launcher must have no policy of its own (ADR 0001).
   Date/Author: 2026-11-06, agent.
+- Decision: boot-time threshold 5000 ms, pinned as `boot.max_boot_ms` in the image lock and enforced by
+  `systemvmctl boot-smoke` against the launcher's `ready` time (not the wall clock, which includes the probe).
+  Rationale: owner's number; measured boots are about 1.05 s, leaving headroom for slower hosts.
+  Date/Author: 2026-11-06, cityhunteur (decision), agent (record).
+- Decision: prove NAT from the guest with a console-driven probe pinned in the lock (`boot.probe`), not a guest
+  agent.
+  Rationale: owner's choice; self-contained, no new dependency, and the same path gives a clean `poweroff`. The
+  vsock control channel stays with WOR-25. The success marker is split in the typed command because the console
+  echoes input, and `ProbeSettings::validate` rejects markers that appear in typed lines.
+  Date/Author: 2026-11-06, cityhunteur (decision), agent (record).
 
 ## Outcomes & Retrospective
 
 Slice 1 delivered a verifiable image pipeline with no new crate dependencies. Slice 2 delivered the launcher and
 real boot evidence (200/200 to the login prompt, about 1.1 s each on an M3; `run/WOR-27/systemvm/boot-report-200.json`).
-Gaps: nothing runs inside the guest and NAT is unproven from the guest side; the launcher stops the VM without a
-clean shutdown; boot evidence cannot be produced in CI (TD-005). Lesson: verify an image format by booting it, not by
-`file` output; slice 1's "EFI-stubbed Image" claim was wrong.
+Slice 3 delivered the guest probe and threshold: every boot now proves NAT from inside the guest and powers off
+cleanly, under 5 s (`run/WOR-27/systemvm/boot-report-probe-200.json`). All four GH #12 checklist items are proven.
+Gaps: no workload inside the guest and no control channel beyond the console script; boot evidence cannot be
+produced in CI (TD-005). Lesson: verify an image format by booting it, not by `file` output; slice 1's
+"EFI-stubbed Image" claim was wrong.
 
 ## Context and Orientation
 
@@ -114,8 +133,11 @@ Slice 2 (done): ADR 0001; `launcher/` reads `launch-config.json`, boots with NAT
 boot media, boot settings); `systemvmctl launch-config --from-lock`; `boot-smoke.sh` drives the launcher; per-boot
 durations in the report; `launcher-build` CI job on macOS.
 
-Slice 3: NAT proof from the guest (a console-driven command or a guest agent over vsock), clean shutdown, and an
-agreed boot-time threshold in the report.
+Slice 3 (done): `ProbeSettings` and `max_boot_ms` in the lock (schema 3) and launch config; the launcher's probe
+state machine (login, commands, success pattern, shutdown); `run_boot_check` captures stdout, reads the `ready`
+time and enforces the threshold; `boot-smoke.sh` passes the lock's threshold.
+
+Issue exit: close out on GitHub and Linear; move this plan to `docs/exec-plans/completed/`.
 
 ## Concrete Steps
 
@@ -136,8 +158,11 @@ a digest mismatch; the `System VM Image` workflow is green on the PR. Artifacts 
 Slice 2: the above plus `make vmlauncher-build`, `make systemvm-boot-smoke` (5 and 200 iterations, zero failures),
 `make validate-entitlements` on both lint paths, and the `launcher-build` CI job.
 
-Exit for the issue: GH #12 checklist items proven by a launcher-driven boot-smoke report (boot reliability and
-console done in slice 2; NAT from the guest and the boot-time threshold in slice 3).
+Slice 3: `cargo test systemvm` (10 tests, incl. the threshold and probe validation), one probed boot showing the
+DHCP lease, `VESPER-NAT-OK` and the power-off in `run/systemvm/console.log`, `make systemvm-boot-smoke` 5/5 and
+`boot-smoke.sh 200 60` 200/200 with `max_boot_ms` under 5000.
+
+Exit for the issue: all four GH #12 checklist items proven by launcher-driven boot-smoke reports.
 
 ## Idempotence and Recovery
 
@@ -152,8 +177,15 @@ docs/process/systemvm-bringup.md. All slice-1 changes are plain files on branch 
     verified alpine 3.22.8 aarch64 image in .../build/systemvm: image_id=b1965de508d579c75a9f55c761a9114d42e6220a81d0d101517733ff546e8abe
 
     $ make systemvm-boot-smoke
-    {"status":"ready","elapsed_ms":1024,"ready_pattern":"login:","console_log":".../run/systemvm/console.log"}
-    boot smoke passed: successful=5 failed=0
+    {"status":"ready","elapsed_ms":1052,"ready_pattern":"login:","console_log":".../run/systemvm/console.log"}
+    {"status":"probe-ok","elapsed_ms":1302,...}
+    {"status":"stopped","elapsed_ms":3584,...}
+    boot smoke passed: successful=5 failed=0 max_boot_ms=1053 (threshold 5000)
+
+    $ grep -nE "udhcpc: lease|VESPER-NAT-OK|poweroff" run/systemvm/console.log
+    128:udhcpc: lease of 192.168.64.3 obtained from 192.168.64.1, lease time 3600
+    131:VESPER-NAT-OK
+    132:localhost:~# poweroff
 
     $ printf x >> build/systemvm/initramfs-virt && cargo run -q --bin systemvmctl -- verify-image
     initrd build/systemvm/initramfs-virt sha256 693ffe08... does not match pinned 0f7da92c...
@@ -161,8 +193,10 @@ docs/process/systemvm-bringup.md. All slice-1 changes are plain files on branch 
 ## Interfaces and Dependencies
 
 `vesper::systemvm::{ImageLock, ImageSource, ImageArtifacts, ImageArtifact, UnpackMethod, BootMedia, BootSettings,
-LaunchInputs, load_image_lock, validate_image_lock, image_lock_env, verify_image, launch_config_from_lock, image_id}`;
+ProbeSettings, LaunchInputs, load_image_lock, validate_image_lock, image_lock_env, verify_image,
+launch_config_from_lock, image_id}`;
 `ImageBuildConfig { kernel_path, rootfs_path, initrd_path, boot_media_path: Option<String> }`; `LaunchConfig {
-kernel_path, rootfs_path?, initrd_path?, boot_media_path?, kernel_cmdline, ready_pattern, network_mode, cpu_count,
-memory_mib, console_log_path }`; `default_launch_config(&LaunchInputs)`. Launcher contract: `launcher/README.md`.
+kernel_path, rootfs_path?, initrd_path?, boot_media_path?, kernel_cmdline, ready_pattern, max_boot_ms?, probe?,
+network_mode, cpu_count, memory_mib, console_log_path }`; `default_launch_config(&LaunchInputs)`;
+`BootCheckConfig.max_boot_ms`. Launcher contract: `launcher/README.md`.
 No new crate dependencies.

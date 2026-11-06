@@ -81,6 +81,9 @@ enum Commands {
         log: String,
         #[arg(long, default_value = "run/systemvm/boot-report.json")]
         report: String,
+        /// Fail an iteration whose boot time exceeds this many milliseconds.
+        #[arg(long)]
+        max_boot_ms: Option<u64>,
     },
 }
 
@@ -136,6 +139,8 @@ fn run() -> Result<(), String> {
                     boot_media_path: boot_media.as_deref(),
                     kernel_cmdline: cmdline.as_deref(),
                     ready_pattern: ready_pattern.as_deref(),
+                    max_boot_ms: None,
+                    probe: None,
                     console_log_path: &console_log,
                 })?
             };
@@ -165,6 +170,7 @@ fn run() -> Result<(), String> {
             args,
             log,
             report,
+            max_boot_ms,
         } => {
             let report_data =
                 vesper::systemvm::run_boot_check(&vesper::systemvm::BootCheckConfig {
@@ -174,10 +180,17 @@ fn run() -> Result<(), String> {
                     args,
                     log_path: log,
                     report_path: report,
+                    max_boot_ms,
                 })?;
             println!(
-                "boot smoke passed: successful={} failed={}",
-                report_data.successful, report_data.failed
+                "boot smoke passed: successful={} failed={} max_boot_ms={} (threshold {})",
+                report_data.successful,
+                report_data.failed,
+                report_data.max_boot_ms,
+                report_data
+                    .max_boot_allowed_ms
+                    .map(|ms| ms.to_string())
+                    .unwrap_or_else(|| "none".to_string())
             );
             Ok(())
         }

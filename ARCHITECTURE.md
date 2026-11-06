@@ -75,7 +75,7 @@ flowchart LR
 | `compatexctl` | Compat exception registry validation | [src/bin/compatexctl.rs](src/bin/compatexctl.rs) | None | [src/compat.rs](src/compat.rs) |
 | `contractgen` | Golden route contract generate/check | [src/bin/contractgen.rs](src/bin/contractgen.rs) | `testdata/contracts/firecracker-routes.golden.json` | [src/spec.rs](src/spec.rs) |
 | `systemvmctl` | System VM image lock verification, manifest, launch config, boot smoke (repeated launcher runs with timing) | [src/bin/systemvmctl.rs](src/bin/systemvmctl.rs) | `build/systemvm/*.json`, `run/systemvm/*` | [src/systemvm.rs](src/systemvm.rs) |
-| `vesper-vmlauncher` | Boot one launch config on Virtualization.framework (NAT, virtio console), report ready or failure (contract: [launcher/README.md](launcher/README.md); decision: [ADR 0001](docs/design-docs/adr/0001-systemvm-launcher-swift-helper.md)) | [launcher/Sources/vesper-vmlauncher/main.swift](launcher/Sources/vesper-vmlauncher/main.swift) | `run/systemvm/console.log` | Swift, not part of the crate |
+| `vesper-vmlauncher` | Boot one launch config on Virtualization.framework (NAT, virtio console), run the config's console probe, report ready, probe and stop status (contract: [launcher/README.md](launcher/README.md); decision: [ADR 0001](docs/design-docs/adr/0001-systemvm-launcher-swift-helper.md)) | [launcher/Sources/vesper-vmlauncher/main.swift](launcher/Sources/vesper-vmlauncher/main.swift) | `run/systemvm/console.log` | Swift, not part of the crate |
 
 The six Rust binaries are discovered by Cargo from `src/bin/*.rs`; see [src/bin/README.md](src/bin/README.md). The
 launcher is a separate Swift package built by `make vmlauncher-build`.
@@ -260,8 +260,9 @@ its upstream set to `vesperd`'s socket, so `run/docker.sock` is a second path to
 [scripts/macos/README.md](scripts/macos/README.md)). Entitlement
 plists live in `packaging/macos/`. No installer, launchd or packaging manifests exist. The System VM path is
 `make systemvm-fetch` (pinned Alpine ISO, verified), `make systemvm-launch-config`, `make vmlauncher-build`
-(ad-hoc signed Swift helper) and `make systemvm-boot-smoke`, which boots the VM to its login prompt N times with
-NAT networking and records timings; nothing yet runs inside the guest (TD-005).
+(ad-hoc signed Swift helper) and `make systemvm-boot-smoke`, which boots the VM N times, logs in on the console,
+obtains a DHCP lease from the NAT and pings the gateway, powers the guest off, and checks each boot against the 5 s
+threshold; no workload (containerd, Firecracker) runs inside the guest yet (TD-005).
 
 **Intended:** design-v0 describes a packaged macOS host process plus a Linux System VM running containerd and
 Firecracker.
@@ -300,9 +301,10 @@ or parity documents.
   [src/README.md](src/README.md) and [src/bin/README.md](src/bin/README.md).
 - `make dev-up` has no idempotency guard and does not wait for `vesperd`'s socket before starting the proxy
   ([scripts/macos/README.md](scripts/macos/README.md)).
-- `vesper-vmlauncher` stops the VM as soon as the ready pattern appears (no clean guest shutdown), is ad-hoc signed
-  (runs only on the building machine), and nothing yet executes inside the guest, so NAT is attached but unproven
-  from the guest side (TD-005). GitHub's macOS runners cannot boot it; boot evidence comes from developer hardware.
+- `vesper-vmlauncher` is ad-hoc signed (runs only on the building machine); the guest probe is console-scripted
+  (password-less root login on the live ISO), so it proves NAT and a clean shutdown but is not a control channel;
+  no workload runs inside the guest (TD-005). GitHub's macOS runners cannot boot it; boot evidence comes from
+  developer hardware.
 
 ## Guardrails for future work
 
