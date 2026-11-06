@@ -191,6 +191,15 @@ enum ControlAction {
         #[arg(long, default_value = "vesper-rootfs-test")]
         id: String,
     },
+    /// Run `vesper-workload <args>` in the guest (run NAME IMAGE -- CMD...|ps|logs|wait|stop|rm|isolation).
+    Workload {
+        args: Vec<String>,
+    },
+    /// Run the GH #20 checklist (concurrent workloads, isolation, stop teardown, exit mapping) and write a JSON report.
+    WorkloadSuite {
+        #[arg(long, default_value = "run/systemvm/workload-report.json")]
+        report: String,
+    },
     /// Run the GH #18 checklist (launch, jailer isolation, stop, crash, poweroff, cleanup) and write a JSON report.
     MicrovmSuite {
         #[arg(long, default_value = "run/systemvm/microvm-report.json")]
@@ -310,6 +319,34 @@ fn run_control(endpoint: vesper::control::ControlEndpoint, action: ControlAction
                 return Err(format!("rootfs suite failed (report: {report})"));
             }
             println!("rootfs suite passed (report: {report})");
+        }
+        ControlAction::Workload { args } => {
+            let mut session = control::connect(&endpoint)?;
+            let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+            let (rc, lines) = session.workload(&refs)?;
+            for line in &lines {
+                println!("{line}");
+            }
+            if rc != 0 {
+                return Err(format!("vesper-workload exited with {rc}"));
+            }
+        }
+        ControlAction::WorkloadSuite { report } => {
+            let result = control::run_workload_suite(&endpoint);
+            control::write_report(&report, &result)?;
+            for step in &result.steps {
+                println!(
+                    "{} {}: {} ({} ms)",
+                    if step.ok { "ok  " } else { "FAIL" },
+                    step.name,
+                    step.detail.chars().take(220).collect::<String>(),
+                    step.elapsed_ms
+                );
+            }
+            if !result.passed {
+                return Err(format!("workload suite failed (report: {report})"));
+            }
+            println!("workload suite passed (report: {report})");
         }
         ControlAction::MicrovmSuite { report, id } => {
             let result = control::run_microvm_suite(&endpoint, &id);

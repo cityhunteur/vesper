@@ -81,7 +81,9 @@ errors to stderr and exits with code 1 on failure.
   guest, prints its output, exits non-zero on its failure), `microvm-suite
   --report run/systemvm/microvm-report.json --id vesper-test`, `rootfs
   <args…>` (runs `vesper-rootfs` in the guest), `rootfs-suite --report
-  run/systemvm/rootfs-report.json --id vesper-rootfs-test`, `suite --report
+  run/systemvm/rootfs-report.json --id vesper-rootfs-test`, `workload
+  <args…>` (runs `vesper-workload` in the guest), `workload-suite --report
+  run/systemvm/workload-report.json`, `suite --report
   run/systemvm/control-report.json --keepalive-interval 2 --keepalive-seconds
   20 --payload-bytes 2097152`), `boot-smoke` (`--iterations` 5,
   `--timeout-seconds` 20, `--command` `sh`, `--args` `-c,echo boot-ok`,
