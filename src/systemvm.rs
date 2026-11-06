@@ -12,7 +12,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 pub const MANIFEST_SCHEMA_VERSION: &str = "2";
-pub const IMAGE_LOCK_SCHEMA_VERSION: u32 = 4;
+pub const IMAGE_LOCK_SCHEMA_VERSION: u32 = 5;
 pub const DEFAULT_KERNEL_CMDLINE: &str = "console=hvc0";
 pub const DEFAULT_READY_PATTERN: &str = "login:";
 
@@ -72,6 +72,12 @@ pub struct LaunchConfig {
     /// Console-driven guest probe the launcher runs after the ready pattern.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub probe: Option<ProbeSettings>,
+    /// Host Unix socket the launcher serves as the vsock bridge (`CONNECT <port>` preface).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vsock_bridge_path: Option<String>,
+    /// Guest vsock port of the Vesper agent, for `systemvmctl control`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_port: Option<u32>,
     pub network_mode: String,
     pub cpu_count: u16,
     pub memory_mib: u32,
@@ -139,6 +145,8 @@ pub struct LaunchInputs<'a> {
     pub ready_pattern: Option<&'a str>,
     pub max_boot_ms: Option<u64>,
     pub probe: Option<&'a ProbeSettings>,
+    pub vsock_bridge_path: Option<&'a str>,
+    pub agent_port: Option<u32>,
     pub console_log_path: &'a str,
 }
 
@@ -287,6 +295,8 @@ pub fn default_launch_config(inputs: &LaunchInputs<'_>) -> Result<LaunchConfig, 
         ready_pattern,
         max_boot_ms: inputs.max_boot_ms,
         probe: inputs.probe.cloned(),
+        vsock_bridge_path: non_blank(inputs.vsock_bridge_path),
+        agent_port: inputs.agent_port,
         network_mode: "nat".to_string(),
         cpu_count: 2,
         memory_mib: 2048,
@@ -615,6 +625,7 @@ mod tests {
         .unwrap();
         assert_eq!(explicit.kernel_cmdline, "console=hvc0 quiet");
         assert_eq!(explicit.ready_pattern, "Welcome");
+        assert!(explicit.vsock_bridge_path.is_none() && explicit.agent_port.is_none());
 
         let err = default_launch_config(&LaunchInputs {
             kernel_path: "vmlinuz",

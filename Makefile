@@ -4,7 +4,7 @@ RUN_DIR ?= run
 .PHONY: build test contract-generate contract-check contract-test surface-matrix-generate \
 	surface-matrix-check behavior-matrix-generate behavior-matrix-check \
 	validate-entitlements dev-up dev-down vmlauncher-build systemvm-fetch systemvm-overlay systemvm-prepare systemvm-build systemvm-launch-config \
-	systemvm-boot-smoke
+	systemvm-boot-smoke systemvm-up systemvm-down systemvm-control-suite
 
 build:
 	$(CARGO) build --bins
@@ -62,3 +62,12 @@ systemvm-launch-config:
 
 systemvm-boot-smoke:
 	bash scripts/systemvm/boot-smoke.sh
+
+systemvm-up:
+	bash scripts/systemvm/up.sh
+
+systemvm-down:
+	bash scripts/systemvm/down.sh
+
+systemvm-control-suite:
+	$(CARGO) run --bin systemvmctl -- control suite

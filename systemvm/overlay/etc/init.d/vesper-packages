@@ -1,0 +1,29 @@
+#!/sbin/openrc-run
+# Install the pinned extras (docs/specs/systemvm-packages.lock.yaml) that
+# scripts/systemvm/build-initramfs.py placed under /var/lib/vesper/apks in the
+# overlay. Other Vesper services `need` this one, so OpenRC orders them after
+# it. Writes /run/vesper/packages-ready on success.
+description="Vesper pinned package install"
+
+depend() {
+  need localmount
+  after modloop
+}
+
+start() {
+  ebegin "Installing Vesper pinned packages"
+  mkdir -p /run/vesper
+  if ls /var/lib/vesper/apks/*.apk >/dev/null 2>&1; then
+    echo "vesper: installing $(ls /var/lib/vesper/apks/*.apk | wc -l) pinned packages" > /dev/console
+    if ! apk add --quiet --no-progress --force-non-repository /var/lib/vesper/apks/*.apk; then
+      echo "vesper: package install FAILED" > /dev/console
+      eend 1
+      return 1
+    fi
+  else
+    echo "vesper: no extra packages in the overlay" > /dev/console
+  fi
+  touch /run/vesper/packages-ready
+  echo "vesper: packages ready" > /dev/console
+  eend 0
+}

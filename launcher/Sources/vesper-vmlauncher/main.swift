@@ -7,6 +7,10 @@
 //
 // When the config carries a `probe`, the launcher then logs in on the console, types the probe
 // commands, waits for the success pattern and types the shutdown command, so the guest stops itself.
+// With --keep-running the shutdown command is skipped and the VM stays up until the guest powers
+// off (for example through the agent's SHUTDOWN) or the launcher receives SIGTERM.
+// When the config carries `vsock_bridge_path`, the launcher serves that Unix socket as the vsock
+// bridge: a client writes "CONNECT <port>\n" and is then relayed to that guest vsock port.
 //
 // Exit codes: 0 ready pattern seen and VM stopped (probe, if any, succeeded); 1 VM failed to start,
 // stopped before ready, or stopped before the probe succeeded; 2 timeout waiting for the ready
@@ -33,6 +37,8 @@ struct LaunchConfig: Decodable {
     let ready_pattern: String?
     let max_boot_ms: UInt64?
     let probe: ProbeSettings?
+    let vsock_bridge_path: String?
+    let agent_port: UInt32?
     let network_mode: String
     let cpu_count: Int
     let memory_mib: UInt64
@@ -148,6 +154,7 @@ func buildConfiguration(_ config: LaunchConfig, consoleOutput: FileHandle, conso
     }
 
     vm.entropyDevices = [VZVirtioEntropyDeviceConfiguration()]
+    vm.socketDevices = [VZVirtioSocketDeviceConfiguration()]
 
     // Block devices in order: boot media (read-only) first, then the writable rootfs, so the
     // kernel command line can name them as /dev/vda and /dev/vdb.
@@ -196,6 +203,9 @@ final class Launcher: NSObject, VZVirtualMachineDelegate {
     var probeStep = 0  // 0 = waiting for login prompt handled by `ready`; then index into steps
     var awaiting: Data?
     var probeDone = false
+    var bridgeSource: DispatchSourceRead?
+    var bridgeFd: Int32 = -1
+    var signalSource: DispatchSourceSignal?
 
     init(options: Options, config: LaunchConfig) {
         self.options = options
@@ -231,7 +241,10 @@ final class Launcher: NSObject, VZVirtualMachineDelegate {
                 startProbe(probe)
                 return
             }
-            if options.keepRunning { return }
+            if options.keepRunning {
+                report(status: "running")
+                return
+            }
             stopAndExit(0)
             return
         }
@@ -279,18 +292,149 @@ final class Launcher: NSObject, VZVirtualMachineDelegate {
         }
         probeDone = true
         report(status: "probe-ok")
+        if options.keepRunning {
+            report(status: "running")
+            return
+        }
         typeLine(probe.shutdown_command)
     }
 
-    func report(status: String) {
+    // MARK: vsock bridge
+
+    func startBridge(_ path: String) {
+        guard let device = machine.socketDevices.first as? VZVirtioSocketDevice else {
+            fail(3, "VM has no virtio socket device")
+        }
+        let url = URL(fileURLWithPath: path)
+        try? FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        unlink(path)
+        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        guard fd >= 0 else { fail(1, "bridge socket(): \(String(cString: strerror(errno)))") }
+        var addr = sockaddr_un()
+        addr.sun_family = sa_family_t(AF_UNIX)
+        let pathBytes = Array(path.utf8)
+        guard pathBytes.count < MemoryLayout.size(ofValue: addr.sun_path) else {
+            fail(3, "bridge socket path is too long: \(path)")
+        }
+        withUnsafeMutablePointer(to: &addr.sun_path) { ptr in
+            ptr.withMemoryRebound(to: UInt8.self, capacity: pathBytes.count + 1) { dst in
+                for (index, byte) in pathBytes.enumerated() { dst[index] = byte }
+                dst[pathBytes.count] = 0
+            }
+        }
+        let bound = withUnsafePointer(to: &addr) { ptr in
+            ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in
+                Darwin.bind(fd, sa, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+        guard bound == 0, listen(fd, 16) == 0 else {
+            fail(1, "bridge bind/listen \(path): \(String(cString: strerror(errno)))")
+        }
+        // The bridge reaches any guest vsock port, so only the owner may use it.
+        chmod(path, 0o600)
+        bridgeFd = fd
+        let source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: .main)
+        source.setEventHandler { [weak self] in
+            guard let self = self else { return }
+            let client = accept(fd, nil, nil)
+            if client >= 0 { self.handleBridgeClient(client, device) }
+        }
+        source.resume()
+        bridgeSource = source
+        report(status: "bridge-listening", extra: "\"bridge\":\"\(path)\"")
+    }
+
+    func handleBridgeClient(_ client: Int32, _ device: VZVirtioSocketDevice) {
+        DispatchQueue.global().async {
+            var line = [UInt8]()
+            var byte: UInt8 = 0
+            while line.count < 64 {
+                let n = read(client, &byte, 1)
+                if n <= 0 { close(client); return }
+                if byte == 10 { break }
+                line.append(byte)
+            }
+            guard let text = String(bytes: line, encoding: .utf8),
+                text.hasPrefix("CONNECT "),
+                let port = UInt32(text.dropFirst(8).trimmingCharacters(in: .whitespaces))
+            else {
+                FileHandle.standardError.write("vesper-vmlauncher: bridge: bad preface\n".data(using: .utf8)!)
+                close(client)
+                return
+            }
+            DispatchQueue.main.async {
+                device.connect(toPort: port) { result in
+                    switch result {
+                    case .success(let connection):
+                        self.relay(client: client, connection: connection)
+                    case .failure(let error):
+                        FileHandle.standardError.write(
+                            "vesper-vmlauncher: bridge: connect to guest port \(port) failed: \(error)\n".data(using: .utf8)!)
+                        close(client)
+                    }
+                }
+            }
+        }
+    }
+
+    func relay(client: Int32, connection: VZVirtioSocketConnection) {
+        let guest = connection.fileDescriptor
+        let group = DispatchGroup()
+        for (source, sink) in [(client, guest), (guest, client)] {
+            group.enter()
+            DispatchQueue.global().async {
+                var buffer = [UInt8](repeating: 0, count: 65536)
+                outer: while true {
+                    let n = read(source, &buffer, buffer.count)
+                    if n <= 0 { break }
+                    var offset = 0
+                    while offset < n {
+                        let written = buffer.withUnsafeBytes { raw in
+                            write(sink, raw.baseAddress! + offset, n - offset)
+                        }
+                        if written <= 0 { break outer }
+                        offset += written
+                    }
+                }
+                shutdown(sink, SHUT_WR)
+                group.leave()
+            }
+        }
+        group.notify(queue: .main) {
+            close(client)
+            connection.close()
+        }
+    }
+
+    func installSignalHandler() {
+        signal(SIGTERM, SIG_IGN)
+        let source = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+        source.setEventHandler { [weak self] in
+            guard let self = self else { exit(0) }
+            self.report(status: "terminating")
+            self.stopAndExit(self.ready ? 0 : 1)
+        }
+        source.resume()
+        signalSource = source
+    }
+
+    func report(status: String, extra: String = "") {
+        let tail = extra.isEmpty ? "" : "," + extra
         let line = """
-        {"status":"\(status)","elapsed_ms":\(elapsedMs()),"ready_pattern":"\(readyPattern)","console_log":"\(config.console_log_path)"}
+        {"status":"\(status)","elapsed_ms":\(elapsedMs()),"ready_pattern":"\(readyPattern)","console_log":"\(config.console_log_path)"\(tail)}
         """
         print(line)
         fflush(stdout)
     }
 
     func stopAndExit(_ code: Int32) {
+        if bridgeFd >= 0 {
+            bridgeSource?.cancel()
+            close(bridgeFd)
+            if let path = config.vsock_bridge_path { unlink(path) }
+            bridgeFd = -1
+        }
         guard machine.canStop else { exit(code) }
         machine.stop { _ in exit(code) }
     }
@@ -316,6 +460,7 @@ final class Launcher: NSObject, VZVirtualMachineDelegate {
             self.stopAndExit(2)
         }
 
+        installSignalHandler()
         machine.start { result in
             if case .failure(let error) = result {
                 FileHandle.standardError.write(
@@ -323,11 +468,20 @@ final class Launcher: NSObject, VZVirtualMachineDelegate {
                 self.report(status: "start-failed")
                 exit(1)
             }
+            if let bridge = self.config.vsock_bridge_path, !bridge.isEmpty {
+                self.startBridge(bridge)
+            }
         }
         dispatchMain()
     }
 
     func guestDidStop(_ virtualMachine: VZVirtualMachine) {
+        if let path = config.vsock_bridge_path, bridgeFd >= 0 {
+            bridgeSource?.cancel()
+            close(bridgeFd)
+            unlink(path)
+            bridgeFd = -1
+        }
         let ok = ready && (probe == nil || probeDone)
         report(status: ok ? "stopped" : (ready ? "stopped-before-probe" : "stopped-before-ready"))
         exit(ok ? 0 : 1)

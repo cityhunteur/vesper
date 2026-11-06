@@ -1,0 +1,44 @@
+#!/bin/sh
+# Vesper guest agent: one connection per process, spawned by socat
+# (etc/init.d/vesper-agent) for every vsock connection on the agent port.
+# Line protocol, version 1:
+#   greeting:  VESPER-AGENT 1 <hostname>
+#   PING                  -> PONG
+#   VERSION               -> VERSION 1
+#   ECHO <n>              -> ECHO <n> then the next <n> bytes are read and written back unchanged
+#   HEALTH                -> HEALTH {"packages_ready":bool,"services":{"name":"started|stopped|..."}}
+#   DROP                  -> DROP then the connection is closed (simulates a server-side drop)
+#   SHUTDOWN              -> BYE then poweroff
+#   QUIT                  -> BYE then the connection is closed
+#   anything else         -> ERR unknown command
+printf 'VESPER-AGENT 1 %s\n' "$(hostname)"
+service_state() {
+  if [ -x "/etc/init.d/$1" ]; then
+    rc-service "$1" status 2>/dev/null | awk '{print $NF}'
+  else
+    echo missing
+  fi
+}
+while IFS= read -r line; do
+  set -- $line
+  case "$1" in
+    PING) echo PONG ;;
+    VERSION) echo "VERSION 1" ;;
+    ECHO)
+      n="${2:-0}"
+      case "$n" in ''|*[!0-9]*) echo "ERR bad length"; continue ;; esac
+      echo "ECHO $n"
+      head -c "$n"
+      ;;
+    HEALTH)
+      ready=false
+      [ -f /run/vesper/packages-ready ] && ready=true
+      printf 'HEALTH {"packages_ready":%s,"services":{"containerd":"%s","docker":"%s","vesper-agent":"%s"}}\n' \
+        "$ready" "$(service_state containerd)" "$(service_state docker)" "$(service_state vesper-agent)"
+      ;;
+    DROP) echo DROP; exit 0 ;;
+    SHUTDOWN) echo BYE; (sleep 0.2; poweroff) & exit 0 ;;
+    QUIT) echo BYE; exit 0 ;;
+    *) echo "ERR unknown command" ;;
+  esac
+done

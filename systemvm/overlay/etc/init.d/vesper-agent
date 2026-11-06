@@ -1,0 +1,15 @@
+#!/sbin/openrc-run
+# Vesper guest agent on vsock: socat accepts every connection on the agent
+# port and runs /usr/local/bin/vesper-agent for it. Supervised by
+# supervise-daemon so a crash is restarted without manual intervention.
+description="Vesper guest agent (vsock)"
+supervisor=supervise-daemon
+agent_port="${VESPER_AGENT_PORT:-1024}"
+command=/usr/bin/socat
+command_args="VSOCK-LISTEN:${agent_port},reuseaddr,fork EXEC:/usr/local/bin/vesper-agent"
+respawn_delay=1
+respawn_max=0
+
+depend() {
+  need localmount vesper-packages
+}

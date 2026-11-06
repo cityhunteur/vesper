@@ -3,7 +3,7 @@
 #          systemvmctl lock-env / verify-image / launch-config --from-lock,
 #          scripts/systemvm/fetch-image.sh, .github/workflows/systemvm-image.yml.
 # Change procedure: docs/process/systemvm-bringup.md, "Bumping the pinned image".
-schema_version: 4
+schema_version: 5
 distribution: alpine
 branch: v3.22
 release: 3.22.8
@@ -46,6 +46,13 @@ overlay:
   packages_lock: docs/specs/systemvm-packages.lock.yaml
   apkovl_path: /vesper/localhost.apkovl.tar.gz
   file: initramfs-vesper
+# Control channel (GH #13): the launcher serves <bridge_dir>/<cid>.sock on the host; a client writes
+# "CONNECT <port>\n" and is relayed to that guest vsock port (the vesper-proxy bridge convention). The guest
+# agent (systemvm/overlay/usr/local/bin/vesper-agent, supervised by etc/init.d/vesper-agent) listens on agent_port.
+control:
+  bridge_dir: run/systemvm/vsock
+  cid: 3
+  agent_port: 1024
 boot:
   # From boot/grub/grub.cfg on the ISO, with the console moved to the virtio console (hvc0), plus the overlay.
   kernel_cmdline: "console=hvc0 modules=loop,squashfs,sd-mod,usb-storage apkovl=/vesper/localhost.apkovl.tar.gz"
@@ -64,7 +71,8 @@ boot:
       - "ip link set eth0 up && udhcpc -i eth0 -n -q -t 10"
       - "ip -4 addr show eth0 | grep -q 'inet ' && ping -c 1 -W 3 \"$(ip route | awk '/^default/ {print $3; exit}')\" > /dev/null && touch /run/vesper-nat-ok && echo \"VESPER-NAT-\"OK"
       - "for i in $(seq 1 90); do [ -f /run/vesper/packages-ready ] && break; sleep 1; done; test -f /run/vesper/packages-ready && command -v socat >/dev/null && command -v containerd >/dev/null && command -v dockerd >/dev/null && echo \"VESPER-EXTRAS-\"OK"
-      - "test -f /run/vesper-nat-ok && test -f /run/vesper/packages-ready && echo \"VESPER-PROBE-\"OK"
+      - "for i in $(seq 1 30); do rc-service vesper-agent status 2>/dev/null | grep -q started && break; sleep 1; done; rc-service vesper-agent status | grep -q started && echo \"VESPER-AGENT-\"OK"
+      - "test -f /run/vesper-nat-ok && test -f /run/vesper/packages-ready && rc-service vesper-agent status | grep -q started && echo \"VESPER-PROBE-\"OK"
     success_pattern: "VESPER-PROBE-OK"
     shutdown_command: poweroff
 # sha256("<kernel_sha256>:<rootfs or empty>:<initrd_sha256>:<boot_media_sha256>") as computed by

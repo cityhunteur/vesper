@@ -23,6 +23,7 @@ RULES: Dict[str, Set[str]] = {
     "src/api/boot_source.rs": set(),
     "src/api/logger_metrics.rs": set(),
     "src/api/machine_config.rs": set(),
+    "src/control.rs": set(),
     "src/proxy.rs": {"buildinfo", "platform"},
     "src/systemvm.rs": {"buildinfo", "platform"},
     "src/systemvm/image_lock.rs": set(),
