@@ -205,6 +205,30 @@ impl Session {
         serde_json::from_str(json).map_err(|err| format!("HEALTH: invalid JSON {json:?}: {err}"))
     }
 
+    /// Sends SIGKILL to a supervised daemon in the guest (`containerd` or `docker`); returns its pid.
+    pub fn kill_service(&mut self, service: &str) -> Result<u32, String> {
+        self.send(&format!("KILL {service}"))?;
+        let line = self.read_line()?;
+        let mut parts = line.split_whitespace();
+        match (parts.next(), parts.next(), parts.next()) {
+            (Some("KILL"), Some(name), Some(pid)) if name == service => {
+                pid.parse().map_err(|_| format!("KILL: bad pid in {line:?}"))
+            }
+            _ => Err(format!("KILL {service}: unexpected reply {line:?}")),
+        }
+    }
+
+    /// Last `count` lines of a guest log (`messages`, `containerd` or `docker`).
+    pub fn logs(&mut self, log: &str, count: u32) -> Result<Vec<String>, String> {
+        self.send(&format!("LOGS {log} {count}"))?;
+        let line = self.read_line()?;
+        let n: usize = line
+            .strip_prefix("LOGS ")
+            .and_then(|v| v.parse().ok())
+            .ok_or_else(|| format!("LOGS {log}: unexpected reply {line:?}"))?;
+        (0..n).map(|_| self.read_line()).collect()
+    }
+
     /// Asks the agent to close this connection (server-side drop).
     pub fn drop_connection(&mut self) -> Result<(), String> {
         self.expect("DROP", "DROP").map(|_| ())
@@ -324,6 +348,73 @@ pub fn run_suite(
     }
 }
 
+/// Runs the GH #14 checklist per service: healthy at boot, SIGKILL, supervised restart within
+/// `recovery_timeout`, and log lines that record the startup and the recovery.
+pub fn run_services_suite(
+    endpoint: &ControlEndpoint,
+    services: &[&str],
+    recovery_timeout: Duration,
+) -> SuiteReport {
+    let mut steps = Vec::new();
+    let healthy = |session: &mut Session, service: &str| -> Result<serde_json::Value, String> {
+        let health = session.health()?;
+        let ok = health.get(format!("{service}_ok")).and_then(|v| v.as_bool()) == Some(true);
+        let state = health["services"][service].as_str().unwrap_or("?").to_string();
+        if !ok || state != "started" {
+            return Err(format!("{service} not healthy: state {state}, health {health}"));
+        }
+        Ok(health)
+    };
+    let session = step(&mut steps, "handshake", || {
+        let session = connect(endpoint)?;
+        let detail = format!("protocol {} host {}", session.handshake.protocol_version, session.handshake.hostname);
+        Ok((session, detail))
+    });
+    let Some(mut session) = session else {
+        return SuiteReport { bridge_path: endpoint.bridge_path.display().to_string(), port: endpoint.port, steps, passed: false };
+    };
+    for service in services {
+        let service = *service;
+        let before = step(&mut steps, &format!("{service}_healthy_at_boot"), || {
+            let health = healthy(&mut session, service)?;
+            Ok(((), format!("state started, {service}_ok true, health {health}")))
+        });
+        if before.is_none() {
+            continue;
+        }
+        let killed = step(&mut steps, &format!("{service}_simulated_crash"), || {
+            let pid = session.kill_service(service)?;
+            Ok((pid, format!("SIGKILL sent to pid {pid}")))
+        });
+        let Some(old_pid) = killed else { continue };
+        step(&mut steps, &format!("{service}_recovers"), || {
+            let deadline = Instant::now() + recovery_timeout;
+            let started = Instant::now();
+            loop {
+                if let Ok(health) = healthy(&mut session, service) {
+                    return Ok(((), format!("healthy again after {} ms (old pid {old_pid}); health {health}", started.elapsed().as_millis())));
+                }
+                if Instant::now() >= deadline {
+                    return Err(format!("{service} did not recover within {} s", recovery_timeout.as_secs()));
+                }
+                thread::sleep(Duration::from_millis(500));
+            }
+        });
+        step(&mut steps, &format!("{service}_logs_capture_startup_and_recovery"), || {
+            let lines = session.logs(service, 200)?;
+            let startups = lines.iter().filter(|l| l.contains("starting containerd") || l.contains("Starting up")).count();
+            let messages = session.logs("messages", 200)?;
+            let respawns = messages.iter().filter(|l| l.contains("supervise-daemon") && l.contains(service)).count();
+            if startups < 2 {
+                return Err(format!("expected at least two startups in /var/log/{service}.log, found {startups}"));
+            }
+            Ok(((), format!("{startups} startup lines in {service}.log, {respawns} supervise-daemon lines for {service} in messages")))
+        });
+    }
+    let passed = steps.iter().all(|s| s.ok) && steps.len() == 1 + services.len() * 4;
+    SuiteReport { bridge_path: endpoint.bridge_path.display().to_string(), port: endpoint.port, steps, passed }
+}
+
 pub fn write_report(path: impl AsRef<Path>, report: &SuiteReport) -> Result<(), String> {
     let path = path.as_ref();
     if let Some(parent) = path.parent() {
@@ -374,8 +465,21 @@ mod tests {
                                 writer.write_all(&buf).unwrap();
                             }
                             Some("HEALTH") => writer
-                                .write_all(b"HEALTH {\"packages_ready\":true,\"services\":{\"vesper-agent\":\"started\"}}\n")
+                                .write_all(b"HEALTH {\"packages_ready\":true,\"services\":{\"vesper-agent\":\"started\",\"containerd\":\"started\",\"docker\":\"started\"},\"containerd_ok\":true,\"docker_ok\":true}\n")
                                 .unwrap(),
+                            Some("KILL") => {
+                                let name = parts.next().unwrap_or("");
+                                writer.write_all(format!("KILL {name} 4242\n").as_bytes()).unwrap();
+                            }
+                            Some("LOGS") => {
+                                let name = parts.next().unwrap_or("");
+                                let body = if name == "messages" {
+                                    "supervise-daemon[1]: containerd: respawning\nsupervise-daemon[1]: docker: respawning\n"
+                                } else {
+                                    "level=info msg=\"starting containerd\"\nlevel=info msg=\"Starting up\"\n"
+                                };
+                                writer.write_all(format!("LOGS {}\n{body}", body.lines().count()).as_bytes()).unwrap();
+                            }
                             Some("DROP") => {
                                 writer.write_all(b"DROP\n").unwrap();
                                 return;
@@ -438,5 +542,21 @@ mod tests {
         write_report(&out, &report).unwrap();
         let written: SuiteReport = serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
         assert!(written.passed);
+    }
+
+    #[test]
+    fn services_suite_kills_and_waits_for_recovery() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("3.sock");
+        fake_bridge(&path, "VESPER-AGENT 1 vesper", false);
+        let endpoint = ControlEndpoint::new(&path, DEFAULT_AGENT_PORT);
+        let mut session = connect(&endpoint).unwrap();
+        assert_eq!(session.kill_service("docker").unwrap(), 4242);
+        assert_eq!(session.logs("docker", 10).unwrap().len(), 2);
+        let report = run_services_suite(&endpoint, &["containerd", "docker"], Duration::from_secs(2));
+        let names: Vec<&str> = report.steps.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names.len(), 9);
+        assert!(names.contains(&"docker_recovers") && names.contains(&"containerd_logs_capture_startup_and_recovery"));
+        assert!(report.passed, "{:?}", report.steps);
     }
 }

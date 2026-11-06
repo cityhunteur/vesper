@@ -72,7 +72,8 @@ boot:
       - "ip -4 addr show eth0 | grep -q 'inet ' && ping -c 1 -W 3 \"$(ip route | awk '/^default/ {print $3; exit}')\" > /dev/null && touch /run/vesper-nat-ok && echo \"VESPER-NAT-\"OK"
       - "for i in $(seq 1 90); do [ -f /run/vesper/packages-ready ] && break; sleep 1; done; test -f /run/vesper/packages-ready && command -v socat >/dev/null && command -v containerd >/dev/null && command -v dockerd >/dev/null && echo \"VESPER-EXTRAS-\"OK"
       - "for i in $(seq 1 30); do rc-service vesper-agent status 2>/dev/null | grep -q started && break; sleep 1; done; rc-service vesper-agent status | grep -q started && echo \"VESPER-AGENT-\"OK"
-      - "test -f /run/vesper-nat-ok && test -f /run/vesper/packages-ready && rc-service vesper-agent status | grep -q started && echo \"VESPER-PROBE-\"OK"
+      - "for i in $(seq 1 60); do [ -f /run/vesper/services-ready ] && break; sleep 1; done; rc-service containerd status | grep -q started && rc-service docker status | grep -q started && docker version --format '{{.Server.Version}}' >/dev/null 2>&1 && echo \"VESPER-SERVICES-\"OK"
+      - "test -f /run/vesper-nat-ok && test -f /run/vesper/packages-ready && test -f /run/vesper/services-ready && rc-service vesper-agent status | grep -q started && echo \"VESPER-PROBE-\"OK"
     success_pattern: "VESPER-PROBE-OK"
     shutdown_command: poweroff
 # sha256("<kernel_sha256>:<rootfs or empty>:<initrd_sha256>:<boot_media_sha256>") as computed by

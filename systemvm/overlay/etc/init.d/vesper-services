@@ -1,0 +1,39 @@
+#!/sbin/openrc-run
+# Start the runtime daemons that arrive with the pinned packages (their OpenRC
+# scripts do not exist when the default runlevel is computed, so they cannot
+# be runlevel symlinks). containerd and docker are supervised by
+# supervise-daemon (respawn on crash) and log to /var/log/<name>.log.
+description="Vesper runtime services (containerd, docker)"
+
+depend() {
+  need localmount vesper-packages
+  use net
+}
+
+start() {
+  ebegin "Starting Vesper runtime services"
+  for svc in containerd docker; do
+    if [ ! -x "/etc/init.d/$svc" ]; then
+      echo "vesper: service $svc is missing" > /dev/console
+      eend 1
+      return 1
+    fi
+    # A clean environment: inside a runlevel change rc-service would only schedule the start.
+    if ! out="$(env -i PATH=/sbin:/usr/sbin:/bin:/usr/bin rc-service "$svc" start 2>&1)"; then
+      echo "vesper: service $svc failed to start: $(printf '%s' "$out" | tail -2 | tr '\n' ' ')" > /dev/console
+      eend 1
+      return 1
+    fi
+    echo "vesper: service $svc started" > /dev/console
+  done
+  mkdir -p /run/vesper && touch /run/vesper/services-ready
+  eend 0
+}
+
+stop() {
+  ebegin "Stopping Vesper runtime services"
+  env -i PATH=/sbin:/usr/sbin:/bin:/usr/bin rc-service docker stop >/dev/null 2>&1 || true
+  env -i PATH=/sbin:/usr/sbin:/bin:/usr/bin rc-service containerd stop >/dev/null 2>&1 || true
+  rm -f /run/vesper/services-ready
+  eend 0
+}

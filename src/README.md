@@ -97,10 +97,12 @@ Public symbols by file:
 - `control.rs`: `ControlEndpoint { bridge_path, port, io_timeout }` with
   `new(bridge, port)` (10 s timeouts), `Handshake { protocol_version,
   hostname, connect_ms }`, `Session` with `ping`, `version`, `echo(payload)`,
-  `health`, `drop_connection`, `shutdown`, `keepalive(interval, total)`,
+  `health`, `kill_service(name)`, `logs(name, count)`, `drop_connection`,
+  `shutdown`, `keepalive(interval, total)`,
   `connect(&endpoint)`, `connect_with_retry(&endpoint, attempts, backoff)`,
   `SuiteStep`, `SuiteReport`, `run_suite(&endpoint, interval, total,
-  payload_bytes)`, `write_report(path, &report)`; constants
+  payload_bytes)`, `run_services_suite(&endpoint, &[service], recovery_timeout)`,
+  `write_report(path, &report)`; constants
   `AGENT_PROTOCOL_VERSION` (1), `DEFAULT_AGENT_PORT` (1024).
 - `systemvm.rs` (manifest, launch config, boot smoke),
   `systemvm/image_lock.rs` (`ImageLock` and everything lock-related) and
@@ -265,7 +267,12 @@ Public symbols by file:
   while reading, because the agent streams bytes back as they arrive.
   `run_suite` runs `handshake`, `keepalive`, `reconnect` (server-side `DROP`,
   then `connect_with_retry` 5 × 500 ms) and `large_payload` in that order,
-  stopping at the first failure; `passed` requires all four.
+  stopping at the first failure; `passed` requires all four. `run_services_suite`
+  runs `handshake` then, per service, `<svc>_healthy_at_boot` (`HEALTH` state
+  `started` and `<svc>_ok` true), `<svc>_simulated_crash` (`KILL`),
+  `<svc>_recovers` (polls `HEALTH` every 500 ms until the timeout) and
+  `<svc>_logs_capture_startup_and_recovery` (at least two startup lines in
+  `/var/log/<svc>.log`); `passed` requires `1 + 4 × services` ok steps.
 - `systemvm/packages.rs:validate_packages_lock` requires schema `1`,
   non-blank branch and arch, every requested package in the closure,
   packages sorted by name without duplicates, `file ==

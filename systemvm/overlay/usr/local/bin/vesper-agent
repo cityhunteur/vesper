@@ -6,7 +6,10 @@
 #   PING                  -> PONG
 #   VERSION               -> VERSION 1
 #   ECHO <n>              -> ECHO <n> then the next <n> bytes are read and written back unchanged
-#   HEALTH                -> HEALTH {"packages_ready":bool,"services":{"name":"started|stopped|..."}}
+#   HEALTH                -> HEALTH {"packages_ready":bool,"services_ready":bool,"services":{...},
+#                             "containerd_ok":bool,"docker_ok":bool,"docker_version":"..."}
+#   KILL <containerd|docker> -> KILL <name> <pid> after SIGKILL to the daemon (crash simulation)
+#   LOGS <messages|containerd|docker> <n> -> LOGS <count> then <count> log lines
 #   DROP                  -> DROP then the connection is closed (simulates a server-side drop)
 #   SHUTDOWN              -> BYE then poweroff
 #   QUIT                  -> BYE then the connection is closed
@@ -31,10 +34,44 @@ while IFS= read -r line; do
       head -c "$n"
       ;;
     HEALTH)
-      ready=false
+      ready=false; sready=false; cok=false; dok=false; dver=""
       [ -f /run/vesper/packages-ready ] && ready=true
-      printf 'HEALTH {"packages_ready":%s,"services":{"containerd":"%s","docker":"%s","vesper-agent":"%s"}}\n' \
-        "$ready" "$(service_state containerd)" "$(service_state docker)" "$(service_state vesper-agent)"
+      [ -f /run/vesper/services-ready ] && sready=true
+      ctr --connect-timeout 2s version >/dev/null 2>&1 && cok=true
+      dver="$(docker version --format '{{.Server.Version}}' 2>/dev/null || true)"
+      [ -n "$dver" ] && dok=true
+      printf 'HEALTH {"packages_ready":%s,"services_ready":%s,"services":{"containerd":"%s","docker":"%s","vesper-agent":"%s"},"containerd_ok":%s,"docker_ok":%s,"docker_version":"%s"}\n' \
+        "$ready" "$sready" "$(service_state containerd)" "$(service_state docker)" "$(service_state vesper-agent)" "$cok" "$dok" "$dver"
+      ;;
+    KILL)
+      case "$2" in
+        containerd) proc=containerd ;;
+        docker) proc=dockerd ;;
+        *) echo "ERR unknown service"; continue ;;
+      esac
+      pid="$(pidof "$proc" 2>/dev/null | awk '{print $1}')"
+      if [ -z "$pid" ]; then echo "ERR $2 not running"; continue; fi
+      kill -9 "$pid" 2>/dev/null
+      echo "KILL $2 $pid"
+      ;;
+    LOGS)
+      case "$2" in
+        messages) file=/var/log/messages ;;
+        containerd) file=/var/log/containerd.log ;;
+        docker) file=/var/log/docker.log ;;
+        *) echo "ERR unknown log"; continue ;;
+      esac
+      n="${3:-50}"
+      case "$n" in ''|*[!0-9]*) echo "ERR bad count"; continue ;; esac
+      if [ -f "$file" ]; then
+        out="$(tail -n "$n" "$file")"
+        count="$(printf '%s\n' "$out" | grep -c '' )"
+        [ -z "$out" ] && count=0
+        echo "LOGS $count"
+        [ "$count" -gt 0 ] && printf '%s\n' "$out"
+      else
+        echo "LOGS 0"
+      fi
       ;;
     DROP) echo DROP; exit 0 ;;
     SHUTDOWN) echo BYE; (sleep 0.2; poweroff) & exit 0 ;;

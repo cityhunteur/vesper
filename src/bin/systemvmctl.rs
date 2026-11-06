@@ -136,6 +136,23 @@ enum ControlAction {
     },
     /// Ask the guest to power off.
     Shutdown,
+    /// SIGKILL a supervised guest daemon (containerd or docker).
+    Kill { service: String },
+    /// Tail a guest log: messages, containerd or docker.
+    Logs {
+        log: String,
+        #[arg(long, default_value_t = 50)]
+        lines: u32,
+    },
+    /// Run the GH #14 checklist (healthy, crash, supervised recovery, logs) and write a JSON report.
+    ServicesSuite {
+        #[arg(long, default_value = "run/systemvm/services-report.json")]
+        report: String,
+        #[arg(long, value_delimiter = ',', default_values_t = vec!["containerd".to_string(), "docker".to_string()])]
+        services: Vec<String>,
+        #[arg(long, default_value_t = 60)]
+        recovery_seconds: u64,
+    },
     /// Run the GH #13 checklist and write a JSON report.
     Suite {
         #[arg(long, default_value = "run/systemvm/control-report.json")]
@@ -209,6 +226,42 @@ fn run_control(endpoint: vesper::control::ControlEndpoint, action: ControlAction
             let mut session = control::connect(&endpoint)?;
             session.shutdown()?;
             println!("guest acknowledged shutdown");
+        }
+        ControlAction::Kill { service } => {
+            let mut session = control::connect(&endpoint)?;
+            println!("killed {service} pid {}", session.kill_service(&service)?);
+        }
+        ControlAction::Logs { log, lines } => {
+            let mut session = control::connect(&endpoint)?;
+            for line in session.logs(&log, lines)? {
+                println!("{line}");
+            }
+        }
+        ControlAction::ServicesSuite {
+            report,
+            services,
+            recovery_seconds,
+        } => {
+            let names: Vec<&str> = services.iter().map(String::as_str).collect();
+            let result = control::run_services_suite(
+                &endpoint,
+                &names,
+                std::time::Duration::from_secs(recovery_seconds),
+            );
+            control::write_report(&report, &result)?;
+            for step in &result.steps {
+                println!(
+                    "{} {}: {} ({} ms)",
+                    if step.ok { "ok  " } else { "FAIL" },
+                    step.name,
+                    step.detail.chars().take(160).collect::<String>(),
+                    step.elapsed_ms
+                );
+            }
+            if !result.passed {
+                return Err(format!("services suite failed (report: {report})"));
+            }
+            println!("services suite passed (report: {report})");
         }
         ControlAction::Suite {
             report,
