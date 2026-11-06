@@ -270,7 +270,9 @@ obtains a DHCP lease from the NAT and pings the gateway, powers the guest off, a
 threshold. `make systemvm-up` keeps the VM running with the owner-only bridge socket `run/systemvm/vsock/3.sock`
 served by the launcher; `systemvmctl control` reaches the supervised guest agent through it (handshake, keepalive,
 reconnect and 2 MiB echo proven by `make systemvm-control-suite`); `make systemvm-down` powers the guest off.
-`containerd` and `dockerd` are installed but not yet started (TD-005).
+`containerd` and `dockerd` run under `supervise-daemon` inside the guest (cgroup v2, `eth0` by DHCP) and
+`make systemvm-services-suite` proves they recover from SIGKILL; dockerd listens only inside the guest until the
+Docker socket ingress lands (TD-005).
 
 **Intended:** design-v0 describes a packaged macOS host process plus a Linux System VM running containerd and
 Firecracker.

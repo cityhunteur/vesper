@@ -95,7 +95,9 @@ Minimum:
   `run/<ISSUE-ID>/systemvm/`; the 200-boot reliability bar from design-v0 for any change to the launcher, the
   image lock or the kernel command line,
 - `make systemvm-up && make systemvm-control-suite && make systemvm-down` with `passed: true` in
-  `run/systemvm/control-report.json` for any change to the launcher bridge, the overlay services or the agent.
+  `run/systemvm/control-report.json` for any change to the launcher bridge, the overlay services or the agent,
+- `make systemvm-services-suite` with `passed: true` in `run/systemvm/services-report.json` for any change to
+  the guest services, the package pins or cgroup configuration.
 
 ### Governance work
 

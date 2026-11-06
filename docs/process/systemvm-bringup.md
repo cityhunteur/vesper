@@ -37,8 +37,8 @@ Rust (`systemvm::load_image_lock`, `deny_unknown_fields`); the shell never inter
 ## Overlay and packages (ADR 0002)
 
 `systemvm/overlay/` is an Alpine `apkovl` tree applied over the tmpfs root at boot. `make systemvm-overlay`
-downloads the packages pinned in `docs/specs/systemvm-packages.lock.yaml` (`socat`, `containerd`, Docker and
-their closure, 18 files, verified by digest), packs the tree plus the packages into
+downloads the packages pinned in `docs/specs/systemvm-packages.lock.yaml` (`socat`, `containerd` with `ctr`,
+Docker and their closure, 19 files, verified by digest), packs the tree plus the packages into
 `build/systemvm/localhost.apkovl.tar.gz` with owner root and mtime 0, appends it to the pinned initramfs as a
 second cpio archive at `/vesper/localhost.apkovl.tar.gz` (`build/systemvm/initramfs-vesper`), and re-verifies the
 image. The kernel command line names it with `apkovl=`; `etc/local.d/10-vesper-packages.start` installs the
@@ -140,6 +140,17 @@ systemvm-control-suite` runs the GH #13 checklist (handshake, keepalive under id
 drop, 2 MiB echo) and writes `run/systemvm/control-report.json`. `make systemvm-down` (`down.sh [WAIT]`) asks the
 agent to power off, waits for the launcher to exit, and falls back to SIGTERM. On 2026-11-06 (M3): up in 3.1 s,
 suite passed (11 keepalive pings over 20 s, reconnect in 1 attempt, 2 MiB echoed in 11 ms), down in 3.3 s.
+
+## Runtime services (GH #14)
+
+The overlay starts `containerd` and `dockerd` at boot (`vesper-services`, after the package install) under OpenRC's
+`supervise-daemon`, with cgroup v2 mounted (`cgroups` in sysinit, `rc_cgroup_mode="unified"`) and `eth0` configured
+by the `networking` service. The agent's `HEALTH` reports `containerd_ok` (`ctr version`) and `docker_ok` with the
+server version. `make systemvm-services-suite` (`systemvmctl control services-suite`) runs the GH #14 checklist
+for each service: healthy at boot, `KILL` (SIGKILL), recovery judged by `HEALTH` within 60 s, and
+`/var/log/<svc>.log` plus `supervise-daemon` lines in `/var/log/messages` as evidence; it writes
+`run/systemvm/services-report.json`. On 2026-11-06 (M3): both recovered in under 600 ms; the login prompt now
+appears at 3.4 to 4.5 s because the daemons start before it.
 
 ## Proxy bridge convention
 

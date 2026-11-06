@@ -4,7 +4,7 @@
 schema_version: 1
 branch: v3.22
 arch: aarch64
-requested: [socat, containerd, containerd-openrc, docker-engine, docker-cli, docker-openrc]
+requested: [socat, containerd, containerd-ctr, containerd-openrc, docker-engine, docker-cli, docker-openrc]
 packages:
   - name: ca-certificates
     version: "20261020-r0"
@@ -20,6 +20,13 @@ packages:
     url: https://dl-cdn.alpinelinux.org/alpine/v3.22/community/aarch64/containerd-2.1.5-r2.apk
     sha256: 963e1c79c6439e23afbb085428d6466fa684921bacfc4f39dc0e667b044b7669
     size_bytes: 16323732
+  - name: containerd-ctr
+    version: "2.1.5-r2"
+    repo: community
+    file: containerd-ctr-2.1.5-r2.apk
+    url: https://dl-cdn.alpinelinux.org/alpine/v3.22/community/aarch64/containerd-ctr-2.1.5-r2.apk
+    sha256: 576c706f934ca3f4ae02dbc91d70a29076d695782eea2f60e2d2da78cae8ac27
+    size_bytes: 7763622
   - name: containerd-openrc
     version: "2.1.5-r2"
     repo: community

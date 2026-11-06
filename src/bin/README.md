@@ -67,7 +67,10 @@ errors to stderr and exits with code 1 on failure.
   (`--config` default `build/systemvm/launch-config.json`, optional `--bridge`
   and `--port` overriding the config's `vsock_bridge_path` and `agent_port`;
   actions `handshake`, `ping`, `version`, `health`, `echo --bytes` (2 MiB),
-  `keepalive --interval 5 --seconds 30`, `shutdown`, `suite --report
+  `keepalive --interval 5 --seconds 30`, `shutdown`, `kill <service>`, `logs
+  <messages|containerd|docker> --lines 50`, `services-suite --report
+  run/systemvm/services-report.json --services containerd,docker
+  --recovery-seconds 60`, `suite --report
   run/systemvm/control-report.json --keepalive-interval 2 --keepalive-seconds
   20 --payload-bytes 2097152`), `boot-smoke` (`--iterations` 5,
   `--timeout-seconds` 20, `--command` `sh`, `--args` `-c,echo boot-ok`,

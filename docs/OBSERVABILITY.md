@@ -41,9 +41,11 @@ The durable signals this project relies on are artifacts rather than live teleme
   `max_boot_allowed_ms`) from `systemvmctl boot-smoke`; `run/systemvm/console.log` (guest serial console of the
   last boot, including the probe's login, DHCP lease and `VESPER-NAT-OK`) and JSON status lines (`ready`,
   `probe-ok`, `stopped`, …) from `vesper-vmlauncher`; `run/systemvm/vmlauncher.log` (those lines for the VM kept
-  up by `make systemvm-up`, plus bridge errors on stderr) and `run/systemvm/control-report.json` (`steps[]` with
-  `name`, `ok`, `detail`, `elapsed_ms`, and `passed`) from `systemvmctl control suite`; the agent's `HEALTH` line
-  (`packages_ready`, OpenRC state per service).
+  up by `make systemvm-up`, plus bridge errors on stderr) and `run/systemvm/control-report.json` and `run/systemvm/services-report.json`
+  (`steps[]` with `name`, `ok`, `detail`, `elapsed_ms`, and `passed`) from `systemvmctl control suite` and
+  `services-suite`; the agent's `HEALTH` line (`packages_ready`, `services_ready`, OpenRC state per service,
+  `containerd_ok`, `docker_ok`, `docker_version`); guest logs through `systemvmctl control logs
+  <messages|containerd|docker>` (`/var/log/messages` holds the `supervise-daemon` respawn lines).
 - `build/systemvm/image-manifest.json` (SHA-256 digests, stable `image_id`) and `build/systemvm/launch-config.json`.
 - `artifacts/parity-metadata.json` from `baselinectl --mode generate`.
 - JSON and Markdown reports from the Python sensors (`--json-out`, `--markdown-out`), uploaded by the `harness-*`
