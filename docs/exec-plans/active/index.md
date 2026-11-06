@@ -5,4 +5,4 @@ Plans currently in progress. Add a row when you create a plan, and move the row 
 
 | Plan | Goal | Started | Owner |
 |---|---|---|---|
-| | *None* | | |
+| [2026-11-06-WOR-24-nested-virtualization-gating.md](2026-11-06-WOR-24-nested-virtualization-gating.md) | Host capability probe, nested-virtualization policy and backend selection with diagnostics (GH #17) | 2026-11-06 | cityhunteur |

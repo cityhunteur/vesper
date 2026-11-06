@@ -79,6 +79,8 @@ impl ControlSettings {
 pub struct BootSettings {
     pub kernel_cmdline: String,
     pub ready_pattern: String,
+    /// Nested virtualization policy for the System VM: `auto`, `require` or `off` (GH #17).
+    pub nested_virtualization: String,
     /// Boot-time threshold (design-v0 "boot time within acceptable threshold"): time to `ready_pattern`.
     pub max_boot_ms: u64,
     /// Console-driven guest probe run after the ready pattern (NAT proof and clean shutdown).
@@ -171,6 +173,8 @@ pub fn validate_image_lock(lock: &ImageLock) -> Result<(), String> {
             return Err(format!("image lock field {name} must not be blank"));
         }
     }
+    super::NestedPolicy::parse(&lock.boot.nested_virtualization)
+        .map_err(|err| format!("image lock boot.nested_virtualization: {err}"))?;
     if lock.boot.max_boot_ms == 0 {
         return Err("image lock boot.max_boot_ms must be > 0".to_string());
     }
@@ -287,6 +291,7 @@ pub fn image_lock_env(lock: &ImageLock) -> String {
         ("VESPER_IMAGE_KERNEL_CMDLINE", lock.boot.kernel_cmdline.as_str()),
         ("VESPER_IMAGE_READY_PATTERN", lock.boot.ready_pattern.as_str()),
         ("VESPER_IMAGE_MAX_BOOT_MS", &max_boot_ms),
+        ("VESPER_IMAGE_NESTED_VIRTUALIZATION", lock.boot.nested_virtualization.as_str()),
         ("VESPER_IMAGE_OVERLAY_DIR", lock.overlay.as_ref().map(|o| o.dir.as_str()).unwrap_or("")),
         (
             "VESPER_IMAGE_OVERLAY_PACKAGES_LOCK",
@@ -419,6 +424,7 @@ pub fn launch_config_from_lock(
         probe: lock.boot.probe.as_ref(),
         vsock_bridge_path: bridge.as_deref(),
         agent_port: lock.control.as_ref().map(|c| c.agent_port),
+        nested_virtualization: Some(&lock.boot.nested_virtualization),
         console_log_path,
     })
 }
@@ -449,6 +455,7 @@ mod tests {
         assert!(lock.boot.kernel_cmdline.contains("console=hvc0"));
         assert_eq!(lock.boot.ready_pattern, DEFAULT_READY_PATTERN);
         assert_eq!(lock.boot.max_boot_ms, 5000);
+        assert_eq!(lock.boot.nested_virtualization, "auto");
         let probe = lock.boot.probe.as_ref().expect("the lock pins a guest probe");
         assert_eq!(probe.login_user, "root");
         assert!(probe.commands.iter().any(|c| c.contains("ping")));
@@ -598,6 +605,7 @@ mod tests {
         assert_eq!(launch.max_boot_ms, Some(lock.boot.max_boot_ms));
         assert_eq!(launch.vsock_bridge_path.as_deref(), Some("run/systemvm/vsock/3.sock"));
         assert_eq!(launch.agent_port, Some(1024));
+        assert_eq!(launch.nested_virtualization.as_deref(), Some("auto"));
         assert_eq!(
             launch.probe.as_ref().map(|p| p.shutdown_command.as_str()),
             Some("poweroff")

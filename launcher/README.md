@@ -15,8 +15,9 @@ optional vsock bridge socket the config names, and reports.
 ## Interface
 
 - Build and sign: `make vmlauncher-build` (`scripts/macos/build-vmlauncher.sh`), output `build/vmlauncher/vesper-vmlauncher` ad-hoc signed with `packaging/macos/vesper-vmlauncher.entitlements`.
-- CLI: `vesper-vmlauncher [--config PATH] [--ready-pattern TEXT] [--timeout-seconds N] [--keep-running] [--skip-probe]`.
+- CLI: `vesper-vmlauncher [--config PATH] [--ready-pattern TEXT] [--timeout-seconds N] [--keep-running] [--skip-probe]`, or `vesper-vmlauncher --host-capabilities` (prints one JSON line `{api_available, nested_virtualization_supported, virtualization_supported, macos, chip, model}` and exits 0; needs no config).
   - `--config` default `build/systemvm/launch-config.json`; decoded as `LaunchConfig { kernel_path, rootfs_path?, initrd_path?, boot_media_path?, kernel_cmdline, ready_pattern?, max_boot_ms?, probe?: { login_user, shell_prompt, commands[], success_pattern, shutdown_command }, network_mode, cpu_count, memory_mib, console_log_path }` (the JSON written by `systemvmctl launch-config`). `max_boot_ms` is ignored here; `systemvmctl boot-smoke` enforces it.
+  - `nested_virtualization` in the config (`auto` default, `require`, `off`): `auto` and `require` set `VZGenericPlatformConfiguration.isNestedVirtualizationEnabled` when macOS 15+ reports support; `require` exits 3 with a diagnostic otherwise; any other value exits 3. A `platform` status line reports `"nested_virtualization":"enabled|unsupported|off"` before start.
   - `--ready-pattern` overrides `ready_pattern` from the config; the fallback is `login:`.
   - `--timeout-seconds` default `60`, must be positive; covers the boot and the whole probe.
   - `--keep-running`: run the probe without its shutdown command (or stop after the ready pattern when there is no probe) and keep the VM up until the guest powers off or the launcher receives SIGTERM (it then stops the VM and exits 0 when it was ready).

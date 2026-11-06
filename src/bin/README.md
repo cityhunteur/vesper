@@ -56,7 +56,7 @@ errors to stderr and exits with code 1 on failure.
   `--out` default `build/systemvm/image-manifest.json`), `launch-config`
   (either `--from-lock` with `--lock` and `--dir` default `build/systemvm`, or
   `--kernel` with optional `--rootfs`, `--initrd`, `--boot-media`,
-  `--cmdline`, `--ready-pattern`; `--console-log` default
+  `--cmdline`, `--ready-pattern`, `--nested` (auto|require|off); `--console-log` default
   `run/systemvm/console.log`, `--out` default
   `build/systemvm/launch-config.json`), `lock-env` (`--lock` default
   `docs/specs/systemvm-image.lock.yaml`; prints `KEY='VALUE'` lines),
@@ -64,7 +64,11 @@ errors to stderr and exits with code 1 on failure.
   prints `file<TAB>url<TAB>sha256` lines), `verify-packages` (`--lock`,
   `--dir` default `build/systemvm/cache/apks`),
   `verify-image` (`--lock`, `--dir` default `build/systemvm`, `--out` default
-  `build/systemvm/image-manifest.json`, `--require-overlay`), `control`
+  `build/systemvm/image-manifest.json`, `--require-overlay`),
+  `backend-select` (`--launcher` default `build/vmlauncher/vesper-vmlauncher`,
+  `--policy` default the lock's `boot.nested_virtualization`, `--lock`,
+  `--capabilities` to print the raw probe; prints the `BackendSelection`
+  JSON or exits 1 with diagnostics under `require`), `control`
   (`--config` default `build/systemvm/launch-config.json`, optional `--bridge`
   and `--port` overriding the config's `vsock_bridge_path` and `agent_port`;
   actions `handshake`, `ping`, `version`, `health`, `echo --bytes` (2 MiB),

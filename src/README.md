@@ -88,7 +88,13 @@ Public symbols by file:
   `Summary { open, closed }`, `load(path)`,
   `validate(registry, today, require_zero_open)`.
 - `platform.rs`: `validate_entitlements_file(path: Option<&Path>,
-  required_keys: &[&str])`.
+  required_keys: &[&str])`, `HostCapabilities { api_available,
+  nested_virtualization_supported, virtualization_supported, macos, chip,
+  model }`, `parse_host_capabilities(json)`, `probe_host_capabilities(launcher)`
+  (runs `vesper-vmlauncher --host-capabilities`), `NestedPolicy { Auto,
+  Require, Off }` with `parse`, `Backend { BackendA, BackendB }`,
+  `BackendSelection { backend, nested_virtualization, implemented,
+  diagnostics }`, `select_backend(&caps, policy)`.
 - `proxy.rs`: `Target { scheme, address, cid, port }`, `parse_target(raw)`,
   `ServerConfig { listen_path, upstream_raw, dial_timeout, vsock_socket_dir,
   listen_mode, validate_upstream }` with `Default` (5 s, mode `0o600`, no
@@ -117,7 +123,8 @@ Public symbols by file:
   `"2"`, optional rootfs, initrd and boot-media digests), `LaunchConfig {
   kernel_path, rootfs_path?, initrd_path?, boot_media_path?, kernel_cmdline,
   ready_pattern, max_boot_ms?, probe?: ProbeSettings, vsock_bridge_path?,
-  agent_port?, network_mode, cpu_count, memory_mib, console_log_path }`, `ProbeSettings { login_user, shell_prompt,
+  agent_port?, nested_virtualization?, network_mode, cpu_count, memory_mib,
+  console_log_path }`, `ProbeSettings { login_user, shell_prompt,
   commands, success_pattern, shutdown_command }` with `validate()`,
   `LaunchInputs` (borrowed inputs for `default_launch_config`),
   `BootCheckConfig { …, max_boot_ms: Option }`, `BootCheckReport {
@@ -135,7 +142,7 @@ Public symbols by file:
   `load_image_lock`, `validate_image_lock`, `image_lock_env`, `verify_image`,
   `default_launch_config`, `launch_config_from_lock`, `write_launch_config`,
   `run_boot_check`; constants `MANIFEST_SCHEMA_VERSION`,
-  `IMAGE_LOCK_SCHEMA_VERSION` (5), `DEFAULT_KERNEL_CMDLINE` (`console=hvc0`),
+  `IMAGE_LOCK_SCHEMA_VERSION` (6), `DEFAULT_KERNEL_CMDLINE` (`console=hvc0`),
   `DEFAULT_READY_PATTERN` (`login:`).
 
 ## Invariants
@@ -246,7 +253,8 @@ Public symbols by file:
   defaults to `login:`.
 - `systemvm.rs:load_image_lock` parses the YAML into `ImageLock` with
   `deny_unknown_fields`, then `validate_image_lock` requires schema version
-  `5`, an `https://` URL, non-zero `size_bytes`, non-blank `boot.*`, a
+  `6`, an `https://` URL, non-zero `size_bytes`, non-blank `boot.*`, a valid
+  `boot.nested_virtualization` policy, a
   `control` (when present) with a relative `bridge_dir`, `cid >= 3` and a
   non-zero `agent_port`,
   `boot.max_boot_ms > 0`, a valid `boot.probe` when present, an `overlay`
@@ -278,6 +286,11 @@ Public symbols by file:
   `<svc>_recovers` (polls `HEALTH` every 500 ms until the timeout) and
   `<svc>_logs_capture_startup_and_recovery` (at least two startup lines in
   `/var/log/<svc>.log`); `passed` requires `1 + 4 × services` ok steps.
+- `platform.rs:select_backend` never panics: `auto` on a host without
+  nested virtualization returns `BackendB` with `implemented: false` and
+  diagnostics naming the missing requirement (macOS 15, M3 or later);
+  `require` on such a host returns `Err` with the same text; `off` returns
+  `BackendB` without nested virtualization even on an M3.
 - `systemvm/packages.rs:validate_packages_lock` requires schema `1`,
   non-blank branch and arch, every requested package in the closure,
   packages sorted by name without duplicates, `file ==

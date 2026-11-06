@@ -3,6 +3,8 @@ use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+pub(crate) use crate::platform::NestedPolicy;
+
 mod image_lock;
 mod packages;
 pub use image_lock::*;
@@ -12,7 +14,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 pub const MANIFEST_SCHEMA_VERSION: &str = "2";
-pub const IMAGE_LOCK_SCHEMA_VERSION: u32 = 5;
+pub const IMAGE_LOCK_SCHEMA_VERSION: u32 = 6;
 pub const DEFAULT_KERNEL_CMDLINE: &str = "console=hvc0";
 pub const DEFAULT_READY_PATTERN: &str = "login:";
 
@@ -78,6 +80,9 @@ pub struct LaunchConfig {
     /// Guest vsock port of the Vesper agent, for `systemvmctl control`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_port: Option<u32>,
+    /// `auto`, `require` or `off` (GH #17); the launcher enables nested virtualization accordingly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nested_virtualization: Option<String>,
     pub network_mode: String,
     pub cpu_count: u16,
     pub memory_mib: u32,
@@ -147,6 +152,7 @@ pub struct LaunchInputs<'a> {
     pub probe: Option<&'a ProbeSettings>,
     pub vsock_bridge_path: Option<&'a str>,
     pub agent_port: Option<u32>,
+    pub nested_virtualization: Option<&'a str>,
     pub console_log_path: &'a str,
 }
 
@@ -285,6 +291,13 @@ pub fn default_launch_config(inputs: &LaunchInputs<'_>) -> Result<LaunchConfig, 
     if let Some(probe) = inputs.probe {
         probe.validate().map_err(|err| format!("probe: {err}"))?;
     }
+    let nested_virtualization = match non_blank(inputs.nested_virtualization) {
+        Some(value) => {
+            NestedPolicy::parse(&value)?;
+            Some(value.to_ascii_lowercase())
+        }
+        None => None,
+    };
 
     Ok(LaunchConfig {
         kernel_path: inputs.kernel_path.trim().to_string(),
@@ -297,6 +310,7 @@ pub fn default_launch_config(inputs: &LaunchInputs<'_>) -> Result<LaunchConfig, 
         probe: inputs.probe.cloned(),
         vsock_bridge_path: non_blank(inputs.vsock_bridge_path),
         agent_port: inputs.agent_port,
+        nested_virtualization,
         network_mode: "nat".to_string(),
         cpu_count: 2,
         memory_mib: 2048,
@@ -626,6 +640,25 @@ mod tests {
         assert_eq!(explicit.kernel_cmdline, "console=hvc0 quiet");
         assert_eq!(explicit.ready_pattern, "Welcome");
         assert!(explicit.vsock_bridge_path.is_none() && explicit.agent_port.is_none());
+        assert!(explicit.nested_virtualization.is_none());
+        let nested = default_launch_config(&LaunchInputs {
+            kernel_path: "vmlinuz",
+            initrd_path: Some("initramfs"),
+            nested_virtualization: Some("Require"),
+            console_log_path: "console.log",
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(nested.nested_virtualization.as_deref(), Some("require"));
+        let err = default_launch_config(&LaunchInputs {
+            kernel_path: "vmlinuz",
+            initrd_path: Some("initramfs"),
+            nested_virtualization: Some("maybe"),
+            console_log_path: "console.log",
+            ..Default::default()
+        })
+        .unwrap_err();
+        assert!(err.contains("auto, require or off"));
 
         let err = default_launch_config(&LaunchInputs {
             kernel_path: "vmlinuz",
