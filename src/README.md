@@ -107,13 +107,13 @@ Public symbols by file:
   `new(bridge, port)` (10 s timeouts), `Handshake { protocol_version,
   hostname, connect_ms }`, `Session` with `ping`, `version`, `echo(payload)`,
   `health`, `kill_service(name)`, `logs(name, count)`, `microvm(args)`,
-  `rootfs(args)` and `workload(args)` (guest tools; 120 s read timeout), `drop_connection`,
+  `rootfs(args)`, `workload(args)` and `fcparity(args)` (guest tools; 600 s read timeout), `drop_connection`,
   `shutdown`, `keepalive(interval, total)`,
   `connect(&endpoint)`, `connect_with_retry(&endpoint, attempts, backoff)`,
   `SuiteStep`, `SuiteReport`, `run_suite(&endpoint, interval, total,
   payload_bytes)`, `run_services_suite(&endpoint, &[service], recovery_timeout)`,
   `run_microvm_suite(&endpoint, id)`, `run_rootfs_suite(&endpoint, id)`,
-  `run_workload_suite(&endpoint)`,
+  `run_workload_suite(&endpoint)`, `run_parity_suite(&endpoint, id, perf_cycles)`,
   `write_report(path, &report)`; constants
   `AGENT_PROTOCOL_VERSION` (1), `DEFAULT_AGENT_PORT` (1024).
 - `systemvm.rs` (manifest, launch config, boot smoke),
@@ -324,6 +324,12 @@ Public symbols by file:
   `wait_maps_exit_code_and_output` (`EXITED wd code=3`, output present),
   `rm_wa`..`rm_wd` (`REMOVED`) and `nothing_left` (empty `ps`); `passed`
   requires every step ok and at least 14 steps.
+- `control/suites.rs:run_parity_suite` runs `handshake`, then `vesper-fcparity conformance <id>`
+  turning each `CHECK <name> ok|fail <detail>` line into a `conformance:<name>` step and the
+  `CONFORMANCE …` line into `conformance_summary` (ok when `failed=0`), then `perf_run_1` and
+  `perf_run_2` (`vesper-fcparity perf <cycles>`; ok when the `PERF` line has `failures=0`; detail is
+  that line's tokens) and `perf_comparable` (two runs, boot p50 drift at most 20 %); `passed` requires
+  every step ok and at least one conformance step.
 - `systemvm/packages.rs:validate_packages_lock` requires schema `2`,
   non-blank branch and arch, every requested package in the closure,
   packages sorted by name without duplicates, `file ==

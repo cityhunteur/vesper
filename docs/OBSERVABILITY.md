@@ -54,7 +54,10 @@ The durable signals this project relies on are artifacts rather than live teleme
   `run/systemvm/rootfs-report.json` from `make systemvm-rootfs-suite` and the provenance sidecars
   `/var/lib/vesper/rootfs/<id16>.ext4.provenance.json` in the guest (`systemvmctl control rootfs provenance <path>`);
   `run/systemvm/workload-report.json` from `make systemvm-workload-suite`, `systemvmctl control workload ps` and
-  `systemvmctl control workload logs <name>` (the output between the workload markers).
+  `systemvmctl control workload logs <name>` (the output between the workload markers);
+  `run/systemvm/parity-baseline-report.json` from `make systemvm-parity-baseline` (conformance checks with each
+  response, both performance runs, compat exception summary) and `systemvmctl control fcparity api <id> GET /`
+  for a live microVM's state.
 - `build/systemvm/image-manifest.json` (SHA-256 digests, stable `image_id`) and `build/systemvm/launch-config.json`.
 - `artifacts/parity-metadata.json` from `baselinectl --mode generate`.
 - JSON and Markdown reports from the Python sensors (`--json-out`, `--markdown-out`), uploaded by the `harness-*`

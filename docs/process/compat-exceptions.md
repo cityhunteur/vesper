@@ -22,6 +22,15 @@ Top level: `version` (non-zero integer) and `exceptions`. Required fields per ex
 
 Optional: `description`. See `src/compat.rs`.
 
+## Registered exceptions
+
+Three open exceptions back the GH #21 parity baseline (WOR-26, 2026-11-06), all owned by cityhunteur with expiry
+2027-03-31 and target release `parity-ga`: CE-0001 (the upstream Firecracker pytest suite is not run; an API
+conformance subset stands in), CE-0002 (the guest runs the v1.16.0 release, not a build of the pinned commit;
+TD-029) and CE-0003 (performance is captured under nested virtualization with no Linux baseline on the same host
+class). They are summarised in `docs/specs/backend-a-parity-baseline.json`; the `Parity Baseline` workflow fails
+if the capture and the registry disagree about which ids are open.
+
 ## Policy checks
 
 - New exceptions without required fields are rejected.
