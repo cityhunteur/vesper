@@ -6,6 +6,19 @@ last_reviewed: 2026-11-05
 
 # Symphony milestones
 
+### 2026-11-06 — WOR-28 — Reproducible OCI image to ext4 rootfs with provenance, booted in a microVM, GH #19 complete
+- GitHub issue: #19 (mirror #71)
+- PR: #129
+- Commit: `fa30660` (squash merge of PR #129; remote CI green)
+- Phase: 2
+- Parity unit: guest-side `docker export` to deterministic `mke2fs -d` with embedded provenance (source image id, layers, pinned baseline revisions, tool versions) and a digest-verified cache; microVM initramfs with root-drive modules; a jailed microVM boots the rootfs and executes from it
+- Result: keep
+- Verification bundle: `.symphony/runs/WOR-28/current/` (evidence in `run/WOR-28/systemvm/`, incl. `rootfs-report.json`)
+- Council summary: skipped; no control-plane path changed; six remote workflows green
+- Harness update: `vesper-rootfs`; `vesper-microvm launch --rootfs`; agent `ROOTFS`; `control/suites.rs` split; `make systemvm-rootfs-suite`; `e2fsprogs-extra` pinned; baselines lock shipped into the overlay; TD-030 resolved, TD-031 added
+- Remaining risks: reproducibility keyed by the image id (TD-031); only the guest-built trivial image converted; the microVM has no network (WOR-30); evidence is developer-hardware only (TD-005)
+- Truthful project state after this milestone: Backend A can turn a Docker image into a bootable, reproducible, provenance-stamped ext4 rootfs and boot it in a jailed Firecracker microVM; Phase 2 continues with WOR-30 (microVM per container) and WOR-26 (upstream parity baseline)
+
 ### 2026-11-06 — WOR-31 — Stock Firecracker runs under the jailer inside the System VM, GH #18 complete
 - GitHub issue: #18 (mirror #68)
 - PR: #128

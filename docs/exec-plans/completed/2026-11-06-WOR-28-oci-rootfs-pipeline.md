@@ -25,7 +25,7 @@ rejects an unknown image, and boots a jailed Firecracker microVM from the rootfs
   `--rootfs` launch mode that mounts `/dev/vda`, prints `VESPER-ROOTFS-OK <image id>` from the embedded provenance
   and executes a command from the rootfs (or `switch_root` when it has `/sbin/init`); agent `ROOTFS`;
   `control::run_rootfs_suite`; `systemvmctl control rootfs|rootfs-suite`; `make systemvm-rootfs-suite`. Suite 11/11.
-- [ ] PR merged, CI green, GH #19 checklist and WOR-28 updated, milestone entry; plan moved to completed.
+- [x] (2026-11-06 21:25Z) PR #129 merged as `fa30660`, CI green, GH #19 checklist and WOR-28 updated, milestone entry; plan moved to completed.
 
 ## Surprises & Discoveries
 
