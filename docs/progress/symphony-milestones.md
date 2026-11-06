@@ -6,6 +6,19 @@ last_reviewed: 2026-11-05
 
 # Symphony milestones
 
+### 2026-11-06 — WOR-27 — Phase 1 System VM image pinned, verified and reproducible in CI
+- GitHub issue: #12 (mirror #74)
+- PR: #119
+- Commit: `8bd505b` (squash merge of PR #119; remote CI green)
+- Phase: 1
+- Parity unit: replace the placeholder kernel/rootfs with a pinned Alpine 3.22.8 aarch64 netboot kernel + initramfs, digest-verified by `make systemvm-fetch` and reproduced in CI
+- Result: keep
+- Verification bundle: `.symphony/runs/WOR-27/current/` (evidence in `run/WOR-27/systemvm/`)
+- Council summary: skipped; no handler or runtime path changed, six remote workflows green including the new `System VM Image` job
+- Harness update: added `docs/specs/systemvm-image.lock.yaml`, `systemvm::ImageLock`/`verify_image`, `systemvmctl lock-env`/`verify-image`, `scripts/systemvm/fetch-image.sh`, `make systemvm-fetch`, `.github/workflows/systemvm-image.yml`; manifest schema 2 with optional rootfs and initrd; `kernel_cmdline` in the launch config; `assets/systemvm/` removed; ExecPlan `docs/exec-plans/active/2026-11-06-WOR-27-systemvm-image-pipeline.md`
+- Remaining risks: nothing boots the image yet (TD-005); the launcher technology (Swift Virtualization.framework helper vs Rust bindings) is an open human decision; the image is aarch64-only so Linux CI verifies digests but cannot boot it
+- Truthful project state after this milestone: Phase 1 has started; GH #12's reproducibility deliverable is met, its boot, console, NAT and boot-time checklist items remain open
+
 ### 2026-04-12 — WOR-71 — `vesper-proxy` gains a Phase 0 vsock CONNECT bridge
 - GitHub issue: #9
 - PR: #118
