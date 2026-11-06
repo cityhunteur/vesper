@@ -65,8 +65,10 @@ Normative design references are `docs/specs/design-v0.md` and
   validated by `src/platform.rs` and `scripts/ci/validate-entitlements.sh`.
 - testdata/contracts: `firecracker-routes.golden.json`, written and checked
   by `contractgen`.
-- docs/specs/systemvm-image.lock.yaml: pinned System VM kernel and initramfs,
-  fetched into `build/systemvm/` by `make systemvm-fetch`.
+- docs/specs/systemvm-image.lock.yaml: pinned System VM boot image (Alpine
+  virt ISO), fetched into `build/systemvm/` by `make systemvm-fetch`.
+- launcher: `vesper-vmlauncher`, the Swift Virtualization.framework helper
+  that boots the launch config (`make vmlauncher-build`).
 
 ## Global Invariants
 

@@ -89,8 +89,11 @@ Minimum:
 
 Minimum:
 - targeted `cargo test systemvm`,
+- `make systemvm-fetch` green (digests and `image_id` verified),
 - launch-config artifact,
-- boot-smoke proof in a supported environment.
+- `make systemvm-boot-smoke` report with zero failures on Apple silicon, copied with `console.log` into
+  `run/<ISSUE-ID>/systemvm/`; the 200-boot reliability bar from design-v0 for any change to the launcher, the
+  image lock or the kernel command line.
 
 ### Governance work
 

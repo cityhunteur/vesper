@@ -28,7 +28,10 @@ Child contracts:
 Public symbols by file:
 
 - `lib.rs`: `pub mod api, api_behavior_matrix, api_matrix, baseline,
-  buildinfo, compat, platform, proxy, spec, systemvm`.
+  buildinfo, compat, platform, proxy, spec, systemvm`. `systemvm.rs` declares
+  the private child `systemvm/image_lock.rs` and re-exports it (`pub use
+  image_lock::*`), so every symbol below is reachable as
+  `vesper::systemvm::*`.
 - `api.rs:ErrorEnvelope` `{ fault_message, code, path, method,
   baseline_firecracker_revision }`; `api.rs:OperationStatus`
   `{ status_code: StatusCode, code, message }`; `api.rs:RouteSpec`
@@ -90,17 +93,26 @@ Public symbols by file:
   vsock_socket_dir }`, `async run_server(config, shutdown)`.
 - `spec.rs`: `Route { method, path }`, `load_routes(path)`,
   `load_info_version(path)`.
-- `systemvm.rs`: `ImageBuildConfig { kernel_path, rootfs_path: Option,
-  initrd_path: Option }`, `ImageManifest` (schema `"2"`, optional rootfs and
-  initrd digests), `LaunchConfig` (adds `initrd_path: Option` and
-  `kernel_cmdline`), `BootCheckConfig`, `BootCheckReport`, `ImageLock {
+- `systemvm.rs` (manifest, launch config, boot smoke) and
+  `systemvm/image_lock.rs` (`ImageLock` and everything lock-related):
+  `ImageBuildConfig { kernel_path, rootfs_path: Option,
+  initrd_path: Option, boot_media_path: Option }`, `ImageManifest` (schema
+  `"2"`, optional rootfs, initrd and boot-media digests), `LaunchConfig {
+  kernel_path, rootfs_path?, initrd_path?, boot_media_path?, kernel_cmdline,
+  ready_pattern, network_mode, cpu_count, memory_mib, console_log_path }`,
+  `LaunchInputs` (borrowed inputs for `default_launch_config`),
+  `BootCheckConfig`, `BootCheckReport { iterations, successful, failed,
+  failures, durations_ms, max_duration_ms, mean_duration_ms }`, `ImageLock {
   source: ImageSource, artifacts: ImageArtifacts { kernel, initrd:
-  ImageArtifact }, expected_image_id }`, `build_manifest`, `image_id`,
-  `write_manifest`, `load_image_lock`, `validate_image_lock`,
-  `image_lock_env`, `verify_image`, `default_launch_config`,
-  `write_launch_config`, `run_boot_check`; constants
-  `MANIFEST_SCHEMA_VERSION`, `IMAGE_LOCK_SCHEMA_VERSION`,
-  `DEFAULT_KERNEL_CMDLINE` (`console=hvc0`).
+  ImageArtifact { member, member_sha256, unpack: UnpackMethod, file, sha256,
+  format } }, boot_media: Option<BootMedia>, boot: BootSettings {
+  kernel_cmdline, ready_pattern }, expected_image_id }`, `UnpackMethod {
+  None, ZbootGzip }`, `build_manifest`, `image_id`, `write_manifest`,
+  `load_image_lock`, `validate_image_lock`, `image_lock_env`, `verify_image`,
+  `default_launch_config`, `launch_config_from_lock`, `write_launch_config`,
+  `run_boot_check`; constants `MANIFEST_SCHEMA_VERSION`,
+  `IMAGE_LOCK_SCHEMA_VERSION` (2), `DEFAULT_KERNEL_CMDLINE` (`console=hvc0`),
+  `DEFAULT_READY_PATTERN` (`login:`).
 
 ## Invariants
 
@@ -192,17 +204,22 @@ Public symbols by file:
   report.
 - `systemvm.rs:build_manifest` and `default_launch_config` require a kernel
   plus at least one of rootfs or initrd; `image_id` is
-  `sha256("<kernel>:<rootfs or empty>:<initrd or empty>")` over hex digests,
-  so the same blob as rootfs and as initrd yields different ids.
-  `default_launch_config` appends ` root=/dev/vda rw` to the cmdline only when
-  a rootfs is given.
+  `sha256("<kernel>:<rootfs or empty>:<initrd or empty>:<boot media or
+  empty>")` over hex digests, so the same blob in different roles yields
+  different ids. `default_launch_config` uses `kernel_cmdline` verbatim when
+  given, else `console=hvc0` plus ` root=/dev/vda rw` (or `/dev/vdb` when boot
+  media precedes the rootfs) only when a rootfs is given; `ready_pattern`
+  defaults to `login:`.
 - `systemvm.rs:load_image_lock` parses the YAML into `ImageLock` with
   `deny_unknown_fields`, then `validate_image_lock` requires schema version
-  `1`, an `https://` URL, non-zero `size_bytes`, 64-char lowercase hex for
-  every digest and `expected_image_id`, and distinct kernel and initrd file
-  names. `verify_image(lock, dir)` requires `dir/<member file name>` to exist
-  for both artifacts, match the pinned digests, and produce
-  `expected_image_id`.
+  `2`, an `https://` URL, non-zero `size_bytes`, non-blank `boot.*`, 64-char
+  lowercase hex for every digest and `expected_image_id`, `member_sha256 ==
+  sha256` for artifacts with `unpack: none`, `boot_media.sha256 ==
+  source.sha256`, and distinct bare file names for kernel, initrd and boot
+  media. `verify_image(lock, dir)` requires `dir/<file>` to exist for both
+  artifacts and the boot media, match the pinned digests, and produce
+  `expected_image_id`. `launch_config_from_lock` names those files, the
+  lock's `kernel_cmdline` and `ready_pattern`, and NAT networking.
 
 ## Side Effects
 

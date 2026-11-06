@@ -3,7 +3,7 @@ RUN_DIR ?= run
 
 .PHONY: build test contract-generate contract-check contract-test surface-matrix-generate \
 	surface-matrix-check behavior-matrix-generate behavior-matrix-check \
-	validate-entitlements dev-up dev-down systemvm-fetch systemvm-build systemvm-launch-config \
+	validate-entitlements dev-up dev-down vmlauncher-build systemvm-fetch systemvm-build systemvm-launch-config \
 	systemvm-boot-smoke
 
 build:
@@ -41,6 +41,9 @@ dev-up:
 
 dev-down:
 	bash scripts/macos/dev-down.sh
+
+vmlauncher-build:
+	bash scripts/macos/build-vmlauncher.sh
 
 systemvm-fetch:
 	bash scripts/systemvm/fetch-image.sh

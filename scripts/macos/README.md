@@ -6,7 +6,9 @@ Local developer loop for macOS. `dev-up.sh` builds the `vesperd` and
 `vesper-proxy` binaries in the debug profile and launches both as background
 processes under `<repo>/run/`, recording pid and log files. `dev-down.sh`
 stops them via those pid files. Both are wrapped by the Makefile targets
-`dev-up` and `dev-down`.
+`dev-up` and `dev-down`. `build-vmlauncher.sh` builds the Swift
+Virtualization.framework helper in `launcher/` and ad-hoc signs it with the
+virtualization entitlement (`make vmlauncher-build`).
 
 ## Interface
 
@@ -17,7 +19,8 @@ stops them via those pid files. Both are wrapped by the Makefile targets
 - `dev-up.sh` launches `vesper-proxy` with `--listen ${RUN_DIR}/docker.sock` and `--upstream unix://${RUN_DIR}/vesperd.sock`.
 - `dev-up.sh` stdout: `vesperd PID: <pid>` and `vesper-proxy PID: <pid>`. `dev-down.sh` stdout: `services stopped`.
 - Exit codes: `dev-up.sh` returns `0` on success and propagates failures from `cargo build`, `mkdir`, `pushd`, or `cat` via `set -e`; backgrounded binaries (`&`) do not affect its exit status even if they exit immediately. `dev-down.sh` returns `0` in practice because `kill` failures are suppressed with `|| true`; an unreadable pid file aborts under `set -e` because `cat` is unguarded.
-- Makefile entry points: `make dev-up` and `make dev-down`.
+- `build-vmlauncher.sh` accepts no arguments. It exits 2 on a non-Darwin host; runs `swift build -c release --package-path ${ROOT_DIR}/launcher`; copies the product from `swift build --show-bin-path` to `${ROOT_DIR}/build/vmlauncher/vesper-vmlauncher`; runs `codesign --force --sign - --entitlements ${ROOT_DIR}/packaging/macos/vesper-vmlauncher.entitlements` on it; exits 1 unless `codesign --display --entitlements -` then lists `com.apple.security.virtualization`; prints `built and signed <path>`.
+- Makefile entry points: `make dev-up`, `make dev-down`, `make vmlauncher-build`.
 
 ## Invariants
 
@@ -30,6 +33,7 @@ stops them via those pid files. Both are wrapped by the Makefile targets
 - `dev-down.sh` sends a signal only when the pid file exists and `kill -0 "${pid}"` succeeds; stale pid files are removed regardless.
 - `dev-down.sh` sends default `SIGTERM` only, with no `SIGKILL` escalation and no wait for exit.
 - `dev-down.sh` deletes only `${RUN_DIR}/<name>.pid`; `vesperd.sock`, `docker.sock`, and `*.log` are left in place.
+- `build-vmlauncher.sh` signs ad hoc (`--sign -`): the binary runs on the building machine but carries no Developer ID; the entitlement file contains only `com.apple.security.virtualization` (no App Sandbox, so the helper can read image files anywhere).
 
 ## Side Effects
 
@@ -38,8 +42,9 @@ stops them via those pid files. Both are wrapped by the Makefile targets
 - `dev-up.sh` writes `<repo>/run/vesperd.pid` and `<repo>/run/vesper-proxy.pid` via `echo $!`.
 - The launched binaries (not the scripts) create Unix socket listeners at `<repo>/run/vesperd.sock` and `<repo>/run/docker.sock`. No TCP listeners are opened.
 - `dev-down.sh` sends `SIGTERM` to the recorded pids if alive and deletes the two pid files.
+- `build-vmlauncher.sh` writes `<repo>/launcher/.build/` (gitignored) and `<repo>/build/vmlauncher/vesper-vmlauncher`, and replaces that file's code signature.
 
 ## Verification
 
-- Run: `make dev-up` then `make dev-down`
+- Run: `make dev-up` then `make dev-down`; `make vmlauncher-build` then `build/vmlauncher/vesper-vmlauncher --help`
 - Broader regression for the launched binaries: `cargo test`

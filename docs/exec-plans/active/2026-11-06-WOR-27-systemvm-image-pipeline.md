@@ -18,12 +18,16 @@ with console output. The parity unit for slice 1 is "pinned, verified, CI-reprod
 - [x] (2026-11-06 16:00Z) Slice 1: image lock, `systemvmctl lock-env` and `verify-image`, `fetch-image.sh`,
   `make systemvm-fetch`, `systemvm-image.yml`, initrd support in manifest and launch config, placeholders removed,
   docs and EGM contracts updated. Local sensors green; cold and cached fetch proven.
-- [ ] Slice 1: PR merged, CI green, GH #74 and WOR-27 updated, milestone entry written.
-- [ ] Slice 2: launcher decision recorded as an ADR (Swift helper under `packaging/` vs Rust bindings to
-  Virtualization.framework); launcher boots `launch-config.json` and writes the console to `console_log_path`.
-- [ ] Slice 3: `boot-smoke` drives the launcher; healthy-state detection on the console (Alpine login banner);
-  200-iteration run recorded under `run/WOR-27/systemvm/`.
-- [ ] Slice 4: NAT connectivity proof from the guest; boot-time threshold recorded; GH #12 checklist updated.
+- [x] (2026-11-06 16:30Z) Slice 1: PR #119 merged as `8bd505b`, CI green, GH #74 and WOR-27 updated, milestone
+  entry `297c678`.
+- [x] (2026-11-06 17:10Z) Slice 2: ADR 0001 (Swift helper, chosen by the owner); `launcher/` boots
+  `launch-config.json` with NAT and a virtio console and writes `console_log_path`; lock moved to the Alpine virt
+  ISO with zboot kernel unpacking and the ISO as read-only boot media; `boot-smoke` drives the launcher and records
+  per-boot durations; 5/5 and 200/200 boots to the login prompt recorded under `run/WOR-27/systemvm/`.
+- [ ] Slice 2: PR merged, CI green (Linux image job + macOS launcher build), GH #74 and WOR-27 updated, milestone
+  entry written.
+- [ ] Slice 3: NAT connectivity proof from the guest (guest-side command over the console or a guest agent);
+  clean guest shutdown; boot-time threshold agreed; GH #12 checklist updated.
 
 ## Surprises & Discoveries
 
@@ -37,6 +41,17 @@ with console output. The parity unit for slice 1 is "pinned, verified, CI-reprod
 - Observation: no ext4 tooling (`mke2fs`) is on a stock macOS host, so a block rootfs cannot be built locally
   without new tooling. The initramfs boot path sidesteps this for the boot-reliability milestone.
   Evidence: `command -v mke2fs` returns nothing on the development host.
+- Observation: Virtualization.framework refused the netboot kernel with "Internal Virtualization error" because
+  Alpine's arm64 `vmlinuz-virt` is an EFI zboot PE wrapping a gzip payload, not a raw Image; the `file` output
+  (`PE32+ … EFI application`) had been misread as an EFI-stubbed raw Image in slice 1.
+  Evidence: bytes 4..8 are `zimg`, bytes 24..28 `gzip`; the gunzipped payload has `ARM\x64` at offset 56 and boots.
+- Observation: the raw kernel with the netboot initramfs alone drops to the initramfs emergency shell ("Mounting boot
+  media: failed") because that initramfs expects boot media or network parameters. Attaching the virt ISO as a
+  read-only virtio block device satisfies it offline, and the ISO (80 MB) is smaller than the netboot tarball.
+  Evidence: `run/WOR-27/systemvm/single-boot-raw.txt` vs `single-boot-iso.txt` (ready in 1055 ms).
+- Observation: ad-hoc signing with only `com.apple.security.virtualization` is enough to boot on macOS 27 (no
+  Developer ID, no sandbox).
+  Evidence: `codesign -d --entitlements -` on `build/vmlauncher/vesper-vmlauncher`; boot-smoke 200/200.
 
 ## Decision Log
 
@@ -56,11 +71,26 @@ with console output. The parity unit for slice 1 is "pinned, verified, CI-reprod
   Rationale: both options add a runtime dependency or a packaged, signed helper, which AGENTS.md lists under
   "Ask a human first".
   Date/Author: 2026-11-06, agent.
+- Decision: Swift helper process (`launcher/`), recorded as ADR 0001.
+  Rationale: owner's choice; no Rust dependency, Apple API as documented, policy stays in Rust.
+  Date/Author: 2026-11-06, cityhunteur (decision), agent (record).
+- Decision: pin the Alpine `virt` ISO instead of the `netboot` tarball, unpack the zboot kernel in a Python
+  standard-library script, and attach the ISO read-only as boot media.
+  Rationale: the only offline-bootable combination found (see Surprises); keeps the lock a single source file;
+  avoids a gzip crate in Rust. Lock schema bumped to 2 with `member_sha256`, `unpack`, `file`, `boot_media` and
+  `boot` so every transformation is digest-pinned.
+  Date/Author: 2026-11-06, agent.
+- Decision: the launch config carries `ready_pattern` and `boot_media_path`, and the launcher reads both.
+  Rationale: the launcher must have no policy of its own (ADR 0001).
+  Date/Author: 2026-11-06, agent.
 
 ## Outcomes & Retrospective
 
-Slice 1 delivered a verifiable image pipeline with no new crate dependencies. Gaps: nothing boots yet (TD-005); the
-image is `aarch64` only, so the CI job verifies digests on x86-64 Linux but cannot boot there.
+Slice 1 delivered a verifiable image pipeline with no new crate dependencies. Slice 2 delivered the launcher and
+real boot evidence (200/200 to the login prompt, about 1.1 s each on an M3; `run/WOR-27/systemvm/boot-report-200.json`).
+Gaps: nothing runs inside the guest and NAT is unproven from the guest side; the launcher stops the VM without a
+clean shutdown; boot evidence cannot be produced in CI (TD-005). Lesson: verify an image format by booting it, not by
+`file` output; slice 1's "EFI-stubbed Image" claim was wrong.
 
 ## Context and Orientation
 
@@ -79,21 +109,22 @@ to `src/systemvm.rs`; make `rootfs_path` optional and add `initrd_path` to `Imag
 `build-image.sh` and `generate-launch-config.sh` at the fetched files; add the Make target and the CI workflow;
 delete `assets/systemvm/`.
 
-Slice 2: record the launcher ADR; implement the launcher so that it reads `launch-config.json`, boots with NAT
-networking, writes the serial console to `console_log_path`, exits 0 when a configurable console pattern appears and
-non-zero on timeout.
+Slice 2 (done): ADR 0001; `launcher/` reads `launch-config.json`, boots with NAT, streams the console to
+`console_log_path`, exits 0 on the config's `ready_pattern` and 2 on timeout; lock schema 2 (ISO, zboot unpack,
+boot media, boot settings); `systemvmctl launch-config --from-lock`; `boot-smoke.sh` drives the launcher; per-boot
+durations in the report; `launcher-build` CI job on macOS.
 
-Slice 3: teach `boot-smoke` to pass the launch config and pattern to the launcher by default; record a long run.
-
-Slice 4: NAT proof (guest `wget` of a known host) and boot-time measurement in the report.
+Slice 3: NAT proof from the guest (a console-driven command or a guest agent over vsock), clean shutdown, and an
+agreed boot-time threshold in the report.
 
 ## Concrete Steps
 
     cd <repo root>
-    make systemvm-fetch            # first run downloads; prints "verified alpine 3.22.8 aarch64 image ... image_id=40bd8242..."
-    make systemvm-build            # prints "wrote image manifest: .../build/systemvm/image-manifest.json (image_id=40bd8242...)"
+    make systemvm-fetch            # first run downloads the ISO; prints "verified alpine 3.22.8 aarch64 image ... image_id=b1965de5..."
     make systemvm-launch-config    # prints "wrote launch config: .../build/systemvm/launch-config.json"
-    cargo test systemvm            # 8 tests pass
+    make vmlauncher-build          # prints "built and signed .../build/vmlauncher/vesper-vmlauncher"
+    make systemvm-boot-smoke       # five JSON "ready" lines, then "boot smoke passed: successful=5 failed=0"
+    cargo test systemvm            # 9 tests pass
 
 ## Validation and Acceptance
 
@@ -102,7 +133,11 @@ Slice 1: `cargo test systemvm`, `cargo test`, `python3 scripts/harness/check_str
 twice (cold, then cached with no download); a corrupted `initramfs-virt` makes `systemvmctl verify-image` exit 1 with
 a digest mismatch; the `System VM Image` workflow is green on the PR. Artifacts under `run/WOR-27/systemvm/`.
 
-Exit for the issue: GH #12 checklist items proven by a launcher-driven boot-smoke report.
+Slice 2: the above plus `make vmlauncher-build`, `make systemvm-boot-smoke` (5 and 200 iterations, zero failures),
+`make validate-entitlements` on both lint paths, and the `launcher-build` CI job.
+
+Exit for the issue: GH #12 checklist items proven by a launcher-driven boot-smoke report (boot reliability and
+console done in slice 2; NAT from the guest and the boot-time threshold in slice 3).
 
 ## Idempotence and Recovery
 
@@ -112,16 +147,22 @@ docs/process/systemvm-bringup.md. All slice-1 changes are plain files on branch 
 ## Artifacts and Notes
 
     $ make systemvm-fetch
-    systemvm-fetch: using cached .../build/systemvm/cache/alpine-netboot-3.22.8-aarch64.tar.gz
-    verified alpine 3.22.8 aarch64 image in .../build/systemvm: image_id=40bd82424e8154232b1bc61923e6a9cca9b665e901ff161150e8c90e1423cca6
+    systemvm-fetch: using cached .../build/systemvm/cache/alpine-virt-3.22.8-aarch64.iso
+    unpacked .../cache/boot/vmlinuz-virt -> .../build/systemvm/Image-virt (34734080 bytes)
+    verified alpine 3.22.8 aarch64 image in .../build/systemvm: image_id=b1965de508d579c75a9f55c761a9114d42e6220a81d0d101517733ff546e8abe
+
+    $ make systemvm-boot-smoke
+    {"status":"ready","elapsed_ms":1024,"ready_pattern":"login:","console_log":".../run/systemvm/console.log"}
+    boot smoke passed: successful=5 failed=0
 
     $ printf x >> build/systemvm/initramfs-virt && cargo run -q --bin systemvmctl -- verify-image
     initrd build/systemvm/initramfs-virt sha256 693ffe08... does not match pinned 0f7da92c...
 
 ## Interfaces and Dependencies
 
-`vesper::systemvm::{ImageLock, ImageSource, ImageArtifacts, ImageArtifact, load_image_lock, validate_image_lock,
-image_lock_env, verify_image, image_id}`; `ImageBuildConfig { kernel_path, rootfs_path: Option<String>, initrd_path:
-Option<String> }`; `LaunchConfig { kernel_path, rootfs_path: Option, initrd_path: Option, kernel_cmdline,
-network_mode, cpu_count, memory_mib, console_log_path }`; `default_launch_config(kernel, rootfs: Option<&str>,
-initrd: Option<&str>, console_log)`. No new crate dependencies. Slice 2 will add the launcher interface.
+`vesper::systemvm::{ImageLock, ImageSource, ImageArtifacts, ImageArtifact, UnpackMethod, BootMedia, BootSettings,
+LaunchInputs, load_image_lock, validate_image_lock, image_lock_env, verify_image, launch_config_from_lock, image_id}`;
+`ImageBuildConfig { kernel_path, rootfs_path, initrd_path, boot_media_path: Option<String> }`; `LaunchConfig {
+kernel_path, rootfs_path?, initrd_path?, boot_media_path?, kernel_cmdline, ready_pattern, network_mode, cpu_count,
+memory_mib, console_log_path }`; `default_launch_config(&LaunchInputs)`. Launcher contract: `launcher/README.md`.
+No new crate dependencies.

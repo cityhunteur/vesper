@@ -28,8 +28,8 @@ of the GA API surface; they support development, CI, and tracker hygiene.
 
 - [ci](./ci/README.md): `validate-entitlements.sh` lints the two macOS entitlement plists (`make validate-entitlements`).
 - [harness](./harness/README.md): four Python sensors (`check_docs.py`, `check_structure.py`, `compute_quality_score.py`, `janitor_scan.py`) and two Bash bundle helpers (`init_issue_run.sh`, `collect_verification_bundle.sh`).
-- [macos](./macos/README.md): `dev-up.sh` / `dev-down.sh` build and run `vesperd` and `vesper-proxy` under `run/` (`make dev-up`, `make dev-down`).
-- [systemvm](./systemvm/README.md): `fetch-image.sh`, `build-image.sh`, `generate-launch-config.sh`, `boot-smoke.sh` wrap `cargo run --bin systemvmctl` (`make systemvm-fetch`, `make systemvm-build`, `make systemvm-launch-config`, `make systemvm-boot-smoke`).
+- [macos](./macos/README.md): `dev-up.sh` / `dev-down.sh` build and run `vesperd` and `vesper-proxy` under `run/` (`make dev-up`, `make dev-down`); `build-vmlauncher.sh` builds and signs the Swift launcher (`make vmlauncher-build`).
+- [systemvm](./systemvm/README.md): `fetch-image.sh` (+ `unpack-zboot.py`), `build-image.sh`, `generate-launch-config.sh`, `boot-smoke.sh` wrap `cargo run --bin systemvmctl` and the launcher (`make systemvm-fetch`, `make systemvm-build`, `make systemvm-launch-config`, `make systemvm-boot-smoke`).
 
 ## Invariants
 
@@ -50,5 +50,5 @@ of the GA API surface; they support development, CI, and tracker hygiene.
 ## Verification
 
 - Run: `cargo test`
-- Subdirectory targets: `make validate-entitlements`, `make dev-up` / `make dev-down`, `make systemvm-fetch`, `make systemvm-build`, `make systemvm-launch-config`, `make systemvm-boot-smoke`
+- Subdirectory targets: `make validate-entitlements`, `make dev-up` / `make dev-down`, `make vmlauncher-build`, `make systemvm-fetch`, `make systemvm-build`, `make systemvm-launch-config`, `make systemvm-boot-smoke`
 - `update-issue-checklists.sh` has no automated test and performs live GitHub edits; verify with `bash -n scripts/update-issue-checklists.sh` for syntax only.

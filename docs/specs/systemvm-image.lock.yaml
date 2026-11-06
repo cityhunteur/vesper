@@ -1,31 +1,48 @@
 # Pinned System VM boot image for Phase 1 (WOR-27 / GH #12).
-# Read by: src/systemvm.rs (load_image_lock, verify_image) via systemvmctl lock-env / verify-image,
+# Read by: src/systemvm.rs (load_image_lock, verify_image, launch_config_from_lock) via
+#          systemvmctl lock-env / verify-image / launch-config --from-lock,
 #          scripts/systemvm/fetch-image.sh, .github/workflows/systemvm-image.yml.
-# Change procedure: update every field from the upstream release manifest
-# (https://dl-cdn.alpinelinux.org/alpine/<branch>/releases/<arch>/latest-releases.yaml), run
-# make systemvm-fetch, copy the printed image_id into expected_image_id, and record the bump in
-# docs/process/systemvm-bringup.md.
-schema_version: 1
+# Change procedure: docs/process/systemvm-bringup.md, "Bumping the pinned image".
+schema_version: 2
 distribution: alpine
 branch: v3.22
 release: 3.22.8
 arch: aarch64
-flavor: netboot
+flavor: virt
 kernel_version: 6.12.115-0-virt
 source:
-  url: https://dl-cdn.alpinelinux.org/alpine/v3.22/releases/aarch64/alpine-netboot-3.22.8-aarch64.tar.gz
-  sha256: 619d568696faf045b63b459259ebe4c347553320a0217a1658e5d277c3d3e1d1
-  size_bytes: 342369530
+  # The "Virtual" ISO: kernel, initramfs, modloop and base apks in one ISO 9660 image.
+  url: https://dl-cdn.alpinelinux.org/alpine/v3.22/releases/aarch64/alpine-virt-3.22.8-aarch64.iso
+  sha256: dd3cec79d32a726d40bace8fc97c2d04f58d7da9dd9084e62a817ed6228181b7
+  size_bytes: 80646144
   published: "2026-11-05"
 artifacts:
   kernel:
     member: boot/vmlinuz-virt
-    sha256: ebf299aa6829b15166008db24b076ac0a8b3e778c72ed66be488742aaf05d741
-    format: arm64 Linux Image with EFI stub (PE32+), uncompressed
+    member_sha256: ebf299aa6829b15166008db24b076ac0a8b3e778c72ed66be488742aaf05d741
+    # Alpine ships the arm64 kernel as an EFI zboot PE wrapping a gzip payload; Virtualization.framework
+    # needs the raw ARM64 Image inside it (scripts/systemvm/unpack-zboot.py).
+    unpack: zboot-gzip
+    file: Image-virt
+    sha256: ee66670649107e2efe319a436c9b9caf84b093d471f73577d54292e5c081b80b
+    format: raw ARM64 Linux Image (magic ARM\x64 at offset 56), uncompressed
   initrd:
     member: boot/initramfs-virt
-    sha256: 0f7da92ca19e6b87b8f0a250e3ce84cc8335c16b2369b18d96f68cc486d638b8
+    member_sha256: 274289d30bee817d46e285cf4054f7a0e016c93feafd1763066a95f695b88ba0
+    unpack: none
+    file: initramfs-virt
+    sha256: 274289d30bee817d46e285cf4054f7a0e016c93feafd1763066a95f695b88ba0
     format: gzip-compressed cpio initramfs
-# sha256("<kernel_sha256>:<rootfs_sha256 or empty>:<initrd_sha256 or empty>"), as computed by
+# The ISO itself is attached read-only as the first virtio block device so the initramfs finds its
+# boot media (modloop and apks) without network access.
+boot_media:
+  file: alpine-virt-3.22.8-aarch64.iso
+  sha256: dd3cec79d32a726d40bace8fc97c2d04f58d7da9dd9084e62a817ed6228181b7
+boot:
+  # From boot/grub/grub.cfg on the ISO, with the console moved to the virtio console (hvc0).
+  kernel_cmdline: "console=hvc0 modules=loop,squashfs,sd-mod,usb-storage"
+  # Console text that marks a healthy boot: the getty prompt on hvc0.
+  ready_pattern: "login:"
+# sha256("<kernel_sha256>:<rootfs or empty>:<initrd_sha256>:<boot_media_sha256>") as computed by
 # systemvm::build_manifest. systemvmctl verify-image fails if the fetched artifacts do not produce it.
-expected_image_id: 40bd82424e8154232b1bc61923e6a9cca9b665e901ff161150e8c90e1423cca6
+expected_image_id: b1965de508d579c75a9f55c761a9114d42e6220a81d0d101517733ff546e8abe

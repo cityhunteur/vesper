@@ -35,8 +35,10 @@ baseline a response was produced against.
 
 The durable signals this project relies on are artifacts rather than live telemetry:
 
-- `run/systemvm/boot.log` (one `result=` line per iteration) and `run/systemvm/boot-report.json` (`iterations`,
-  `successful`, `failed`, free-text `failures`) from `systemvmctl boot-smoke`.
+- `run/systemvm/boot.log` (one `result=… duration_ms=…` line per iteration) and `run/systemvm/boot-report.json`
+  (`iterations`, `successful`, `failed`, free-text `failures`, `durations_ms`, `max_duration_ms`,
+  `mean_duration_ms`) from `systemvmctl boot-smoke`; `run/systemvm/console.log` (guest serial console of the last
+  boot) and one JSON status line per boot (`{"status":"ready","elapsed_ms":…}`) from `vesper-vmlauncher`.
 - `build/systemvm/image-manifest.json` (SHA-256 digests, stable `image_id`) and `build/systemvm/launch-config.json`.
 - `artifacts/parity-metadata.json` from `baselinectl --mode generate`.
 - JSON and Markdown reports from the Python sensors (`--json-out`, `--markdown-out`), uploaded by the `harness-*`

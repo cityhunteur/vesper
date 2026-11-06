@@ -16,7 +16,7 @@ artifacts honest. Guest microVM execution (Backend A/B) is designed but not yet 
 |---|---|
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Layers, dependency rules, main flows, invariants and how each is enforced |
 | [src/](src/README.md) | Library crate: `api`, `api_matrix`, `baseline`, `compat`, `platform`, `proxy`, `spec`, `systemvm` |
-| [src/bin/](src/bin/README.md) | The six binaries |
+| [src/bin/](src/bin/README.md) | The six Rust binaries; [launcher/](launcher/README.md) holds `vesper-vmlauncher`, the Swift System VM launcher |
 | [tests/](docs/TESTING.md) | Contract and golden integration suites |
 | [scripts/](scripts/README.md) | CI, macOS dev loop, System VM wrappers, harness sensors |
 | [docs/](docs/README.md) | Knowledge base and system of record; start at `docs/README.md` |
@@ -32,7 +32,7 @@ artifacts honest. Guest microVM execution (Backend A/B) is designed but not yet 
 | Orienting in the codebase | [ARCHITECTURE.md](ARCHITECTURE.md), the EGM contract README in each `src/` and `scripts/` directory |
 | Changing API or parity behaviour | [design-v0.md](docs/specs/design-v0.md), [parity matrix](docs/specs/firecracker-feature-parity.md), [product specs](docs/product-specs/index.md) |
 | Touching baseline, compat or generated matrices | [baseline governance](docs/process/baseline-governance.md), [compat exceptions](docs/process/compat-exceptions.md) |
-| Touching the proxy or System VM | [systemvm-bringup.md](docs/process/systemvm-bringup.md), [RELIABILITY.md](docs/RELIABILITY.md), [SECURITY.md](docs/SECURITY.md) |
+| Touching the proxy or System VM | [systemvm-bringup.md](docs/process/systemvm-bringup.md), [ADR 0001](docs/design-docs/adr/0001-systemvm-launcher-swift-helper.md), [RELIABILITY.md](docs/RELIABILITY.md), [SECURITY.md](docs/SECURITY.md) |
 | Making or questioning a design decision | [Core beliefs](docs/design-docs/core-beliefs.md), [design docs](docs/design-docs/index.md), [ADRs](docs/design-docs/adr/index.md) |
 | Starting multi-step or risky work | [PLANS.md](docs/PLANS.md), [active plans](docs/exec-plans/active/index.md) |
 | Building and running locally | [DEVELOPMENT.md](docs/DEVELOPMENT.md) |

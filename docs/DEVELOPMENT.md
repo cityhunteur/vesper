@@ -18,6 +18,8 @@ otherwise.
 | Python 3 | 3.11+ for `harness/`; CI uses 3.12 (`docs.yml`) and `3.x` (`harness-*.yml`) | `.github/workflows/docs.yml` |
 | GNU make, bash | any recent | `Makefile`, `scripts/**/*.sh` |
 | `plutil` | macOS built-in; optional | `scripts/ci/validate-entitlements.sh` falls back to Python `plistlib` |
+| Xcode command line tools (`swift`, `codesign`) | Swift 5.9+ (`launcher/Package.swift`); verified with Swift 6.4 on macOS 27 | only for `make vmlauncher-build` |
+| `bsdtar` | macOS built-in `tar`; Linux needs `libarchive-tools` | `scripts/systemvm/fetch-image.sh` (reads the ISO) |
 | `gh` CLI | authenticated with write access | only for `scripts/update-issue-checklists.sh` |
 
 Supported host: macOS for the dev loop and entitlements. Linux CI runs `cargo test`, the matrix checks and the
@@ -44,10 +46,11 @@ None of these are secrets.
 
 ## Local infrastructure
 
-None. There is no database, queue or container dependency. The System VM kernel and initramfs are not checked in:
-`make systemvm-fetch` downloads the release pinned in `docs/specs/systemvm-image.lock.yaml` (Alpine netboot, about
-330 MB, cached under `build/systemvm/cache/`) and verifies every digest before writing `build/systemvm/`
-(see [process/systemvm-bringup.md](process/systemvm-bringup.md)). Nothing boots the image yet (TD-005).
+None. There is no database, queue or container dependency. The System VM image is not checked in:
+`make systemvm-fetch` downloads the Alpine virt ISO pinned in `docs/specs/systemvm-image.lock.yaml` (about 80 MB,
+cached under `build/systemvm/cache/`), verifies every digest and unpacks the kernel into `build/systemvm/`.
+`make vmlauncher-build` then `make systemvm-boot-smoke` boots it on Virtualization.framework (macOS, Apple silicon;
+see [process/systemvm-bringup.md](process/systemvm-bringup.md)).
 
 ## Build and run
 
@@ -93,7 +96,8 @@ All generated files are committed and checked in CI.
 | `baselinectl --mode generate-api-matrix` | swagger + `docs/specs/firecracker-api-baseline-captures.yaml` | `docs/generated/firecracker-api-surface-stub-matrix.json` | `make surface-matrix-generate` | `make surface-matrix-check` (CI: `rust-tests.yml`) |
 | `baselinectl --mode generate-api-behavior-matrix` | swagger + `docs/specs/firecracker-api-behavior-captures.yaml` | `docs/generated/firecracker-api-behavior-matrix.json` | `make behavior-matrix-generate` | `make behavior-matrix-check` (CI: `rust-tests.yml`) |
 | `baselinectl --mode generate` | baseline lock + `--backend/--host-os/--host-cpu` | `artifacts/parity-metadata.json` (not committed) | `cargo run --bin baselinectl -- --mode generate --backend backend-a --host-os macos --host-cpu arm64 --metadata artifacts/parity-metadata.json` | `cargo run --bin baselinectl -- --mode validate --metadata artifacts/parity-metadata.json` (CI: `baseline-governance.yml`) |
-| `systemvmctl` | `docs/specs/systemvm-image.lock.yaml`, fetched kernel + initramfs | `build/systemvm/{vmlinuz-virt,initramfs-virt,image-manifest.json,launch-config.json}` (not committed) | `make systemvm-fetch`, `make systemvm-build`, `make systemvm-launch-config` | `make systemvm-fetch` (CI: `systemvm-image.yml`) |
+| `systemvmctl` | `docs/specs/systemvm-image.lock.yaml`, fetched ISO | `build/systemvm/{Image-virt,initramfs-virt,<iso>,image-manifest.json,launch-config.json}` (not committed) | `make systemvm-fetch`, `make systemvm-launch-config` | `make systemvm-build` (CI: `systemvm-image.yml`) |
+| `swift build` + `codesign` | `launcher/` | `build/vmlauncher/vesper-vmlauncher` (not committed) | `make vmlauncher-build` | `launcher-build` job of `systemvm-image.yml` |
 
 ## Documentation checks
 

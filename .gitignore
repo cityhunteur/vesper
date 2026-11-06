@@ -1,6 +1,7 @@
 /artifacts/
 /target/
 /build/
+/launcher/.build/
 /run/*
 !/run/WOR-*/
 /run/WOR-*/*
