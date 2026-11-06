@@ -17,6 +17,7 @@ otherwise.
 | Rust toolchain (`cargo`, `rustc`) | stable; CI uses `dtolnay/rust-toolchain@stable`, edition 2024 in `Cargo.toml` | **Not pinned**: no `rust-toolchain.toml` (tech debt TD-009) |
 | Python 3 | 3.11+ for `harness/`; CI uses 3.12 (`docs.yml`) and `3.x` (`harness-*.yml`) | `.github/workflows/docs.yml` |
 | GNU make, bash | any recent | `Makefile`, `scripts/**/*.sh` |
+| Docker CLI (`docker`) | any recent; verified with 29.8 | only for `make docker-smoke` (client only; the daemon runs in the System VM) |
 | `plutil` | macOS built-in; optional | `scripts/ci/validate-entitlements.sh` falls back to Python `plistlib` |
 | Xcode command line tools (`swift`, `codesign`) | Swift 5.9+ (`launcher/Package.swift`); verified with Swift 6.4 on macOS 27 | only for `make vmlauncher-build` |
 | `bsdtar` | macOS built-in `tar`; Linux needs `libarchive-tools` | `scripts/systemvm/fetch-image.sh` (reads the ISO) |
@@ -52,7 +53,8 @@ cached under `build/systemvm/cache/`), verifies every digest and unpacks the ker
 `make systemvm-overlay` downloads the pinned guest packages (about 55 MB) and packs them with
 `systemvm/overlay/` into a derived initramfs; `make vmlauncher-build` then `make systemvm-boot-smoke` boots it on
 Virtualization.framework (macOS, Apple silicon). `make systemvm-prepare` runs all four steps; `make systemvm-up`, `make systemvm-control-suite` and
-`make systemvm-down` keep the VM running and exercise the guest agent over the vsock bridge
+`make systemvm-down` keep the VM running and exercise the guest agent over the vsock bridge; `make docker-up`
+then exposes the guest's Docker on `run/vesper/docker.sock` for the host Docker CLI
 (see [process/systemvm-bringup.md](process/systemvm-bringup.md)).
 
 ## Build and run

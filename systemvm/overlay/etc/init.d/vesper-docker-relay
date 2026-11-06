@@ -1,0 +1,15 @@
+#!/sbin/openrc-run
+# Expose the guest Docker socket on a vsock port for vesper-proxy. The raw
+# /var/run/docker.sock and containerd socket stay inside the guest; only this
+# relay is reachable from the host, through the launcher's bridge.
+description="Vesper Docker socket relay (vsock)"
+supervisor=supervise-daemon
+relay_port="${VESPER_DOCKER_PORT:-2375}"
+command=/usr/bin/socat
+command_args="VSOCK-LISTEN:${relay_port},reuseaddr,fork UNIX-CONNECT:/var/run/docker.sock"
+respawn_delay=1
+respawn_max=0
+
+depend() {
+  need localmount vesper-packages vesper-services
+}

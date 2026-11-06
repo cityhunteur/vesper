@@ -47,15 +47,16 @@ Those are design-v0 phases that have no code here yet.
 
 ## System context
 
-**Verified** for every edge except the two marked `Intended:`, which are design-only and not exercised by any test.
+**Verified** for every edge except the one marked `Intended:`, which is design-only and not exercised by any test.
 
 ```mermaid
 flowchart LR
   client([Firecracker API client]) -- Unix socket --> vesperd[vesperd]
-  docker([Any Unix-socket client; Docker UX is Intended]) -- Unix socket --> proxy[vesper-proxy]
-  proxy -- "unix:// | tcp:// | vsock:// (host bridge, TD-004)" --> upstream[(Upstream socket)]
+  docker([Docker CLI or any Unix-socket client]) -- Unix socket --> proxy[vesper-proxy]
+  proxy -- "unix:// | tcp:// | vsock:// (launcher bridge)" --> upstream[(Upstream socket)]
   proxy -- "upstream when started by make dev-up (see Deployment topology)" --> vesperd
-  upstream -. Intended: Backend A .-> sysvm[Linux System VM]
+  upstream -- "vsock 2375 -> /var/run/docker.sock (make docker-up)" --> sysvm[Linux System VM: dockerd, containerd, vesper-agent]
+  launcher[vesper-vmlauncher] -- boots, serves the bridge --> sysvm
   vesperd -. Intended: Backend A .-> sysvm
   vesperd -- reads --> spec[third_party/firecracker/firecracker.yaml]
   vesperd -- reads --> lock[docs/specs/design-v0.baselines.lock.yaml]
@@ -271,8 +272,10 @@ threshold. `make systemvm-up` keeps the VM running with the owner-only bridge so
 served by the launcher; `systemvmctl control` reaches the supervised guest agent through it (handshake, keepalive,
 reconnect and 2 MiB echo proven by `make systemvm-control-suite`); `make systemvm-down` powers the guest off.
 `containerd` and `dockerd` run under `supervise-daemon` inside the guest (cgroup v2, `eth0` by DHCP) and
-`make systemvm-services-suite` proves they recover from SIGKILL; dockerd listens only inside the guest until the
-Docker socket ingress lands (TD-005).
+`make systemvm-services-suite` proves they recover from SIGKILL. `make docker-up` starts `vesper-proxy` on the
+owner-only `run/vesper/docker.sock` with `vsock://3:2375` as upstream, reached through the bridge and the guest's
+Docker relay, so the macOS Docker CLI talks to Docker 28 in the VM; `make docker-smoke` runs a trivial container
+built offline from the pinned ISO. That is design-v0's Phase 1 exit criterion, met on developer hardware.
 
 **Intended:** design-v0 describes a packaged macOS host process plus a Linux System VM running containerd and
 Firecracker.
@@ -287,7 +290,7 @@ or parity documents.
 | # | Invariant | Status | Enforced by | Verify with | See |
 |---|---|---|---|---|---|
 | 1a | `vesperd` is the only binary that serves the control-plane API; `vesper-proxy` is the only other host-visible socket and only relays bytes (plus the vsock `CONNECT` preface) | Verified | Review only; no mechanical check (TD-008) | `grep -n 'UnixListener::bind' src/bin/vesperd.rs src/proxy.rs` (expect 1 hit in `vesperd.rs` and 3 in `proxy.rs`, of which the two inside the `#[cfg(test)]` module are test fixtures) | [src/bin/vesperd.rs](src/bin/vesperd.rs), [src/proxy.rs](src/proxy.rs) |
-| 1b | Raw Firecracker and containerd sockets stay private to the System VM | Intended | Nothing yet; the System VM does not exist here | n/a | [design-v0](docs/specs/design-v0.md#security-model-firecrackerequivalent-hardening-on-macos), [docs/SECURITY.md](docs/SECURITY.md) |
+| 1b | Raw Firecracker and containerd sockets stay private to the System VM | Verified | The guest exposes only vsock 1024 (agent) and 2375 (Docker relay); `make docker-smoke` enumerates host sockets and expects a refused `CONNECT` to a port without a listener | `make systemvm-up && make docker-up && make docker-smoke` (steps `no_raw_host_sockets`, `raw_guest_port_denied`) | [design-v0](docs/specs/design-v0.md#security-model-firecrackerequivalent-hardening-on-macos), [docs/SECURITY.md](docs/SECURITY.md) |
 | 2 | Intra-crate single-path references in the 18 `RULES` files follow the layer table | Verified | `RULES` in `check_structure.py`, run by `harness-structure.yml` on `src/**` changes; a new module needs a `RULES` row (TD-018) | `python3 scripts/harness/check_structure.py --root .` | [scripts/harness/check_structure.py](scripts/harness/check_structure.py) |
 | 3 | Every error response produced by `handle_all` is an `ErrorEnvelope` with the pinned baseline revision. Exceptions before extraction: a body over axum's default 2 MiB limit gets a plain `413`, a body-read failure gets a plain `400`, and a poisoned `RwLock` panics the task (TD-019) | Verified | `AppState::new_with_matrix` rejects a blank revision; `tests/api_contract.rs` asserts envelopes; `rust-tests.yml` runs `cargo test` for every `src/**` change | `make contract-test` | [tests/api_contract.rs](tests/api_contract.rs) |
 | 4 | The golden route list equals `contractgen`'s serialisation of the pinned swagger | Verified | `contractgen --mode check` and `tests/contract_golden.rs` in `contract-tests.yml`; `tests/**` changes are covered by `rust-tests.yml` | `make contract-check` | [tests/contract_golden.rs](tests/contract_golden.rs) |

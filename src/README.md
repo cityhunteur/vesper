@@ -90,8 +90,10 @@ Public symbols by file:
 - `platform.rs`: `validate_entitlements_file(path: Option<&Path>,
   required_keys: &[&str])`.
 - `proxy.rs`: `Target { scheme, address, cid, port }`, `parse_target(raw)`,
-  `ServerConfig { listen_path, upstream_raw, dial_timeout,
-  vsock_socket_dir }`, `async run_server(config, shutdown)`.
+  `ServerConfig { listen_path, upstream_raw, dial_timeout, vsock_socket_dir,
+  listen_mode, validate_upstream }` with `Default` (5 s, mode `0o600`, no
+  validation), `upstream_socket_path(&target, vsock_socket_dir)`, `async
+  run_server(config, shutdown)`.
 - `spec.rs`: `Route { method, path }`, `load_routes(path)`,
   `load_info_version(path)`.
 - `control.rs`: `ControlEndpoint { bridge_path, port, io_timeout }` with
@@ -213,7 +215,10 @@ Public symbols by file:
   literally as `<key>{key}</key>`; a `None` path is `Ok`.
 - `proxy.rs:run_server` returns `Err` for a blank `listen_path` or
   `upstream_raw` before touching the filesystem; a vsock dial errors on a
-  blank `vsock_socket_dir`.
+  blank `vsock_socket_dir`. With `validate_upstream` it returns `Err` before
+  binding unless the unix path or `<vsock_socket_dir>/<cid>.sock` exists and
+  is a socket (tcp upstreams are not checked). After binding it applies
+  `listen_mode` to the listen socket.
 - `proxy.rs:parse_target` accepts only `unix://`, `tcp://`, and
   `vsock://<cid>:<port>`. The vsock bridge preface is exactly
   `"CONNECT {port}\n"` with no reply awaited. Upstream dial is bounded by

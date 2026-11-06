@@ -26,9 +26,16 @@ Vesper’s security model is part of its parity contract. Treat this file as the
 - `vesper-proxy` may expose a host-visible socket only for the intended Docker or container runtime UX.
 - Raw Firecracker and raw containerd sockets stay private to the System VM.
 - Shipped defaults (`src/bin/vesperd.rs`, `src/bin/vesper-proxy.rs`): `vesperd` binds `/tmp/vesperd.sock` with mode
-  `0o660`; `vesper-proxy` listens on `/tmp/vesper/docker.sock` and dials `vsock://3:2375`, which is bridged through a
-  host Unix socket `/tmp/vesper/vsock/<cid>.sock` with a `CONNECT <port>` preface. Those are world-writable temp
-  directories; `make dev-up` uses `run/` instead, and packaged builds must pass explicit paths.
+  `0o660`; `vesper-proxy` listens on `/tmp/vesper/docker.sock` with mode `0o600` (`--listen-mode`) and dials
+  `vsock://3:2375`, which is bridged through a host Unix socket `/tmp/vesper/vsock/<cid>.sock` with a `CONNECT
+  <port>` preface. Those are world-writable temp directories; `make dev-up`, `make systemvm-up` and `make docker-up`
+  use `run/` instead, and packaged builds must pass explicit paths.
+- Host-visible sockets with the System VM running (`make systemvm-up && make docker-up`), all under `run/` and
+  owner-only: `run/vesper/docker.sock` (the Docker ingress, served by `vesper-proxy`) and `run/systemvm/vsock/3.sock`
+  (the launcher's vsock bridge, which reaches any guest vsock port; TD-027). Inside the guest only two vsock ports
+  listen: 1024 (`vesper-agent`) and 2375 (relay to `/var/run/docker.sock`). `containerd.sock` and `docker.sock`
+  themselves never leave the guest, and a `CONNECT` to a guest port without a listener is refused.
+  `make docker-smoke` checks the socket list and the refusal (`no_raw_host_sockets`, `raw_guest_port_denied`).
 
 ## Entitlements
 

@@ -70,6 +70,32 @@ pub struct ServerConfig {
     pub upstream_raw: String,
     pub dial_timeout: Duration,
     pub vsock_socket_dir: String,
+    /// Permission bits applied to the listen socket after bind (owner-only by default).
+    pub listen_mode: u32,
+    /// Refuse to start unless a unix or vsock upstream's socket path exists.
+    pub validate_upstream: bool,
+}
+
+impl Default for ServerConfig {
+    fn default() -> Self {
+        ServerConfig {
+            listen_path: String::new(),
+            upstream_raw: String::new(),
+            dial_timeout: Duration::from_secs(5),
+            vsock_socket_dir: String::new(),
+            listen_mode: 0o600,
+            validate_upstream: false,
+        }
+    }
+}
+
+/// The host socket a unix or vsock upstream dials, when there is one to check.
+pub fn upstream_socket_path(target: &Target, vsock_socket_dir: &str) -> Result<Option<String>, String> {
+    Ok(match target.scheme.as_str() {
+        "unix" => Some(target.address.clone()),
+        "vsock" => Some(vsock_socket_path(vsock_socket_dir, target.cid)?),
+        _ => None,
+    })
 }
 
 pub async fn run_server(
@@ -84,6 +110,15 @@ pub async fn run_server(
     }
 
     let target = parse_target(&config.upstream_raw)?;
+    if config.validate_upstream {
+        if let Some(path) = upstream_socket_path(&target, &config.vsock_socket_dir)? {
+            let meta = std::fs::metadata(&path)
+                .map_err(|err| format!("upstream socket {path} is not available: {err} (is the System VM up? `make systemvm-up`)"))?;
+            if !std::os::unix::fs::FileTypeExt::is_socket(&meta.file_type()) {
+                return Err(format!("upstream path {path} is not a socket"));
+            }
+        }
+    }
 
     if let Some(parent) = Path::new(&config.listen_path).parent() {
         tokio::fs::create_dir_all(parent)
@@ -94,6 +129,11 @@ pub async fn run_server(
     let _ = tokio::fs::remove_file(&config.listen_path).await;
     let listener = UnixListener::bind(&config.listen_path)
         .map_err(|err| format!("listen on unix socket {}: {err}", config.listen_path))?;
+    std::fs::set_permissions(
+        &config.listen_path,
+        std::os::unix::fs::PermissionsExt::from_mode(config.listen_mode),
+    )
+    .map_err(|err| format!("set mode {:o} on {}: {err}", config.listen_mode, config.listen_path))?;
 
     let accept_loop = async {
         loop {
@@ -181,6 +221,54 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn upstream_socket_path_follows_the_scheme() {
+        let unix = parse_target("unix:///tmp/x.sock").unwrap();
+        assert_eq!(upstream_socket_path(&unix, "/tmp/vsock").unwrap().as_deref(), Some("/tmp/x.sock"));
+        let vsock = parse_target("vsock://3:2375").unwrap();
+        assert_eq!(upstream_socket_path(&vsock, "/tmp/vsock").unwrap().as_deref(), Some("/tmp/vsock/3.sock"));
+        let tcp = parse_target("tcp://127.0.0.1:1").unwrap();
+        assert!(upstream_socket_path(&tcp, "/tmp/vsock").unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn validate_upstream_refuses_a_missing_bridge_and_sets_listen_mode() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let listen = tempdir.path().join("docker.sock");
+        let err = run_server(
+            ServerConfig {
+                listen_path: listen.to_string_lossy().into_owned(),
+                upstream_raw: "vsock://3:2375".to_string(),
+                vsock_socket_dir: tempdir.path().join("vsock").to_string_lossy().into_owned(),
+                validate_upstream: true,
+                ..Default::default()
+            },
+            async {},
+        )
+        .await
+        .unwrap_err();
+        assert!(err.contains("make systemvm-up"), "{err}");
+
+        let bridge_dir = tempdir.path().join("vsock");
+        std::fs::create_dir_all(&bridge_dir).unwrap();
+        let _bridge = UnixListener::bind(bridge_dir.join("3.sock")).unwrap();
+        run_server(
+            ServerConfig {
+                listen_path: listen.to_string_lossy().into_owned(),
+                upstream_raw: "vsock://3:2375".to_string(),
+                vsock_socket_dir: bridge_dir.to_string_lossy().into_owned(),
+                validate_upstream: true,
+                listen_mode: 0o640,
+                ..Default::default()
+            },
+            async {},
+        )
+        .await
+        .unwrap();
+        let mode = std::os::unix::fs::PermissionsExt::mode(&std::fs::metadata(&listen).unwrap().permissions()) & 0o777;
+        assert_eq!(mode, 0o640);
+    }
     use std::sync::Arc;
     use tokio::io::AsyncReadExt;
     use tokio::net::TcpListener;
@@ -248,6 +336,7 @@ mod tests {
                     upstream_raw: format!("tcp://{}", echo_addr),
                     dial_timeout: Duration::from_secs(1),
                     vsock_socket_dir: tempdir.path().join("vsock").to_string_lossy().into_owned(),
+                    ..Default::default()
                 },
                 async move {
                     done.notified().await;
@@ -327,6 +416,7 @@ mod tests {
                     upstream_raw: "vsock://3:2375".to_string(),
                     dial_timeout: Duration::from_secs(1),
                     vsock_socket_dir: vsock_dir_for_task.to_string_lossy().into_owned(),
+                    ..Default::default()
                 },
                 async move {
                     done.notified().await;
@@ -365,6 +455,7 @@ mod tests {
                     upstream_raw: format!("unix://{}", upstream_path_for_task.to_string_lossy()),
                     dial_timeout: Duration::from_millis(200),
                     vsock_socket_dir: tempdir.path().join("vsock").to_string_lossy().into_owned(),
+                    ..Default::default()
                 },
                 async move {
                     done.notified().await;

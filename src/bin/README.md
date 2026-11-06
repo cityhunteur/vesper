@@ -27,9 +27,10 @@ errors to stderr and exits with code 1 on failure.
 - `vesper-proxy.rs:main` (binary `vesper-proxy`, `#[tokio::main]`). Flags:
   `--listen` (default `/tmp/vesper/docker.sock`), `--upstream`
   (default `vsock://3:2375`), `--vsock-socket-dir`
-  (default `/tmp/vesper/vsock`), `--dial-timeout-seconds` (default 5). Calls
-  `vesper::proxy::run_server` with a `ServerConfig`; shutdown is Ctrl-C only
-  (`tokio::signal::ctrl_c`), SIGTERM is not handled.
+  (default `/tmp/vesper/vsock`), `--dial-timeout-seconds` (default 5),
+  `--listen-mode` (octal, default `600`), `--validate-upstream` (flag). Calls
+  `vesper::proxy::run_server` with a `ServerConfig`; shutdown on Ctrl-C or
+  SIGTERM.
 - `baselinectl.rs:main` (binary `baselinectl`). Flags: `--mode` (required),
   `--lock` (default `docs/specs/design-v0.baselines.lock.yaml`), `--metadata`
   (default `artifacts/parity-metadata.json`), `--swagger` (default
@@ -109,7 +110,9 @@ Subdirectories: none.
   mismatch, an `image_id` that differs from the lock's `expected_image_id`,
   a derived initramfs that does not start with the pinned one, or (with
   `--require-overlay`) a missing derived initramfs.
-- `vesper-proxy.rs:main`: dial timeout is clamped to at least 1 second.
+- `vesper-proxy.rs:main`: dial timeout is clamped to at least 1 second; a
+  non-octal `--listen-mode` exits 2; with `--validate-upstream` a missing
+  upstream socket exits 1 before listening.
 - `vesperd.rs:run`: when `--entitlements-file` is given it is validated first
   and must contain `com.apple.security.virtualization` (no check without the
   flag); `AppState` is built only via
