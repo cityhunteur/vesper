@@ -6,6 +6,19 @@ last_reviewed: 2026-11-05
 
 # Symphony milestones
 
+### 2026-11-06 — WOR-27 — System VM boots on Virtualization.framework, 200/200 to the login prompt
+- GitHub issue: #12 (mirror #74)
+- PR: #120
+- Commit: `a638c34` (squash merge of PR #120; remote CI green incl. the macOS `launcher-build` job)
+- Phase: 1
+- Parity unit: boot the pinned image through a thin Swift Virtualization.framework helper (ADR 0001) with NAT and a virtio console, and record repeated-boot diagnostics
+- Result: keep
+- Verification bundle: `.symphony/runs/WOR-27/current/` (evidence in `run/WOR-27/systemvm/`, incl. `boot-report-200.json`)
+- Council summary: skipped; no control-plane path changed; seven remote CI jobs green
+- Harness update: `launcher/` + `make vmlauncher-build` + `packaging/macos/vesper-vmlauncher.entitlements`; image lock schema 2 on the Alpine 3.22.8 virt ISO with `scripts/systemvm/unpack-zboot.py` (Alpine's arm64 kernel is an EFI zboot PE that VZ cannot start) and the ISO as read-only boot media; `systemvmctl launch-config --from-lock`; `boot-smoke` drives the launcher and records `durations_ms`; `src/systemvm/image_lock.rs` split out; first ADR
+- Remaining risks: nothing runs inside the guest and NAT is unproven from the guest side; the launcher stops the VM without a clean shutdown; boot evidence is developer-hardware only because GitHub's macOS runners lack nested virtualisation (TD-005)
+- Truthful project state after this milestone: GH #12 checklist items "200-cycle boot reliability" and "kernel boots to healthy state with console output" are proven (mean 1091 ms, max 1251 ms on an M3); "NAT functional from guest" and "boot time within threshold" remain open
+
 ### 2026-11-06 — WOR-27 — Phase 1 System VM image pinned, verified and reproducible in CI
 - GitHub issue: #12 (mirror #74)
 - PR: #119
