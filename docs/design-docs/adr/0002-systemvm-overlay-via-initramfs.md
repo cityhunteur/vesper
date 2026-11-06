@@ -51,7 +51,7 @@ initramfs and to guest RAM, and nothing persists across boots; a persistent data
 `scripts/systemvm/resolve-apks.py` (pins a closure), `fetch-packages.sh`, `build-initramfs.py`,
 `build-overlay.sh`, `make systemvm-overlay` and `make systemvm-prepare`; `systemvmctl package-list` and
 `verify-packages`; `verify-image` records the derived initramfs digest; the launch config's `initrd_path` becomes
-the derived file. ExecPlan: [2026-11-06-WOR-25-systemvm-control-channel.md](../../exec-plans/active/2026-11-06-WOR-25-systemvm-control-channel.md).
+the derived file. ExecPlan: [2026-11-06-WOR-25-systemvm-control-channel.md](../../exec-plans/completed/2026-11-06-WOR-25-systemvm-control-channel.md).
 
 ## References
 

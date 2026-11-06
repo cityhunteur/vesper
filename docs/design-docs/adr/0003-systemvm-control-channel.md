@@ -50,7 +50,7 @@ write (`control::Session::echo` does).
 `launcher/` (socket device, bridge, `--keep-running`, SIGTERM), `systemvm/overlay/etc/init.d/vesper-agent` and
 `usr/local/bin/vesper-agent`, `src/control.rs`, `systemvmctl control …`, image lock schema 5 (`control`),
 `scripts/systemvm/up.sh` / `down.sh`. ExecPlan:
-[2026-11-06-WOR-25-systemvm-control-channel.md](../../exec-plans/active/2026-11-06-WOR-25-systemvm-control-channel.md).
+[2026-11-06-WOR-25-systemvm-control-channel.md](../../exec-plans/completed/2026-11-06-WOR-25-systemvm-control-channel.md).
 
 ## References
 

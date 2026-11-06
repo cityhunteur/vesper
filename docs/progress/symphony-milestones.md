@@ -6,6 +6,19 @@ last_reviewed: 2026-11-05
 
 # Symphony milestones
 
+### 2026-11-06 — WOR-25 — vsock control channel proven end to end, GH #13 complete
+- GitHub issue: #13 (mirror #67)
+- PR: #123
+- Commit: `cf091e9` (squash merge of PR #123; remote CI green)
+- Phase: 1
+- Parity unit: launcher-served vsock bridge (`CONNECT <port>` preface, owner-only socket), supervised socat-backed guest agent (protocol 1), Rust control client with keepalive and reconnect, `make systemvm-up/down/control-suite`
+- Result: keep
+- Verification bundle: `.symphony/runs/WOR-25/current/` (evidence in `run/WOR-25/systemvm/`, incl. `control-report.json`)
+- Council summary: skipped; no control-plane path changed; six remote workflows green
+- Harness update: ADR 0003; `src/control.rs` (+ RULES row); `systemvmctl control …`; image lock schema 5 (`control`); `vesper-packages` OpenRC oneshot and `vesper-agent` service in the overlay; `scripts/systemvm/up.sh` / `down.sh`; TD-026, TD-027
+- Remaining risks: shell line-protocol agent (TD-026); host-visible owner-only bridge socket reaching any guest port (TD-027, human decision before Phase 1 exit); `containerd`/`dockerd` installed but not started (WOR-33)
+- Truthful project state after this milestone: all four GH #13 checklist items are proven against the real guest (handshake 1 ms, 11 keepalive pings over 20 s, reconnect after a server-side drop in 1 attempt, 2 MiB echoed intact); Phase 1 continues with WOR-33 (services) and WOR-23 (Docker socket ingress)
+
 ### 2026-11-06 — WOR-25 — Pinned guest packages installed at boot through an initramfs overlay
 - GitHub issue: #13 (mirror #67); also advances #14
 - PR: #122

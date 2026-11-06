@@ -25,8 +25,8 @@ boot through an overlay (ADR 0002), so later slices can run an agent and service
   keepalive, reconnect with backoff, streaming echo and a suite; `systemvmctl control …`; `make systemvm-up` /
   `systemvm-down` / `systemvm-control-suite`; ADR 0003. Suite passed against the real guest: handshake 1 ms,
   11 keepalive pings over 20 s, reconnect in 1 attempt after a server-side drop, 2 MiB echoed intact in 11 ms.
-- [ ] Slice 2: PR merged, CI green, GH #13 checklist and WOR-25 updated, milestone entry written; plan moved to
-  completed.
+- [x] (2026-11-06 18:55Z) Slice 2: PR #123 merged as `cf091e9`, CI green, GH #13 checklist and WOR-25 updated,
+  milestone entry written; plan moved to completed.
 
 ## Surprises & Discoveries
 
@@ -77,7 +77,8 @@ boot through an overlay (ADR 0002), so later slices can run an agent and service
 ## Outcomes & Retrospective
 
 Slices 1 and 2 delivered the guest foundation and the control channel; every GH #13 checklist item is proven
-against the real guest (`run/WOR-25/systemvm/control-report.json`). Gaps: shell agent (TD-026), host-visible bridge
+against the real guest (`run/WOR-25/systemvm/control-report.json`). Landed as PRs #122 and #123 (merges `e4fed7c`,
+`cf091e9`); WOR-25 is Done. Gaps: shell agent (TD-026), host-visible bridge
 (TD-027), packages reinstalled per boot (TD-025).
 
 ## Context and Orientation
