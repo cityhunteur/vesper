@@ -125,14 +125,30 @@ produced on developer hardware and attached to the issue (`run/WOR-27/systemvm/`
 6. Run `cargo test systemvm`, `make systemvm-launch-config`, `make systemvm-boot-smoke`, then record the bump in
    the milestone log.
 
+## Control channel (ADR 0003)
+
+`make systemvm-up` (`scripts/systemvm/up.sh [TIMEOUT]`) starts the launcher detached with `--keep-running`,
+writes `run/systemvm/vmlauncher.pid` and `run/systemvm/vmlauncher.log`, and returns once the probe succeeded and
+the bridge socket exists (about 3 s). The launcher serves the lock's `control` bridge at
+`run/systemvm/vsock/3.sock` (mode 0600): a client writes `CONNECT <port>\n` and is relayed to that guest vsock
+port. In the guest, OpenRC supervises `socat VSOCK-LISTEN:1024,fork EXEC:/usr/local/bin/vesper-agent`
+(`systemvm/overlay/README.md` documents protocol version 1).
+
+`cargo run --bin systemvmctl -- control [--config build/systemvm/launch-config.json] <handshake|ping|version|
+health|echo --bytes N|keepalive --interval S --seconds S|shutdown|suite>` talks to the agent; `make
+systemvm-control-suite` runs the GH #13 checklist (handshake, keepalive under idle, reconnect after a server-side
+drop, 2 MiB echo) and writes `run/systemvm/control-report.json`. `make systemvm-down` (`down.sh [WAIT]`) asks the
+agent to power off, waits for the launcher to exit, and falls back to SIGTERM. On 2026-11-06 (M3): up in 3.1 s,
+suite passed (11 keepalive pings over 20 s, reconnect in 1 attempt, 2 MiB echoed in 11 ms), down in 3.3 s.
+
 ## Proxy bridge convention
 
 Phase 0 keeps the proxy-side vsock bridge inspectable by resolving
 `vsock://<cid>:<port>` upstreams through a host Unix socket at
 `<vsock_socket_dir>/<cid>.sock` and sending a Firecracker-style
-`CONNECT <port>\n` preface before relaying traffic. This is the current
-host-initiated bridge skeleton for `vesper-proxy`; the broader control-channel
-protocol work remains tracked separately under the Phase 1 vsock issue.
+`CONNECT <port>\n` preface before relaying traffic. Since 2026-11-06 `vesper-vmlauncher` serves that socket
+(see "Control channel"), so `vesper-proxy --vsock-socket-dir run/systemvm/vsock --upstream vsock://3:<port>`
+reaches a guest port while the VM is up.
 
 Configuration lives on `vesper-proxy`: `--upstream` (default `vsock://3:2375`), `--vsock-socket-dir` (default
 `/tmp/vesper/vsock`) and `--dial-timeout-seconds` (default 5); the preface is written after the dial succeeds within

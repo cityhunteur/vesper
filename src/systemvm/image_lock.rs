@@ -29,6 +29,9 @@ pub struct ImageLock {
     /// Overlay (apkovl) delivered through a derived initramfs; see ADR 0002.
     #[serde(default)]
     pub overlay: Option<OverlaySettings>,
+    /// Host-to-guest control channel over vsock (GH #13).
+    #[serde(default)]
+    pub control: Option<ControlSettings>,
     pub boot: BootSettings,
     pub expected_image_id: String,
 }
@@ -52,6 +55,23 @@ pub struct OverlaySettings {
     pub apkovl_path: String,
     /// File name of the derived initramfs under the image directory.
     pub file: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ControlSettings {
+    /// Directory of bridge sockets, `<bridge_dir>/<cid>.sock` (the `vesper-proxy` convention).
+    pub bridge_dir: String,
+    /// Guest context id (Virtualization.framework guests are 3).
+    pub cid: u32,
+    /// Guest vsock port of the agent.
+    pub agent_port: u32,
+}
+
+impl ControlSettings {
+    pub fn bridge_path(&self) -> std::path::PathBuf {
+        Path::new(&self.bridge_dir).join(format!("{}.sock", self.cid))
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -157,6 +177,14 @@ pub fn validate_image_lock(lock: &ImageLock) -> Result<(), String> {
     if let Some(probe) = &lock.boot.probe {
         probe.validate().map_err(|err| format!("image lock boot.probe: {err}"))?;
     }
+    if let Some(control) = &lock.control {
+        if control.bridge_dir.trim().is_empty() || control.bridge_dir.contains("..") {
+            return Err("image lock control.bridge_dir must be a non-blank relative path".to_string());
+        }
+        if control.cid < 3 || control.agent_port == 0 {
+            return Err("image lock control.cid must be >= 3 and control.agent_port > 0".to_string());
+        }
+    }
     if let Some(overlay) = &lock.overlay {
         for (name, value) in [
             ("overlay.dir", &overlay.dir),
@@ -234,6 +262,8 @@ pub fn validate_image_lock(lock: &ImageLock) -> Result<(), String> {
 /// Shell-sourceable `KEY=VALUE` lines for `scripts/systemvm/fetch-image.sh`.
 pub fn image_lock_env(lock: &ImageLock) -> String {
     let max_boot_ms = lock.boot.max_boot_ms.to_string();
+    let control_cid = lock.control.as_ref().map(|c| c.cid.to_string()).unwrap_or_default();
+    let control_port = lock.control.as_ref().map(|c| c.agent_port.to_string()).unwrap_or_default();
     let pairs = [
         ("VESPER_IMAGE_DISTRIBUTION", lock.distribution.as_str()),
         ("VESPER_IMAGE_RELEASE", lock.release.as_str()),
@@ -267,6 +297,9 @@ pub fn image_lock_env(lock: &ImageLock) -> String {
             lock.overlay.as_ref().map(|o| o.apkovl_path.as_str()).unwrap_or(""),
         ),
         ("VESPER_IMAGE_OVERLAY_FILE", lock.overlay.as_ref().map(|o| o.file.as_str()).unwrap_or("")),
+        ("VESPER_IMAGE_CONTROL_BRIDGE_DIR", lock.control.as_ref().map(|c| c.bridge_dir.as_str()).unwrap_or("")),
+        ("VESPER_IMAGE_CONTROL_CID", &control_cid),
+        ("VESPER_IMAGE_CONTROL_AGENT_PORT", &control_port),
         ("VESPER_IMAGE_EXPECTED_ID", lock.expected_image_id.as_str()),
     ];
     let mut out = String::new();
@@ -374,6 +407,7 @@ pub fn launch_config_from_lock(
         .boot_media
         .as_ref()
         .map(|media| dir.join(media.file.trim()).display().to_string());
+    let bridge = lock.control.as_ref().map(|c| c.bridge_path().display().to_string());
     default_launch_config(&LaunchInputs {
         kernel_path: &kernel,
         rootfs_path: None,
@@ -383,6 +417,8 @@ pub fn launch_config_from_lock(
         ready_pattern: Some(&lock.boot.ready_pattern),
         max_boot_ms: Some(lock.boot.max_boot_ms),
         probe: lock.boot.probe.as_ref(),
+        vsock_bridge_path: bridge.as_deref(),
+        agent_port: lock.control.as_ref().map(|c| c.agent_port),
         console_log_path,
     })
 }
@@ -418,10 +454,13 @@ mod tests {
         assert!(probe.commands.iter().any(|c| c.contains("ping")));
         assert!(probe.success_pattern.contains("VESPER"));
         assert_eq!(probe.shutdown_command, "poweroff");
+        let control = lock.control.as_ref().expect("the lock defines the control channel");
+        assert_eq!(control.cid, 3);
+        assert_eq!(control.bridge_path().to_string_lossy(), "run/systemvm/vsock/3.sock");
         let overlay = lock.overlay.as_ref().expect("the lock delivers an overlay");
         assert_eq!(overlay.dir, "systemvm/overlay");
         assert!(lock.boot.kernel_cmdline.contains(&format!("apkovl={}", overlay.apkovl_path)));
-        assert!(std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/systemvm/overlay/etc/local.d")).is_dir());
+        assert!(std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/systemvm/overlay/etc/init.d/vesper-agent")).is_file());
         assert_eq!(
             lock.expected_image_id,
             image_id(
@@ -489,6 +528,8 @@ mod tests {
             "VESPER_IMAGE_KERNEL_CMDLINE='console=hvc0",
             "VESPER_IMAGE_READY_PATTERN='login:'",
             "VESPER_IMAGE_MAX_BOOT_MS='5000'",
+            "VESPER_IMAGE_CONTROL_CID='3'",
+            "VESPER_IMAGE_CONTROL_AGENT_PORT='1024'",
             "VESPER_IMAGE_EXPECTED_ID=",
         ] {
             assert!(env.contains(key), "missing {key} in\n{env}");
@@ -555,6 +596,8 @@ mod tests {
         assert_eq!(launch.kernel_cmdline, lock.boot.kernel_cmdline);
         assert_eq!(launch.ready_pattern, lock.boot.ready_pattern);
         assert_eq!(launch.max_boot_ms, Some(lock.boot.max_boot_ms));
+        assert_eq!(launch.vsock_bridge_path.as_deref(), Some("run/systemvm/vsock/3.sock"));
+        assert_eq!(launch.agent_port, Some(1024));
         assert_eq!(
             launch.probe.as_ref().map(|p| p.shutdown_command.as_str()),
             Some("poweroff")

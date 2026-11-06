@@ -63,7 +63,13 @@ errors to stderr and exits with code 1 on failure.
   prints `file<TAB>url<TAB>sha256` lines), `verify-packages` (`--lock`,
   `--dir` default `build/systemvm/cache/apks`),
   `verify-image` (`--lock`, `--dir` default `build/systemvm`, `--out` default
-  `build/systemvm/image-manifest.json`, `--require-overlay`), `boot-smoke` (`--iterations` 5,
+  `build/systemvm/image-manifest.json`, `--require-overlay`), `control`
+  (`--config` default `build/systemvm/launch-config.json`, optional `--bridge`
+  and `--port` overriding the config's `vsock_bridge_path` and `agent_port`;
+  actions `handshake`, `ping`, `version`, `health`, `echo --bytes` (2 MiB),
+  `keepalive --interval 5 --seconds 30`, `shutdown`, `suite --report
+  run/systemvm/control-report.json --keepalive-interval 2 --keepalive-seconds
+  20 --payload-bytes 2097152`), `boot-smoke` (`--iterations` 5,
   `--timeout-seconds` 20, `--command` `sh`, `--args` `-c,echo boot-ok`,
   optional `--max-boot-ms`, `--log` default `run/systemvm/boot.log`,
   `--report` default `run/systemvm/boot-report.json`; prints `boot smoke
@@ -71,7 +77,8 @@ errors to stderr and exits with code 1 on failure.
   script substitutes the launcher and the lock's threshold). Calls `vesper::systemvm::{build_manifest, write_manifest,
   default_launch_config, launch_config_from_lock, write_launch_config,
   load_image_lock, image_lock_env, verify_image, load_packages_lock,
-  packages_list, verify_packages, run_boot_check}`.
+  packages_list, verify_packages, run_boot_check}` and
+  `vesper::control::{connect, run_suite, write_report, ControlEndpoint}`.
 
 Subdirectories: none.
 
@@ -120,6 +127,9 @@ Subdirectories: none.
 - `compatexctl.rs:run` reads the registry YAML and the system clock when
   `--today` is absent.
 - `contractgen.rs:run` reads the swagger file and writes or reads `--out`.
+- `systemvmctl.rs control`: exits non-zero when the bridge is unreachable, the
+  agent speaks another protocol version, a reply is unexpected, an echoed
+  payload differs, or any suite step fails (the report is still written).
 - `systemvmctl.rs` writes the image manifest and launch config to `--out`
   (`verify-image` also writes the manifest); `lock-env` only prints;
   `boot-smoke` delegates process spawning and log/report writes to

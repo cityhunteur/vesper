@@ -10,7 +10,8 @@ generate and validate the pinned route matrices under `docs/generated/`.
 baseline lock, compat exception registry, macOS entitlements file, and the
 vendored Firecracker OpenAPI. `proxy` forwards a Unix socket to a unix, tcp,
 or vsock upstream. `systemvm` builds image manifests and launch configs and
-runs boot smoke checks. `buildinfo` carries compile-time version metadata.
+runs boot smoke checks. `control` is the host client for the guest agent over
+the vsock bridge (ADR 0003). `buildinfo` carries compile-time version metadata.
 
 Every API error is a deterministic `ErrorEnvelope` that carries the pinned
 Firecracker baseline revision. Route-level pre-boot and post-boot gating is
@@ -28,7 +29,7 @@ Child contracts:
 Public symbols by file:
 
 - `lib.rs`: `pub mod api, api_behavior_matrix, api_matrix, baseline,
-  buildinfo, compat, platform, proxy, spec, systemvm`. `systemvm.rs` declares
+  buildinfo, compat, control, platform, proxy, spec, systemvm`. `systemvm.rs` declares
   the private children `systemvm/image_lock.rs` and `systemvm/packages.rs`
   and re-exports them, so every symbol below is reachable as
   `vesper::systemvm::*`.
@@ -93,6 +94,14 @@ Public symbols by file:
   vsock_socket_dir }`, `async run_server(config, shutdown)`.
 - `spec.rs`: `Route { method, path }`, `load_routes(path)`,
   `load_info_version(path)`.
+- `control.rs`: `ControlEndpoint { bridge_path, port, io_timeout }` with
+  `new(bridge, port)` (10 s timeouts), `Handshake { protocol_version,
+  hostname, connect_ms }`, `Session` with `ping`, `version`, `echo(payload)`,
+  `health`, `drop_connection`, `shutdown`, `keepalive(interval, total)`,
+  `connect(&endpoint)`, `connect_with_retry(&endpoint, attempts, backoff)`,
+  `SuiteStep`, `SuiteReport`, `run_suite(&endpoint, interval, total,
+  payload_bytes)`, `write_report(path, &report)`; constants
+  `AGENT_PROTOCOL_VERSION` (1), `DEFAULT_AGENT_PORT` (1024).
 - `systemvm.rs` (manifest, launch config, boot smoke),
   `systemvm/image_lock.rs` (`ImageLock` and everything lock-related) and
   `systemvm/packages.rs` (`PackagesLock { schema_version, branch, arch,
@@ -103,8 +112,8 @@ Public symbols by file:
   initrd_path: Option, boot_media_path: Option }`, `ImageManifest` (schema
   `"2"`, optional rootfs, initrd and boot-media digests), `LaunchConfig {
   kernel_path, rootfs_path?, initrd_path?, boot_media_path?, kernel_cmdline,
-  ready_pattern, max_boot_ms?, probe?: ProbeSettings, network_mode, cpu_count,
-  memory_mib, console_log_path }`, `ProbeSettings { login_user, shell_prompt,
+  ready_pattern, max_boot_ms?, probe?: ProbeSettings, vsock_bridge_path?,
+  agent_port?, network_mode, cpu_count, memory_mib, console_log_path }`, `ProbeSettings { login_user, shell_prompt,
   commands, success_pattern, shutdown_command }` with `validate()`,
   `LaunchInputs` (borrowed inputs for `default_launch_config`),
   `BootCheckConfig { …, max_boot_ms: Option }`, `BootCheckReport {
@@ -113,14 +122,16 @@ Public symbols by file:
   source: ImageSource, artifacts: ImageArtifacts { kernel, initrd:
   ImageArtifact { member, member_sha256, unpack: UnpackMethod, file, sha256,
   format } }, boot_media: Option<BootMedia>, overlay: Option<OverlaySettings { dir,
-  packages_lock, apkovl_path, file }>, boot: BootSettings { kernel_cmdline,
+  packages_lock, apkovl_path, file }>, control: Option<ControlSettings {
+  bridge_dir, cid, agent_port }> (`bridge_path()` = `<bridge_dir>/<cid>.sock`),
+  boot: BootSettings { kernel_cmdline,
   ready_pattern, max_boot_ms, probe: Option<ProbeSettings> },
   expected_image_id }`, `ImageManifest.overlay_initrd_{path,sha256}`, `UnpackMethod {
   None, ZbootGzip }`, `build_manifest`, `image_id`, `write_manifest`,
   `load_image_lock`, `validate_image_lock`, `image_lock_env`, `verify_image`,
   `default_launch_config`, `launch_config_from_lock`, `write_launch_config`,
   `run_boot_check`; constants `MANIFEST_SCHEMA_VERSION`,
-  `IMAGE_LOCK_SCHEMA_VERSION` (4), `DEFAULT_KERNEL_CMDLINE` (`console=hvc0`),
+  `IMAGE_LOCK_SCHEMA_VERSION` (5), `DEFAULT_KERNEL_CMDLINE` (`console=hvc0`),
   `DEFAULT_READY_PATTERN` (`login:`).
 
 ## Invariants
@@ -228,7 +239,9 @@ Public symbols by file:
   defaults to `login:`.
 - `systemvm.rs:load_image_lock` parses the YAML into `ImageLock` with
   `deny_unknown_fields`, then `validate_image_lock` requires schema version
-  `4`, an `https://` URL, non-zero `size_bytes`, non-blank `boot.*`,
+  `5`, an `https://` URL, non-zero `size_bytes`, non-blank `boot.*`, a
+  `control` (when present) with a relative `bridge_dir`, `cid >= 3` and a
+  non-zero `agent_port`,
   `boot.max_boot_ms > 0`, a valid `boot.probe` when present, an `overlay`
   (when present) with relative paths, a bare `file`, an absolute
   `*.apkovl.tar.gz` `apkovl_path` named by `apkovl=` in the command line,
@@ -245,6 +258,14 @@ Public symbols by file:
   `launch_config_from_lock` names those files (the derived initramfs when
   there is an overlay), the lock's `kernel_cmdline` and `ready_pattern`, and
   NAT networking.
+- `control.rs:connect` writes `CONNECT <port>\n`, requires a greeting
+  `VESPER-AGENT <version> <hostname>` with `version ==
+  AGENT_PROTOCOL_VERSION`, and fails with a `make systemvm-up` hint when the
+  bridge socket is missing. `echo` writes the payload from a second thread
+  while reading, because the agent streams bytes back as they arrive.
+  `run_suite` runs `handshake`, `keepalive`, `reconnect` (server-side `DROP`,
+  then `connect_with_retry` 5 × 500 ms) and `large_payload` in that order,
+  stopping at the first failure; `passed` requires all four.
 - `systemvm/packages.rs:validate_packages_lock` requires schema `1`,
   non-blank branch and arch, every requested package in the closure,
   packages sorted by name without duplicates, `file ==

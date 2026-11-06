@@ -1,0 +1,442 @@
+//! Host-side client for the System VM control channel (GH #13).
+//!
+//! The channel is a vsock port inside the guest, reached from macOS through the launcher's bridge:
+//! a Unix socket that takes the Firecracker-style `CONNECT <port>\n` preface and then relays bytes
+//! to the guest port (`docs/process/systemvm-bringup.md`, "Proxy bridge convention"). The guest
+//! agent (`systemvm/overlay/usr/local/bin/vesper-agent`) speaks a line protocol, version 1.
+
+use serde::{Deserialize, Serialize};
+use std::io::{BufRead, BufReader, Read, Write};
+use std::os::unix::net::UnixStream;
+use std::path::{Path, PathBuf};
+use std::thread;
+use std::time::{Duration, Instant};
+
+pub const AGENT_PROTOCOL_VERSION: u32 = 1;
+pub const DEFAULT_AGENT_PORT: u32 = 1024;
+
+/// Where the bridge socket lives and which guest port the agent listens on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ControlEndpoint {
+    pub bridge_path: PathBuf,
+    pub port: u32,
+    pub io_timeout: Duration,
+}
+
+impl ControlEndpoint {
+    pub fn new(bridge_path: impl Into<PathBuf>, port: u32) -> Self {
+        ControlEndpoint {
+            bridge_path: bridge_path.into(),
+            port,
+            io_timeout: Duration::from_secs(10),
+        }
+    }
+}
+
+/// Greeting sent by the agent right after the bridge connects the guest port.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Handshake {
+    pub protocol_version: u32,
+    pub hostname: String,
+    pub connect_ms: u64,
+}
+
+#[derive(Debug)]
+pub struct Session {
+    reader: BufReader<UnixStream>,
+    writer: UnixStream,
+    pub handshake: Handshake,
+}
+
+/// Connects through the bridge, sends the `CONNECT` preface and reads the greeting.
+pub fn connect(endpoint: &ControlEndpoint) -> Result<Session, String> {
+    let started = Instant::now();
+    let stream = UnixStream::connect(&endpoint.bridge_path).map_err(|err| {
+        format!(
+            "connect bridge {}: {err} (is the VM up? `make systemvm-up`)",
+            endpoint.bridge_path.display()
+        )
+    })?;
+    stream
+        .set_read_timeout(Some(endpoint.io_timeout))
+        .and_then(|_| stream.set_write_timeout(Some(endpoint.io_timeout)))
+        .map_err(|err| format!("set bridge timeouts: {err}"))?;
+    let writer = stream.try_clone().map_err(|err| format!("clone bridge stream: {err}"))?;
+    let mut session = Session {
+        reader: BufReader::new(stream),
+        writer,
+        handshake: Handshake {
+            protocol_version: 0,
+            hostname: String::new(),
+            connect_ms: 0,
+        },
+    };
+    session
+        .send(&format!("CONNECT {}", endpoint.port))
+        .map_err(|err| format!("send CONNECT preface: {err}"))?;
+    let greeting = session.read_line()?;
+    let mut parts = greeting.split_whitespace();
+    let (Some("VESPER-AGENT"), Some(version), Some(hostname)) = (parts.next(), parts.next(), parts.next())
+    else {
+        return Err(format!("unexpected greeting from the agent: {greeting:?}"));
+    };
+    let protocol_version: u32 = version
+        .parse()
+        .map_err(|_| format!("agent protocol version is not a number: {greeting:?}"))?;
+    if protocol_version != AGENT_PROTOCOL_VERSION {
+        return Err(format!(
+            "agent speaks protocol {protocol_version}, this client speaks {AGENT_PROTOCOL_VERSION}"
+        ));
+    }
+    session.handshake = Handshake {
+        protocol_version,
+        hostname: hostname.to_string(),
+        connect_ms: started.elapsed().as_millis() as u64,
+    };
+    Ok(session)
+}
+
+/// `connect` with retries and a fixed backoff; returns the session and the attempts used.
+pub fn connect_with_retry(
+    endpoint: &ControlEndpoint,
+    attempts: u32,
+    backoff: Duration,
+) -> Result<(Session, u32), String> {
+    let mut last = String::new();
+    for attempt in 1..=attempts.max(1) {
+        match connect(endpoint) {
+            Ok(session) => return Ok((session, attempt)),
+            Err(err) => {
+                last = err;
+                if attempt < attempts {
+                    thread::sleep(backoff);
+                }
+            }
+        }
+    }
+    Err(format!("gave up after {attempts} attempts: {last}"))
+}
+
+impl Session {
+    fn send(&mut self, line: &str) -> Result<(), String> {
+        self.writer
+            .write_all(format!("{line}\n").as_bytes())
+            .and_then(|_| self.writer.flush())
+            .map_err(|err| format!("write to agent: {err}"))
+    }
+
+    fn read_line(&mut self) -> Result<String, String> {
+        let mut line = String::new();
+        let read = self
+            .reader
+            .read_line(&mut line)
+            .map_err(|err| format!("read from agent: {err}"))?;
+        if read == 0 {
+            return Err("agent closed the connection".to_string());
+        }
+        Ok(line.trim_end_matches(['\r', '\n']).to_string())
+    }
+
+    fn expect(&mut self, command: &str, reply: &str) -> Result<Duration, String> {
+        let started = Instant::now();
+        self.send(command)?;
+        let line = self.read_line()?;
+        if line != reply {
+            return Err(format!("{command}: expected {reply:?}, got {line:?}"));
+        }
+        Ok(started.elapsed())
+    }
+
+    /// Round trip of `PING`/`PONG`.
+    pub fn ping(&mut self) -> Result<Duration, String> {
+        self.expect("PING", "PONG")
+    }
+
+    pub fn version(&mut self) -> Result<u32, String> {
+        self.send("VERSION")?;
+        let line = self.read_line()?;
+        line.strip_prefix("VERSION ")
+            .and_then(|v| v.parse().ok())
+            .ok_or_else(|| format!("VERSION: unexpected reply {line:?}"))
+    }
+
+    /// Sends `payload` through `ECHO` and checks the bytes come back unchanged. The payload is
+    /// written from a second thread while this one reads, because the agent streams the bytes back
+    /// as it receives them and a one-sided writer would deadlock once the socket buffers fill.
+    pub fn echo(&mut self, payload: &[u8]) -> Result<Duration, String> {
+        let started = Instant::now();
+        self.send(&format!("ECHO {}", payload.len()))?;
+        let line = self.read_line()?;
+        if line != format!("ECHO {}", payload.len()) {
+            return Err(format!("ECHO: unexpected reply {line:?}"));
+        }
+        let mut writer = self
+            .writer
+            .try_clone()
+            .map_err(|err| format!("clone bridge stream: {err}"))?;
+        let to_send = payload.to_vec();
+        let sender = thread::spawn(move || {
+            writer
+                .write_all(&to_send)
+                .and_then(|_| writer.flush())
+                .map_err(|err| format!("write echo payload: {err}"))
+        });
+        let mut back = vec![0u8; payload.len()];
+        let read = self
+            .reader
+            .read_exact(&mut back)
+            .map_err(|err| format!("read echo payload: {err}"));
+        sender.join().map_err(|_| "echo writer thread panicked".to_string())??;
+        read?;
+        if back != payload {
+            let first = back.iter().zip(payload).position(|(a, b)| a != b).unwrap_or(0);
+            return Err(format!("ECHO: payload corrupted at byte {first}"));
+        }
+        Ok(started.elapsed())
+    }
+
+    /// The agent's `HEALTH` JSON document.
+    pub fn health(&mut self) -> Result<serde_json::Value, String> {
+        self.send("HEALTH")?;
+        let line = self.read_line()?;
+        let json = line
+            .strip_prefix("HEALTH ")
+            .ok_or_else(|| format!("HEALTH: unexpected reply {line:?}"))?;
+        serde_json::from_str(json).map_err(|err| format!("HEALTH: invalid JSON {json:?}: {err}"))
+    }
+
+    /// Asks the agent to close this connection (server-side drop).
+    pub fn drop_connection(&mut self) -> Result<(), String> {
+        self.expect("DROP", "DROP").map(|_| ())
+    }
+
+    /// Asks the guest to power off.
+    pub fn shutdown(&mut self) -> Result<(), String> {
+        self.expect("SHUTDOWN", "BYE").map(|_| ())
+    }
+
+    /// Pings every `interval` for `total`, proving the channel survives idle gaps.
+    pub fn keepalive(&mut self, interval: Duration, total: Duration) -> Result<u32, String> {
+        let deadline = Instant::now() + total;
+        let mut pings = 0;
+        loop {
+            self.ping()?;
+            pings += 1;
+            if Instant::now() >= deadline {
+                return Ok(pings);
+            }
+            thread::sleep(interval);
+        }
+    }
+}
+
+/// Result of one checklist step of the GH #13 control suite.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SuiteStep {
+    pub name: String,
+    pub ok: bool,
+    pub detail: String,
+    pub elapsed_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SuiteReport {
+    pub bridge_path: String,
+    pub port: u32,
+    pub steps: Vec<SuiteStep>,
+    pub passed: bool,
+}
+
+fn step<T>(
+    steps: &mut Vec<SuiteStep>,
+    name: &str,
+    run: impl FnOnce() -> Result<(T, String), String>,
+) -> Option<T> {
+    let started = Instant::now();
+    match run() {
+        Ok((value, detail)) => {
+            steps.push(SuiteStep {
+                name: name.to_string(),
+                ok: true,
+                detail,
+                elapsed_ms: started.elapsed().as_millis() as u64,
+            });
+            Some(value)
+        }
+        Err(err) => {
+            steps.push(SuiteStep {
+                name: name.to_string(),
+                ok: false,
+                detail: err,
+                elapsed_ms: started.elapsed().as_millis() as u64,
+            });
+            None
+        }
+    }
+}
+
+/// Runs the GH #13 checklist: handshake, keepalive under idle, reconnect after a drop, >1 MB echo.
+pub fn run_suite(
+    endpoint: &ControlEndpoint,
+    keepalive_interval: Duration,
+    keepalive_total: Duration,
+    payload_bytes: usize,
+) -> SuiteReport {
+    let mut steps = Vec::new();
+    let session = step(&mut steps, "handshake", || {
+        let session = connect(endpoint)?;
+        let detail = format!(
+            "protocol {} host {} in {} ms",
+            session.handshake.protocol_version, session.handshake.hostname, session.handshake.connect_ms
+        );
+        Ok((session, detail))
+    });
+    let session = session.and_then(|mut session| {
+        step(&mut steps, "keepalive", || {
+            let pings = session.keepalive(keepalive_interval, keepalive_total)?;
+            Ok((session, format!("{pings} pings over {} s", keepalive_total.as_secs())))
+        })
+    });
+    let session = session.and_then(|mut session| {
+        step(&mut steps, "reconnect", || {
+            session.drop_connection()?;
+            let dropped = session.ping().is_err();
+            if !dropped {
+                return Err("connection survived DROP".to_string());
+            }
+            let (fresh, attempts) = connect_with_retry(endpoint, 5, Duration::from_millis(500))?;
+            Ok((fresh, format!("reconnected after a server-side drop in {attempts} attempt(s)")))
+        })
+    });
+    session.and_then(|mut session| {
+        step(&mut steps, "large_payload", || {
+            let payload: Vec<u8> = (0..payload_bytes).map(|i| (i % 251) as u8).collect();
+            let elapsed = session.echo(&payload)?;
+            Ok(((), format!("{payload_bytes} bytes echoed intact in {} ms", elapsed.as_millis())))
+        })
+    });
+    let passed = steps.len() == 4 && steps.iter().all(|s| s.ok);
+    SuiteReport {
+        bridge_path: endpoint.bridge_path.display().to_string(),
+        port: endpoint.port,
+        steps,
+        passed,
+    }
+}
+
+pub fn write_report(path: impl AsRef<Path>, report: &SuiteReport) -> Result<(), String> {
+    let path = path.as_ref();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|err| format!("create {}: {err}", parent.display()))?;
+    }
+    let mut json = serde_json::to_string_pretty(report).map_err(|err| format!("serialize report: {err}"))?;
+    json.push('\n');
+    std::fs::write(path, json).map_err(|err| format!("write {}: {err}", path.display()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::net::UnixListener;
+    use tempfile::tempdir;
+
+    /// A bridge plus agent in one thread: expects the CONNECT preface, greets, speaks protocol 1.
+    fn fake_bridge(path: &Path, greeting: &'static str, drop_after_greeting: bool) {
+        let listener = UnixListener::bind(path).unwrap();
+        thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(stream) = stream else { break };
+                let greeting = greeting;
+                thread::spawn(move || {
+                    let mut reader = BufReader::new(stream.try_clone().unwrap());
+                    let mut writer = stream;
+                    let mut line = String::new();
+                    reader.read_line(&mut line).unwrap();
+                    assert_eq!(line, "CONNECT 1024\n");
+                    writer.write_all(format!("{greeting}\n").as_bytes()).unwrap();
+                    if drop_after_greeting {
+                        return;
+                    }
+                    loop {
+                        line.clear();
+                        if reader.read_line(&mut line).unwrap_or(0) == 0 {
+                            return;
+                        }
+                        let mut parts = line.split_whitespace();
+                        match parts.next() {
+                            Some("PING") => writer.write_all(b"PONG\n").unwrap(),
+                            Some("VERSION") => writer.write_all(b"VERSION 1\n").unwrap(),
+                            Some("ECHO") => {
+                                let n: usize = parts.next().unwrap().parse().unwrap();
+                                writer.write_all(format!("ECHO {n}\n").as_bytes()).unwrap();
+                                let mut buf = vec![0u8; n];
+                                reader.read_exact(&mut buf).unwrap();
+                                writer.write_all(&buf).unwrap();
+                            }
+                            Some("HEALTH") => writer
+                                .write_all(b"HEALTH {\"packages_ready\":true,\"services\":{\"vesper-agent\":\"started\"}}\n")
+                                .unwrap(),
+                            Some("DROP") => {
+                                writer.write_all(b"DROP\n").unwrap();
+                                return;
+                            }
+                            Some("SHUTDOWN") | Some("QUIT") => {
+                                writer.write_all(b"BYE\n").unwrap();
+                                return;
+                            }
+                            _ => writer.write_all(b"ERR unknown command\n").unwrap(),
+                        }
+                    }
+                });
+            }
+        });
+    }
+
+    #[test]
+    fn handshake_ping_version_health_and_echo() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("3.sock");
+        fake_bridge(&path, "VESPER-AGENT 1 vesper", false);
+        let endpoint = ControlEndpoint::new(&path, DEFAULT_AGENT_PORT);
+        let mut session = connect(&endpoint).unwrap();
+        assert_eq!(session.handshake.protocol_version, 1);
+        assert_eq!(session.handshake.hostname, "vesper");
+        session.ping().unwrap();
+        assert_eq!(session.version().unwrap(), 1);
+        let health = session.health().unwrap();
+        assert_eq!(health["packages_ready"], serde_json::Value::Bool(true));
+        let payload: Vec<u8> = (0..2 * 1024 * 1024 + 7).map(|i| (i % 253) as u8).collect();
+        session.echo(&payload).unwrap();
+        session.shutdown().unwrap();
+    }
+
+    #[test]
+    fn rejects_wrong_protocol_and_reports_missing_bridge() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("3.sock");
+        fake_bridge(&path, "VESPER-AGENT 2 vesper", true);
+        let err = connect(&ControlEndpoint::new(&path, DEFAULT_AGENT_PORT)).unwrap_err();
+        assert!(err.contains("protocol 2"));
+        let missing = dir.path().join("missing.sock");
+        let err = connect(&ControlEndpoint::new(&missing, DEFAULT_AGENT_PORT)).unwrap_err();
+        assert!(err.contains("make systemvm-up"));
+        let err = connect_with_retry(&ControlEndpoint::new(&missing, 1024), 2, Duration::from_millis(10)).unwrap_err();
+        assert!(err.contains("gave up after 2 attempts"));
+    }
+
+    #[test]
+    fn suite_covers_the_checklist_and_writes_a_report() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("3.sock");
+        fake_bridge(&path, "VESPER-AGENT 1 vesper", false);
+        let endpoint = ControlEndpoint::new(&path, DEFAULT_AGENT_PORT);
+        let report = run_suite(&endpoint, Duration::from_millis(20), Duration::from_millis(100), 1024 * 1024 + 1);
+        let names: Vec<&str> = report.steps.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, ["handshake", "keepalive", "reconnect", "large_payload"]);
+        assert!(report.passed, "{:?}", report.steps);
+        let out = dir.path().join("control-report.json");
+        write_report(&out, &report).unwrap();
+        let written: SuiteReport = serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
+        assert!(written.passed);
+    }
+}

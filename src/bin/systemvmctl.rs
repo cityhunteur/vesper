@@ -84,6 +84,18 @@ enum Commands {
         #[arg(long)]
         require_overlay: bool,
     },
+    /// Talk to the guest agent over the vsock bridge (GH #13).
+    Control {
+        /// Launch config that names the bridge socket and agent port.
+        #[arg(long, default_value = "build/systemvm/launch-config.json")]
+        config: String,
+        #[arg(long)]
+        bridge: Option<String>,
+        #[arg(long)]
+        port: Option<u32>,
+        #[command(subcommand)]
+        action: ControlAction,
+    },
     BootSmoke {
         #[arg(long, default_value_t = 5)]
         iterations: u32,
@@ -101,6 +113,132 @@ enum Commands {
         #[arg(long)]
         max_boot_ms: Option<u64>,
     },
+}
+
+#[derive(Subcommand, Debug)]
+enum ControlAction {
+    /// Connect, print the greeting.
+    Handshake,
+    Ping,
+    Version,
+    Health,
+    /// Send N bytes through ECHO and verify them.
+    Echo {
+        #[arg(long, default_value_t = 2 * 1024 * 1024)]
+        bytes: usize,
+    },
+    /// Ping every INTERVAL seconds for SECONDS.
+    Keepalive {
+        #[arg(long, default_value_t = 5)]
+        interval: u64,
+        #[arg(long, default_value_t = 30)]
+        seconds: u64,
+    },
+    /// Ask the guest to power off.
+    Shutdown,
+    /// Run the GH #13 checklist and write a JSON report.
+    Suite {
+        #[arg(long, default_value = "run/systemvm/control-report.json")]
+        report: String,
+        #[arg(long, default_value_t = 2)]
+        keepalive_interval: u64,
+        #[arg(long, default_value_t = 20)]
+        keepalive_seconds: u64,
+        #[arg(long, default_value_t = 2 * 1024 * 1024)]
+        payload_bytes: usize,
+    },
+}
+
+fn control_endpoint(
+    config: &str,
+    bridge: Option<String>,
+    port: Option<u32>,
+) -> Result<vesper::control::ControlEndpoint, String> {
+    let (cfg_bridge, cfg_port) = match std::fs::read_to_string(config) {
+        Ok(text) => {
+            let cfg: vesper::systemvm::LaunchConfig = serde_json::from_str(&text)
+                .map_err(|err| format!("parse launch config {config}: {err}"))?;
+            (cfg.vsock_bridge_path, cfg.agent_port)
+        }
+        Err(_) if bridge.is_some() => (None, None),
+        Err(err) => return Err(format!("read launch config {config}: {err} (pass --bridge/--port or run make systemvm-launch-config)")),
+    };
+    let bridge = bridge
+        .or(cfg_bridge)
+        .ok_or("no bridge socket: the launch config has no vsock_bridge_path and --bridge was not given")?;
+    let port = port
+        .or(cfg_port)
+        .unwrap_or(vesper::control::DEFAULT_AGENT_PORT);
+    Ok(vesper::control::ControlEndpoint::new(bridge, port))
+}
+
+fn run_control(endpoint: vesper::control::ControlEndpoint, action: ControlAction) -> Result<(), String> {
+    use vesper::control;
+    match action {
+        ControlAction::Handshake => {
+            let session = control::connect(&endpoint)?;
+            println!("{}", serde_json::to_string(&session.handshake).unwrap());
+        }
+        ControlAction::Ping => {
+            let mut session = control::connect(&endpoint)?;
+            println!("PONG in {} ms", session.ping()?.as_millis());
+        }
+        ControlAction::Version => {
+            let mut session = control::connect(&endpoint)?;
+            println!("VERSION {}", session.version()?);
+        }
+        ControlAction::Health => {
+            let mut session = control::connect(&endpoint)?;
+            println!("{}", session.health()?);
+        }
+        ControlAction::Echo { bytes } => {
+            let mut session = control::connect(&endpoint)?;
+            let payload: Vec<u8> = (0..bytes).map(|i| (i % 251) as u8).collect();
+            let elapsed = session.echo(&payload)?;
+            println!("echoed {bytes} bytes intact in {} ms", elapsed.as_millis());
+        }
+        ControlAction::Keepalive { interval, seconds } => {
+            let mut session = control::connect(&endpoint)?;
+            let pings = session.keepalive(
+                std::time::Duration::from_secs(interval),
+                std::time::Duration::from_secs(seconds),
+            )?;
+            println!("keepalive ok: {pings} pings over {seconds} s");
+        }
+        ControlAction::Shutdown => {
+            let mut session = control::connect(&endpoint)?;
+            session.shutdown()?;
+            println!("guest acknowledged shutdown");
+        }
+        ControlAction::Suite {
+            report,
+            keepalive_interval,
+            keepalive_seconds,
+            payload_bytes,
+        } => {
+            let result = control::run_suite(
+                &endpoint,
+                std::time::Duration::from_secs(keepalive_interval),
+                std::time::Duration::from_secs(keepalive_seconds),
+                payload_bytes,
+            );
+            control::write_report(&report, &result)?;
+            for step in &result.steps {
+                println!(
+                    "{} {}: {} ({} ms)",
+                    if step.ok { "ok  " } else { "FAIL" },
+                    step.name,
+                    step.detail,
+                    step.elapsed_ms
+                );
+            }
+            if !result.passed {
+                return Err(format!("control suite failed (report: {report})"));
+            }
+            println!("control suite passed (report: {report})");
+        }
+    }
+    Ok(())
 }
 
 fn main() {
@@ -157,6 +295,8 @@ fn run() -> Result<(), String> {
                     ready_pattern: ready_pattern.as_deref(),
                     max_boot_ms: None,
                     probe: None,
+                    vsock_bridge_path: None,
+                    agent_port: None,
                     console_log_path: &console_log,
                 })?
             };
@@ -195,6 +335,12 @@ fn run() -> Result<(), String> {
             );
             Ok(())
         }
+        Commands::Control {
+            config,
+            bridge,
+            port,
+            action,
+        } => run_control(control_endpoint(&config, bridge, port)?, action),
         Commands::BootSmoke {
             iterations,
             timeout_seconds,

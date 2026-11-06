@@ -4,6 +4,7 @@ pub mod api_matrix;
 pub mod baseline;
 pub mod buildinfo;
 pub mod compat;
+pub mod control;
 pub mod platform;
 pub mod proxy;
 pub mod spec;

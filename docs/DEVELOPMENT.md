@@ -51,7 +51,8 @@ None. There is no database, queue or container dependency. The System VM image i
 cached under `build/systemvm/cache/`), verifies every digest and unpacks the kernel into `build/systemvm/`.
 `make systemvm-overlay` downloads the pinned guest packages (about 55 MB) and packs them with
 `systemvm/overlay/` into a derived initramfs; `make vmlauncher-build` then `make systemvm-boot-smoke` boots it on
-Virtualization.framework (macOS, Apple silicon). `make systemvm-prepare` runs all four steps
+Virtualization.framework (macOS, Apple silicon). `make systemvm-prepare` runs all four steps; `make systemvm-up`, `make systemvm-control-suite` and
+`make systemvm-down` keep the VM running and exercise the guest agent over the vsock bridge
 (see [process/systemvm-bringup.md](process/systemvm-bringup.md)).
 
 ## Build and run
