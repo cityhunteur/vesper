@@ -206,9 +206,10 @@ the baseline revision `083c4cf6…` of `docs/specs/design-v0.baselines.lock.yaml
 `usr/local/bin`) manages jailed microVMs: `prepare` unpacks the ISO's zboot kernel into a raw Image and builds a
 busybox initramfs whose init prints `VESPER-MICROVM-OK` (and powers off when the command line has `vesper_exit=1`);
 `launch ID [--exit]` copies kernel and initramfs into `/srv/jailer/firecracker/ID/root`, writes a single-file
-Firecracker config (1 vCPU, 128 MiB, no drives, `console=ttyS0 reboot=k panic=1 pci=off`) and starts
+Firecracker config (1 vCPU, 256 MiB, no drives, `console=ttyS0 reboot=k panic=1 pci=off`) and starts
 `jailer --id ID --exec-file … --uid 10000 --gid 10000 --chroot-base-dir /srv/jailer --cgroup-version 2 --cgroup
-pids.max=256 --cgroup memory.max=268435456 -- --config-file /vm.json --api-sock /run/firecracker.socket`, waiting
+pids.max=256 --cgroup memory.max=671088640 -- --config-file /vm.json --api-sock /run/firecracker.socket` (the
+640 MiB cap leaves room for a full snapshot's memory file in the tmpfs jail, which is charged to the same cgroup), waiting
 for the marker; `isolation ID` reports uid, jail contents, mount namespace, cgroup path and seccomp mode from
 `/proc/<pid>`; `stop`, `crash` (SIGKILL), `cleanup` (kill, remove jail and cgroup, report `CLEAN` or `DIRTY <kind>`),
 `status`, `log`. From the host, `cargo run --bin systemvmctl -- control microvm <args>` runs any of these and
@@ -247,6 +248,27 @@ record and log (`REMOVED NAME` or `ERR leftovers`), `isolation NAME` returns the
 JSON. `make systemvm-workload-suite` runs the GH #20 checklist (16 steps: three concurrent microVMs with distinct
 pids and cgroups, a file written in one rootfs invisible to another, stop of one leaving the others running,
 exit-code and output mapping, full removal) and writes `run/systemvm/workload-report.json`. Limits: TD-032.
+
+## Parity and performance baseline (GH #21)
+
+`vesper-fcparity` (overlay, `usr/local/bin`) talks to a jailed microVM's Firecracker API socket with `socat`
+(`api ID METHOD PATH [BODY|-] [TIMEOUT]`; the request side is a FIFO kept open until the response is complete,
+because Firecracker resets a half-closed connection). `conformance ID` launches a microVM and runs 19 checks
+(version equals the binary's, instance state and id, machine and VM config, deterministic 400 faults, pause, full
+snapshot while paused, resume, SIGTERM stop, clean jail), printing `CHECK <name> ok|fail <detail>` lines and
+`CONFORMANCE passed=N failed=M firecracker_version=V`. `perf N` runs N launch/exit/cleanup cycles and prints
+`PERF n= boot_p50_ms= boot_p95_ms= boot_max_ms= cycle_p50_ms= create_rate_per_min= wall_ms= failures=`. From the
+host, `systemvmctl control parity-suite --perf-cycles N` turns these into a suite report (one step per check,
+`perf_run_1`, `perf_run_2`, `perf_comparable`: no failures and boot p50 within 20 %). `make systemvm-parity-baseline`
+(`scripts/systemvm/parity-baseline.sh [PERF_CYCLES] [--publish]`) brings the VM up if needed, runs the suite,
+`baselinectl --mode generate` and `compatexctl`, and assembles `run/systemvm/parity-baseline-report.json` with
+`parity_baseline_report.py`: the exact lock revisions, the Firecracker release, archive digest and API version, the
+parity metadata, the compat exception summary (open ids and entries), the conformance checks, both performance
+runs and `passed`. `--publish` copies a passing report to `docs/specs/backend-a-parity-baseline.json`; the `Parity
+Baseline` workflow re-validates that capture against the lock, `systemvm/archives.yaml` and the registry
+(`make parity-baseline-check`) and uploads it as a CI artifact, since runners cannot boot the System VM (TD-005).
+The gaps to the design bar are compat exceptions CE-0001 (upstream pytest suite not run), CE-0002 (release
+binary vs pinned commit, TD-029) and CE-0003 (no Linux baseline on the same host class).
 
 ## Proxy bridge convention
 

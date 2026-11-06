@@ -1,0 +1,47 @@
+name: Parity Baseline
+
+on:
+  pull_request:
+    paths:
+      - docs/specs/backend-a-parity-baseline.json
+      - docs/specs/design-v0.baselines.lock.yaml
+      - docs/specs/compat-exceptions.yaml
+      - systemvm/archives.yaml
+      - scripts/systemvm/parity_baseline_report.py
+      - .github/workflows/parity-baseline.yml
+  push:
+    branches: [main]
+    paths:
+      - docs/specs/backend-a-parity-baseline.json
+      - docs/specs/design-v0.baselines.lock.yaml
+      - docs/specs/compat-exceptions.yaml
+      - systemvm/archives.yaml
+      - scripts/systemvm/parity_baseline_report.py
+      - .github/workflows/parity-baseline.yml
+
+jobs:
+  validate-and-publish:
+    # The capture itself needs nested virtualization on an M3+ Mac (TD-005); CI re-validates the committed
+    # capture against the current lock, archives and compat registry, then publishes it as an artifact.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Report assembler self-test
+        run: python3 -I scripts/systemvm/parity_baseline_report.py --self-test
+
+      - name: Validate the committed capture against the lock, archives and registry
+        run: |
+          python3 -I scripts/systemvm/parity_baseline_report.py \
+            --validate docs/specs/backend-a-parity-baseline.json \
+            --lock docs/specs/design-v0.baselines.lock.yaml \
+            --archives systemvm/archives.yaml \
+            --registry docs/specs/compat-exceptions.yaml
+
+      - name: Upload the parity baseline report
+        uses: actions/upload-artifact@v4
+        with:
+          name: parity-baseline-${{ github.sha }}
+          path: docs/specs/backend-a-parity-baseline.json
+          if-no-files-found: error

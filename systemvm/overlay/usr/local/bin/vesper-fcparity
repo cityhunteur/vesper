@@ -1,0 +1,134 @@
+#!/bin/sh
+# Vesper parity baseline probes against the stock Firecracker in the System VM (GH #21).
+# usage: vesper-fcparity api ID METHOD PATH [BODY] [TIMEOUT]   raw request to the jailed microVM's API socket; prints
+#                                                               "STATUS <code>" then the body
+#        vesper-fcparity conformance ID                          launch a microVM, run the API conformance checklist
+#                                                               (CHECK <name> ok|fail <detail> lines, then
+#                                                               CONFORMANCE passed=N failed=M firecracker_version=V),
+#                                                               stop and clean it up
+#        vesper-fcparity perf N                                  N sequential launch/exit/cleanup cycles; SAMPLE lines then
+#                                                               PERF n= boot_p50_ms= boot_p95_ms= boot_max_ms= cycle_p50_ms=
+#                                                               create_rate_per_min= wall_ms= failures=
+set -u
+MV=/usr/local/bin/vesper-microvm
+FC=/var/lib/vesper/firecracker/firecracker
+JAIL=/srv/jailer/firecracker
+
+now_ms() { awk '{printf "%d\n", $1 * 1000}' /proc/uptime; }
+
+complete() { # FILE -> 0 when FILE holds a whole HTTP response (status 204, or body >= Content-Length)
+  awk 'BEGIN { cl = -1; st = 0; body = 0; blen = 0 }
+       NR == 1 { if ($0 ~ /^HTTP\/1\.[01] [0-9][0-9][0-9]/) st = $2 + 0; else exit 1 }
+       /^[Cc]ontent-[Ll]ength:/ { cl = $2 + 0 }
+       body == 0 && /^\r?$/ { body = 1; next }
+       body == 1 { blen += length($0) + 1 }
+       END { if (st == 0) exit 1; if (st == 204) exit 0; if (cl >= 0 && blen >= cl) exit 0; exit 1 }' "$1" 2>/dev/null
+}
+
+api() { # ID METHOD PATH [BODY|-] [TIMEOUT]; keeps the request side open until the response is complete
+  id=${1:?}; m=${2:?}; p=${3:?}; b=${4:-}; t=${5:-3}
+  [ "$b" = "-" ] && b=""
+  sock="$JAIL/$id/root/run/firecracker.socket"
+  [ -S "$sock" ] || { echo "STATUS 000"; echo "ERR no API socket at $sock"; return 1; }
+  w=$(mktemp -d); mkfifo "$w/in"
+  socat -T "$t" - "UNIX-CONNECT:$sock" < "$w/in" > "$w/out" 2> "$w/err" &
+  spid=$!
+  exec 3> "$w/in"
+  printf "%s %s HTTP/1.1\r\nHost: localhost\r\nAccept: application/json\r\nContent-Type: application/json\r\nContent-Length: %d\r\n\r\n%s" "$m" "$p" ${#b} "$b" >&3
+  i=0; lim=$((t * 20))
+  while [ "$i" -lt "$lim" ]; do
+    complete "$w/out" && break
+    kill -0 "$spid" 2>/dev/null || break
+    sleep 0.05; i=$((i + 1))
+  done
+  exec 3>&-
+  kill "$spid" 2>/dev/null; wait "$spid" 2>/dev/null
+  raw=$(tr -d '\r' < "$w/out"); err=$(head -c 200 "$w/err")
+  rm -rf "${w:?}"
+  code=$(printf '%s\n' "$raw" | sed -n '1s/^HTTP\/1\.[01] \([0-9][0-9][0-9]\).*/\1/p')
+  body=$(printf '%s\n' "$raw" | sed '1,/^$/d')
+  echo "STATUS ${code:-000}"
+  [ -n "$body" ] && printf '%s\n' "$body"
+  [ -z "$code" ] && [ -n "$err" ] && echo "ERR $err"
+  [ -n "$code" ]
+}
+
+PASSED=0; FAILED=0
+check() { # name ok|fail detail
+  if [ "$2" = ok ]; then PASSED=$((PASSED + 1)); else FAILED=$((FAILED + 1)); fi
+  echo "CHECK $1 $2 $3"
+}
+expect() { # name ID METHOD PATH BODY TIMEOUT want_status [want_substring]
+  name=$1; out=$(api "$2" "$3" "$4" "$5" "$6"); code=$(printf '%s\n' "$out" | head -1 | awk '{print $2}')
+  body=$(printf '%s\n' "$out" | sed '1d' | tr '\n' ' ' | cut -c1-200)
+  if [ "$code" != "$7" ]; then check "$name" fail "status $code (want $7): $body"; return 1; fi
+  if [ -n "${8:-}" ] && ! printf '%s' "$body" | grep -q -- "$8"; then check "$name" fail "status $code but body lacks '$8': $body"; return 1; fi
+  check "$name" ok "status $code ${body:+$body}"
+}
+
+conformance() {
+  id=${1:?}
+  "$MV" cleanup "$id" >/dev/null 2>&1
+  binver=$("$FC" --version 2>/dev/null | head -1 | sed -n 's/^Firecracker v\([0-9.]*\).*/\1/p')
+  out=$("$MV" launch "$id" 2>&1) || { echo "CONFORMANCE passed=0 failed=1 firecracker_version=${binver:-unknown}"; echo "ERR launch: $(printf '%s' "$out" | head -1)"; return 1; }
+  check launch ok "$(printf '%s' "$out" | head -1)"
+  expect version "$id" GET /version "" 3 200 "\"firecracker_version\":\"$binver\""
+  expect instance_running "$id" GET / "" 3 200 '"state":"Running"'
+  expect instance_id "$id" GET / "" 3 200 "\"id\":\"$id\""
+  expect machine_config "$id" GET /machine-config "" 3 200 '"vcpu_count":1,"mem_size_mib":256'
+  expect vm_config "$id" GET /vm/config "" 3 200 '"kernel_image_path"'
+  expect invalid_path_400 "$id" PUT /nonexistent '{}' 3 400 'Invalid request method and/or path'
+  expect bad_body_400 "$id" PUT /balloon '{"amount_mib":1}' 3 400 'missing field'
+  expect postboot_machine_config_400 "$id" PUT /machine-config '{"vcpu_count":2,"mem_size_mib":256}' 3 400 'fault_message'
+  expect unknown_drive_patch_400 "$id" PATCH /drives/nope '{"drive_id":"nope","path_on_host":"/nope"}' 3 400 'fault_message'
+  expect snapshot_while_running_400 "$id" PUT /snapshot/create '{"snapshot_type":"Full","snapshot_path":"/snap.vmstate","mem_file_path":"/snap.mem"}' 3 400 'while running'
+  expect pause "$id" PATCH /vm '{"state":"Paused"}' 3 204
+  expect paused_state "$id" GET / "" 3 200 '"state":"Paused"'
+  if expect snapshot_create_paused "$id" PUT /snapshot/create '{"snapshot_type":"Full","snapshot_path":"/snap.vmstate","mem_file_path":"/snap.mem"}' 40 204; then
+    mem=$(stat -c %s "$JAIL/$id/root/snap.mem" 2>/dev/null || echo 0); st=$(stat -c %s "$JAIL/$id/root/snap.vmstate" 2>/dev/null || echo 0)
+    if [ "$mem" = 268435456 ] && [ "$st" -gt 0 ]; then check snapshot_files ok "snap.mem=$mem snap.vmstate=$st"; else check snapshot_files fail "snap.mem=$mem snap.vmstate=$st"; fi
+  fi
+  expect resume "$id" PATCH /vm '{"state":"Resumed"}' 3 204
+  expect resumed_state "$id" GET / "" 3 200 '"state":"Running"'
+  out=$("$MV" stop "$id" 2>&1 | head -1)
+  case "$out" in "STOPPED $id"|"STOPPED $id") check stop_sigterm ok "$out" ;; *) check stop_sigterm fail "$out" ;; esac
+  out=$("$MV" cleanup "$id" 2>&1 | head -1)
+  case "$out" in CLEAN*) check cleanup ok "$out" ;; *) check cleanup fail "$out" ;; esac
+  echo "CONFORMANCE passed=$PASSED failed=$FAILED firecracker_version=${binver:-unknown}"
+  [ "$FAILED" = 0 ]
+}
+
+perf() {
+  n=${1:-20}; fails=0; boots=""; cycles=""
+  wall0=$(now_ms)
+  i=1
+  while [ "$i" -le "$n" ]; do
+    id="perf-$i"
+    "$MV" cleanup "$id" >/dev/null 2>&1
+    t0=$(now_ms)
+    out=$("$MV" launch "$id" --exit 2>&1 | head -1)
+    boot=$(printf '%s' "$out" | sed -n 's/.*boot_ms=\([0-9]*\).*/\1/p')
+    if [ -z "$boot" ]; then fails=$((fails + 1)); echo "SAMPLE $i boot_ms=- cycle_ms=- error=$(printf '%s' "$out" | cut -c1-120)"; "$MV" cleanup "$id" >/dev/null 2>&1; i=$((i + 1)); continue; fi
+    j=0
+    while [ "$j" -lt 300 ]; do case "$("$MV" status "$id")" in RUNNING*) sleep 0.1; j=$((j + 1)) ;; *) break ;; esac; done
+    "$MV" cleanup "$id" >/dev/null 2>&1
+    t1=$(now_ms); cyc=$((t1 - t0))
+    boots="$boots $boot"; cycles="$cycles $cyc"
+    echo "SAMPLE $i boot_ms=$boot cycle_ms=$cyc"
+    i=$((i + 1))
+  done
+  wall=$(( $(now_ms) - wall0 ))
+  pct() { printf '%s\n' $1 | sort -n | awk -v p="$2" '{a[NR]=$1} END { if (NR==0) {print "-"; exit}; i=int((NR-1)*p/100 + 0.999999); if (i<1) i=1; if (i>NR) i=NR; print a[i] }'; }
+  ok=$((n - fails))
+  rate=$(awk -v ok="$ok" -v w="$wall" 'BEGIN { if (w>0) printf "%.1f", ok*60000/w; else print "-" }')
+  echo "PERF n=$n boot_p50_ms=$(pct "$boots" 50) boot_p95_ms=$(pct "$boots" 95) boot_max_ms=$(pct "$boots" 100) cycle_p50_ms=$(pct "$cycles" 50) create_rate_per_min=$rate wall_ms=$wall failures=$fails"
+  [ "$fails" = 0 ]
+}
+
+cmd=${1:-}; shift 2>/dev/null
+case "$cmd" in
+  api) api "$@" ;;
+  conformance) conformance "$@" ;;
+  perf) perf "$@" ;;
+  *) echo "ERR usage: vesper-fcparity api ID METHOD PATH [BODY] [TIMEOUT]|conformance ID|perf N"; exit 2 ;;
+esac

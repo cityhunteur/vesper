@@ -138,7 +138,7 @@ launch() {
   : > "$lf"
   start=$(now_ms)
   setsid "$FC_DIR/jailer" --id "$id" --exec-file "$FC_DIR/firecracker" --uid "$JUID" --gid "$JGID" \
-    --chroot-base-dir "$JAIL" --cgroup-version 2 --cgroup pids.max=256 --cgroup memory.max=268435456 \
+    --chroot-base-dir "$JAIL" --cgroup-version 2 --cgroup pids.max=256 --cgroup memory.max=671088640 \
     -- --config-file /vm.json --api-sock /run/firecracker.socket \
     > "$lf" 2>&1 < /dev/null &
   for _ in $(seq 1 120); do

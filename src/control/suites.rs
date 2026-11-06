@@ -492,6 +492,81 @@ pub fn run_workload_suite(endpoint: &ControlEndpoint) -> SuiteReport {
     report(endpoint, steps, passed)
 }
 
+fn token<'a>(line: &'a str, key: &str) -> Option<&'a str> {
+    field(line, &format!("{key}="))
+}
+
+/// Runs the GH #21 baseline: the API conformance checklist of the stock Firecracker inside the System VM
+/// (one `conformance:<check>` step per `CHECK` line plus `conformance_summary`) and two performance runs
+/// of `perf_cycles` launch/exit/cleanup cycles each (`perf_run_1`, `perf_run_2`, then `perf_comparable`:
+/// both runs without failures and boot p50 within 20 %).
+pub fn run_parity_suite(endpoint: &ControlEndpoint, id: &str, perf_cycles: u32) -> SuiteReport {
+    let mut steps = Vec::new();
+    let session = step(&mut steps, "handshake", || {
+        let session = connect(endpoint)?;
+        let detail = format!("protocol {} host {}", session.handshake.protocol_version, session.handshake.hostname);
+        Ok((session, detail))
+    });
+    let Some(mut session) = session else {
+        return report(endpoint, steps, false);
+    };
+    let started = Instant::now();
+    match session.fcparity(&["conformance", id]) {
+        Ok((_, lines)) => {
+            let mut summary = None;
+            for line in &lines {
+                let mut parts = line.splitn(4, ' ');
+                match (parts.next(), parts.next(), parts.next(), parts.next()) {
+                    (Some("CHECK"), Some(name), Some(verdict), detail) => steps.push(SuiteStep {
+                        name: format!("conformance:{name}"),
+                        ok: verdict == "ok",
+                        detail: detail.unwrap_or("").to_string(),
+                        elapsed_ms: 0,
+                    }),
+                    (Some("CONFORMANCE"), Some(a), b, c) => {
+                        summary = Some(format!("{a} {} {}", b.unwrap_or(""), c.unwrap_or("")).trim().to_string())
+                    }
+                    _ => {}
+                }
+            }
+            let summary = summary.unwrap_or_else(|| format!("no summary line: {}", lines.join(" | ")));
+            let ok = token(&summary, "failed") == Some("0") && token(&summary, "passed").is_some();
+            steps.push(SuiteStep { name: "conformance_summary".into(), ok, detail: summary, elapsed_ms: started.elapsed().as_millis() as u64 });
+        }
+        Err(err) => steps.push(SuiteStep { name: "conformance_summary".into(), ok: false, detail: err, elapsed_ms: started.elapsed().as_millis() as u64 }),
+    }
+    let mut p50s = Vec::new();
+    for run in 1..=2 {
+        let cycles = perf_cycles.to_string();
+        let name = format!("perf_run_{run}");
+        let line = step(&mut steps, &name, || {
+            let (rc, lines) = session.fcparity(&["perf", &cycles])?;
+            let perf = lines.iter().find(|l| l.starts_with("PERF ")).cloned().unwrap_or_default();
+            if rc != 0 || perf.is_empty() || token(&perf, "failures") != Some("0") {
+                return Err(format!("perf rc={rc}: {}", lines.iter().rev().take(4).cloned().collect::<Vec<_>>().join(" | ")));
+            }
+            let detail = perf.trim_start_matches("PERF ").to_string();
+            Ok((detail.clone(), detail))
+        });
+        if let Some(line) = line {
+            p50s.push(token(&line, "boot_p50_ms").and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.0));
+        }
+    }
+    step(&mut steps, "perf_comparable", || {
+        if p50s.len() < 2 || p50s.iter().any(|v| *v <= 0.0) {
+            return Err("fewer than two successful performance runs".to_string());
+        }
+        let (a, b) = (p50s[0], p50s[1]);
+        let drift = (a - b).abs() * 100.0 / a.min(b);
+        if drift > 20.0 {
+            return Err(format!("boot p50 drift {drift:.1}% between runs ({a} ms vs {b} ms) exceeds 20%"));
+        }
+        Ok(((), format!("boot p50 {a} ms vs {b} ms, drift {drift:.1}% (limit 20%)")))
+    });
+    let passed = steps.iter().all(|s| s.ok) && steps.iter().any(|s| s.name.starts_with("conformance:"));
+    report(endpoint, steps, passed)
+}
+
 pub fn write_report(path: impl AsRef<Path>, report: &SuiteReport) -> Result<(), String> {
     let path = path.as_ref();
     if let Some(parent) = path.parent() {

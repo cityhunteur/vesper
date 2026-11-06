@@ -1,0 +1,216 @@
+{
+ "schema_version": 1,
+ "generated_at": "2026-11-06T21:19:16Z",
+ "host": {
+  "description": "macOS 27.0.1 / Apple M3 Pro",
+  "commit": "06779dc"
+ },
+ "baseline": {
+  "firecracker": {
+   "repo": "firecracker-microvm/firecracker",
+   "revision": "083c4cf69281178acc910f7f857f88e69c51d3b5"
+  },
+  "containerd": {
+   "repo": "containerd/containerd",
+   "revision": "d1d9d07f1960f7f3648298e44963a263eac87fa5"
+  },
+  "apple_containerization": {
+   "repo": "apple/containerization",
+   "revision": "636eef0eff00e451de6d5d426e6a6785b90b44e2"
+  }
+ },
+ "firecracker_binary": {
+  "release": "v1.16.0",
+  "archive_sha256": "531c713cdbc37d4b8bc2533d851aabc0267096afa1768086a37672abb668efd7",
+  "api_version": "1.16.0"
+ },
+ "parity_metadata": [
+  {
+   "key": "baseline.apple_containerization.revision",
+   "value": "636eef0eff00e451de6d5d426e6a6785b90b44e2"
+  },
+  {
+   "key": "baseline.containerd.revision",
+   "value": "d1d9d07f1960f7f3648298e44963a263eac87fa5"
+  },
+  {
+   "key": "baseline.firecracker.revision",
+   "value": "083c4cf69281178acc910f7f857f88e69c51d3b5"
+  },
+  {
+   "key": "candidate.backend",
+   "value": "backend-a"
+  },
+  {
+   "key": "candidate.host_cpu",
+   "value": "apple-m3-pro"
+  },
+  {
+   "key": "candidate.host_os",
+   "value": "macos"
+  }
+ ],
+ "compat_exceptions": {
+  "open": 3,
+  "closed": 0,
+  "open_ids": [
+   "CE-0001",
+   "CE-0002",
+   "CE-0003"
+  ],
+  "entries": [
+   {
+    "id": "CE-0001",
+    "issue": "21",
+    "expiry_date": "2027-03-31",
+    "target_release": "parity-ga",
+    "status": "open"
+   },
+   {
+    "id": "CE-0002",
+    "issue": "21",
+    "expiry_date": "2027-03-31",
+    "target_release": "parity-ga",
+    "status": "open"
+   },
+   {
+    "id": "CE-0003",
+    "issue": "21",
+    "expiry_date": "2027-03-31",
+    "target_release": "parity-ga",
+    "status": "open"
+   }
+  ]
+ },
+ "conformance": {
+  "passed": 19,
+  "failed": 0,
+  "checks": [
+   {
+    "name": "launch",
+    "ok": true,
+    "detail": "LAUNCHED vesper-parity pid=4190 boot_ms=1510"
+   },
+   {
+    "name": "version",
+    "ok": true,
+    "detail": "status 200 {\"firecracker_version\":\"1.16.0\"} "
+   },
+   {
+    "name": "instance_running",
+    "ok": true,
+    "detail": "status 200 {\"id\":\"vesper-parity\",\"state\":\"Running\",\"vmm_version\":\"1.16.0\",\"app_name\":\"Firecracker\"} "
+   },
+   {
+    "name": "instance_id",
+    "ok": true,
+    "detail": "status 200 {\"id\":\"vesper-parity\",\"state\":\"Running\",\"vmm_version\":\"1.16.0\",\"app_name\":\"Firecracker\"} "
+   },
+   {
+    "name": "machine_config",
+    "ok": true,
+    "detail": "status 200 {\"vcpu_count\":1,\"mem_size_mib\":256,\"smt\":false,\"track_dirty_pages\":false,\"huge_pages\":\"None\"} "
+   },
+   {
+    "name": "vm_config",
+    "ok": true,
+    "detail": "status 200 {\"balloon\":null,\"drives\":[],\"boot-source\":{\"kernel_image_path\":\"/Image\",\"initrd_path\":\"/initrd.gz\",\"boot_args\":\"console=ttyS0 reboot=k panic=1 pci=off rdinit=/init\"},\"cpu-config\":null,\"logger\":null,\"m"
+   },
+   {
+    "name": "invalid_path_400",
+    "ok": true,
+    "detail": "status 400 {\"fault_message\":\"Invalid request method and/or path: PUT nonexistent.\"} "
+   },
+   {
+    "name": "bad_body_400",
+    "ok": true,
+    "detail": "status 400 {\"fault_message\":\"An error occurred when deserializing the json body of a request: missing field `deflate_on_oom` at line 1 column 16.\"} "
+   },
+   {
+    "name": "postboot_machine_config_400",
+    "ok": true,
+    "detail": "status 400 {\"fault_message\":\"The requested operation is not supported after starting the microVM.\"} "
+   },
+   {
+    "name": "unknown_drive_patch_400",
+    "ok": true,
+    "detail": "status 400 {\"fault_message\":\"Drive config error: Unable to patch the block device: Failed perform action on device: Device not found Please verify the request arguments.\"} "
+   },
+   {
+    "name": "snapshot_while_running_400",
+    "ok": true,
+    "detail": "status 400 {\"fault_message\":\"Create snapshot error: Cannot save the microVM state: Operation not allowed: save/restore unavailable while running\"} "
+   },
+   {
+    "name": "pause",
+    "ok": true,
+    "detail": "status 204 "
+   },
+   {
+    "name": "paused_state",
+    "ok": true,
+    "detail": "status 200 {\"id\":\"vesper-parity\",\"state\":\"Paused\",\"vmm_version\":\"1.16.0\",\"app_name\":\"Firecracker\"} "
+   },
+   {
+    "name": "snapshot_create_paused",
+    "ok": true,
+    "detail": "status 204 "
+   },
+   {
+    "name": "snapshot_files",
+    "ok": true,
+    "detail": "snap.mem=268435456 snap.vmstate=6010"
+   },
+   {
+    "name": "resume",
+    "ok": true,
+    "detail": "status 204 "
+   },
+   {
+    "name": "resumed_state",
+    "ok": true,
+    "detail": "status 200 {\"id\":\"vesper-parity\",\"state\":\"Running\",\"vmm_version\":\"1.16.0\",\"app_name\":\"Firecracker\"} "
+   },
+   {
+    "name": "stop_sigterm",
+    "ok": true,
+    "detail": "STOPPED vesper-parity"
+   },
+   {
+    "name": "cleanup",
+    "ok": true,
+    "detail": "CLEAN vesper-parity"
+   }
+  ]
+ },
+ "performance": {
+  "runs": [
+   {
+    "boot_p50_ms": 1510.0,
+    "boot_p95_ms": 1520.0,
+    "boot_max_ms": 1520.0,
+    "cycle_p50_ms": 1541.0,
+    "create_rate_per_min": 38.8,
+    "wall_ms": 30960.0,
+    "failures": 0.0,
+    "n": 20,
+    "ok": true
+   },
+   {
+    "boot_p50_ms": 1520.0,
+    "boot_p95_ms": 1520.0,
+    "boot_max_ms": 1520.0,
+    "cycle_p50_ms": 1550.0,
+    "create_rate_per_min": 38.6,
+    "wall_ms": 31060.0,
+    "failures": 0.0,
+    "n": 20,
+    "ok": true
+   }
+  ],
+  "drift_pct": 0.6622516556291391,
+  "drift_limit_pct": 20.0,
+  "comparable": true
+ },
+ "passed": true
+}
