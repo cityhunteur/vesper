@@ -6,6 +6,19 @@ last_reviewed: 2026-11-05
 
 # Symphony milestones
 
+### 2026-11-06 — WOR-33 — containerd and dockerd supervised in the System VM, GH #14 complete
+- GitHub issue: #14 (mirror #73)
+- PR: #124
+- Commit: `f64ac7b` (squash merge of PR #124; remote CI green)
+- Phase: 1
+- Parity unit: start `containerd` and `dockerd` at boot under OpenRC `supervise-daemon` with cgroup v2 and DHCP networking, expose their health through the agent, and prove crash recovery and log capture from the host
+- Result: keep
+- Verification bundle: `.symphony/runs/WOR-33/current/` (evidence in `run/WOR-33/systemvm/`, incl. `services-report.json`)
+- Council summary: skipped; no control-plane path changed; six remote workflows green
+- Harness update: overlay `networking`, `cgroups`, `rc.conf`, `vesper-services`; agent `HEALTH` fields, `KILL`, `LOGS`; `control::run_services_suite`; `systemvmctl control kill|logs|services-suite`; `make systemvm-services-suite`; `containerd-ctr` pinned; TD-028
+- Remaining risks: boot to login 3.4 to 4.5 s against the 5 s threshold (TD-028); dockerd reachable only inside the guest (WOR-23); no container run yet
+- Truthful project state after this milestone: all four GH #14 checklist items are proven (both daemons healthy at boot, recovered within 600 ms after SIGKILL, startup and respawn lines captured); Phase 1 continues with WOR-23 (Docker socket ingress) and WOR-21 (reliability suite)
+
 ### 2026-11-06 — WOR-25 — vsock control channel proven end to end, GH #13 complete
 - GitHub issue: #13 (mirror #67)
 - PR: #123

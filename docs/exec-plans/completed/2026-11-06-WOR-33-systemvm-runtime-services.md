@@ -20,7 +20,7 @@ recovery from the host.
   `src/control.rs` gains `kill_service`, `logs`, `run_services_suite`; `systemvmctl control kill|logs|services-suite`;
   `make systemvm-services-suite`. Suite passed: both daemons healthy at boot, recovered in under 600 ms after
   SIGKILL, logs show the respawns. Boot smoke 5/5, max boot 4509 ms.
-- [ ] PR merged, CI green, GH #14 checklist and WOR-33 updated, milestone entry; plan moved to completed.
+- [x] (2026-11-06 19:20Z) PR #124 merged as `f64ac7b`, CI green, GH #14 checklist and WOR-33 updated, milestone entry; plan moved to completed.
 
 ## Surprises & Discoveries
 
