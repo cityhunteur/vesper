@@ -18,7 +18,7 @@ boot through an overlay (ADR 0002), so later slices can run an agent and service
 - [x] (2026-11-06 18:05Z) Slice 1: packages lock and resolver, overlay tree with boot-time install, deterministic
   overlay-and-initramfs builder, image lock schema 4 with the overlay section, `make systemvm-overlay` and
   `make systemvm-prepare`, probe extended to require the installed binaries; 5/5 boots at about 2.0 s ready time.
-- [ ] Slice 1: PR merged, CI green, tracker updated.
+- [x] (2026-11-06 18:25Z) Slice 1: PR #122 merged as `e4fed7c` after a CI fix (verify-image tolerated a missing overlay), CI green, tracker updated.
 - [ ] Slice 2: launcher exposes the guest vsock as the host Unix socket the proxy's bridge convention expects
   (`CONNECT <port>` preface); guest agent (socat + shell) on a vsock port; `systemvmctl control` client with
   handshake and version; `make systemvm-up` / `systemvm-down`.
@@ -37,6 +37,9 @@ boot through an overlay (ADR 0002), so later slices can run an agent and service
 - Observation: installing the 18 packages at boot costs about 0.9 s before the login prompt (ready time 1.05 s
   to 2.0 s).
   Evidence: `run/WOR-25/systemvm/boot-report-5.json`.
+- Observation: the first CI run failed because `make systemvm-fetch` verified the image before the overlay step
+  and required the derived initramfs; the local tree already had the file, so the sequence was never exercised.
+  Evidence: PR #122 run log; fixed by making the check opt-in and reproducing with the file deleted.
 
 ## Decision Log
 

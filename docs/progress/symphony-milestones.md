@@ -6,6 +6,19 @@ last_reviewed: 2026-11-05
 
 # Symphony milestones
 
+### 2026-11-06 — WOR-25 — Pinned guest packages installed at boot through an initramfs overlay
+- GitHub issue: #13 (mirror #67); also advances #14
+- PR: #122
+- Commit: `e4fed7c` (squash merge of PR #122; remote CI green incl. the overlay determinism check)
+- Phase: 1
+- Parity unit: pin the Alpine closure for `socat`, `containerd` and Docker, pack it with `systemvm/overlay/` into a deterministic apkovl appended to the pinned initramfs (ADR 0002), install it at every boot, and prove it from the guest probe
+- Result: keep
+- Verification bundle: `.symphony/runs/WOR-25/current/` (evidence in `run/WOR-25/systemvm/`)
+- Council summary: skipped; no control-plane path changed; six remote workflows green
+- Harness update: `docs/specs/systemvm-packages.lock.yaml` + `scripts/systemvm/resolve-apks.py`; `src/systemvm/packages.rs`; image lock schema 4 with `overlay`; `build-initramfs.py`, `fetch-packages.sh`, `build-overlay.sh`; `make systemvm-overlay` / `systemvm-prepare`; `systemvmctl package-list` / `verify-packages` / `verify-image --require-overlay`; CI caches packages and asserts determinism; TD-025
+- Remaining risks: packages are reinstalled on every boot and nothing persists (TD-025); no service runs yet; the vsock bridge and agent are the next slices
+- Truthful project state after this milestone: the guest boots in about 2 s with `socat`, `containerd` and `dockerd` installed from pinned, digest-verified packages; GH #13 and #14 remain partial
+
 ### 2026-11-06 — WOR-27 — NAT proven from the guest, 5 s boot threshold enforced, GH #12 complete
 - GitHub issue: #12 (mirror #74)
 - PR: #121
