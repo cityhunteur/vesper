@@ -18,8 +18,8 @@ whose `failures[]` name the step, the reason and the evidence file.
   kept-up VM the control suite, the services suite and the Docker smoke, with host leak snapshots before and after),
   `scripts/systemvm/reliability_report.py` (assembler with boot-drift and leak checks, `--self-test`),
   `make systemvm-reliability`, CI runs the self-test.
-- [ ] 50-cycle run recorded under `run/WOR-21/systemvm/`; PR merged, CI green, GH #16 checklist and WOR-21
-  updated, milestone entry; plan moved to completed.
+- [x] (2026-11-06 20:05Z) 50-cycle run recorded under `run/WOR-21/systemvm/`; PR #126 merged as `e152da1`, CI
+  green, GH #16 checklist and WOR-21 updated, milestone entry; plan moved to completed.
 
 ## Surprises & Discoveries
 

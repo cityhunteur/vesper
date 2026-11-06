@@ -6,6 +6,32 @@ last_reviewed: 2026-11-05
 
 # Symphony milestones
 
+### 2026-11-06 — WOR-12 — Phase 1 System VM bring-up complete on developer hardware
+- GitHub issue: #3 (mirror #54)
+- PR: none (epic close-out; sub-issues landed as PRs #119 to #126)
+- Commit: `e152da1` (last sub-issue merge)
+- Phase: 1
+- Parity unit: close the Phase 1 epic now that #12, #13, #14, #15 and #16 pass their checklists
+- Result: keep
+- Verification bundle: `.symphony/runs/WOR-27`, `WOR-25`, `WOR-33`, `WOR-23`, `WOR-21` (evidence under `run/WOR-*/systemvm/`)
+- Council summary: skipped; epic close-out with no code change
+- Harness update: parity audit row for #3 and the design-docs catalogue updated
+- Remaining risks: boot and socket evidence is developer-hardware only (TD-005); bridge socket exposure (TD-027); packages reinstalled per boot (TD-025); shell agent (TD-026); packaging and launchd absent
+- Truthful project state after this milestone: design-v0's Phase 1 exit criteria hold on an M3 (reliable boots, `docker version` and a trivial container from macOS through `vesper-proxy`, raw sockets private, automated reliability suite); Phase 2 (Backend A, stock Firecracker in the System VM under nested virtualisation) is next
+
+### 2026-11-06 — WOR-21 — Reliability suite with a JSON health report, GH #16 complete
+- GitHub issue: #16 (mirror #62)
+- PR: #126
+- Commit: `e152da1` (squash merge of PR #126; remote CI green)
+- Phase: 1
+- Parity unit: N-cycle boot stress plus control, services and Docker socket suites with host leak checks and a machine-readable report
+- Result: keep
+- Verification bundle: `.symphony/runs/WOR-21/current/` (evidence in `run/WOR-21/systemvm/`, incl. `reliability-report-50.json` and the first failing run's log)
+- Council summary: skipped; the suite itself is the sensor; six remote workflows green
+- Harness update: `reliability-suite.sh`, `reliability_report.py` (self-test in CI), `make systemvm-reliability`; `vesper-services` detaches networking and the daemons from the runlevel (TD-028 resolved)
+- Remaining risks: the suite needs Apple silicon (TD-005)
+- Truthful project state after this milestone: the first run caught three boots over the 5 s threshold, the fix brought the login prompt back to about 2.2 s, and the third run passed 50/50 with zero leaks; all GH #16 checklist items are proven
+
 ### 2026-11-06 — WOR-23 — Docker socket ingress through vesper-proxy, trivial container runs from macOS, GH #15 complete
 - GitHub issue: #15 (mirror #65); advances the #3 epic
 - PR: #125
