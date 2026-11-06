@@ -19,6 +19,7 @@ otherwise.
 | GNU make, bash | any recent | `Makefile`, `scripts/**/*.sh` |
 | Docker CLI (`docker`) | any recent; verified with 29.8 | only for `make docker-smoke` (client only; the daemon runs in the System VM) |
 | `plutil` | macOS built-in; optional | `scripts/ci/validate-entitlements.sh` falls back to Python `plistlib` |
+| Go toolchain (`go`) | 1.27 (`shim/go.mod`); CI uses `actions/setup-go@v5` with that file | only for `make shim-build` / `make shim-test`, which `make systemvm-overlay` needs |
 | Xcode command line tools (`swift`, `codesign`) | Swift 5.9+ (`launcher/Package.swift`); verified with Swift 6.4 on macOS 27 | only for `make vmlauncher-build` |
 | `bsdtar` | macOS built-in `tar`; Linux needs `libarchive-tools` | `scripts/systemvm/fetch-image.sh` (reads the ISO) |
 | `gh` CLI | authenticated with write access | only for `scripts/update-issue-checklists.sh` |

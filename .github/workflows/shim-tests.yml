@@ -1,0 +1,43 @@
+name: Shim Tests
+
+on:
+  pull_request:
+    paths:
+      - shim/**
+      - scripts/systemvm/build-shim.sh
+      - .github/workflows/shim-tests.yml
+  push:
+    branches: [main]
+    paths:
+      - shim/**
+      - scripts/systemvm/build-shim.sh
+      - .github/workflows/shim-tests.yml
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: shim/go.mod
+          cache-dependency-path: shim/go.sum
+
+      - name: Vet
+        run: cd shim && go vet ./...
+
+      - name: Test
+        run: cd shim && go test ./...
+
+      - name: Cross-build the static linux/arm64 shim
+        run: bash scripts/systemvm/build-shim.sh
+
+      - name: Upload the shim binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: containerd-shim-vesper-v2-${{ github.sha }}
+          path: build/shim/containerd-shim-vesper-v2
+          if-no-files-found: error

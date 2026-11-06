@@ -107,13 +107,13 @@ Public symbols by file:
   `new(bridge, port)` (10 s timeouts), `Handshake { protocol_version,
   hostname, connect_ms }`, `Session` with `ping`, `version`, `echo(payload)`,
   `health`, `kill_service(name)`, `logs(name, count)`, `microvm(args)`,
-  `rootfs(args)`, `workload(args)` and `fcparity(args)` (guest tools; 600 s read timeout), `drop_connection`,
+  `rootfs(args)`, `workload(args)`, `fcparity(args)` and `ctr(args)` (guest tools; 600 s read timeout), `drop_connection`,
   `shutdown`, `keepalive(interval, total)`,
   `connect(&endpoint)`, `connect_with_retry(&endpoint, attempts, backoff)`,
   `SuiteStep`, `SuiteReport`, `run_suite(&endpoint, interval, total,
   payload_bytes)`, `run_services_suite(&endpoint, &[service], recovery_timeout)`,
   `run_microvm_suite(&endpoint, id)`, `run_rootfs_suite(&endpoint, id)`,
-  `run_workload_suite(&endpoint)`, `run_parity_suite(&endpoint, id, perf_cycles)`,
+  `run_workload_suite(&endpoint)`, `run_parity_suite(&endpoint, id, perf_cycles)`, `run_shim_suite(&endpoint)`,
   `write_report(path, &report)`; constants
   `AGENT_PROTOCOL_VERSION` (1), `DEFAULT_AGENT_PORT` (1024).
 - `systemvm.rs` (manifest, launch config, boot smoke),
@@ -330,6 +330,13 @@ Public symbols by file:
   `perf_run_2` (`vesper-fcparity perf <cycles>`; ok when the `PERF` line has `failures=0`; detail is
   that line's tokens) and `perf_comparable` (two runs, boot p50 drift at most 20 %); `passed` requires
   every step ok and at least one conformance step.
+- `control/suites.rs:run_shim_suite` force-deletes `e2e`, `det`, `ca`, `cb`, `cc`, then runs `handshake`,
+  `import_image` (`IMPORTED`), `e2e_run_exit_code_and_output` (`vesper-ctr run e2e echo hello-from-task; exit 3`
+  → `RC 3` and an `OUT hello-from-task` line), `start_detached` (`STARTED`), `state_running` (`RUNNING` with a
+  non-zero `pid=`), `invalid_start_running` and `invalid_delete_running` (`vesper-ctr try task start|delete det`
+  must fail), `kill_detached`, `delete_detached`, `invalid_unknown_task`, `start_ca|cb|cc`,
+  `three_tasks_running` (three `RUNNING` rows with distinct non-zero pids), `kill_*`/`delete_*` for each and
+  `no_leftovers` (`CLEAN`); `passed` requires every step ok and at least 18 steps.
 - `systemvm/packages.rs:validate_packages_lock` requires schema `2`,
   non-blank branch and arch, every requested package in the closure,
   packages sorted by name without duplicates, `file ==

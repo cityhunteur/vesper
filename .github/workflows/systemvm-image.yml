@@ -49,6 +49,12 @@ jobs:
       - name: Install bsdtar (reads ISO 9660)
         run: sudo apt-get update -qq && sudo apt-get install -y -qq libarchive-tools
 
+      - name: Setup Go (the overlay carries the cross-built containerd shim)
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: shim/go.mod
+          cache-dependency-path: shim/go.sum
+
       - name: systemvm unit tests
         run: cargo test systemvm
 

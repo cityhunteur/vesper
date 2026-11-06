@@ -213,6 +213,15 @@ enum ControlAction {
         #[arg(long, default_value_t = 20)]
         perf_cycles: u32,
     },
+    /// Run `vesper-ctr <args>` in the guest (import|run NAME CMD...|start|state|kill|delete|try CTR-ARGS...|leftovers).
+    Ctr {
+        args: Vec<String>,
+    },
+    /// Run the GH #22 checklist (ctr task lifecycle through the Vesper shim v2) and write a JSON report.
+    ShimSuite {
+        #[arg(long, default_value = "run/systemvm/shim-report.json")]
+        report: String,
+    },
     /// Run the GH #18 checklist (launch, jailer isolation, stop, crash, poweroff, cleanup) and write a JSON report.
     MicrovmSuite {
         #[arg(long, default_value = "run/systemvm/microvm-report.json")]
@@ -388,6 +397,34 @@ fn run_control(endpoint: vesper::control::ControlEndpoint, action: ControlAction
                 return Err(format!("parity suite failed (report: {report})"));
             }
             println!("parity suite passed (report: {report})");
+        }
+        ControlAction::Ctr { args } => {
+            let mut session = control::connect(&endpoint)?;
+            let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+            let (rc, lines) = session.ctr(&refs)?;
+            for line in &lines {
+                println!("{line}");
+            }
+            if rc != 0 {
+                return Err(format!("vesper-ctr exited with {rc}"));
+            }
+        }
+        ControlAction::ShimSuite { report } => {
+            let result = control::run_shim_suite(&endpoint);
+            control::write_report(&report, &result)?;
+            for step in &result.steps {
+                println!(
+                    "{} {}: {} ({} ms)",
+                    if step.ok { "ok  " } else { "FAIL" },
+                    step.name,
+                    step.detail.chars().take(220).collect::<String>(),
+                    step.elapsed_ms
+                );
+            }
+            if !result.passed {
+                return Err(format!("shim suite failed (report: {report})"));
+            }
+            println!("shim suite passed (report: {report})");
         }
         ControlAction::MicrovmSuite { report, id } => {
             let result = control::run_microvm_suite(&endpoint, &id);

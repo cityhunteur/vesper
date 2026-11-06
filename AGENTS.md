@@ -5,10 +5,10 @@ This file is a map, not a manual: read it first, then open only the documents yo
 
 ## Project overview
 
-Vesper is a Rust crate that exposes a Firecracker-compatible control plane on macOS. `vesperd` serves the pinned
-Firecracker OpenAPI routes over a Unix socket with deterministic, baseline-stamped error envelopes; `vesper-proxy`
-forwards sockets; `baselinectl`, `compatexctl`, `contractgen` and `systemvmctl` keep parity governance and System VM
-artifacts honest. Guest microVM execution (Backend A/B) is designed but not yet implemented here.
+Vesper is a Rust crate exposing a Firecracker-compatible control plane on macOS: `vesperd` serves the pinned OpenAPI
+routes with deterministic, baseline-stamped errors; `vesper-proxy` forwards sockets; `baselinectl`, `compatexctl`,
+`contractgen` and `systemvmctl` keep parity governance and System VM artifacts honest. Backend A runs stock Firecracker
+microVMs in an Alpine System VM behind the Go shim in `shim/`; Backend B (native) is not built yet.
 
 ## Repository map
 
@@ -17,6 +17,7 @@ artifacts honest. Guest microVM execution (Backend A/B) is designed but not yet 
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Layers, dependency rules, main flows, invariants and how each is enforced |
 | [src/](src/README.md) | Library crate: `api`, `api_matrix`, `baseline`, `compat`, `platform`, `proxy`, `spec`, `systemvm` |
 | [src/bin/](src/bin/README.md) | The six Rust binaries; [launcher/](launcher/README.md) holds `vesper-vmlauncher`, the Swift System VM launcher |
+| [shim/](shim/README.md) | `containerd-shim-vesper-v2`, the Go containerd runtime v2 shim that runs tasks as jailed microVMs in the System VM |
 | [tests/](docs/TESTING.md) | Contract and golden integration suites |
 | [scripts/](scripts/README.md) | CI, macOS dev loop, System VM wrappers, harness sensors |
 | [docs/](docs/README.md) | Knowledge base and system of record; start at `docs/README.md` |

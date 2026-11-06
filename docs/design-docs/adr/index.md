@@ -17,6 +17,7 @@ new ADR, and the old ADR then links forward to it. The repository had no ADR ser
 | [0001](0001-systemvm-launcher-swift-helper.md) | Boot the System VM through a thin Swift Virtualization.framework helper | accepted | 2026-11-06 | none |
 | [0002](0002-systemvm-overlay-via-initramfs.md) | Customise the System VM with an Alpine overlay delivered through the initramfs | accepted | 2026-11-06 | none |
 | [0003](0003-systemvm-control-channel.md) | Control channel: launcher-served vsock bridge and a socat-backed guest agent | accepted | 2026-11-06 | none |
+| [0004](0004-containerd-shim-in-go.md) | containerd shim v2 in Go, cross-built on the host and shipped in the System VM overlay | accepted | 2026-11-06 | none |
 
 ## Candidates
 

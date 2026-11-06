@@ -1,0 +1,101 @@
+#!/bin/sh
+# Drive containerd (ctr) with the Vesper shim v2 runtime inside the System VM (GH #22).
+# usage: vesper-ctr import                        docker save the trivial image into containerd; IMPORTED <ref>
+#        vesper-ctr run NAME WORDS...             ctr run --rm … sh -c "WORDS"; prints RC <code> then OUT <line> per output line
+#        vesper-ctr start NAME WORDS...           ctr run -d … sh -c "WORDS"; STARTED NAME pid=N
+#        vesper-ctr state NAME                    STATE NAME <STATUS> pid=N
+#        vesper-ctr kill NAME                     SIGKILL and wait for STOPPED; KILLED NAME
+#        vesper-ctr delete NAME                   ctr task delete + container delete; DELETED NAME (or ERR …)
+#        vesper-ctr try CTR-ARGS...               run any ctr command; prints RC <code> then OUT lines (for invalid sequences)
+#        vesper-ctr leftovers                     CLEAN or DIRTY <what>
+set -u
+NS=vesper
+RT=io.containerd.vesper.v2
+IMAGE_TAG=vesper/trivial:guest
+ctr_() { ctr -n "$NS" "$@"; }
+ref() { ctr_ images ls -q 2>/dev/null | grep -F "$IMAGE_TAG" | head -1; }
+
+import() {
+  docker image inspect "$IMAGE_TAG" >/dev/null 2>&1 || /usr/local/bin/vesper-rootfs import-trivial >/dev/null 2>&1
+  r=$(ref)
+  if [ -z "$r" ]; then
+    out=$(docker save "$IMAGE_TAG" | ctr_ images import - 2>&1) || { echo "ERR import failed: $(printf '%s' "$out" | tail -1)"; return 1; }
+    r=$(ref)
+  fi
+  [ -n "$r" ] || { echo "ERR image not in containerd after import"; return 1; }
+  echo "IMPORTED $r"
+}
+
+emit() { # RC then OUT lines from a captured output
+  echo "RC $1"
+  printf '%s\n' "$2" | sed '/^$/d; s/^/OUT /'
+}
+
+run() {
+  name=${1:?}; shift
+  r=$(ref) || true; [ -n "$r" ] || { echo "ERR import first"; return 1; }
+  out=$(ctr_ run --rm --runtime "$RT" "$r" "$name" sh -c "$*" 2>&1); rc=$?
+  emit "$rc" "$out"
+}
+
+start() {
+  name=${1:?}; shift
+  r=$(ref) || true; [ -n "$r" ] || { echo "ERR import first"; return 1; }
+  out=$(ctr_ run -d --runtime "$RT" "$r" "$name" sh -c "$*" 2>&1) || { echo "ERR start failed: $(printf '%s' "$out" | tail -1)"; return 1; }
+  pid=$(ctr_ task ls 2>/dev/null | awk -v n="$name" '$1==n {print $2}')
+  echo "STARTED $name pid=${pid:-0}"
+}
+
+state() {
+  name=${1:?}
+  line=$(ctr_ task ls 2>/dev/null | awk -v n="$name" '$1==n {print $3, $2}')
+  [ -n "$line" ] || { echo "STATE $name ABSENT pid=0"; return 1; }
+  echo "STATE $name $(echo "$line" | awk '{print $1}') pid=$(echo "$line" | awk '{print $2}')"
+}
+
+kill_() {
+  name=${1:?}
+  out=$(ctr_ task kill -s KILL "$name" 2>&1) || { echo "ERR kill failed: $(printf '%s' "$out" | tail -1)"; return 1; }
+  i=0
+  while [ "$i" -lt 100 ]; do
+    st=$(ctr_ task ls 2>/dev/null | awk -v n="$name" '$1==n {print $3}')
+    [ "$st" = "STOPPED" ] && { echo "KILLED $name"; return 0; }
+    sleep 0.1; i=$((i + 1))
+  done
+  echo "ERR $name still ${st:-absent} 10 s after SIGKILL"; return 1
+}
+
+delete() {
+  name=${1:?}
+  out=$(ctr_ task delete "$name" 2>&1) || { echo "ERR task delete: $(printf '%s' "$out" | tail -1)"; return 1; }
+  out=$(ctr_ container delete "$name" 2>&1) || { echo "ERR container delete: $(printf '%s' "$out" | tail -1)"; return 1; }
+  echo "DELETED $name"
+}
+
+try() {
+  out=$(ctr_ "$@" 2>&1); rc=$?
+  emit "$rc" "$out"
+}
+
+leftovers() {
+  what=""
+  n=$(pgrep -f "firecracker --id " 2>/dev/null | wc -l | tr -d ' '); [ "$n" = 0 ] || what="$what firecracker=$n"
+  n=$(pgrep -f containerd-shim-vesper-v2 2>/dev/null | wc -l | tr -d ' '); [ "$n" = 0 ] || what="$what shims=$n"
+  n=$(ls -d /srv/jailer/firecracker/*/ 2>/dev/null | wc -l | tr -d ' '); [ "$n" = 0 ] || what="$what jails=$n"
+  n=$(ctr_ task ls 2>/dev/null | tail -n +2 | wc -l | tr -d ' '); [ "$n" = 0 ] || what="$what tasks=$n"
+  n=$(ctr_ containers ls -q 2>/dev/null | wc -l | tr -d ' '); [ "$n" = 0 ] || what="$what containers=$n"
+  if [ -z "$what" ]; then echo CLEAN; else echo "DIRTY$what"; return 1; fi
+}
+
+cmd=${1:-}; shift 2>/dev/null
+case "$cmd" in
+  import) import ;;
+  run) run "$@" ;;
+  start) start "$@" ;;
+  state) state "$@" ;;
+  kill) kill_ "$@" ;;
+  delete) delete "$@" ;;
+  try) try "$@" ;;
+  leftovers) leftovers ;;
+  *) echo "ERR usage: vesper-ctr import|run|start|state|kill|delete|try|leftovers"; exit 2 ;;
+esac
