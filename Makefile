@@ -1,10 +1,11 @@
 CARGO ?= cargo
 RUN_DIR ?= run
+CYCLES ?= 50
 
 .PHONY: build test contract-generate contract-check contract-test surface-matrix-generate \
 	surface-matrix-check behavior-matrix-generate behavior-matrix-check \
 	validate-entitlements dev-up dev-down vmlauncher-build systemvm-fetch systemvm-overlay systemvm-prepare systemvm-build systemvm-launch-config \
-	systemvm-boot-smoke systemvm-up systemvm-down systemvm-control-suite systemvm-services-suite systemvm-trivial-image docker-up docker-down docker-smoke
+	systemvm-boot-smoke systemvm-up systemvm-down systemvm-control-suite systemvm-services-suite systemvm-trivial-image docker-up docker-down docker-smoke systemvm-reliability
 
 build:
 	$(CARGO) build --bins
@@ -86,3 +87,6 @@ docker-down:
 
 docker-smoke:
 	bash scripts/systemvm/docker-smoke.sh
+
+systemvm-reliability:
+	bash scripts/systemvm/reliability-suite.sh $(CYCLES)

@@ -28,7 +28,8 @@ Rust (`systemvm::load_image_lock`, `deny_unknown_fields`); the shell never inter
   modules=loop,squashfs,sd-mod,usb-storage`); `ready_pattern` is `login:`; `max_boot_ms` is the agreed boot-time
   threshold (5000, 2026-11-06), checked by boot smoke against the launcher's `ready` time.
 - Probe (`boot.probe`): after the login prompt the launcher logs in as `root` (the live ISO has no password),
-  brings `eth0` up and runs `udhcpc` against the Virtualization.framework NAT, pings the default gateway
+  waits for `/run/vesper/net-ready` (`eth0` configured by DHCP from the Virtualization.framework NAT by the
+  detached `vesper-services` unit), pings the default gateway
   (`VESPER-NAT-OK`), waits for `/run/vesper/packages-ready` and checks that `socat`, `containerd` and `dockerd`
   are installed (`VESPER-EXTRAS-OK`), prints `VESPER-PROBE-OK` and runs `poweroff`, so every boot proves NAT and
   the overlay from inside the guest and ends with a clean shutdown. Markers are split in the typed commands
@@ -83,7 +84,8 @@ To add a package: run `python3 -I scripts/systemvm/resolve-apks.py` with the thr
    `max_duration_ms`, `mean_duration_ms`, `boot_ms`, `max_boot_ms`, `max_boot_allowed_ms`). An iteration fails when
    the launcher exits non-zero or `boot_ms` exceeds the threshold. On 2026-11-06 a MacBook Pro (M3, macOS 27.0.1)
    reached the login prompt in about 1.05 s and finished the probe and power-off in about 3.5 s per iteration;
-   with the overlay installing 18 packages the login prompt appears at about 2.0 s.
+   with the overlay installing 19 packages the login prompt appears at about 2.2 s and the full probe (NAT,
+   packages, agent, services) plus power-off takes about 7 s.
 
 6. Re-verify the fetched files or digest explicit ones into a manifest:
    `make systemvm-build` (no arguments re-runs `verify-image`; `scripts/systemvm/build-image.sh KERNEL [INITRD]
@@ -143,14 +145,15 @@ suite passed (11 keepalive pings over 20 s, reconnect in 1 attempt, 2 MiB echoed
 
 ## Runtime services (GH #14)
 
-The overlay starts `containerd` and `dockerd` at boot (`vesper-services`, after the package install) under OpenRC's
-`supervise-daemon`, with cgroup v2 mounted (`cgroups` in sysinit, `rc_cgroup_mode="unified"`) and `eth0` configured
-by the `networking` service. The agent's `HEALTH` reports `containerd_ok` (`ctr version`) and `docker_ok` with the
+The overlay starts `networking` (`eth0` by DHCP), `containerd` and `dockerd` after the package install from a
+detached `vesper-services` unit, under OpenRC's `supervise-daemon`, with cgroup v2 mounted (`cgroups` in sysinit,
+`rc_cgroup_mode="unified"`); because the unit is detached, the login prompt (the boot-time measure) waits for
+neither DHCP nor the daemons, while the probe and `HEALTH` wait for `/run/vesper/services-ready`. The agent's `HEALTH` reports `containerd_ok` (`ctr version`) and `docker_ok` with the
 server version. `make systemvm-services-suite` (`systemvmctl control services-suite`) runs the GH #14 checklist
 for each service: healthy at boot, `KILL` (SIGKILL), recovery judged by `HEALTH` within 60 s, and
 `/var/log/<svc>.log` plus `supervise-daemon` lines in `/var/log/messages` as evidence; it writes
-`run/systemvm/services-report.json`. On 2026-11-06 (M3): both recovered in under 600 ms; the login prompt now
-appears at 3.4 to 4.5 s because the daemons start before it.
+`run/systemvm/services-report.json`. On 2026-11-06 (M3): both recovered in under 600 ms; the login prompt stays
+at about 2.2 s.
 
 ## Docker ingress (GH #15)
 
@@ -168,6 +171,18 @@ On 2026-11-06 (M3): 7/7, the container printed `vesper-container-ok`.
 
 The packaged canonical path from the issue, `/var/run/vesper/docker.sock`, is Intended: it needs root and no
 packaging exists yet.
+
+## Reliability suite (GH #16)
+
+`make systemvm-reliability` (`scripts/systemvm/reliability-suite.sh [CYCLES]`, default 50, `CYCLES=200 make
+systemvm-reliability`) stops anything running, snapshots host resources (launcher and proxy processes, sockets and
+pid files under `run/`), runs `CYCLES` probed boots through `boot-smoke.sh` under the lock's threshold, then brings
+the VM up once and runs the control suite, the services suite, `docker-up`, the Docker smoke and the tear-down,
+snapshots again, and assembles `run/systemvm/reliability-report.json` with
+`scripts/systemvm/reliability_report.py`. The report records per-section status, boot statistics with a drift check
+(last five cycles may not exceed the first five by more than 1.5×), the leak snapshots, and `failures[]` entries of
+`{step, reason, evidence}`; `passed` is true only when every section is ok and nothing leaked. The transcript is in
+`run/systemvm/reliability.log`. The assembler's `--self-test` runs in CI; the suite itself needs Apple silicon.
 
 ## Proxy bridge convention
 

@@ -5,4 +5,4 @@ Plans currently in progress. Add a row when you create a plan, and move the row 
 
 | Plan | Goal | Started | Owner |
 |---|---|---|---|
-| | *None* | | |
+| [2026-11-06-WOR-21-systemvm-reliability-suite.md](2026-11-06-WOR-21-systemvm-reliability-suite.md) | N-cycle boot stress, socket smoke, leak checks and a JSON health report (GH #16) | 2026-11-06 | cityhunteur |
