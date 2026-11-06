@@ -270,6 +270,22 @@ Baseline` workflow re-validates that capture against the lock, `systemvm/archive
 The gaps to the design bar are compat exceptions CE-0001 (upstream pytest suite not run), CE-0002 (release
 binary vs pinned commit, TD-029) and CE-0003 (no Linux baseline on the same host class).
 
+## containerd shim v2 (GH #22, ADR 0004)
+
+`containerd-shim-vesper-v2` (Go module `shim/`, cross-built static for linux/arm64 by `make shim-build` and
+shipped by `make systemvm-overlay` to `/usr/bin` in the guest) registers the runtime `io.containerd.vesper.v2`.
+`ctr -n vesper run --runtime io.containerd.vesper.v2 IMAGE ID CMD…` makes containerd start one shim per task;
+`Create` mounts the snapshot onto `<bundle>/rootfs`, builds `<bundle>/rootfs.ext4` with `mke2fs -d`, and encodes
+the OCI process (`cwd`, `env`, `args`) as the base64 shell command; `Start` runs `vesper-microvm launch ID --rootfs
+… --cmd …` and tails `/var/log/vesper-microvm-ID.log`, copying the lines between the workload markers to the task's
+stdout and taking the exit status from `VESPER-WORKLOAD-EXIT <n>` (137 when the VMM disappears); `Kill` is
+`vesper-microvm stop`; `Delete` is `vesper-microvm cleanup`, image removal and shim shutdown. Exec, terminal,
+stdin, pause, checkpoint and stats return `NotImplemented` (P3.2). The guest driver `vesper-ctr` (`import`, `run
+NAME WORDS…`, `start`, `state`, `kill`, `delete`, `try CTR-ARGS…`, `leftovers`) wraps `ctr`, and
+`make systemvm-shim-suite` runs the GH #22 checklist (21 steps: `ctr run --rm` exit code and output, a detached
+task RUNNING with a pid, start-twice and delete-while-running rejected, unknown task rejected, three concurrent
+tasks with distinct VMM pids, kill and delete of each, no leftovers) into `run/systemvm/shim-report.json`.
+
 ## Proxy bridge convention
 
 Phase 0 keeps the proxy-side vsock bridge inspectable by resolving

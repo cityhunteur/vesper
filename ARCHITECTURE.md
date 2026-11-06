@@ -151,6 +151,7 @@ control-plane modules.
   - `rust-tests.yml`: `make build`, `cargo test`, both matrix checks, entitlement lint (`src/**`, `tests/**`,
     `Cargo.*`, `Makefile`, `third_party/**`, `docs/generated/**`, `docs/specs/*.yaml`, `packaging/**`, `scripts/ci/**`).
   - `contract-tests.yml`: golden check, `make contract-test` (swagger, `src/spec.rs`, `src/api.rs`, `contractgen`, golden file).
+  - `shim-tests.yml`: `go vet`, `go test` and the static linux/arm64 cross-build of `shim/`, binary uploaded as an artifact.
   - `parity-baseline.yml`: assembler self-test, validation of the committed Backend A parity capture against the lock, archives and compat registry, artifact upload.
   - `baseline-governance.yml`: `cargo test`, parity metadata generate and validate (lock file, `src/baseline.rs`, `baselinectl`).
   - `compat-exceptions.yml`: `cargo test`, `compatexctl` (registry, `src/compat.rs`, `compatexctl`).
@@ -287,7 +288,10 @@ converts an image from the guest's Docker into a reproducible ext4 rootfs with e
 microVM from it; `make systemvm-workload-suite` runs concurrent container-style workloads one per jailed microVM
 with private rootfs copies; `make systemvm-parity-baseline` runs 19 Firecracker API conformance checks and two
 comparable performance runs against the stock release binary and publishes the capture that CI validates. The
-upstream pytest suite is not run yet (CE-0001). MicroVMs have no network yet (TD-032).
+upstream pytest suite is not run yet (CE-0001). `shim/` (Go, ADR 0004) is the containerd runtime v2 shim:
+`ctr run --runtime io.containerd.vesper.v2` boots a jailed microVM from the container rootfs and maps exit code,
+output, kill and delete (`make systemvm-shim-suite`); exec, terminal and stdin are P3.2. MicroVMs have no network
+yet (TD-032).
 
 **Intended:** design-v0 describes a packaged macOS host process plus a Linux System VM running containerd and
 Firecracker.

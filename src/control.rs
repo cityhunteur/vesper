@@ -252,7 +252,12 @@ impl Session {
         self.guest_tool("FCPARITY", args)
     }
 
-    /// Runs a guest tool command (`MICROVM`, `ROOTFS`, `WORKLOAD`, `FCPARITY`): waits up to 10 min
+    /// Runs `vesper-ctr <args>` in the guest (containerd with the Vesper shim); returns its exit code and output lines.
+    pub fn ctr(&mut self, args: &[&str]) -> Result<(i32, Vec<String>), String> {
+        self.guest_tool("CTR", args)
+    }
+
+    /// Runs a guest tool command (`MICROVM`, `ROOTFS`, `WORKLOAD`, `FCPARITY`, `CTR`): waits up to 10 min
     /// because launches, image builds and performance runs take longer than the default I/O timeout.
     fn guest_tool(&mut self, tool: &str, args: &[&str]) -> Result<(i32, Vec<String>), String> {
         let stream = self.reader.get_ref();

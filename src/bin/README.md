@@ -83,7 +83,7 @@ errors to stderr and exits with code 1 on failure.
   <args…>` (runs `vesper-rootfs` in the guest), `rootfs-suite --report
   run/systemvm/rootfs-report.json --id vesper-rootfs-test`, `workload
   <args…>` (runs `vesper-workload` in the guest), `workload-suite --report
-  run/systemvm/workload-report.json`, `fcparity <args…>` (runs `vesper-fcparity` in the guest),
+  run/systemvm/workload-report.json`, `fcparity <args…>` (runs `vesper-fcparity` in the guest), `ctr <args…>` (runs `vesper-ctr` in the guest), `shim-suite --report run/systemvm/shim-report.json`,
   `parity-suite --report run/systemvm/parity-suite-report.json --id vesper-parity --perf-cycles 20`, `suite --report
   run/systemvm/control-report.json --keepalive-interval 2 --keepalive-seconds
   20 --payload-bytes 2097152`), `boot-smoke` (`--iterations` 5,
