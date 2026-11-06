@@ -8,8 +8,8 @@ last_reviewed: 2026-11-05
 
 ### 2026-04-12 — WOR-71 — `vesper-proxy` gains a Phase 0 vsock CONNECT bridge
 - GitHub issue: #9
-- PR: none
-- Commit: pending local commit
+- PR: #118
+- Commit: `badc4a6` (squash merge of PR #118; remote CI green)
 - Phase: 0
 - Parity unit: replace the explicit `vsock` dial stub in `vesper-proxy` with a testable host UDS bridge that speaks Firecracker's `CONNECT <port>` preface and prove the proxy survives a failed upstream dial
 - Result: keep
@@ -21,8 +21,8 @@ last_reviewed: 2026-11-05
 
 ### 2026-04-12 — WOR-15 — State-machine umbrella reconciled to current repo truth
 - GitHub issue: #8
-- PR: none
-- Commit: pending local commit
+- PR: #117
+- Commit: `c64ce51` (squash merge of PR #117; remote CI green)
 - Phase: 0
 - Parity unit: reconcile the stale-open state-machine umbrella to the current explicit lifecycle model, guarded-route contract coverage, and generated behavior-matrix evidence
 - Result: keep
@@ -34,8 +34,8 @@ last_reviewed: 2026-11-05
 
 ### 2026-04-12 — WOR-105 — `src/api.rs` structure budget restored with route-family extractions
 - GitHub issue: #110
-- PR: none
-- Commit: pending local commit
+- PR: #116
+- Commit: `41444e8` (squash merge of PR #116; remote CI green)
 - Phase: 0
 - Parity unit: extract coherent `actions`, `boot_source`, `logger_metrics`, and `machine_config` route families plus the inline API tests out of `src/api.rs` without changing pinned contract behavior
 - Result: keep
@@ -47,8 +47,8 @@ last_reviewed: 2026-11-05
 
 ### 2026-04-12 — WOR-104 — Network-interface endpoint baseline packet captured
 - GitHub issue: #109
-- PR: none
-- Commit: pending local commit
+- PR: #115
+- Commit: `be35fee` (squash merge of PR #115; remote CI green)
 - Phase: 0
 - Parity unit: package the existing `/network-interfaces/{iface_id}` family baseline into an issue-local endpoint packet without repopulating the placeholder capture registry
 - Result: keep
@@ -60,8 +60,8 @@ last_reviewed: 2026-11-05
 
 ### 2026-04-11 — WOR-106 — Hotplug-memory endpoint baseline packet reconciled to the current harness model
 - GitHub issue: #108
-- PR: none
-- Commit: pending local commit
+- PR: #114
+- Commit: `1b42818` (squash merge of PR #114; remote CI green)
 - Phase: 0
 - Parity unit: package the existing `/hotplug/memory` family baseline into an issue-local endpoint packet and clarify that concrete routes stay out of the placeholder capture registry
 - Result: keep
