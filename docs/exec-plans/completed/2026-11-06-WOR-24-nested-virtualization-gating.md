@@ -21,8 +21,9 @@ the lock's policy, and the guest reports `/dev/kvm`.
   tests for M3, M1, pre-macOS-15 and `off`; `systemvmctl backend-select`; lock `boot.nested_virtualization: auto`;
   probe prints `VESPER-KVM-OK|ABSENT`; agent `HEALTH.kvm`; CI exercises the probe and selection on GitHub's
   M-series runner. Verified on an M3 Pro: `auto` boots with `/dev/kvm`, `off` without, `require` succeeds.
-- [ ] PR merged, CI green (including the runner's unsupported-host path), GH #17 checklist and WOR-24 updated,
-  milestone entry; plan moved to completed.
+- [x] (2026-11-06 20:50Z) PR #127 merged as `8469d90`, CI green; GitHub's M2 runner (VirtualMac2,1, macOS 15.8.2)
+  reported `nested_virtualization_supported: false`, selected Backend B with diagnostics and refused `require`,
+  without crashing; GH #17 checklist and WOR-24 updated, milestone entry; plan moved to completed.
 
 ## Surprises & Discoveries
 
