@@ -21,7 +21,7 @@ without touching the others, maps a short workload's exit code and output back, 
   `VESPER-WORKLOAD-EXIT <code>`, then powers off. Agent `WORKLOAD`; `control::Session::workload`;
   `run_workload_suite`; `systemvmctl control workload|workload-suite`; `make systemvm-workload-suite`. The trivial
   image now carries every busybox applet. Suite 16/16; microvm 13/13 and rootfs 11/11 still pass.
-- [ ] PR merged, CI green, GH #20 checklist and WOR-30 updated, milestone entry; plan moved to completed.
+- [x] (2026-11-06 21:40Z) PR #130 merged as `2475a4f`, CI green, GH #20 checklist and WOR-30 updated, milestone entry; plan moved to completed.
 
 ## Surprises & Discoveries
 

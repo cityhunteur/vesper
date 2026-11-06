@@ -4,6 +4,7 @@ Finished plans. Keep them: their Decision Logs and retrospectives explain why th
 
 | Plan | Outcome | Completed |
 |---|---|---|
+| [2026-11-06-WOR-30-microvm-per-container.md](2026-11-06-WOR-30-microvm-per-container.md) | MicroVM-per-container workload lifecycle: concurrent jailed microVMs with private rootfs copies, isolation, stop teardown, exit mapping (GH #20 closed) | 2026-11-06 |
 | [2026-11-06-WOR-28-oci-rootfs-pipeline.md](2026-11-06-WOR-28-oci-rootfs-pipeline.md) | Byte-reproducible OCI image to ext4 rootfs with embedded provenance and a digest-verified cache, booted in a jailed microVM (GH #19 closed) | 2026-11-06 |
 | [2026-11-06-WOR-31-firecracker-lifecycle.md](2026-11-06-WOR-31-firecracker-lifecycle.md) | Stock Firecracker v1.16.0 under the jailer on nested KVM inside the System VM: launch, isolation, stop, crash cleanup and guest power-off proven (GH #18 closed) | 2026-11-06 |
 | [2026-11-06-WOR-24-nested-virtualization-gating.md](2026-11-06-WOR-24-nested-virtualization-gating.md) | Host capability probe, nested-virtualization policy, Backend A/B selection with diagnostics; verified on an M3 and on CI's M2 runner (GH #17 closed) | 2026-11-06 |

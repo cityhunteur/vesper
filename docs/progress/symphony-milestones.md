@@ -6,6 +6,19 @@ last_reviewed: 2026-11-05
 
 # Symphony milestones
 
+### 2026-11-06 — WOR-30 — MicroVM-per-container workload lifecycle, GH #20 complete
+- GitHub issue: #20 (mirror #72)
+- PR: #130
+- Commit: `2475a4f` (squash merge of PR #130; remote CI green)
+- Phase: 2
+- Parity unit: `vesper-workload run|ps|logs|wait|stop|rm|isolation` mapping one workload to one jailed Firecracker microVM with a private rootfs copy; command on the kernel command line; exit code and output mapped back
+- Result: keep
+- Verification bundle: `.symphony/runs/WOR-30/current/` (evidence in `run/WOR-30/systemvm/`, incl. `workload-report.json`)
+- Council summary: skipped; no control-plane path changed; six remote workflows green
+- Harness update: `vesper-workload`; `vesper-microvm launch --cmd`; agent `WORKLOAD`; `run_workload_suite`; `make systemvm-workload-suite`; trivial image with all busybox applets; TD-032 added
+- Remaining risks: copied rootfs without CoW, command-line-bound command, no microVM network, no resource accounting beyond cgroup limits (TD-032); evidence is developer-hardware only (TD-005)
+- Truthful project state after this milestone: Backend A runs concurrent container-style workloads one per jailed microVM with isolation and clean teardown; Phase 2 continues with WOR-26 (upstream parity and performance baseline) and the epic WOR-14
+
 ### 2026-11-06 — WOR-28 — Reproducible OCI image to ext4 rootfs with provenance, booted in a microVM, GH #19 complete
 - GitHub issue: #19 (mirror #71)
 - PR: #129
