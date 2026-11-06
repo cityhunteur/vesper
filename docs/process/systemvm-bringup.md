@@ -216,6 +216,23 @@ for the marker; `isolation ID` reports uid, jail contents, mount namespace, cgro
 On 2026-11-06 (M3 Pro): launch to marker in about 1.5 s, all isolation checks true, cleanup clean after stop,
 SIGKILL and guest power-off.
 
+## OCI image to ext4 rootfs (GH #19)
+
+`vesper-rootfs` (overlay, `usr/local/bin`) converts an image from the guest's Docker daemon into a reproducible ext4
+rootfs: `build IMAGE [--no-cache]` runs `docker create` and `docker export`, strips Docker's per-container files,
+embeds `/etc/vesper-provenance.json` (source image id, repo tags, layer diff ids, created, architecture, os; the
+Firecracker and containerd revisions from `docs/specs/design-v0.baselines.lock.yaml`, which `make systemvm-overlay`
+ships to `/var/lib/vesper/baselines.lock.yaml`; mke2fs and Docker versions), forces every mtime to epoch 0 and runs
+`E2FSPROGS_FAKE_TIME=0 mke2fs -t ext4 -d` with a UUID and hash seed derived from the image id, so one image id always
+yields the same bytes. Output: `/var/lib/vesper/rootfs/<id16>.ext4` with a sidecar `.provenance.json` carrying
+`output_sha256` (read back with `debugfs`); a second `build` is a cache hit verified by digest. `provenance PATH`
+prints the document, `inspect PATH` lists the files of a loop-mounted image, `import-trivial` makes a busybox image
+from the guest itself. `vesper-microvm launch ID --rootfs PATH` attaches the image as `/dev/vda`; the microVM
+initramfs (now carrying virtio-mmio, virtio-blk, crc32c and ext4 modules from the modloop) mounts it, prints
+`VESPER-ROOTFS-OK <image id>` from the embedded provenance, `switch_root`s into `/sbin/init` when present or
+executes a command from the rootfs. `make systemvm-rootfs-suite` runs the GH #19 checklist (11 steps) and writes
+`run/systemvm/rootfs-report.json`. Reproducibility is keyed by the image id (TD-031).
+
 ## Proxy bridge convention
 
 Phase 0 keeps the proxy-side vsock bridge inspectable by resolving

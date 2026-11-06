@@ -50,7 +50,9 @@ The durable signals this project relies on are artifacts rather than live teleme
   `make docker-smoke`; `run/systemvm/reliability-report.json` (sections per suite, boot statistics and drift, leak
   snapshots, `failures[] {step, reason, evidence}`, `passed`) and `run/systemvm/reliability.log` from
   `make systemvm-reliability`; `run/systemvm/microvm-report.json` from `make systemvm-microvm-suite` and the
-  microVM serial logs `/var/log/vesper-microvm-<id>.log` in the guest (`systemvmctl control microvm log <id>`).
+  microVM serial logs `/var/log/vesper-microvm-<id>.log` in the guest (`systemvmctl control microvm log <id>`);
+  `run/systemvm/rootfs-report.json` from `make systemvm-rootfs-suite` and the provenance sidecars
+  `/var/lib/vesper/rootfs/<id16>.ext4.provenance.json` in the guest (`systemvmctl control rootfs provenance <path>`).
 - `build/systemvm/image-manifest.json` (SHA-256 digests, stable `image_id`) and `build/systemvm/launch-config.json`.
 - `artifacts/parity-metadata.json` from `baselinectl --mode generate`.
 - JSON and Markdown reports from the Python sensors (`--json-out`, `--markdown-out`), uploaded by the `harness-*`

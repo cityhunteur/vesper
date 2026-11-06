@@ -1,7 +1,10 @@
 #!/bin/sh
 # Vesper microVM manager (GH #18): stock Firecracker under the jailer inside the System VM.
 # usage: vesper-microvm prepare
-#        vesper-microvm launch ID [--exit]   boot a microVM (kernel + busybox initramfs); --exit powers off after the marker
+#        vesper-microvm launch ID [--exit] [--rootfs PATH]
+#                                             boot a microVM (kernel + busybox initramfs); --exit powers off after the
+#                                             marker; --rootfs attaches an ext4 image as /dev/vda, mounts it, prints
+#                                             VESPER-ROOTFS-OK <source digest> from its provenance and switches root
 #        vesper-microvm status ID            RUNNING ID pid=N | EXITED ID | ABSENT ID
 #        vesper-microvm isolation ID         JSON with uid, chroot, cgroup and seccomp checks
 #        vesper-microvm stop ID              SIGTERM, wait up to 10 s
@@ -38,6 +41,20 @@ prepare() {
     cp /bin/busybox "$MVM/initroot/bin/busybox"
     cp /lib/ld-musl-aarch64.so.1 "$MVM/initroot/lib/ld-musl-aarch64.so.1"
     ln -s busybox "$MVM/initroot/bin/sh"
+    # Kernel modules for a root drive (virtio-mmio transport, virtio-blk, ext4 and its deps) from the modloop.
+    kver=$(uname -r)
+    mdir="$MVM/initroot/lib/modules/$kver"
+    mkdir -p "$mdir"
+    for rel in kernel/drivers/virtio/virtio_mmio kernel/drivers/block/virtio_blk kernel/crypto/crc32c_generic kernel/lib/libcrc32c kernel/fs/ext4/ext4 kernel/fs/jbd2/jbd2 kernel/fs/mbcache kernel/lib/crc16; do
+      src=$(ls "/lib/modules/$kver/$rel".ko* 2>/dev/null | head -1)
+      [ -n "$src" ] || { echo "ERR module $rel missing from /lib/modules/$kver"; return 1; }
+      mkdir -p "$mdir/$(dirname "$rel")"
+      cp "$src" "$mdir/$(dirname "$rel")/"
+    done
+    for f in modules.dep modules.alias modules.builtin modules.order; do
+      [ -f "/lib/modules/$kver/$f" ] && cp "/lib/modules/$kver/$f" "$mdir/$f"
+    done
+    mkdir -p "$MVM/initroot/newroot"
     cat > "$MVM/initroot/init" <<'INIT'
 #!/bin/sh
 /bin/busybox mount -t proc proc /proc 2>/dev/null
@@ -45,6 +62,21 @@ prepare() {
 echo "VESPER-MICROVM-OK"
 if /bin/busybox grep -q vesper_exit=1 /proc/cmdline; then
   /bin/busybox poweroff -f
+fi
+if /bin/busybox grep -q vesper_rootfs=1 /proc/cmdline; then
+  /bin/busybox modprobe -a virtio_mmio virtio_blk crc32c_generic libcrc32c ext4 2>&1
+  /bin/busybox mount -t devtmpfs devtmpfs /dev 2>/dev/null
+  for i in 1 2 3 4 5 6 7 8 9 10; do [ -b /dev/vda ] && break; /bin/busybox sleep 0.5; done
+  if /bin/busybox mount -t ext4 /dev/vda /newroot; then
+    src=$(/bin/busybox sed -n 's/.*"image_id":"\([^"]*\)".*/\1/p' /newroot/etc/vesper-provenance.json 2>/dev/null)
+    echo "VESPER-ROOTFS-OK ${src:-no-provenance}"
+    if [ -x /newroot/sbin/init ]; then
+      exec /bin/busybox switch_root /newroot /sbin/init
+    fi
+    /bin/busybox chroot /newroot /bin/busybox echo "VESPER-ROOTFS-EXEC-OK" || echo "VESPER-ROOTFS-EXEC-FAILED"
+  else
+    echo "VESPER-ROOTFS-MOUNT-FAILED"
+  fi
 fi
 exec /bin/busybox sleep 86400
 INIT
@@ -55,8 +87,18 @@ INIT
 }
 
 launch() {
-  id=$1; mode=${2:-}
+  id=$1; shift
+  mode=""; rootfs=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --exit) mode=--exit ;;
+      --rootfs) rootfs=$2; shift ;;
+      *) echo "ERR unknown launch option $1"; return 2 ;;
+    esac
+    shift
+  done
   [ -f "$MVM/Image" ] && [ -f "$MVM/initrd.gz" ] || prepare >/dev/null || return 1
+  if [ -n "$rootfs" ] && [ ! -f "$rootfs" ]; then echo "ERR rootfs $rootfs missing"; return 1; fi
   if [ -n "$(fcpid "$id")" ]; then echo "ERR $id already running"; return 1; fi
   root="$JAIL/firecracker/$id/root"
   rm -rf "$JAIL/firecracker/$id"
@@ -65,7 +107,13 @@ launch() {
   cp "$MVM/initrd.gz" "$root/initrd.gz"
   extra=""
   [ "$mode" = "--exit" ] && extra=" vesper_exit=1"
-  printf '{"boot-source":{"kernel_image_path":"/Image","initrd_path":"/initrd.gz","boot_args":"console=ttyS0 reboot=k panic=1 pci=off rdinit=/init%s"},"drives":[],"machine-config":{"vcpu_count":1,"mem_size_mib":128}}\n' "$extra" > "$root/vm.json"
+  drives="[]"
+  if [ -n "$rootfs" ]; then
+    cp "$rootfs" "$root/rootfs.ext4"
+    extra="$extra vesper_rootfs=1"
+    drives='[{"drive_id":"rootfs","path_on_host":"/rootfs.ext4","is_root_device":true,"is_read_only":false}]'
+  fi
+  printf '{"boot-source":{"kernel_image_path":"/Image","initrd_path":"/initrd.gz","boot_args":"console=ttyS0 reboot=k panic=1 pci=off rdinit=/init%s"},"drives":%s,"machine-config":{"vcpu_count":1,"mem_size_mib":256}}\n' "$extra" "$drives" > "$root/vm.json"
   chown -R "$JUID:$JGID" "$JAIL/firecracker/$id"
   lf=$(logfile "$id")
   : > "$lf"

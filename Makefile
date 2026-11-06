@@ -5,7 +5,7 @@ CYCLES ?= 50
 .PHONY: build test contract-generate contract-check contract-test surface-matrix-generate \
 	surface-matrix-check behavior-matrix-generate behavior-matrix-check \
 	validate-entitlements dev-up dev-down vmlauncher-build systemvm-fetch systemvm-overlay systemvm-prepare systemvm-build systemvm-launch-config \
-	systemvm-boot-smoke systemvm-up systemvm-down systemvm-control-suite systemvm-services-suite systemvm-trivial-image docker-up docker-down docker-smoke systemvm-reliability systemvm-microvm-suite
+	systemvm-boot-smoke systemvm-up systemvm-down systemvm-control-suite systemvm-services-suite systemvm-trivial-image docker-up docker-down docker-smoke systemvm-reliability systemvm-microvm-suite systemvm-rootfs-suite
 
 build:
 	$(CARGO) build --bins
@@ -78,6 +78,9 @@ systemvm-services-suite:
 
 systemvm-microvm-suite:
 	$(CARGO) run --bin systemvmctl -- control microvm-suite
+
+systemvm-rootfs-suite:
+	$(CARGO) run --bin systemvmctl -- control rootfs-suite
 
 systemvm-trivial-image:
 	bash scripts/systemvm/build-trivial-image.sh

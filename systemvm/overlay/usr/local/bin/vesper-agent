@@ -11,6 +11,7 @@
 #   KILL <containerd|docker> -> KILL <name> <pid> after SIGKILL to the daemon (crash simulation)
 #   LOGS <messages|containerd|docker> <n> -> LOGS <count> then <count> log lines
 #   MICROVM <args...>     -> MICROVM <rc> <count> then <count> output lines of `vesper-microvm <args>`
+#   ROOTFS <args...>      -> ROOTFS <rc> <count> then <count> output lines of `vesper-rootfs <args>`
 #   DROP                  -> DROP then the connection is closed (simulates a server-side drop)
 #   SHUTDOWN              -> BYE then poweroff
 #   QUIT                  -> BYE then the connection is closed
@@ -75,12 +76,13 @@ while IFS= read -r line; do
         echo "LOGS 0"
       fi
       ;;
-    MICROVM)
-      shift
-      out="$(/usr/local/bin/vesper-microvm "$@" 2>&1)"; rc=$?
+    MICROVM|ROOTFS)
+      tool=$1; shift
+      case "$tool" in MICROVM) bin=/usr/local/bin/vesper-microvm ;; *) bin=/usr/local/bin/vesper-rootfs ;; esac
+      out="$("$bin" "$@" 2>&1)"; rc=$?
       count="$(printf '%s\n' "$out" | grep -c '')"
       [ -z "$out" ] && count=0
-      echo "MICROVM $rc $count"
+      echo "$tool $rc $count"
       [ "$count" -gt 0 ] && printf '%s\n' "$out"
       ;;
     DROP) echo DROP; exit 0 ;;
