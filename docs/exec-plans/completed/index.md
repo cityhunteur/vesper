@@ -4,6 +4,7 @@ Finished plans. Keep them: their Decision Logs and retrospectives explain why th
 
 | Plan | Outcome | Completed |
 |---|---|---|
+| [2026-11-06-WOR-31-firecracker-lifecycle.md](2026-11-06-WOR-31-firecracker-lifecycle.md) | Stock Firecracker v1.16.0 under the jailer on nested KVM inside the System VM: launch, isolation, stop, crash cleanup and guest power-off proven (GH #18 closed) | 2026-11-06 |
 | [2026-11-06-WOR-24-nested-virtualization-gating.md](2026-11-06-WOR-24-nested-virtualization-gating.md) | Host capability probe, nested-virtualization policy, Backend A/B selection with diagnostics; verified on an M3 and on CI's M2 runner (GH #17 closed) | 2026-11-06 |
 | [2026-11-06-WOR-21-systemvm-reliability-suite.md](2026-11-06-WOR-21-systemvm-reliability-suite.md) | N-cycle boot stress, socket smoke, leak checks and a JSON health report; first run caught threshold overruns, fixed by detaching the daemon start-up (GH #16 closed) | 2026-11-06 |
 | [2026-11-06-WOR-23-docker-socket-ingress.md](2026-11-06-WOR-23-docker-socket-ingress.md) | Docker CLI on macOS reaches the guest's Docker through vesper-proxy; trivial container runs; raw sockets private (GH #15 closed) | 2026-11-06 |

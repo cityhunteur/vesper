@@ -6,6 +6,19 @@ last_reviewed: 2026-11-05
 
 # Symphony milestones
 
+### 2026-11-06 — WOR-31 — Stock Firecracker runs under the jailer inside the System VM, GH #18 complete
+- GitHub issue: #18 (mirror #68)
+- PR: #128
+- Commit: `0e66d26` (squash merge of PR #128; remote CI green)
+- Phase: 2
+- Parity unit: digest-pinned Firecracker and jailer v1.16.0 provisioned through the overlay; a guest microVM manager that launches jailed microVMs (uid 10000, pivot-root jail, cgroup v2 limits, seccomp) and proves stop, SIGKILL cleanup and guest power-off from the host
+- Result: keep
+- Verification bundle: `.symphony/runs/WOR-31/current/` (evidence in `run/WOR-31/systemvm/`, incl. `microvm-report.json`)
+- Council summary: skipped; no control-plane path changed; six remote workflows green
+- Harness update: packages lock schema 2 with `archives`; `systemvm/archives.yaml`; `systemvmctl archive-list`; `vesper-microvm`; agent `MICROVM`; `control::run_microvm_suite`; `make systemvm-microvm-suite`; TD-029, TD-030
+- Remaining risks: release binary rather than the exact pinned commit (TD-029); no rootfs or network in the microVM yet (TD-030); evidence is developer-hardware only (TD-005)
+- Truthful project state after this milestone: Backend A exists on an M3 Pro: a stock Firecracker microVM boots in about 1.5 s under the jailer on nested KVM inside the System VM; Phase 2 continues with WOR-28 (OCI to ext4 rootfs), WOR-30 (microVM per container) and WOR-26 (upstream parity baseline)
+
 ### 2026-11-06 — WOR-24 — Nested virtualization detection and backend gating, GH #17 complete
 - GitHub issue: #17 (mirror #66)
 - PR: #127

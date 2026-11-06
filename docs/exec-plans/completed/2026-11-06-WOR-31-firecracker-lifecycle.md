@@ -22,7 +22,7 @@ nested KVM and proves all of that from the host.
   guest, busybox initramfs with a marker-printing init, jailer with uid/gid 10000, `--cgroup-version 2`,
   `pids.max` and `memory.max` limits, Firecracker's default seccomp; agent `MICROVM`; `control::run_microvm_suite`;
   `systemvmctl control microvm|microvm-suite`; `make systemvm-microvm-suite`. Suite 13/13 on an M3 Pro.
-- [ ] PR merged, CI green, GH #18 checklist and WOR-31 updated, milestone entry; plan moved to completed.
+- [x] (2026-11-06 21:05Z) PR #128 merged as `0e66d26`, CI green, GH #18 checklist and WOR-31 updated, milestone entry; plan moved to completed.
 
 ## Surprises & Discoveries
 
