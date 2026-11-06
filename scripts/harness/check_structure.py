@@ -26,6 +26,7 @@ RULES: Dict[str, Set[str]] = {
     "src/proxy.rs": {"buildinfo", "platform"},
     "src/systemvm.rs": {"buildinfo", "platform"},
     "src/systemvm/image_lock.rs": set(),
+    "src/systemvm/packages.rs": set(),
     "src/lib.rs": set(),
 }
 

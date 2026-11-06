@@ -3,7 +3,7 @@ RUN_DIR ?= run
 
 .PHONY: build test contract-generate contract-check contract-test surface-matrix-generate \
 	surface-matrix-check behavior-matrix-generate behavior-matrix-check \
-	validate-entitlements dev-up dev-down vmlauncher-build systemvm-fetch systemvm-build systemvm-launch-config \
+	validate-entitlements dev-up dev-down vmlauncher-build systemvm-fetch systemvm-overlay systemvm-prepare systemvm-build systemvm-launch-config \
 	systemvm-boot-smoke
 
 build:
@@ -47,6 +47,12 @@ vmlauncher-build:
 
 systemvm-fetch:
 	bash scripts/systemvm/fetch-image.sh
+
+systemvm-overlay:
+	bash scripts/systemvm/fetch-packages.sh
+	bash scripts/systemvm/build-overlay.sh
+
+systemvm-prepare: systemvm-fetch systemvm-overlay systemvm-launch-config vmlauncher-build
 
 systemvm-build:
 	bash scripts/systemvm/build-image.sh

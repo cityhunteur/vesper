@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - docs/specs/systemvm-image.lock.yaml
+      - docs/specs/systemvm-packages.lock.yaml
+      - systemvm/**
       - scripts/systemvm/**
       - scripts/macos/build-vmlauncher.sh
       - launcher/**
@@ -50,8 +52,25 @@ jobs:
       - name: systemvm unit tests
         run: cargo test systemvm
 
+      - name: Cache pinned guest packages
+        uses: actions/cache@v4
+        with:
+          path: build/systemvm/cache/apks
+          key: systemvm-packages-${{ hashFiles('docs/specs/systemvm-packages.lock.yaml') }}
+
       - name: Fetch and verify pinned image (digests + expected image_id)
         run: make systemvm-fetch
+
+      - name: Fetch pinned packages and build the overlay initramfs
+        run: make systemvm-overlay
+
+      - name: Overlay build is deterministic
+        run: |
+          first="$(sha256sum build/systemvm/initramfs-vesper | cut -d' ' -f1)"
+          bash scripts/systemvm/build-overlay.sh > /dev/null
+          second="$(sha256sum build/systemvm/initramfs-vesper | cut -d' ' -f1)"
+          echo "first=${first} second=${second}"
+          test "${first}" = "${second}"
 
       - name: Re-verify fetched artifacts into the manifest
         run: make systemvm-build
@@ -73,6 +92,7 @@ jobs:
           path: |
             build/systemvm/image-manifest.json
             build/systemvm/launch-config.json
+            build/systemvm/localhost.apkovl.tar.gz
 
   launcher-build:
     # Virtualization.framework helper: build and ad-hoc sign on macOS. GitHub's macOS runners are

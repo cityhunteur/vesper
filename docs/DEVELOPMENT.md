@@ -49,8 +49,10 @@ None of these are secrets.
 None. There is no database, queue or container dependency. The System VM image is not checked in:
 `make systemvm-fetch` downloads the Alpine virt ISO pinned in `docs/specs/systemvm-image.lock.yaml` (about 80 MB,
 cached under `build/systemvm/cache/`), verifies every digest and unpacks the kernel into `build/systemvm/`.
-`make vmlauncher-build` then `make systemvm-boot-smoke` boots it on Virtualization.framework (macOS, Apple silicon;
-see [process/systemvm-bringup.md](process/systemvm-bringup.md)).
+`make systemvm-overlay` downloads the pinned guest packages (about 55 MB) and packs them with
+`systemvm/overlay/` into a derived initramfs; `make vmlauncher-build` then `make systemvm-boot-smoke` boots it on
+Virtualization.framework (macOS, Apple silicon). `make systemvm-prepare` runs all four steps
+(see [process/systemvm-bringup.md](process/systemvm-bringup.md)).
 
 ## Build and run
 
@@ -97,6 +99,7 @@ All generated files are committed and checked in CI.
 | `baselinectl --mode generate-api-behavior-matrix` | swagger + `docs/specs/firecracker-api-behavior-captures.yaml` | `docs/generated/firecracker-api-behavior-matrix.json` | `make behavior-matrix-generate` | `make behavior-matrix-check` (CI: `rust-tests.yml`) |
 | `baselinectl --mode generate` | baseline lock + `--backend/--host-os/--host-cpu` | `artifacts/parity-metadata.json` (not committed) | `cargo run --bin baselinectl -- --mode generate --backend backend-a --host-os macos --host-cpu arm64 --metadata artifacts/parity-metadata.json` | `cargo run --bin baselinectl -- --mode validate --metadata artifacts/parity-metadata.json` (CI: `baseline-governance.yml`) |
 | `systemvmctl` | `docs/specs/systemvm-image.lock.yaml`, fetched ISO | `build/systemvm/{Image-virt,initramfs-virt,<iso>,image-manifest.json,launch-config.json}` (not committed) | `make systemvm-fetch`, `make systemvm-launch-config` | `make systemvm-build` (CI: `systemvm-image.yml`) |
+| `build-initramfs.py` | `systemvm/overlay/`, `docs/specs/systemvm-packages.lock.yaml`, pinned initramfs | `build/systemvm/{localhost.apkovl.tar.gz,initramfs-vesper}` (not committed) | `make systemvm-overlay` | `systemvmctl verify-image` (CI: `systemvm-image.yml`) |
 | `swift build` + `codesign` | `launcher/` | `build/vmlauncher/vesper-vmlauncher` (not committed) | `make vmlauncher-build` | `launcher-build` job of `systemvm-image.yml` |
 
 ## Documentation checks

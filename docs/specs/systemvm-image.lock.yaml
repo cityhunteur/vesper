@@ -3,7 +3,7 @@
 #          systemvmctl lock-env / verify-image / launch-config --from-lock,
 #          scripts/systemvm/fetch-image.sh, .github/workflows/systemvm-image.yml.
 # Change procedure: docs/process/systemvm-bringup.md, "Bumping the pinned image".
-schema_version: 3
+schema_version: 4
 distribution: alpine
 branch: v3.22
 release: 3.22.8
@@ -38,9 +38,17 @@ artifacts:
 boot_media:
   file: alpine-virt-3.22.8-aarch64.iso
   sha256: dd3cec79d32a726d40bace8fc97c2d04f58d7da9dd9084e62a817ed6228181b7
+# Overlay (ADR 0002): systemvm/overlay plus the pinned packages are packed into localhost.apkovl.tar.gz,
+# appended to the pinned initramfs as a second cpio archive (build/systemvm/initramfs-vesper) and selected
+# with apkovl= on the kernel command line, so the pinned ISO stays untouched.
+overlay:
+  dir: systemvm/overlay
+  packages_lock: docs/specs/systemvm-packages.lock.yaml
+  apkovl_path: /vesper/localhost.apkovl.tar.gz
+  file: initramfs-vesper
 boot:
-  # From boot/grub/grub.cfg on the ISO, with the console moved to the virtio console (hvc0).
-  kernel_cmdline: "console=hvc0 modules=loop,squashfs,sd-mod,usb-storage"
+  # From boot/grub/grub.cfg on the ISO, with the console moved to the virtio console (hvc0), plus the overlay.
+  kernel_cmdline: "console=hvc0 modules=loop,squashfs,sd-mod,usb-storage apkovl=/vesper/localhost.apkovl.tar.gz"
   # Console text that marks a healthy boot: the getty prompt on hvc0.
   ready_pattern: "login:"
   # Boot-time threshold (GH #12 "boot time within acceptable threshold"), agreed 2026-11-06: 5 s to ready_pattern.
@@ -54,8 +62,10 @@ boot:
     shell_prompt: "~# "
     commands:
       - "ip link set eth0 up && udhcpc -i eth0 -n -q -t 10"
-      - "ip -4 addr show eth0 | grep -q 'inet ' && ping -c 1 -W 3 \"$(ip route | awk '/^default/ {print $3; exit}')\" > /dev/null && echo \"VESPER-NAT-\"OK"
-    success_pattern: "VESPER-NAT-OK"
+      - "ip -4 addr show eth0 | grep -q 'inet ' && ping -c 1 -W 3 \"$(ip route | awk '/^default/ {print $3; exit}')\" > /dev/null && touch /run/vesper-nat-ok && echo \"VESPER-NAT-\"OK"
+      - "for i in $(seq 1 90); do [ -f /run/vesper/packages-ready ] && break; sleep 1; done; test -f /run/vesper/packages-ready && command -v socat >/dev/null && command -v containerd >/dev/null && command -v dockerd >/dev/null && echo \"VESPER-EXTRAS-\"OK"
+      - "test -f /run/vesper-nat-ok && test -f /run/vesper/packages-ready && echo \"VESPER-PROBE-\"OK"
+    success_pattern: "VESPER-PROBE-OK"
     shutdown_command: poweroff
 # sha256("<kernel_sha256>:<rootfs or empty>:<initrd_sha256>:<boot_media_sha256>") as computed by
 # systemvm::build_manifest. systemvmctl verify-image fails if the fetched artifacts do not produce it.

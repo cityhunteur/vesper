@@ -59,6 +59,9 @@ errors to stderr and exits with code 1 on failure.
   `run/systemvm/console.log`, `--out` default
   `build/systemvm/launch-config.json`), `lock-env` (`--lock` default
   `docs/specs/systemvm-image.lock.yaml`; prints `KEY='VALUE'` lines),
+  `package-list` (`--lock` default `docs/specs/systemvm-packages.lock.yaml`;
+  prints `file<TAB>url<TAB>sha256` lines), `verify-packages` (`--lock`,
+  `--dir` default `build/systemvm/cache/apks`),
   `verify-image` (`--lock`, `--dir` default `build/systemvm`, `--out` default
   `build/systemvm/image-manifest.json`), `boot-smoke` (`--iterations` 5,
   `--timeout-seconds` 20, `--command` `sh`, `--args` `-c,echo boot-ok`,
@@ -67,7 +70,8 @@ errors to stderr and exits with code 1 on failure.
   passed: successful=… failed=… max_boot_ms=… (threshold …)`; the wrapper
   script substitutes the launcher and the lock's threshold). Calls `vesper::systemvm::{build_manifest, write_manifest,
   default_launch_config, launch_config_from_lock, write_launch_config,
-  load_image_lock, image_lock_env, verify_image, run_boot_check}`.
+  load_image_lock, image_lock_env, verify_image, load_packages_lock,
+  packages_list, verify_packages, run_boot_check}`.
 
 Subdirectories: none.
 

@@ -28,11 +28,29 @@ Rust (`systemvm::load_image_lock`, `deny_unknown_fields`); the shell never inter
   modules=loop,squashfs,sd-mod,usb-storage`); `ready_pattern` is `login:`; `max_boot_ms` is the agreed boot-time
   threshold (5000, 2026-11-06), checked by boot smoke against the launcher's `ready` time.
 - Probe (`boot.probe`): after the login prompt the launcher logs in as `root` (the live ISO has no password),
-  brings `eth0` up and runs `udhcpc` against the Virtualization.framework NAT, pings the default gateway, prints
-  `VESPER-NAT-OK` and runs `poweroff`, so every boot proves NAT from inside the guest and ends with a clean
-  shutdown. The marker is split in the typed command because the console echoes input.
+  brings `eth0` up and runs `udhcpc` against the Virtualization.framework NAT, pings the default gateway
+  (`VESPER-NAT-OK`), waits for `/run/vesper/packages-ready` and checks that `socat`, `containerd` and `dockerd`
+  are installed (`VESPER-EXTRAS-OK`), prints `VESPER-PROBE-OK` and runs `poweroff`, so every boot proves NAT and
+  the overlay from inside the guest and ends with a clean shutdown. Markers are split in the typed commands
+  because the console echoes input.
+
+## Overlay and packages (ADR 0002)
+
+`systemvm/overlay/` is an Alpine `apkovl` tree applied over the tmpfs root at boot. `make systemvm-overlay`
+downloads the packages pinned in `docs/specs/systemvm-packages.lock.yaml` (`socat`, `containerd`, Docker and
+their closure, 18 files, verified by digest), packs the tree plus the packages into
+`build/systemvm/localhost.apkovl.tar.gz` with owner root and mtime 0, appends it to the pinned initramfs as a
+second cpio archive at `/vesper/localhost.apkovl.tar.gz` (`build/systemvm/initramfs-vesper`), and re-verifies the
+image. The kernel command line names it with `apkovl=`; `etc/local.d/10-vesper-packages.start` installs the
+packages and creates `/run/vesper/packages-ready`. The pinned ISO and initramfs stay byte-identical; `verify-image`
+checks that the derived file starts with the pinned one and records its digest in the manifest.
+
+To add a package: run `python3 -I scripts/systemvm/resolve-apks.py` with the three APKINDEX files (boot ISO,
+`main`, `community`) and the new package list, commit the regenerated packages lock, then `make systemvm-overlay`.
 
 ## Commands
+
+0. Everything below in one go: `make systemvm-prepare` (fetch, overlay, launch config, launcher).
 
 1. Fetch and verify the pinned image (first run downloads about 80 MB; later runs reuse `build/systemvm/cache/`):
    `make systemvm-fetch` (wraps `scripts/systemvm/fetch-image.sh [LOCK]`), which runs `systemvmctl lock-env`,
@@ -40,18 +58,22 @@ Rust (`systemvm::load_image_lock`, `deny_unknown_fields`); the shell never inter
    their digests, unpacks the kernel, copies the ISO as boot media, and runs `systemvmctl verify-image`, which
    checks the three final digests and the `image_id` and writes `build/systemvm/image-manifest.json`.
 
-2. Generate the NAT-default launch configuration from the lock:
+2. Build the overlay and derived initramfs: `make systemvm-overlay` (`scripts/systemvm/fetch-packages.sh` then
+   `scripts/systemvm/build-overlay.sh`).
+
+3. Generate the NAT-default launch configuration from the lock:
    `make systemvm-launch-config` (runs `systemvmctl launch-config --from-lock --dir build/systemvm`), which writes
-   `build/systemvm/launch-config.json` with the kernel, initramfs, boot media, command line and ready pattern.
+   `build/systemvm/launch-config.json` with the kernel, the derived initramfs, boot media, command line and ready
+   pattern.
    Explicit inputs: `cargo run --bin systemvmctl -- launch-config --kernel <path> [--initrd <path>] [--rootfs <path>]
    [--boot-media <path>] [--cmdline <text>] [--ready-pattern <text>] --console-log run/systemvm/console.log --out
    build/systemvm/launch-config.json`. With no `--cmdline` the line is `console=hvc0`, plus ` root=/dev/vda rw`
    (or `/dev/vdb` behind boot media) when a rootfs is given.
 
-3. Build and sign the launcher (macOS, Xcode command line tools):
+4. Build and sign the launcher (macOS, Xcode command line tools):
    `make vmlauncher-build` (`scripts/macos/build-vmlauncher.sh`), output `build/vmlauncher/vesper-vmlauncher`.
 
-4. Boot repeatedly and record diagnostics:
+5. Boot repeatedly and record diagnostics:
    `make systemvm-boot-smoke` (`scripts/systemvm/boot-smoke.sh [ITERATIONS] [TIMEOUT] [COMMAND] [ARGS]`, defaults
    5 boots, 60 s each, through the launcher with `--config build/systemvm/launch-config.json`; `MAX_BOOT_MS` in the
    environment overrides the lock's threshold). Each iteration boots the VM to the ready pattern, runs the probe
@@ -60,16 +82,17 @@ Rust (`systemvm::load_image_lock`, `deny_unknown_fields`); the shell never inter
    `run/systemvm/boot-report.json` (`iterations`, `successful`, `failed`, `failures`, `durations_ms`,
    `max_duration_ms`, `mean_duration_ms`, `boot_ms`, `max_boot_ms`, `max_boot_allowed_ms`). An iteration fails when
    the launcher exits non-zero or `boot_ms` exceeds the threshold. On 2026-11-06 a MacBook Pro (M3, macOS 27.0.1)
-   reached the login prompt in about 1.05 s and finished the probe and power-off in about 3.5 s per iteration.
+   reached the login prompt in about 1.05 s and finished the probe and power-off in about 3.5 s per iteration;
+   with the overlay installing 18 packages the login prompt appears at about 2.0 s.
 
-5. Re-verify the fetched files or digest explicit ones into a manifest:
+6. Re-verify the fetched files or digest explicit ones into a manifest:
    `make systemvm-build` (no arguments re-runs `verify-image`; `scripts/systemvm/build-image.sh KERNEL [INITRD]
    [ROOTFS]` digests explicit files with `systemvmctl build`).
 
 ## Make targets
 
-- `make systemvm-fetch`, `make systemvm-launch-config`, `make vmlauncher-build`, `make systemvm-boot-smoke`,
-  `make systemvm-build`.
+- `make systemvm-prepare` (= `systemvm-fetch`, `systemvm-overlay`, `systemvm-launch-config`, `vmlauncher-build`),
+  `make systemvm-boot-smoke`, `make systemvm-build`.
 
 Each wraps a script under `scripts/systemvm/` or `scripts/macos/`. `make` does not forward arguments, so invoke the
 script directly to override. The scripts must be run from inside the crate tree; see `scripts/systemvm/README.md`.
