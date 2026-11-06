@@ -180,6 +180,17 @@ enum ControlAction {
     Microvm {
         args: Vec<String>,
     },
+    /// Run `vesper-rootfs <args>` in the guest (import-trivial|build IMAGE [--no-cache]|provenance PATH).
+    Rootfs {
+        args: Vec<String>,
+    },
+    /// Run the GH #19 checklist (reproducible build, provenance, invalid image, boot in a microVM) and write a JSON report.
+    RootfsSuite {
+        #[arg(long, default_value = "run/systemvm/rootfs-report.json")]
+        report: String,
+        #[arg(long, default_value = "vesper-rootfs-test")]
+        id: String,
+    },
     /// Run the GH #18 checklist (launch, jailer isolation, stop, crash, poweroff, cleanup) and write a JSON report.
     MicrovmSuite {
         #[arg(long, default_value = "run/systemvm/microvm-report.json")]
@@ -271,6 +282,34 @@ fn run_control(endpoint: vesper::control::ControlEndpoint, action: ControlAction
             if rc != 0 {
                 return Err(format!("vesper-microvm exited with {rc}"));
             }
+        }
+        ControlAction::Rootfs { args } => {
+            let mut session = control::connect(&endpoint)?;
+            let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+            let (rc, lines) = session.rootfs(&refs)?;
+            for line in &lines {
+                println!("{line}");
+            }
+            if rc != 0 {
+                return Err(format!("vesper-rootfs exited with {rc}"));
+            }
+        }
+        ControlAction::RootfsSuite { report, id } => {
+            let result = control::run_rootfs_suite(&endpoint, &id);
+            control::write_report(&report, &result)?;
+            for step in &result.steps {
+                println!(
+                    "{} {}: {} ({} ms)",
+                    if step.ok { "ok  " } else { "FAIL" },
+                    step.name,
+                    step.detail.chars().take(220).collect::<String>(),
+                    step.elapsed_ms
+                );
+            }
+            if !result.passed {
+                return Err(format!("rootfs suite failed (report: {report})"));
+            }
+            println!("rootfs suite passed (report: {report})");
         }
         ControlAction::MicrovmSuite { report, id } => {
             let result = control::run_microvm_suite(&endpoint, &id);

@@ -1,0 +1,110 @@
+#!/bin/sh
+# Vesper OCI image -> ext4 rootfs pipeline (GH #19), run inside the System VM against its Docker daemon.
+# usage: vesper-rootfs import-trivial                 import a busybox+musl image from this guest; prints IMPORTED <image-id>
+#        vesper-rootfs build IMAGE [--no-cache]        docker export -> deterministic mke2fs; prints BUILT <path> sha256=<h> bytes=<n> cached=<bool>
+#        vesper-rootfs provenance PATH                 prints the provenance JSON embedded in PATH (from its sidecar)
+#        vesper-rootfs inspect PATH                    loop-mounts PATH read-only and lists every file with size, mtime and sha256
+# Reproducible for one image id: file mtimes and filesystem timestamps are forced to epoch 0, the UUID and hash seed
+# derive from the image id, and the embedded provenance carries only deterministic facts.
+set -u
+STORE=/var/lib/vesper/rootfs
+BASELINES=/var/lib/vesper/baselines.lock.yaml
+MIN_KB=16384
+
+baseline() { sed -n "/^  $1:/,/revision/{s/^ *revision: *\"\(.*\)\"/\1/p}" "$BASELINES" 2>/dev/null | head -1; }
+uuid_from() { h=$1; printf '%s-%s-4%s-8%s-%s\n' "$(echo "$h" | cut -c1-8)" "$(echo "$h" | cut -c9-12)" "$(echo "$h" | cut -c14-16)" "$(echo "$h" | cut -c18-20)" "$(echo "$h" | cut -c21-32)"; }
+
+import_trivial() {
+  work=$(mktemp -d)
+  mkdir -p "$work/root/bin" "$work/root/lib" "$work/root/etc"
+  cp /bin/busybox "$work/root/bin/busybox"
+  cp /lib/ld-musl-aarch64.so.1 "$work/root/lib/ld-musl-aarch64.so.1"
+  ln -s busybox "$work/root/bin/sh"
+  echo "vesper trivial image" > "$work/root/etc/vesper-trivial"
+  find "$work/root" -exec touch -h -t 197001010000.00 {} + 2>/dev/null
+  (cd "$work/root" && find . | sort | cpio -o -H ustar 2>/dev/null > "$work/trivial.tar") || tar -C "$work/root" -cf "$work/trivial.tar" .
+  id=$(docker import "$work/trivial.tar" vesper/trivial:guest 2>&1) || { echo "ERR docker import failed: $id"; rm -rf "$work"; return 1; }
+  rm -rf "$work"
+  echo "IMPORTED ${id#sha256:}"
+}
+
+build() {
+  image=${1:-}; shift
+  nocache=0
+  for a in "$@"; do [ "$a" = "--no-cache" ] && nocache=1; done
+  [ -n "$image" ] || { echo "ERR usage: build IMAGE"; return 2; }
+  info=$(docker image inspect --format '{{.Id}}|{{json .RootFS.Layers}}|{{json .RepoTags}}|{{.Created}}|{{.Architecture}}|{{.Os}}' "$image" 2>&1) \
+    || { echo "ERR image not found: $image ($(printf '%s' "$info" | head -1))"; return 1; }
+  id=$(printf '%s' "$info" | cut -d'|' -f1); id=${id#sha256:}
+  layers=$(printf '%s' "$info" | cut -d'|' -f2)
+  tags=$(printf '%s' "$info" | cut -d'|' -f3)
+  created=$(printf '%s' "$info" | cut -d'|' -f4)
+  arch=$(printf '%s' "$info" | cut -d'|' -f5); os=$(printf '%s' "$info" | cut -d'|' -f6)
+  mkdir -p "$STORE"
+  out="$STORE/$(echo "$id" | cut -c1-16).ext4"
+  side="$out.provenance.json"
+  if [ "$nocache" = 0 ] && [ -f "$out" ] && [ -f "$side" ]; then
+    want=$(sed -n 's/.*"output_sha256":"\([0-9a-f]*\)".*/\1/p' "$side")
+    have=$(sha256sum "$out" | cut -d' ' -f1)
+    if [ "$want" = "$have" ]; then
+      echo "BUILT $out sha256=$have bytes=$(stat -c %s "$out") cached=true"; return 0
+    fi
+  fi
+  work=$(mktemp -d)
+  cid=$(docker create "$image" /bin/true 2>&1) || { echo "ERR docker create failed: $cid"; rm -rf "$work"; return 1; }
+  mkdir -p "$work/root"
+  if ! docker export "$cid" 2>"$work/export.err" | tar -x -C "$work/root" 2>"$work/tar.err"; then
+    docker rm -f "$cid" >/dev/null 2>&1
+    echo "ERR export failed: $(cat "$work/export.err" "$work/tar.err" | head -2 | tr '\n' ' ')"; rm -rf "$work"; return 1
+  fi
+  docker rm -f "$cid" >/dev/null 2>&1
+  # Container-runtime artifacts, not image content: Docker injects them per container.
+  rm -f "$work/root/.dockerenv" "$work/root/etc/hostname" "$work/root/etc/hosts" "$work/root/etc/resolv.conf"
+  mkdir -p "$work/root/etc"
+  printf '{"schema_version":1,"source":{"image_id":"%s","repo_tags":%s,"layers":%s,"created":"%s","architecture":"%s","os":"%s"},"baseline":{"firecracker_revision":"%s","containerd_revision":"%s"},"tooling":{"mke2fs":"%s","docker":"%s"},"build":{"method":"docker export | mke2fs -d","timestamps_epoch":0}}\n' \
+    "$id" "$tags" "$layers" "$created" "$arch" "$os" "$(baseline firecracker)" "$(baseline containerd)" \
+    "$(mke2fs -V 2>&1 | head -1 | awk '{print $2}')" "$(docker version --format '{{.Server.Version}}' 2>/dev/null)" \
+    > "$work/root/etc/vesper-provenance.json"
+  find "$work/root" -exec touch -h -t 197001010000.00 {} + 2>/dev/null
+  used=$(du -sk "$work/root" | cut -f1)
+  size=$(( used + used / 5 + 4096 )); [ "$size" -lt "$MIN_KB" ] && size=$MIN_KB
+  uuid=$(uuid_from "$id")
+  rm -f "$out.tmp"
+  if ! E2FSPROGS_FAKE_TIME=0 mke2fs -q -F -t ext4 -d "$work/root" -U "$uuid" -E hash_seed="$uuid",root_owner=0:0 -L vesper-rootfs "$out.tmp" "${size}K" >"$work/mke2fs.log" 2>&1; then
+    echo "ERR mke2fs failed: $(tail -2 "$work/mke2fs.log" | tr '\n' ' ')"; rm -rf "$work" "$out.tmp"; return 1
+  fi
+  rm -rf "$work"
+  mv "$out.tmp" "$out"
+  sha=$(sha256sum "$out" | cut -d' ' -f1)
+  # Sidecar: the embedded document plus the output digest (debugfs from e2fsprogs-extra reads it without mounting).
+  if ! debugfs -R "cat /etc/vesper-provenance.json" "$out" 2>/dev/null | sed "s/}}\$/},\"output_sha256\":\"$sha\"}/" > "$side" || [ ! -s "$side" ]; then
+    echo "ERR provenance sidecar could not be written (debugfs missing?)"; rm -f "$side"; return 1
+  fi
+  echo "BUILT $out sha256=$sha bytes=$(stat -c %s "$out") cached=false"
+}
+
+provenance() {
+  f=${1:-}
+  [ -f "$f.provenance.json" ] && { cat "$f.provenance.json"; return 0; }
+  [ -f "$f" ] || { echo "ERR no such file: $f"; return 1; }
+  debugfs -R "cat /etc/vesper-provenance.json" "$f" 2>/dev/null || { echo "ERR no provenance in $f"; return 1; }
+}
+
+inspect() {
+  f=${1:-}; [ -f "$f" ] || { echo "ERR no such file: $f"; return 1; }
+  m=$(mktemp -d)
+  mount -o loop,ro "$f" "$m" 2>/dev/null || { echo "ERR mount failed"; rmdir "$m"; return 1; }
+  (cd "$m" && find . -type f -o -type l | sort | while read -r p; do
+     if [ -L "$p" ]; then echo "l $p -> $(readlink "$p")"; else echo "f $p $(stat -c '%s %Y %a' "$p") $(sha256sum "$p" | cut -c1-16)"; fi
+   done)
+  umount "$m"; rmdir "$m"
+}
+
+cmd=${1:-}; shift 2>/dev/null
+case "$cmd" in
+  import-trivial) import_trivial ;;
+  build) build "$@" ;;
+  provenance) provenance "$@" ;;
+  inspect) inspect "$@" ;;
+  *) echo "ERR usage: vesper-rootfs import-trivial|build IMAGE [--no-cache]|provenance PATH"; exit 2 ;;
+esac

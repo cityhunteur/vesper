@@ -5,10 +5,13 @@
 //! to the guest port (`docs/process/systemvm-bringup.md`, "Proxy bridge convention"). The guest
 //! agent (`systemvm/overlay/usr/local/bin/vesper-agent`) speaks a line protocol, version 1.
 
+mod suites;
+pub use suites::*;
+
 use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -231,26 +234,39 @@ impl Session {
 
     /// Runs `vesper-microvm <args>` in the guest; returns its exit code and output lines.
     pub fn microvm(&mut self, args: &[&str]) -> Result<(i32, Vec<String>), String> {
-        // A launch waits for the guest's boot marker (up to 30 s), longer than the default I/O timeout.
+        self.guest_tool("MICROVM", args)
+    }
+
+    /// Runs `vesper-rootfs <args>` in the guest; returns its exit code and output lines.
+    pub fn rootfs(&mut self, args: &[&str]) -> Result<(i32, Vec<String>), String> {
+        self.guest_tool("ROOTFS", args)
+    }
+
+    /// Runs a guest tool command (`MICROVM`, `ROOTFS`): waits up to 120 s because launches and image
+    /// builds take longer than the default I/O timeout.
+    fn guest_tool(&mut self, tool: &str, args: &[&str]) -> Result<(i32, Vec<String>), String> {
         let stream = self.reader.get_ref();
         let previous = stream.read_timeout().map_err(|err| format!("read timeout: {err}"))?;
         stream
             .set_read_timeout(Some(Duration::from_secs(120)))
             .map_err(|err| format!("set read timeout: {err}"))?;
-        let result = self.microvm_inner(args);
+        let result = self.guest_tool_inner(tool, args);
         let _ = self.reader.get_ref().set_read_timeout(previous);
         result
     }
 
-    fn microvm_inner(&mut self, args: &[&str]) -> Result<(i32, Vec<String>), String> {
-        self.send(&format!("MICROVM {}", args.join(" ")))?;
+    fn guest_tool_inner(&mut self, tool: &str, args: &[&str]) -> Result<(i32, Vec<String>), String> {
+        self.send(&format!("{tool} {}", args.join(" ")))?;
         let line = self.read_line()?;
         let mut parts = line.split_whitespace();
-        let (Some("MICROVM"), Some(rc), Some(count)) = (parts.next(), parts.next(), parts.next()) else {
-            return Err(format!("MICROVM: unexpected reply {line:?}"));
+        let (Some(reply), Some(rc), Some(count)) = (parts.next(), parts.next(), parts.next()) else {
+            return Err(format!("{tool}: unexpected reply {line:?}"));
         };
-        let rc: i32 = rc.parse().map_err(|_| format!("MICROVM: bad rc in {line:?}"))?;
-        let count: usize = count.parse().map_err(|_| format!("MICROVM: bad count in {line:?}"))?;
+        if reply != tool {
+            return Err(format!("{tool}: unexpected reply {line:?}"));
+        }
+        let rc: i32 = rc.parse().map_err(|_| format!("{tool}: bad rc in {line:?}"))?;
+        let count: usize = count.parse().map_err(|_| format!("{tool}: bad count in {line:?}"))?;
         let lines = (0..count).map(|_| self.read_line()).collect::<Result<Vec<_>, _>>()?;
         Ok((rc, lines))
     }
@@ -280,262 +296,11 @@ impl Session {
     }
 }
 
-/// Result of one checklist step of the GH #13 control suite.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SuiteStep {
-    pub name: String,
-    pub ok: bool,
-    pub detail: String,
-    pub elapsed_ms: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SuiteReport {
-    pub bridge_path: String,
-    pub port: u32,
-    pub steps: Vec<SuiteStep>,
-    pub passed: bool,
-}
-
-fn step<T>(
-    steps: &mut Vec<SuiteStep>,
-    name: &str,
-    run: impl FnOnce() -> Result<(T, String), String>,
-) -> Option<T> {
-    let started = Instant::now();
-    match run() {
-        Ok((value, detail)) => {
-            steps.push(SuiteStep {
-                name: name.to_string(),
-                ok: true,
-                detail,
-                elapsed_ms: started.elapsed().as_millis() as u64,
-            });
-            Some(value)
-        }
-        Err(err) => {
-            steps.push(SuiteStep {
-                name: name.to_string(),
-                ok: false,
-                detail: err,
-                elapsed_ms: started.elapsed().as_millis() as u64,
-            });
-            None
-        }
-    }
-}
-
-/// Runs the GH #13 checklist: handshake, keepalive under idle, reconnect after a drop, >1 MB echo.
-pub fn run_suite(
-    endpoint: &ControlEndpoint,
-    keepalive_interval: Duration,
-    keepalive_total: Duration,
-    payload_bytes: usize,
-) -> SuiteReport {
-    let mut steps = Vec::new();
-    let session = step(&mut steps, "handshake", || {
-        let session = connect(endpoint)?;
-        let detail = format!(
-            "protocol {} host {} in {} ms",
-            session.handshake.protocol_version, session.handshake.hostname, session.handshake.connect_ms
-        );
-        Ok((session, detail))
-    });
-    let session = session.and_then(|mut session| {
-        step(&mut steps, "keepalive", || {
-            let pings = session.keepalive(keepalive_interval, keepalive_total)?;
-            Ok((session, format!("{pings} pings over {} s", keepalive_total.as_secs())))
-        })
-    });
-    let session = session.and_then(|mut session| {
-        step(&mut steps, "reconnect", || {
-            session.drop_connection()?;
-            let dropped = session.ping().is_err();
-            if !dropped {
-                return Err("connection survived DROP".to_string());
-            }
-            let (fresh, attempts) = connect_with_retry(endpoint, 5, Duration::from_millis(500))?;
-            Ok((fresh, format!("reconnected after a server-side drop in {attempts} attempt(s)")))
-        })
-    });
-    session.and_then(|mut session| {
-        step(&mut steps, "large_payload", || {
-            let payload: Vec<u8> = (0..payload_bytes).map(|i| (i % 251) as u8).collect();
-            let elapsed = session.echo(&payload)?;
-            Ok(((), format!("{payload_bytes} bytes echoed intact in {} ms", elapsed.as_millis())))
-        })
-    });
-    let passed = steps.len() == 4 && steps.iter().all(|s| s.ok);
-    SuiteReport {
-        bridge_path: endpoint.bridge_path.display().to_string(),
-        port: endpoint.port,
-        steps,
-        passed,
-    }
-}
-
-/// Runs the GH #14 checklist per service: healthy at boot, SIGKILL, supervised restart within
-/// `recovery_timeout`, and log lines that record the startup and the recovery.
-pub fn run_services_suite(
-    endpoint: &ControlEndpoint,
-    services: &[&str],
-    recovery_timeout: Duration,
-) -> SuiteReport {
-    let mut steps = Vec::new();
-    let healthy = |session: &mut Session, service: &str| -> Result<serde_json::Value, String> {
-        let health = session.health()?;
-        let ok = health.get(format!("{service}_ok")).and_then(|v| v.as_bool()) == Some(true);
-        let state = health["services"][service].as_str().unwrap_or("?").to_string();
-        if !ok || state != "started" {
-            return Err(format!("{service} not healthy: state {state}, health {health}"));
-        }
-        Ok(health)
-    };
-    let session = step(&mut steps, "handshake", || {
-        let session = connect(endpoint)?;
-        let detail = format!("protocol {} host {}", session.handshake.protocol_version, session.handshake.hostname);
-        Ok((session, detail))
-    });
-    let Some(mut session) = session else {
-        return SuiteReport { bridge_path: endpoint.bridge_path.display().to_string(), port: endpoint.port, steps, passed: false };
-    };
-    for service in services {
-        let service = *service;
-        let before = step(&mut steps, &format!("{service}_healthy_at_boot"), || {
-            let health = healthy(&mut session, service)?;
-            Ok(((), format!("state started, {service}_ok true, health {health}")))
-        });
-        if before.is_none() {
-            continue;
-        }
-        let killed = step(&mut steps, &format!("{service}_simulated_crash"), || {
-            let pid = session.kill_service(service)?;
-            Ok((pid, format!("SIGKILL sent to pid {pid}")))
-        });
-        let Some(old_pid) = killed else { continue };
-        step(&mut steps, &format!("{service}_recovers"), || {
-            let deadline = Instant::now() + recovery_timeout;
-            let started = Instant::now();
-            loop {
-                if let Ok(health) = healthy(&mut session, service) {
-                    return Ok(((), format!("healthy again after {} ms (old pid {old_pid}); health {health}", started.elapsed().as_millis())));
-                }
-                if Instant::now() >= deadline {
-                    return Err(format!("{service} did not recover within {} s", recovery_timeout.as_secs()));
-                }
-                thread::sleep(Duration::from_millis(500));
-            }
-        });
-        step(&mut steps, &format!("{service}_logs_capture_startup_and_recovery"), || {
-            let lines = session.logs(service, 200)?;
-            let startups = lines.iter().filter(|l| l.contains("starting containerd") || l.contains("Starting up")).count();
-            let messages = session.logs("messages", 200)?;
-            let respawns = messages.iter().filter(|l| l.contains("supervise-daemon") && l.contains(service)).count();
-            if startups < 2 {
-                return Err(format!("expected at least two startups in /var/log/{service}.log, found {startups}"));
-            }
-            Ok(((), format!("{startups} startup lines in {service}.log, {respawns} supervise-daemon lines for {service} in messages")))
-        });
-    }
-    let passed = steps.iter().all(|s| s.ok) && steps.len() == 1 + services.len() * 4;
-    SuiteReport { bridge_path: endpoint.bridge_path.display().to_string(), port: endpoint.port, steps, passed }
-}
-
-fn microvm_step(
-    session: &mut Session,
-    steps: &mut Vec<SuiteStep>,
-    name: &str,
-    args: &[&str],
-    expect: &str,
-) -> Option<Vec<String>> {
-    step(steps, name, || {
-        let (rc, lines) = session.microvm(args)?;
-        let first = lines.first().cloned().unwrap_or_default();
-        if rc != 0 || !first.starts_with(expect) {
-            return Err(format!("`vesper-microvm {}` rc={rc}: {}", args.join(" "), lines.join(" | ")));
-        }
-        Ok((lines.clone(), first))
-    })
-}
-
-/// Runs the GH #18 checklist: launch under the jailer, isolation (uid, chroot, cgroup, seccomp), clean
-/// stop and cleanup, cleanup after SIGKILL, and a guest-initiated power-off.
-pub fn run_microvm_suite(endpoint: &ControlEndpoint, id: &str) -> SuiteReport {
-    let mut steps = Vec::new();
-    let session = step(&mut steps, "handshake", || {
-        let session = connect(endpoint)?;
-        let detail = format!("protocol {} host {}", session.handshake.protocol_version, session.handshake.hostname);
-        Ok((session, detail))
-    });
-    let Some(mut session) = session else {
-        return SuiteReport { bridge_path: endpoint.bridge_path.display().to_string(), port: endpoint.port, steps, passed: false };
-    };
-    let _ = microvm_step(&mut session, &mut steps, "cleanup_before", &["cleanup", id], "CLEAN");
-    if steps.last().map(|s| !s.ok).unwrap_or(true) {
-        steps.pop(); // a dirty pre-state is cleaned, not a failure
-    }
-    let prepared = microvm_step(&mut session, &mut steps, "prepare", &["prepare"], "PREPARED");
-    if prepared.is_none() {
-        return SuiteReport { bridge_path: endpoint.bridge_path.display().to_string(), port: endpoint.port, steps, passed: false };
-    }
-    if microvm_step(&mut session, &mut steps, "launch", &["launch", id], "LAUNCHED").is_some() {
-        let isolation = microvm_step(&mut session, &mut steps, "isolation_output", &["isolation", id], "{");
-        steps.pop();
-        if let Some(lines) = isolation {
-            step(&mut steps, "jailer_isolation", || {
-                let json: serde_json::Value = serde_json::from_str(&lines[0]).map_err(|e| format!("isolation JSON: {e}: {}", lines[0]))?;
-                let checks = ["uid_ok", "chroot_ok", "cgroup_ok", "seccomp_ok"];
-                let failed: Vec<&str> = checks.iter().copied().filter(|k| json[k] != serde_json::Value::Bool(true)).collect();
-                if !failed.is_empty() {
-                    return Err(format!("isolation checks failed: {}; {}", failed.join(", "), lines[0]));
-                }
-                Ok(((), format!("uid {}, jail files {}, cgroup {}, seccomp mode {}", json["uid"], json["jail_files"], json["cgroup"], json["seccomp_mode"])))
-            });
-        } else {
-            steps.push(SuiteStep { name: "jailer_isolation".into(), ok: false, detail: "no isolation output".into(), elapsed_ms: 0 });
-        }
-        microvm_step(&mut session, &mut steps, "stop", &["stop", id], "STOPPED");
-        microvm_step(&mut session, &mut steps, "cleanup_after_stop", &["cleanup", id], "CLEAN");
-        if microvm_step(&mut session, &mut steps, "relaunch", &["launch", id], "LAUNCHED").is_some() {
-            microvm_step(&mut session, &mut steps, "abnormal_termination", &["crash", id], "CRASHED");
-            microvm_step(&mut session, &mut steps, "cleanup_after_crash", &["cleanup", id], "CLEAN");
-        }
-        if microvm_step(&mut session, &mut steps, "guest_poweroff_launch", &["launch", id, "--exit"], "LAUNCHED").is_some() {
-            step(&mut steps, "guest_poweroff_exits", || {
-                let deadline = Instant::now() + Duration::from_secs(15);
-                loop {
-                    let (_, lines) = session.microvm(&["status", id])?;
-                    let first = lines.first().cloned().unwrap_or_default();
-                    if first.starts_with("EXITED") {
-                        return Ok(((), "firecracker exited after the guest powered off".to_string()));
-                    }
-                    if Instant::now() >= deadline {
-                        return Err(format!("still {first} after 15 s"));
-                    }
-                    thread::sleep(Duration::from_millis(500));
-                }
-            });
-            microvm_step(&mut session, &mut steps, "cleanup_after_poweroff", &["cleanup", id], "CLEAN");
-        }
-    }
-    let passed = steps.iter().all(|s| s.ok) && steps.len() >= 11;
-    SuiteReport { bridge_path: endpoint.bridge_path.display().to_string(), port: endpoint.port, steps, passed }
-}
-
-pub fn write_report(path: impl AsRef<Path>, report: &SuiteReport) -> Result<(), String> {
-    let path = path.as_ref();
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|err| format!("create {}: {err}", parent.display()))?;
-    }
-    let mut json = serde_json::to_string_pretty(report).map_err(|err| format!("serialize report: {err}"))?;
-    json.push('\n');
-    std::fs::write(path, json).map_err(|err| format!("write {}: {err}", path.display()))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::os::unix::net::UnixListener;
+    use std::path::Path;
     use tempfile::tempdir;
 
     /// A bridge plus agent in one thread: expects the CONNECT preface, greets, speaks protocol 1.

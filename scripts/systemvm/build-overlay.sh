@@ -29,6 +29,8 @@ done < <(cargo run -q --bin systemvmctl -- package-list --lock "${PACKAGES_LOCK}
 while IFS=$'\t' read -r name url sha member file msha guest mode; do
   APK_ARGS+=(--file "${ARCHIVES_DIR}/${name}/${file}:${guest}:${mode}")
 done < <(cargo run -q --bin systemvmctl -- archive-list --lock "${PACKAGES_LOCK}")
+# The baseline lock rides along so guest-built artifacts can embed the pinned revisions (GH #19 provenance).
+APK_ARGS+=(--file "${ROOT_DIR}/docs/specs/design-v0.baselines.lock.yaml:/var/lib/vesper/baselines.lock.yaml:0644")
 
 python3 -I "${ROOT_DIR}/scripts/systemvm/build-initramfs.py" \
   --overlay-dir "${ROOT_DIR}/${VESPER_IMAGE_OVERLAY_DIR}" \

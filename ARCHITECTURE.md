@@ -83,9 +83,9 @@ launcher is a separate Swift package built by `make vmlauncher-build`.
 
 ## Domain boundaries and dependency rules
 
-**Verified** for single-path `crate::x` and `vesper::x` references in the 18 files enumerated in the `RULES`
+**Verified** for single-path `crate::x` and `vesper::x` references in the 19 files enumerated in the `RULES`
 allowlist of [scripts/harness/check_structure.py](scripts/harness/check_structure.py) (the top-level `src/*.rs`
-modules, the four route-family modules under `src/api/` and the two `src/systemvm/` children), which CI checks. The allowlist is a fixed list, not a
+modules, the four route-family modules under `src/api/`, the two `src/systemvm/` children and `src/control/suites.rs`), which CI checks. The allowlist is a fixed list, not a
 glob: a new module is unchecked until a `RULES` row is added. Grouped `use crate::{..}` imports, `super::super`
 paths, `src/lib.rs`, the binaries and `tests/` are not checked (TD-018); `src/api/tests.rs` is outside both the
 allowlist and the line budgets (TD-015).
@@ -97,7 +97,7 @@ allowlist and the line budgets (TD-015).
 | 2. Control plane: `api` | State machine, dispatch, deterministic errors | `api` | `api_matrix`, `baseline`, `buildinfo`, `compat`, `platform`, `spec` | mechanical |
 | 2. Control plane: matrices | Generated route matrices | `api_matrix`, `api_behavior_matrix` | `api`, `baseline`, `spec`; `api_behavior_matrix` also `api_matrix` | mechanical |
 | 2. Control plane: families | Extracted route-family handlers | `api/*` | `super` only (no `crate::` references) | mechanical |
-| 3. Runtime adapters | Socket proxying, System VM artifacts, guest control channel | `proxy`, `systemvm` (+ `systemvm/image_lock`, `systemvm/packages`, `super` only), `control` | `buildinfo`, `platform` (`control`: nothing local) | mechanical |
+| 3. Runtime adapters | Socket proxying, System VM artifacts, guest control channel | `proxy`, `systemvm` (+ `systemvm/image_lock`, `systemvm/packages`, `super` only), `control` (+ `control/suites`, `super` only) | `buildinfo`, `platform` (`control`: nothing local) | mechanical |
 | 4. Entry points | `clap` binaries | `src/bin/*` | any library layer | review |
 | 5. Tests and harness | Contract tests, sensors (CI scripts that detect drift), docs, Symphony templates | `tests/`, `src/api/tests.rs`, `scripts/harness/`, `harness/`, `.github/workflows/`, `docs/`, `.symphony/templates/` | may import the library; nothing imports them | review |
 
@@ -281,8 +281,9 @@ built offline from the pinned ISO. That is design-v0's Phase 1 exit criterion, m
 the guest then has `/dev/kvm`) and the unimplemented Backend B fallback, with diagnostics; the lock's
 `boot.nested_virtualization: auto` drives the launcher. Backend A itself runs: `make systemvm-microvm-suite`
 launches a stock Firecracker v1.16.0 microVM under the jailer (uid 10000, pivot-root jail, cgroup, seccomp) inside
-the System VM in about 1.5 s and proves stop, SIGKILL cleanup and guest power-off; the microVM has no rootfs or
-network yet (WOR-28, WOR-30).
+the System VM in about 1.5 s and proves stop, SIGKILL cleanup and guest power-off; `make systemvm-rootfs-suite`
+converts an image from the guest's Docker into a reproducible ext4 rootfs with embedded provenance and boots a
+microVM from it. The microVM has no network yet (WOR-30).
 
 **Intended:** design-v0 describes a packaged macOS host process plus a Linux System VM running containerd and
 Firecracker.
@@ -298,7 +299,7 @@ or parity documents.
 |---|---|---|---|---|---|
 | 1a | `vesperd` is the only binary that serves the control-plane API; `vesper-proxy` is the only other host-visible socket and only relays bytes (plus the vsock `CONNECT` preface) | Verified | Review only; no mechanical check (TD-008) | `grep -n 'UnixListener::bind' src/bin/vesperd.rs src/proxy.rs` (expect 1 hit in `vesperd.rs` and 3 in `proxy.rs`, of which the two inside the `#[cfg(test)]` module are test fixtures) | [src/bin/vesperd.rs](src/bin/vesperd.rs), [src/proxy.rs](src/proxy.rs) |
 | 1b | Raw Firecracker and containerd sockets stay private to the System VM | Verified | The guest exposes only vsock 1024 (agent) and 2375 (Docker relay); `make docker-smoke` enumerates host sockets and expects a refused `CONNECT` to a port without a listener | `make systemvm-up && make docker-up && make docker-smoke` (steps `no_raw_host_sockets`, `raw_guest_port_denied`) | [design-v0](docs/specs/design-v0.md#security-model-firecrackerequivalent-hardening-on-macos), [docs/SECURITY.md](docs/SECURITY.md) |
-| 2 | Intra-crate single-path references in the 18 `RULES` files follow the layer table | Verified | `RULES` in `check_structure.py`, run by `harness-structure.yml` on `src/**` changes; a new module needs a `RULES` row (TD-018) | `python3 scripts/harness/check_structure.py --root .` | [scripts/harness/check_structure.py](scripts/harness/check_structure.py) |
+| 2 | Intra-crate single-path references in the 19 `RULES` files follow the layer table | Verified | `RULES` in `check_structure.py`, run by `harness-structure.yml` on `src/**` changes; a new module needs a `RULES` row (TD-018) | `python3 scripts/harness/check_structure.py --root .` | [scripts/harness/check_structure.py](scripts/harness/check_structure.py) |
 | 3 | Every error response produced by `handle_all` is an `ErrorEnvelope` with the pinned baseline revision. Exceptions before extraction: a body over axum's default 2 MiB limit gets a plain `413`, a body-read failure gets a plain `400`, and a poisoned `RwLock` panics the task (TD-019) | Verified | `AppState::new_with_matrix` rejects a blank revision; `tests/api_contract.rs` asserts envelopes; `rust-tests.yml` runs `cargo test` for every `src/**` change | `make contract-test` | [tests/api_contract.rs](tests/api_contract.rs) |
 | 4 | The golden route list equals `contractgen`'s serialisation of the pinned swagger | Verified | `contractgen --mode check` and `tests/contract_golden.rs` in `contract-tests.yml`; `tests/**` changes are covered by `rust-tests.yml` | `make contract-check` | [tests/contract_golden.rs](tests/contract_golden.rs) |
 | 5 | Generated surface stub and behavior matrices are complete and fresh | Verified | `baselinectl --mode validate-api-matrix` and `validate-api-behavior-matrix` in `rust-tests.yml`; the `validates_repo_generated_*` unit tests also fail under `cargo test` | `make surface-matrix-check`, `make behavior-matrix-check` | [docs/process/baseline-governance.md](docs/process/baseline-governance.md) |

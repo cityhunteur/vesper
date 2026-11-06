@@ -102,16 +102,17 @@ Public symbols by file:
   run_server(config, shutdown)`.
 - `spec.rs`: `Route { method, path }`, `load_routes(path)`,
   `load_info_version(path)`.
-- `control.rs`: `ControlEndpoint { bridge_path, port, io_timeout }` with
+- `control.rs` (client) and `control/suites.rs` (checklists, re-exported):
+  `ControlEndpoint { bridge_path, port, io_timeout }` with
   `new(bridge, port)` (10 s timeouts), `Handshake { protocol_version,
   hostname, connect_ms }`, `Session` with `ping`, `version`, `echo(payload)`,
-  `health`, `kill_service(name)`, `logs(name, count)`, `microvm(args)` (120 s
-  read timeout for the launch wait), `drop_connection`,
+  `health`, `kill_service(name)`, `logs(name, count)`, `microvm(args)` and
+  `rootfs(args)` (guest tools; 120 s read timeout), `drop_connection`,
   `shutdown`, `keepalive(interval, total)`,
   `connect(&endpoint)`, `connect_with_retry(&endpoint, attempts, backoff)`,
   `SuiteStep`, `SuiteReport`, `run_suite(&endpoint, interval, total,
   payload_bytes)`, `run_services_suite(&endpoint, &[service], recovery_timeout)`,
-  `run_microvm_suite(&endpoint, id)`,
+  `run_microvm_suite(&endpoint, id)`, `run_rootfs_suite(&endpoint, id)`,
   `write_report(path, &report)`; constants
   `AGENT_PROTOCOL_VERSION` (1), `DEFAULT_AGENT_PORT` (1024).
 - `systemvm.rs` (manifest, launch config, boot smoke),
@@ -303,6 +304,15 @@ Public symbols by file:
   `cleanup_after_crash`, `guest_poweroff_launch`, `guest_poweroff_exits`
   (status `EXITED` within 15 s) and `cleanup_after_poweroff`; `passed`
   requires every step ok.
+- `control/suites.rs:run_rootfs_suite` runs `handshake`, `import_trivial_image`,
+  `build` (`--no-cache`), `reproducible_rebuild` (same `sha256=` from a
+  second `--no-cache` build), `cache_hit` (`cached=true`, same digest),
+  `provenance_embedded` (JSON with the source image id, non-empty layers, a
+  baseline revision and `output_sha256` equal to the build digest),
+  `invalid_image_rejected` (`ERR image not found`), `cleanup_before`,
+  `launch_with_rootfs`, `rootfs_boots` (`VESPER-ROOTFS-OK <image id>` and
+  `VESPER-ROOTFS-EXEC-OK` in the microVM log within 30 s) and
+  `cleanup_after_rootfs_boot`; `passed` requires every step ok.
 - `systemvm/packages.rs:validate_packages_lock` requires schema `2`,
   non-blank branch and arch, every requested package in the closure,
   packages sorted by name without duplicates, `file ==
