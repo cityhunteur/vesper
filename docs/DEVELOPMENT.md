@@ -1,7 +1,7 @@
 ---
 status: verified
 owner: cityhunteur
-last_reviewed: 2026-11-05
+last_reviewed: 2026-11-06
 ---
 
 # Development
@@ -20,7 +20,9 @@ otherwise.
 | `plutil` | macOS built-in; optional | `scripts/ci/validate-entitlements.sh` falls back to Python `plistlib` |
 | `gh` CLI | authenticated with write access | only for `scripts/update-issue-checklists.sh` |
 
-Supported host: macOS for the dev loop and entitlements; Linux CI runs every Cargo and Python check.
+Supported host: macOS for the dev loop and entitlements. Linux CI runs `cargo test`, the matrix checks and the
+entitlement lint for every `src/**`, `tests/**`, `docs/generated/**` and `docs/specs/*.yaml` change
+(`.github/workflows/rust-tests.yml`), plus the Python sensors; [TESTING.md](TESTING.md) lists which workflow runs what.
 
 ## Setup
 
@@ -50,7 +52,7 @@ see [process/systemvm-bringup.md](process/systemvm-bringup.md)).
 
 ```sh
 make build            # cargo build --bins
-make dev-up           # build, then start vesperd and vesper-proxy in the background
+make dev-up           # cargo build vesperd and vesper-proxy only, then start both in the background
 make dev-down         # stop them
 ```
 
@@ -65,6 +67,7 @@ To run `vesperd` by hand with explicit inputs:
 cargo run --bin vesperd -- --socket run/vesperd.sock \
   --baseline-lock docs/specs/design-v0.baselines.lock.yaml \
   --swagger third_party/firecracker/firecracker.yaml \
+  --surface-stub-matrix docs/generated/firecracker-api-surface-stub-matrix.json \
   --entitlements-file packaging/macos/vesperd.entitlements
 ```
 
@@ -75,8 +78,8 @@ Type checking happens through `cargo build` and `cargo test`. Repository-level s
 
 ```sh
 python3 scripts/harness/check_structure.py --root .   # dependency allowlist and line budgets (CI: harness-structure.yml)
-python3 scripts/harness/janitor_scan.py --root .      # broken links, missing route handlers, oversized files
-make validate-entitlements                            # plist lint (CI: not wired; see TD-010)
+python3 scripts/harness/janitor_scan.py --root .      # broken links, absolute paths, missing route handlers, oversized files, retired workflows; exit 1 on errors
+make validate-entitlements                            # plist lint (CI: rust-tests.yml). With plutil present only syntax is checked; VALIDATE_ENTITLEMENTS_FORCE_PYTHON=1 also checks the required keys
 ```
 
 ## Code generation
@@ -86,16 +89,16 @@ All generated files are committed and checked in CI.
 | Generator | Input | Output | Generate | Check |
 |---|---|---|---|---|
 | `contractgen` | `third_party/firecracker/firecracker.yaml` | `testdata/contracts/firecracker-routes.golden.json` | `make contract-generate` | `make contract-check` (CI: `contract-tests.yml`) |
-| `baselinectl --mode generate-api-matrix` | swagger + `docs/specs/firecracker-api-baseline-captures.yaml` | `docs/generated/firecracker-api-surface-stub-matrix.json` | `make surface-matrix-generate` | `make surface-matrix-check` |
-| `baselinectl --mode generate-api-behavior-matrix` | swagger + `docs/specs/firecracker-api-behavior-captures.yaml` | `docs/generated/firecracker-api-behavior-matrix.json` | `make behavior-matrix-generate` | `make behavior-matrix-check` |
+| `baselinectl --mode generate-api-matrix` | swagger + `docs/specs/firecracker-api-baseline-captures.yaml` | `docs/generated/firecracker-api-surface-stub-matrix.json` | `make surface-matrix-generate` | `make surface-matrix-check` (CI: `rust-tests.yml`) |
+| `baselinectl --mode generate-api-behavior-matrix` | swagger + `docs/specs/firecracker-api-behavior-captures.yaml` | `docs/generated/firecracker-api-behavior-matrix.json` | `make behavior-matrix-generate` | `make behavior-matrix-check` (CI: `rust-tests.yml`) |
 | `baselinectl --mode generate` | baseline lock + `--backend/--host-os/--host-cpu` | `artifacts/parity-metadata.json` (not committed) | `cargo run --bin baselinectl -- --mode generate --backend backend-a --host-os macos --host-cpu arm64 --metadata artifacts/parity-metadata.json` | `cargo run --bin baselinectl -- --mode validate --metadata artifacts/parity-metadata.json` (CI: `baseline-governance.yml`) |
 | `systemvmctl` | kernel + rootfs paths | `build/systemvm/*.json` (not committed) | `make systemvm-build`, `make systemvm-launch-config` | none |
 
 ## Documentation checks
 
 ```sh
-python3 harness/check_docs.py            # structural checks; run in CI (docs.yml)
-python3 harness/check_docs.py --strict   # also fails on unfilled template content
+python3 harness/check_docs.py            # structural checks
+python3 harness/check_docs.py --strict   # also fails on unfilled template content; this is what docs.yml runs in CI
 python3 -m unittest discover -s harness/tests
 python3 scripts/harness/check_docs.py --root .   # older required-files and link checker (CI: harness-docs.yml)
 ```

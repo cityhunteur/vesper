@@ -1,7 +1,7 @@
 ---
 status: verified
 owner: cityhunteur
-last_reviewed: 2026-11-05
+last_reviewed: 2026-11-06
 ---
 
 # Architecture decision records
@@ -29,13 +29,15 @@ written for them; the people who made them should.
 - **Single fallback handler dispatch** instead of per-route axum routes: `AppState::router` registers one
   `fallback(any(handle_all))` and matches templates by hand ([src/api.rs](../../../src/api.rs)). Why: unknown.
 - **Data-driven route gating** through `RouteSemantics` in the generated surface stub matrix rather than per-handler
-  guards ([src/api_matrix.rs](../../../src/api_matrix.rs)). Why: unknown.
+  guards, with `PUT /actions` and `PATCH /vm` as the two per-handler exceptions ([src/api_matrix.rs](../../../src/api_matrix.rs),
+  [src/api.rs](../../../src/api.rs)). Why: unknown.
 - **Phase 0 vsock bridge as host Unix socket plus `CONNECT <port>` preface** (GitHub #9, WOR-71). Visible in
   [src/proxy.rs](../../../src/proxy.rs) and [systemvm-bringup.md](../../process/systemvm-bringup.md).
 - **Tracker truth split between Linear (planning) and GitHub (evidence)**. Visible in
   [harness-engineering.md](../../process/harness-engineering.md). Why: unknown.
 - **Retiring optimistic issue-promotion workflows** (`eval-on-review.yml`, `promote-implemented-issues.yml`). The
-  files are gone; the decision is recorded only in the tech-debt tracker and devlog.
+  files are gone; the decision is recorded only in the tech-debt tracker (TD-002), while
+  `docs/specs/firecracker-feature-parity.md` and `docs/references/install.md` still describe `eval-on-review.yml` as present.
 
 ## Writing an ADR
 

@@ -1,7 +1,7 @@
 ---
 status: verified
 owner: cityhunteur
-last_reviewed: 2026-11-05
+last_reviewed: 2026-11-06
 ---
 
 # Design documents
@@ -15,7 +15,7 @@ they live; the normative ones stay under `docs/specs/`.
 
 | Design | Scope | Status | Domain | Implementation | ADRs | Verification | Plans |
 |---|---|---|---|---|---|---|---|
-| [design-v0.md](../specs/design-v0.md) | Normative product and architecture design: requirements, backends, phases, verification plan | draft (normative, maintained by hand) | all | Phase 0 scaffolding in `src/`; later phases not started | none (candidates listed in the ADR index) | milestone reports reference it; not re-verified line by line | [milestone log](../progress/symphony-milestones.md) |
+| [design-v0.md](../specs/design-v0.md) | Normative product and architecture design: requirements, backends, phases, verification plan | draft (normative, maintained by hand) | all | Phase 0 in `src/`; Phase 1 scaffolding only (`src/systemvm.rs`, TD-005); phases 2 to 5 not started | none (candidates listed in the ADR index) | milestone reports reference it; not re-verified line by line | [milestone log](../progress/symphony-milestones.md) |
 | [firecracker-feature-parity.md](../specs/firecracker-feature-parity.md) | Route-level and field-level parity matrix plus the issue audit | draft (normative, maintained by hand) | control plane | `src/api.rs`, `src/api/`, `docs/generated/*.json` | none | updated per accepted issue; checked against the behavior matrix by review | [milestone log](../progress/symphony-milestones.md) |
 | [Core beliefs](core-beliefs.md) | Engineering principles for the whole repository | verified | all | harness sensors and docs | n/a | 2026-11-05 | n/a |
 | [harness-engineering.md](../process/harness-engineering.md) | How guides, sensors, bundles and the tracker protocol fit together | verified | process | `scripts/harness/`, `harness/`, `.symphony/templates/`, `WORKFLOW.md` | none | 2026-11-05 | n/a |

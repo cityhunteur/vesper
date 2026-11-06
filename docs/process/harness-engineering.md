@@ -1,7 +1,7 @@
 ---
 status: verified
 owner: cityhunteur
-last_reviewed: 2026-11-05
+last_reviewed: 2026-11-06
 ---
 
 # Harness Engineering for Vesper
@@ -44,12 +44,14 @@ These are deterministic or mostly deterministic checks:
 - `make contract-test`
 - `make validate-entitlements`
 - `cargo test`
-- `cargo run --bin baselinectl -- --mode validate`
+- `cargo run --bin baselinectl -- --mode generate ...` then `--mode validate` (`artifacts/` is gitignored, so validate alone fails on a fresh clone)
 - `cargo run --bin compatexctl -- --registry docs/specs/compat-exceptions.yaml`
 - `python3 scripts/harness/check_docs.py --root .`
 - `python3 scripts/harness/check_structure.py --root .`
 - `python3 scripts/harness/compute_quality_score.py --root .`
 - `python3 scripts/harness/janitor_scan.py --root .`
+- `python3 harness/check_docs.py --strict` and `python3 -m unittest discover -s harness/tests` (the blocking `docs` workflow; a different program from `scripts/harness/check_docs.py`)
+- `make surface-matrix-check`, `make behavior-matrix-check`, `make validate-entitlements` (run with `cargo test` by `rust-tests.yml`)
 
 ### Inferential sensors
 
@@ -74,7 +76,7 @@ Treat these as authoritative for parity-sensitive work:
 - `docs/specs/design-v0.md`
 - `docs/specs/firecracker-feature-parity.md`
 - the mapped GitHub issue or PR discussion and artifacts
-- `.symphony/runs/<ticket>/current/verification.yaml`
+- `.symphony/runs/<ticket>/current/verification.yaml` (gitignored: it is durable only once its contents are attached to the GitHub issue or PR)
 
 Do not mark parity complete from:
 - tracker closure alone,
@@ -125,11 +127,12 @@ Use:
 - `docs/RELIABILITY.md`
 
 Every issue attempt should leave behind:
-- `.symphony/runs/<ticket>/current/verification.yaml`
-- `.symphony/runs/<ticket>/current/notes.md`
+- `.symphony/runs/<ticket>/current/verification.yaml`, `notes.md`, `env.sh`, `git-info.txt`, `git-status.txt` (written by the two helper scripts)
 - `.symphony/runs/<ticket>/results.tsv`
-- `.symphony/runs/<ticket>/current/council/`
-- copied runtime artifacts from `run/` when relevant
+- `.symphony/runs/<ticket>/current/council/` (the directory is created by `init_issue_run.sh`; the council verdict is written by hand)
+- runtime artifacts copied from `run/<ticket>/` by `collect_verification_bundle.sh` when relevant
+
+`.symphony/runs/` is gitignored, so attach or quote the bundle in the GitHub issue or PR.
 
 ## Garbage collection
 
@@ -141,7 +144,7 @@ Run janitor tasks on a cadence:
 - open or record targeted cleanup work.
 
 Use:
-- `scripts/harness/janitor_scan.py`
+- `scripts/harness/janitor_scan.py` (the scheduled `Harness Garbage Collection` run uses `--fail-on never`, so it reports but never blocks)
 - `scripts/harness/compute_quality_score.py`
 - `docs/exec-plans/tech-debt-tracker.md`
 
@@ -193,7 +196,7 @@ After push:
 - `501 Not Implemented` is not parity.
 - State-dependent routes must enforce Firecracker-style preboot and runtime rules.
 - Error responses must stay deterministic and include the pinned baseline revision.
-- Contract tests must fail if a route regresses to reachability-only scaffolding.
+- Contract tests must fail when a route with pinned behavior regresses; matrix staleness is caught by the `validates_repo_generated_*` unit tests under `cargo test` and by `make *-matrix-check`, not by `make contract-test` alone.
 
 ## Success criteria
 

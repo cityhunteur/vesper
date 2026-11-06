@@ -1,7 +1,7 @@
 ---
 status: verified
 owner: cityhunteur
-last_reviewed: 2026-11-05
+last_reviewed: 2026-11-06
 ---
 
 # Observability
@@ -14,7 +14,7 @@ Only capabilities that exist are documented; missing ones are listed under [Gaps
 | Signal | Implemented? | Library / format | Local destination | Production destination |
 |---|---|---|---|---|
 | Structured logs | No | Plain `println!`/`eprintln!` only; no `log` or `tracing` crate in `Cargo.toml` | `run/vesperd.log`, `run/vesper-proxy.log` when started by `make dev-up` | n/a |
-| Metrics | No | `PUT /metrics` stores a `metrics_path` in `AppState` but nothing is ever written to it ([src/api/logger_metrics.rs](../src/api/logger_metrics.rs)) | n/a | n/a |
+| Metrics | No | `PUT /metrics` validates the path by creating the file empty (`create` + `append` open), stores it in `AppState`, and never writes to it ([src/api/logger_metrics.rs](../src/api/logger_metrics.rs)) | n/a | n/a |
 | Traces | No | none | n/a | n/a |
 | Health / readiness | Partial | `GET /` returns instance info and `GET /version` the pinned Firecracker version ([src/api.rs](../src/api.rs)); `vesperd` prints `vesperd listening on <socket>` once bound | the API socket | n/a |
 | Dashboards | No | none | n/a | n/a |
@@ -35,8 +35,8 @@ baseline a response was produced against.
 
 The durable signals this project relies on are artifacts rather than live telemetry:
 
-- `run/systemvm/boot.log` and `run/systemvm/boot-report.json` from `systemvmctl boot-smoke` (per-iteration result,
-  timeout, exit status).
+- `run/systemvm/boot.log` (one `result=` line per iteration) and `run/systemvm/boot-report.json` (`iterations`,
+  `successful`, `failed`, free-text `failures`) from `systemvmctl boot-smoke`.
 - `build/systemvm/image-manifest.json` (SHA-256 digests, stable `image_id`) and `build/systemvm/launch-config.json`.
 - `artifacts/parity-metadata.json` from `baselinectl --mode generate`.
 - JSON and Markdown reports from the Python sensors (`--json-out`, `--markdown-out`), uploaded by the `harness-*`
@@ -61,7 +61,9 @@ The durable signals this project relies on are artifacts rather than live teleme
 ## Gaps
 
 - No structured logging or log levels in any binary (TD-007).
-- `PUT /metrics` and `PUT /logger` only validate and store paths; nothing is emitted to them (TD-007).
+- `PUT /metrics` and `PUT /logger` create the target file and store its path; nothing is ever emitted to it (TD-007).
+- `make dev-up` writes `run/vesper-proxy.log`, but the bundle collector only picks up `run/<ISSUE-ID>/proxy/proxy.log`
+  or `run/proxy/proxy.log`; copy it by hand (TD-011).
 - No per-connection logging in `vesper-proxy`, so forwarding failures are invisible without a packet capture (TD-007).
 - No request or trace identifiers (TD-007).
 - `collect_verification_bundle.sh` expects `run/<ISSUE-ID>/api/requests.log` and `responses.log`, but no code writes

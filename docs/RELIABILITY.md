@@ -1,7 +1,7 @@
 ---
 status: verified
 owner: cityhunteur
-last_reviewed: 2026-11-05
+last_reviewed: 2026-11-06
 ---
 
 # Vesper Reliability and Legibility
@@ -62,7 +62,12 @@ The helper scripts:
 - `scripts/harness/init_issue_run.sh`
 - `scripts/harness/collect_verification_bundle.sh`
 
-exist to keep these directories predictable.
+exist to keep these directories predictable. `init_issue_run.sh` creates `run/<ISSUE-ID>/{api,proxy,systemvm}` and
+`.symphony/runs/<ISSUE-ID>/current/{api,proxy,systemvm,council}`; the collector reads `run/<ISSUE-ID>/proxy/proxy.log`,
+`run/<ISSUE-ID>/api/{requests,responses}.log` and `run/<ISSUE-ID>/systemvm/{boot.log,boot-report.json}`. Nothing writes
+into `run/<ISSUE-ID>/` automatically: `make dev-up` writes `run/vesperd.log` and `run/vesper-proxy.log`, and
+`make systemvm-boot-smoke` writes `run/systemvm/`, so copy artifacts into the issue directory before collecting.
+`.symphony/runs/` is gitignored; a bundle is durable only once its contents are attached to the GitHub issue or PR.
 
 ## Stage-gated reliability expectations
 
@@ -78,7 +83,7 @@ Minimum:
 Minimum:
 - targeted proxy regression,
 - direct forwarding proof,
-- captured connection logs.
+- captured connection logs (from an external capture; `vesper-proxy` logs nothing per connection, TD-007).
 
 ### System VM work
 

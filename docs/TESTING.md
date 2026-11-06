@@ -1,7 +1,7 @@
 ---
 status: verified
 owner: cityhunteur
-last_reviewed: 2026-11-05
+last_reviewed: 2026-11-06
 ---
 
 # Testing
@@ -20,9 +20,9 @@ the broader suite. `cargo test` was run successfully on 2026-11-05.
 | Contract | Yes | `contractgen --mode check`, `tests/api_contract.rs`, generated matrix validation | Rust binaries | `make contract-test`, `make surface-matrix-check`, `make behavior-matrix-check` | nothing |
 | End-to-end | **Not implemented** | design-v0 describes Docker-replacement e2e; no code | n/a | n/a | real System VM images (TD-010) |
 | Performance | **Not implemented** | design-v0 describes regression and perf gates; no code | n/a | n/a | n/a |
-| Security / static analysis | Partial | `scripts/ci/validate-entitlements.sh`, `scripts/harness/check_structure.py` | bash, Python | `make validate-entitlements`, `python3 scripts/harness/check_structure.py --root .` | Python 3 |
+| Security / static analysis | Partial | `scripts/ci/validate-entitlements.sh`, `scripts/harness/check_structure.py` | bash, Python | `make validate-entitlements` (CI: `rust-tests.yml`), `python3 scripts/harness/check_structure.py --root .` | Python 3 |
 | Runtime smoke | Scaffold | `systemvmctl boot-smoke` runs a command N times and writes a report; proves the harness, not a VM boot | Rust | `make systemvm-boot-smoke` | nothing (defaults to `sh -c 'echo boot-ok'`) |
-| Documentation | Yes | `harness/tests/`, `harness/check_docs.py`, `scripts/harness/check_docs.py` | unittest | `python3 harness/check_docs.py`, `python3 -m unittest discover -s harness/tests` | Python 3.11+ |
+| Documentation | Yes | `harness/tests/`, `harness/check_docs.py`, `scripts/harness/check_docs.py` | unittest | `python3 harness/check_docs.py --strict`, `python3 -m unittest discover -s harness/tests`, `python3 scripts/harness/check_docs.py --root .` | Python 3.11+ |
 
 Suite sizes on 2026-11-05: `tests/api_contract.rs` 115 tests, `tests/contract_golden.rs` 1, `src/api/tests.rs` 67,
 plus smaller unit modules in `api_matrix`, `api_behavior_matrix`, `proxy`, `baseline`, `compat`, `spec`, `platform`
@@ -33,7 +33,7 @@ and `systemvm`.
 ```sh
 cargo test --lib api::                         # every test under src/api (module path filter)
 cargo test --test api_contract                 # one integration suite
-cargo test --test api_contract guarded_routes  # tests whose name contains a substring
+cargo test --test api_contract guards          # tests whose name contains a substring (the state-guard suites)
 cargo test proxy::                             # proxy unit tests (tokio)
 cargo test -- --nocapture                      # show stdout from tests
 ```
@@ -46,10 +46,18 @@ make contract-check            # what contract-tests.yml runs first
 make contract-test             # contract-check + the two integration suites
 ```
 
-CI workflows and what each runs: `contract-tests.yml` (golden check, `make contract-test`), `baseline-governance.yml`
-(`cargo test`, metadata generate and validate), `compat-exceptions.yml` (`compatexctl`), `harness-docs.yml`,
-`harness-structure.yml`, `harness-quality-score.yml`, `harness-garbage-collection.yml` (Python sensors), `docs.yml`
-(`harness/check_docs.py` and its unit tests). All of them run on Linux and are practical to reproduce locally.
+CI workflows and what each runs, all on Linux and all reproducible locally:
+
+- `rust-tests.yml` (any `src/**`, `tests/**`, `Cargo.*`, `Makefile`, `third_party/**`, `docs/generated/**`,
+  `docs/specs/*.yaml`, `packaging/**`, `scripts/ci/**` change): `make build`, `cargo test`,
+  `make surface-matrix-check`, `make behavior-matrix-check`, `make validate-entitlements`.
+- `contract-tests.yml` (swagger, `src/spec.rs`, `src/api.rs`, `contractgen`, golden file): golden check, `make contract-test`.
+- `baseline-governance.yml` (lock file, `src/baseline.rs`, `baselinectl`): `cargo test`, metadata generate and validate.
+- `compat-exceptions.yml` (registry, `src/compat.rs`, `compatexctl`): `cargo test`, `compatexctl`; a `workflow_dispatch`
+  input enables the zero-open gate. There is no schedule, so a calendar expiry is caught only on the next run.
+- `harness-docs.yml`, `harness-structure.yml`, `harness-quality-score.yml`: the Python sensors on docs and script changes.
+- `harness-garbage-collection.yml`: weekly janitor scan with `--fail-on never` (non-blocking).
+- `docs.yml` (every PR and push): `harness/check_docs.py --strict` and its unit tests.
 
 ## Fixtures and environments
 

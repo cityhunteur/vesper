@@ -1,7 +1,7 @@
 ---
 status: verified
 owner: cityhunteur
-last_reviewed: 2026-11-05
+last_reviewed: 2026-11-06
 ---
 
 # Architecture
@@ -40,7 +40,7 @@ flowchart LR
   vesperd -. Intended: Backend A .-> sysvm[Linux System VM]
   vesperd -- reads --> spec[third_party/firecracker/firecracker.yaml]
   vesperd -- reads --> lock[docs/specs/design-v0.baselines.lock.yaml]
-  vesperd -- reads --> matrix[docs/generated/*.json]
+  vesperd -- reads --> matrix[docs/generated/firecracker-api-surface-stub-matrix.json]
 ```
 
 ## Components
@@ -59,13 +59,14 @@ All six are discovered by Cargo from `src/bin/*.rs`; see [src/bin/README.md](src
 ## Domain boundaries and dependency rules
 
 **Verified.** The library crate is layered, and the allowed intra-crate references are enforced mechanically by the
-`RULES` allowlist in [scripts/harness/check_structure.py](scripts/harness/check_structure.py).
+`RULES` allowlist in [scripts/harness/check_structure.py](scripts/harness/check_structure.py) for every library module
+except `src/api/tests.rs` (test code, outside the allowlist and the line budgets).
 
 | Layer | Purpose | Modules | May reference |
 |---|---|---|---|
 | 0. Specs and baselines | Pinned upstream contract and parity metadata | `spec`, `baseline`, `compat`, `buildinfo` | nothing local |
 | 1. Platform policy | Host capability and entitlement rules | `platform` | nothing local |
-| 2. Control plane | State machine, dispatch, deterministic errors | `api`, `api/*`, `api_matrix`, `api_behavior_matrix` | `api_matrix`, `baseline`, `buildinfo`, `compat`, `platform`, `spec` |
+| 2. Control plane | State machine, dispatch, deterministic errors | `api`, `api/*`, `api_matrix`, `api_behavior_matrix` | `api`: `api_matrix`, `baseline`, `buildinfo`, `compat`, `platform`, `spec`; `api_matrix`: `api`, `baseline`, `spec`; `api_behavior_matrix`: those plus `api_matrix`; `api/*`: `super` only |
 | 3. Runtime adapters | Socket proxying and System VM artifacts | `proxy`, `systemvm` | `buildinfo`, `platform` |
 | 4. Entry points | `clap` binaries | `src/bin/*` | any library layer |
 | 5. Tests and harness | Contract tests, sensors, docs, Symphony templates | `tests/`, `scripts/harness/`, `harness/`, `docs/`, `.symphony/templates/` | observe only |
@@ -122,7 +123,7 @@ sequenceDiagram
     H->>H: handler applies its own VmState rules
   else other pinned route
     H->>H: validate_state_guard (RouteSemantics from surface stub matrix)
-    H->>H: concrete handler (the matrix_response fallback is unreachable today)
+    H->>H: concrete handler (the matrix_response fallback and a second PATCH /vm arm are unreachable today)
   end
   H-->>C: 204 / JSON body / ErrorEnvelope with baseline revision
 ```
@@ -160,16 +161,22 @@ own the design-v0 phases hold the answer.
 |---|---|---|---|
 | 1 | `vesperd` is the only public control-plane endpoint; raw Firecracker and containerd sockets stay private to the System VM | *Proposed*: review and [docs/SECURITY.md](docs/SECURITY.md); no mechanical check | [src/bin/vesperd.rs](src/bin/vesperd.rs), [src/bin/vesper-proxy.rs](src/bin/vesper-proxy.rs) |
 | 2 | Intra-crate dependency directions follow the layer table above | *Verified*: `RULES` in [scripts/harness/check_structure.py](scripts/harness/check_structure.py), run by `.github/workflows/harness-structure.yml` | `python3 scripts/harness/check_structure.py --root .` |
-| 3 | Every error response is an `ErrorEnvelope` with the pinned baseline revision | *Verified*: `AppState::new_with_matrix` rejects a blank revision; [tests/api_contract.rs](tests/api_contract.rs) asserts envelopes | `make contract-test` |
+| 3 | Every error response is an `ErrorEnvelope` with the pinned baseline revision | *Verified*: `AppState::new_with_matrix` rejects a blank revision; [tests/api_contract.rs](tests/api_contract.rs) asserts envelopes; `cargo test` runs for every `src/**` change in `rust-tests.yml` | `make contract-test` |
 | 4 | The golden route list equals the pinned swagger byte for byte | *Verified*: `contractgen --mode check` and [tests/contract_golden.rs](tests/contract_golden.rs) in `.github/workflows/contract-tests.yml` | `make contract-check` |
-| 5 | Generated surface stub and behavior matrices are complete and fresh | *Verified*: `baselinectl --mode validate-api-matrix` and `validate-api-behavior-matrix` | `make surface-matrix-check`, `make behavior-matrix-check` |
+| 5 | Generated surface stub and behavior matrices are complete and fresh | *Verified*: `baselinectl --mode validate-api-matrix` and `validate-api-behavior-matrix`, run by `.github/workflows/rust-tests.yml`; the `validates_repo_generated_*` unit tests also fail under `cargo test` | `make surface-matrix-check`, `make behavior-matrix-check` |
 | 6 | Compat exceptions carry required fields, and none is open past expiry | *Verified*: `compatexctl` in `.github/workflows/compat-exceptions.yml` | `cargo run --bin compatexctl -- --registry docs/specs/compat-exceptions.yaml` |
 | 7 | Boundary parsing happens at the edges: request bodies, registries, lock file, proxy targets, launch config | *Verified* per module by unit tests; no cross-cutting lint | [src/README.md](src/README.md) invariants |
-| 8 | `src/api.rs` stays under its line budget (warn 2500, error 3200); other modules under 1200 | *Verified*: budgets in `check_structure.py` and [scripts/harness/janitor_scan.py](scripts/harness/janitor_scan.py) | current size is a warning, see tech debt TD-001 |
-| 9 | When started with `--entitlements-file`, `vesperd` refuses to start unless the plist has the virtualization key; without the flag no check runs | *Verified* for that path: `platform::validate_entitlements_file`; `make validate-entitlements` lints the plists (TD-010) | [src/platform.rs](src/platform.rs) |
+| 8 | `src/api.rs` stays under its line budget (warn 2500, error 3200); other library modules under 1200 (`src/api/tests.rs` is not budgeted, TD-015) | *Verified*: budgets in `check_structure.py` and [scripts/harness/janitor_scan.py](scripts/harness/janitor_scan.py) | current size is a warning, see tech debt TD-001 |
+| 9 | When started with `--entitlements-file`, `vesperd` refuses to start unless the plist has the virtualization key; without the flag no check runs | *Verified* for that path: `platform::validate_entitlements_file` (substring match on the key, value not checked); `make validate-entitlements` lints the plists in `rust-tests.yml` | [src/platform.rs](src/platform.rs) |
 | 10 | A reachable route is not parity; `501 Not Implemented` is not parity | *Proposed*: review against the parity matrix; the janitor only warns on routes without explicit handlers | [docs/specs/firecracker-feature-parity.md](docs/specs/firecracker-feature-parity.md) |
 
 Unenforced rows are tracked in the [tech-debt tracker](docs/exec-plans/tech-debt-tracker.md).
+
+## Guardrails for future work
+
+- Add new parity behavior only with matching tests or runtime evidence.
+- Prefer small, testable repo-local abstractions over opaque helper libraries.
+- When a rule is repeated in review, promote it into a doc, a template, a script, or a workflow.
 
 ## Hotspots and decomposition queue
 

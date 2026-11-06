@@ -1,7 +1,7 @@
 ---
 status: verified
 owner: cityhunteur
-last_reviewed: 2026-11-05
+last_reviewed: 2026-11-06
 ---
 
 # References
@@ -14,7 +14,7 @@ in [docs/specs/](../specs/index.md), not here.
 
 | Reference | Covers | Source and version | Retrieved |
 |---|---|---|---|
-| `third_party/firecracker/firecracker.yaml` | Firecracker OpenAPI served by `vesperd` | `firecracker-microvm/firecracker` at the revision pinned in [design-v0.baselines.lock.yaml](../specs/design-v0.baselines.lock.yaml) | lock `updated_at` 2026-03-01 |
+| `third_party/firecracker/firecracker.yaml` | Firecracker OpenAPI loaded by `vesperd` to build its route table and version string | `firecracker-microvm/firecracker` at the revision pinned in [design-v0.baselines.lock.yaml](../specs/design-v0.baselines.lock.yaml) | lock `updated_at` 2026-03-01 |
 | [design-v0.md § Normative baselines](../specs/design-v0.md#normative-baselines-pinned) | Which upstream documents parity claims cite (Firecracker, containerd, Apple Containerization) | lock file | 2026-03-01 |
 
 No condensed library docs are kept yet; add one here when an agent repeatedly gets a dependency wrong.

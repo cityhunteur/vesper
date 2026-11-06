@@ -1,7 +1,7 @@
 ---
 status: verified
 owner: cityhunteur
-last_reviewed: 2026-11-05
+last_reviewed: 2026-11-06
 ---
 
 # Core beliefs
@@ -47,8 +47,8 @@ and the verification manifest template.
 
 ### Enforce invariants, not implementations
 
-**Verified.** Dependency direction and size budgets are checked mechanically; how each module is written is not
-prescribed. *Enforced by:* the `RULES` allowlist and budgets in `scripts/harness/check_structure.py`
+**Verified.** Dependency direction and size budgets are checked mechanically for every library module except
+`src/api/tests.rs` (TD-015); how each module is written is not prescribed. *Enforced by:* the `RULES` allowlist and budgets in `scripts/harness/check_structure.py`
 ([ARCHITECTURE.md](../../ARCHITECTURE.md#invariants)).
 
 ### Parse at the boundary
@@ -61,7 +61,8 @@ parsed into typed shapes at the edge (`serde` structs, `proxy::parse_target`, `b
 
 **Verified.** The crate depends on axum, clap, serde, tokio and a few utility crates; harness tooling is Python
 standard library only. A tiny repo-local abstraction is preferred over an opaque helper package.
-*Enforced by:* dependency review per [SECURITY.md](../SECURITY.md); new runtime dependencies need a human.
+*Enforced by:* the "ask a human first" list in [AGENTS.md](../../AGENTS.md) (new runtime dependencies); there is no
+automated dependency review.
 
 ### When the agent struggles, upgrade the harness
 
@@ -71,8 +72,9 @@ standard library only. A tiny repo-local abstraction is preferred over an opaque
 
 ### Human taste should compound
 
-**Verified.** Repeated review comments belong in docs, templates, scripts or workflows. *Enforced by:* the council
-rubric and the "promote repeated feedback" rule in [ARCHITECTURE.md](../../ARCHITECTURE.md).
+**Verified.** Repeated review comments belong in docs, templates, scripts or workflows. *Enforced by:* the
+[guardrails in ARCHITECTURE.md](../../ARCHITECTURE.md#guardrails-for-future-work) and the missing-capability protocol
+in [harness-engineering.md](../process/harness-engineering.md).
 
 ### Continuous garbage collection beats debt clean-up marathons
 
