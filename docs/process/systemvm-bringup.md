@@ -198,6 +198,24 @@ snapshots again, and assembles `run/systemvm/reliability-report.json` with
 `{step, reason, evidence}`; `passed` is true only when every section is ok and nothing leaked. The transcript is in
 `run/systemvm/reliability.log`. The assembler's `--self-test` runs in CI; the suite itself needs Apple silicon.
 
+## Backend A: Firecracker microVMs inside the System VM (GH #18)
+
+The packages lock's `archives` section pins the Firecracker v1.16.0 aarch64 release (the first release that contains
+the baseline revision `083c4cf6…` of `docs/specs/design-v0.baselines.lock.yaml`); `make systemvm-overlay` places
+`firecracker` and `jailer` under `/var/lib/vesper/firecracker/` in the guest. `vesper-microvm` (overlay,
+`usr/local/bin`) manages jailed microVMs: `prepare` unpacks the ISO's zboot kernel into a raw Image and builds a
+busybox initramfs whose init prints `VESPER-MICROVM-OK` (and powers off when the command line has `vesper_exit=1`);
+`launch ID [--exit]` copies kernel and initramfs into `/srv/jailer/firecracker/ID/root`, writes a single-file
+Firecracker config (1 vCPU, 128 MiB, no drives, `console=ttyS0 reboot=k panic=1 pci=off`) and starts
+`jailer --id ID --exec-file … --uid 10000 --gid 10000 --chroot-base-dir /srv/jailer --cgroup-version 2 --cgroup
+pids.max=256 --cgroup memory.max=268435456 -- --config-file /vm.json --api-sock /run/firecracker.socket`, waiting
+for the marker; `isolation ID` reports uid, jail contents, mount namespace, cgroup path and seccomp mode from
+`/proc/<pid>`; `stop`, `crash` (SIGKILL), `cleanup` (kill, remove jail and cgroup, report `CLEAN` or `DIRTY <kind>`),
+`status`, `log`. From the host, `cargo run --bin systemvmctl -- control microvm <args>` runs any of these and
+`make systemvm-microvm-suite` runs the GH #18 checklist (13 steps) and writes `run/systemvm/microvm-report.json`.
+On 2026-11-06 (M3 Pro): launch to marker in about 1.5 s, all isolation checks true, cleanup clean after stop,
+SIGKILL and guest power-off.
+
 ## Proxy bridge convention
 
 Phase 0 keeps the proxy-side vsock bridge inspectable by resolving

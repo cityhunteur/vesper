@@ -1,0 +1,164 @@
+#!/bin/sh
+# Vesper microVM manager (GH #18): stock Firecracker under the jailer inside the System VM.
+# usage: vesper-microvm prepare
+#        vesper-microvm launch ID [--exit]   boot a microVM (kernel + busybox initramfs); --exit powers off after the marker
+#        vesper-microvm status ID            RUNNING ID pid=N | EXITED ID | ABSENT ID
+#        vesper-microvm isolation ID         JSON with uid, chroot, cgroup and seccomp checks
+#        vesper-microvm stop ID              SIGTERM, wait up to 10 s
+#        vesper-microvm crash ID             SIGKILL (abnormal termination)
+#        vesper-microvm cleanup ID           kill, remove chroot, cgroup and pid file; CLEAN ID or DIRTY ID <what>
+#        vesper-microvm log ID [N]           last N lines of the serial console log
+set -u
+FC_DIR=/var/lib/vesper/firecracker
+MVM=/var/lib/vesper/microvm
+JAIL=/srv/jailer
+JUID=10000
+JGID=10000
+MARKER="VESPER-MICROVM-OK"
+
+# The jailer execs the binary by its chroot-relative name, so match on "firecracker --id <ID> ".
+fcpid() { pgrep -f "firecracker --id $1 " 2>/dev/null | head -1; }
+now_ms() { awk '{printf "%d", $1 * 1000}' /proc/uptime; }
+logfile() { echo "/var/log/vesper-microvm-$1.log"; }
+
+prepare() {
+  mkdir -p "$MVM"
+  if [ ! -f "$MVM/Image" ]; then
+    # The ISO kernel is an EFI zboot PE: gzip payload at the offset/size stored at bytes 8..16.
+    k=/media/vda/boot/vmlinuz-virt
+    [ -f "$k" ] || { echo "ERR kernel $k missing"; return 1; }
+    off=$(od -A n -t u4 -j 8 -N 4 "$k" | tr -d ' ')
+    size=$(od -A n -t u4 -j 12 -N 4 "$k" | tr -d ' ')
+    tail -c "+$((off + 1))" "$k" | head -c "$size" | gunzip -c > "$MVM/Image.tmp" || { echo "ERR kernel unpack failed"; return 1; }
+    mv "$MVM/Image.tmp" "$MVM/Image"
+  fi
+  if [ ! -f "$MVM/initrd.gz" ]; then
+    rm -rf "$MVM/initroot"
+    mkdir -p "$MVM/initroot/bin" "$MVM/initroot/lib" "$MVM/initroot/dev" "$MVM/initroot/proc" "$MVM/initroot/sys"
+    cp /bin/busybox "$MVM/initroot/bin/busybox"
+    cp /lib/ld-musl-aarch64.so.1 "$MVM/initroot/lib/ld-musl-aarch64.so.1"
+    ln -s busybox "$MVM/initroot/bin/sh"
+    cat > "$MVM/initroot/init" <<'INIT'
+#!/bin/sh
+/bin/busybox mount -t proc proc /proc 2>/dev/null
+/bin/busybox mount -t sysfs sysfs /sys 2>/dev/null
+echo "VESPER-MICROVM-OK"
+if /bin/busybox grep -q vesper_exit=1 /proc/cmdline; then
+  /bin/busybox poweroff -f
+fi
+exec /bin/busybox sleep 86400
+INIT
+    chmod +x "$MVM/initroot/init"
+    (cd "$MVM/initroot" && find . | cpio -o -H newc 2>/dev/null | gzip -c > "$MVM/initrd.gz") || { echo "ERR initramfs build failed"; return 1; }
+  fi
+  echo "PREPARED kernel=$(stat -c %s "$MVM/Image") initrd=$(stat -c %s "$MVM/initrd.gz") firecracker=$("$FC_DIR/firecracker" --version 2>/dev/null | head -1)"
+}
+
+launch() {
+  id=$1; mode=${2:-}
+  [ -f "$MVM/Image" ] && [ -f "$MVM/initrd.gz" ] || prepare >/dev/null || return 1
+  if [ -n "$(fcpid "$id")" ]; then echo "ERR $id already running"; return 1; fi
+  root="$JAIL/firecracker/$id/root"
+  rm -rf "$JAIL/firecracker/$id"
+  mkdir -p "$root"
+  cp "$MVM/Image" "$root/Image"
+  cp "$MVM/initrd.gz" "$root/initrd.gz"
+  extra=""
+  [ "$mode" = "--exit" ] && extra=" vesper_exit=1"
+  printf '{"boot-source":{"kernel_image_path":"/Image","initrd_path":"/initrd.gz","boot_args":"console=ttyS0 reboot=k panic=1 pci=off rdinit=/init%s"},"drives":[],"machine-config":{"vcpu_count":1,"mem_size_mib":128}}\n' "$extra" > "$root/vm.json"
+  chown -R "$JUID:$JGID" "$JAIL/firecracker/$id"
+  lf=$(logfile "$id")
+  : > "$lf"
+  start=$(now_ms)
+  setsid "$FC_DIR/jailer" --id "$id" --exec-file "$FC_DIR/firecracker" --uid "$JUID" --gid "$JGID" \
+    --chroot-base-dir "$JAIL" --cgroup-version 2 --cgroup pids.max=256 --cgroup memory.max=268435456 \
+    -- --config-file /vm.json --api-sock /run/firecracker.socket \
+    > "$lf" 2>&1 < /dev/null &
+  for _ in $(seq 1 120); do
+    grep -q "$MARKER" "$lf" && break
+    sleep 0.25
+  done
+  if grep -q "$MARKER" "$lf"; then
+    end=$(now_ms)
+    echo "LAUNCHED $id pid=$(fcpid "$id") boot_ms=$((end - start))"
+  else
+    echo "FAILED $id"
+    tail -n 8 "$lf"
+    return 1
+  fi
+}
+
+status() {
+  id=$1; pid=$(fcpid "$id")
+  if [ -n "$pid" ]; then echo "RUNNING $id pid=$pid"
+  elif [ -f "$(logfile "$id")" ]; then echo "EXITED $id"
+  else echo "ABSENT $id"; fi
+}
+
+isolation() {
+  id=$1; pid=$(fcpid "$id")
+  [ -n "$pid" ] || { echo "ERR $id not running"; return 1; }
+  uid=$(awk '/^Uid:/{print $2}' "/proc/$pid/status")
+  # The jailer pivot_roots into the chroot in its own mount namespace, so /proc/<pid>/root reads "/";
+  # judge the jail by its contents and by the mount namespace.
+  root=$(readlink "/proc/$pid/root")
+  cg=$(sed -n 's/^0::\(.*\)$/\1/p' "/proc/$pid/cgroup")
+  sec=$(awk '/^Seccomp:/{print $2}' "/proc/$pid/status")
+  uid_ok=false; [ "$uid" = "$JUID" ] && uid_ok=true
+  chroot_ok=false
+  if [ -e "/proc/$pid/root/vm.json" ] && [ ! -e "/proc/$pid/root/etc/alpine-release" ] \
+     && [ "$(readlink "/proc/$pid/ns/mnt")" != "$(readlink /proc/1/ns/mnt)" ]; then chroot_ok=true; fi
+  cg_ok=false; case "$cg" in */firecracker/"$id"*) cg_ok=true;; esac
+  sec_ok=false; [ "$sec" = "2" ] && sec_ok=true
+  jail_files=$(ls "/proc/$pid/root" 2>/dev/null | tr '\n' ' ')
+  printf '{"id":"%s","pid":%s,"uid":%s,"root":"%s","jail_files":"%s","cgroup":"%s","seccomp_mode":%s,"uid_ok":%s,"chroot_ok":%s,"cgroup_ok":%s,"seccomp_ok":%s}\n' \
+    "$id" "$pid" "$uid" "$root" "$jail_files" "$cg" "${sec:-0}" "$uid_ok" "$chroot_ok" "$cg_ok" "$sec_ok"
+}
+
+stop() {
+  id=$1; pid=$(fcpid "$id")
+  [ -n "$pid" ] || { echo "STOPPED $id (not running)"; return 0; }
+  kill -TERM "$pid" 2>/dev/null
+  for _ in $(seq 1 40); do kill -0 "$pid" 2>/dev/null || { echo "STOPPED $id"; return 0; }; sleep 0.25; done
+  kill -KILL "$pid" 2>/dev/null; sleep 0.5
+  echo "STOPPED $id (killed after timeout)"
+}
+
+crash() {
+  id=$1; pid=$(fcpid "$id")
+  [ -n "$pid" ] || { echo "ERR $id not running"; return 1; }
+  kill -KILL "$pid" 2>/dev/null
+  for _ in $(seq 1 20); do kill -0 "$pid" 2>/dev/null || break; sleep 0.25; done
+  echo "CRASHED $id pid=$pid"
+}
+
+cleanup() {
+  id=$1; pid=$(fcpid "$id")
+  [ -n "$pid" ] && { kill -KILL "$pid" 2>/dev/null; sleep 0.5; }
+  rm -rf "$JAIL/firecracker/$id"
+  for cg in "/sys/fs/cgroup/firecracker/$id" "/sys/fs/cgroup/$id"; do
+    [ -d "$cg" ] && rmdir "$cg" 2>/dev/null
+  done
+  dirty=""
+  [ -n "$(fcpid "$id")" ] && dirty="$dirty process"
+  [ -e "$JAIL/firecracker/$id" ] && dirty="$dirty chroot"
+  [ -d "/sys/fs/cgroup/firecracker/$id" ] && dirty="$dirty cgroup"
+  grep -q "/firecracker/$id/" /proc/mounts 2>/dev/null && dirty="$dirty mount"
+  find /run -name "*$id*" -type s 2>/dev/null | grep -q . && dirty="$dirty socket"
+  if [ -z "$dirty" ]; then echo "CLEAN $id"; else echo "DIRTY $id$dirty"; return 1; fi
+}
+
+mlog() { id=$1; n=${2:-20}; lf=$(logfile "$id"); [ -f "$lf" ] && tail -n "$n" "$lf" || echo "ERR no log for $id"; }
+
+cmd=${1:-}; shift 2>/dev/null
+case "$cmd" in
+  prepare) prepare ;;
+  launch) launch "$@" ;;
+  status) status "$@" ;;
+  isolation) isolation "$@" ;;
+  stop) stop "$@" ;;
+  crash) crash "$@" ;;
+  cleanup) cleanup "$@" ;;
+  log) mlog "$@" ;;
+  *) echo "ERR usage: vesper-microvm prepare|launch|status|isolation|stop|crash|cleanup|log"; exit 2 ;;
+esac

@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
 
-pub const PACKAGES_LOCK_SCHEMA_VERSION: u32 = 1;
+pub const PACKAGES_LOCK_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -17,6 +17,43 @@ pub struct PackagesLock {
     /// The top-level packages that were requested; the closure is `packages`.
     pub requested: Vec<String>,
     pub packages: Vec<Package>,
+    /// Binary archives (not apks) whose members are placed into the overlay at `guest_path`.
+    #[serde(default)]
+    pub archives: Vec<Archive>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Archive {
+    pub name: String,
+    pub version: String,
+    pub url: String,
+    pub sha256: String,
+    pub size_bytes: u64,
+    pub members: Vec<ArchiveMember>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ArchiveMember {
+    /// Path inside the archive.
+    pub member: String,
+    /// Absolute path inside the guest.
+    pub guest_path: String,
+    pub sha256: String,
+    /// Octal file mode as a string, for example "0755".
+    pub mode: String,
+}
+
+impl ArchiveMember {
+    /// File name under `cache/archives/<archive>/` after extraction.
+    pub fn file_name(&self) -> Result<&str, String> {
+        Path::new(&self.member)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .filter(|n| !n.is_empty())
+            .ok_or_else(|| format!("archive member {:?} has no file name", self.member))
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -81,7 +118,63 @@ pub fn validate_packages_lock(lock: &PackagesLock) -> Result<(), String> {
             return Err(format!("package {} needs a non-zero size and a repo", package.name));
         }
     }
+    let mut names = std::collections::HashSet::new();
+    for archive in &lock.archives {
+        if archive.name.trim().is_empty() || !names.insert(archive.name.as_str()) {
+            return Err("archive names must be non-blank and unique".to_string());
+        }
+        if !archive.url.starts_with("https://") || !is_sha256_hex(&archive.sha256) || archive.size_bytes == 0 {
+            return Err(format!("archive {} needs an https url, a sha256 and a size", archive.name));
+        }
+        if archive.members.is_empty() {
+            return Err(format!("archive {} has no members", archive.name));
+        }
+        for member in &archive.members {
+            member.file_name()?;
+            if !member.guest_path.starts_with('/') || member.guest_path.ends_with('/') {
+                return Err(format!("archive member {} guest_path must be an absolute file path", member.member));
+            }
+            if !is_sha256_hex(&member.sha256) {
+                return Err(format!("archive member {} sha256 must be 64 lowercase hex characters", member.member));
+            }
+            if u32::from_str_radix(&member.mode, 8).is_err() {
+                return Err(format!("archive member {} mode must be octal", member.member));
+            }
+        }
+    }
     Ok(())
+}
+
+/// `name<TAB>url<TAB>sha256<TAB>member<TAB>file<TAB>member_sha256<TAB>guest_path<TAB>mode` per member,
+/// for `scripts/systemvm/fetch-packages.sh` and `build-overlay.sh`.
+pub fn archive_list(lock: &PackagesLock) -> Result<String, String> {
+    let mut out = String::new();
+    for archive in &lock.archives {
+        for member in &archive.members {
+            out.push_str(&format!(
+                "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
+                archive.name, archive.url, archive.sha256, member.member, member.file_name()?, member.sha256, member.guest_path, member.mode
+            ));
+        }
+    }
+    Ok(out)
+}
+
+/// Checks that every extracted archive member exists under `dir/<archive>/` with its pinned digest.
+pub fn verify_archives(lock: &PackagesLock, dir: impl AsRef<Path>) -> Result<usize, String> {
+    let dir = dir.as_ref();
+    let mut count = 0;
+    for archive in &lock.archives {
+        for member in &archive.members {
+            let path = dir.join(&archive.name).join(member.file_name()?);
+            if !path.is_file() {
+                return Err(format!("archive member {} is missing; run `make systemvm-overlay`", path.display()));
+            }
+            check_digest(&format!("archive {} member {}", archive.name, member.member), &path, &member.sha256)?;
+            count += 1;
+        }
+    }
+    Ok(count)
 }
 
 /// `file<TAB>url<TAB>sha256` per package, for `scripts/systemvm/fetch-packages.sh`.
@@ -120,9 +213,15 @@ mod tests {
     fn validates_repo_packages_lock() {
         let lock = load_packages_lock(REPO_LOCK).unwrap();
         assert_eq!(lock.arch, "aarch64");
-        for name in ["socat", "containerd", "docker-engine", "docker-cli", "runc"] {
+        for name in ["socat", "containerd", "docker-engine", "docker-cli", "runc", "e2fsprogs"] {
             assert!(lock.packages.iter().any(|p| p.name == name), "missing {name}");
         }
+        let fc = lock.archives.iter().find(|a| a.name == "firecracker").expect("firecracker archive");
+        assert_eq!(fc.version, "v1.16.0");
+        assert!(fc.members.iter().any(|m| m.guest_path == "/var/lib/vesper/firecracker/jailer"));
+        let list = archive_list(&lock).unwrap();
+        assert_eq!(list.lines().count(), 2);
+        assert!(list.contains("\tfirecracker-v1.16.0-aarch64\t"));
         let list = packages_list(&lock);
         assert_eq!(list.lines().count(), lock.packages.len());
         assert!(list.contains("\thttps://dl-cdn.alpinelinux.org/"));
@@ -141,6 +240,13 @@ mod tests {
         let mut lock = load_packages_lock(REPO_LOCK).unwrap();
         lock.requested.push("not-pinned".to_string());
         assert!(validate_packages_lock(&lock).unwrap_err().contains("not in the pinned closure"));
+
+        let mut lock = load_packages_lock(REPO_LOCK).unwrap();
+        lock.archives[0].members[0].guest_path = "relative/path".to_string();
+        assert!(validate_packages_lock(&lock).unwrap_err().contains("absolute file path"));
+        let mut lock = load_packages_lock(REPO_LOCK).unwrap();
+        lock.archives[0].members[0].mode = "rwx".to_string();
+        assert!(validate_packages_lock(&lock).unwrap_err().contains("octal"));
     }
 
     #[test]
@@ -155,5 +261,18 @@ mod tests {
         assert!(verify_packages(&lock, dir.path()).unwrap_err().contains("does not match pinned"));
         lock.packages[0].sha256 = super::super::digest_file(&path.display().to_string()).unwrap();
         assert_eq!(verify_packages(&lock, dir.path()).unwrap(), 1);
+
+        let adir = tempdir().unwrap();
+        assert!(verify_archives(&lock, adir.path()).unwrap_err().contains("missing"));
+        let member_dir = adir.path().join("firecracker");
+        fs::create_dir_all(&member_dir).unwrap();
+        for m in &lock.archives[0].members {
+            fs::write(member_dir.join(m.file_name().unwrap()), m.member.as_bytes()).unwrap();
+        }
+        assert!(verify_archives(&lock, adir.path()).unwrap_err().contains("does not match pinned"));
+        for m in lock.archives[0].members.iter_mut() {
+            m.sha256 = super::super::digest_file(&member_dir.join(m.file_name().unwrap()).display().to_string()).unwrap();
+        }
+        assert_eq!(verify_archives(&lock, adir.path()).unwrap(), 2);
     }
 }
