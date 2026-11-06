@@ -1,7 +1,7 @@
 ---
 status: verified
 owner: cityhunteur
-last_reviewed: 2026-11-05
+last_reviewed: 2026-11-06
 ---
 
 # Specifications and baselines
@@ -17,7 +17,9 @@ Markdown documents as the authoritative design and parity references; the YAML f
 | [compat-exceptions.yaml](compat-exceptions.yaml) | Registry of allowed behaviour deviations before GA | `compatexctl` (`src/compat.rs`) |
 | [firecracker-api-baseline-captures.yaml](firecracker-api-baseline-captures.yaml) | Upstream evidence for matrix-backed placeholder routes | `baselinectl` (`src/api_matrix.rs`) |
 | [firecracker-api-behavior-captures.yaml](firecracker-api-behavior-captures.yaml) | Upstream evidence for route-level status and error behaviour | `baselinectl` (`src/api_behavior_matrix.rs`) |
+| [systemvm-image.lock.yaml](systemvm-image.lock.yaml) | Pinned System VM boot image (Alpine netboot kernel and initramfs): archive URL, SHA-256 digests, expected `image_id` | `systemvmctl lock-env` / `verify-image` (`src/systemvm.rs`), `scripts/systemvm/fetch-image.sh`, `systemvm-image.yml` |
 | `assets/` | Mermaid sources and PNG renders of the design-v0 component and lifecycle diagrams | design-v0.md |
 
-Changing any YAML file follows [baseline-governance.md](../process/baseline-governance.md) or
-[compat-exceptions.md](../process/compat-exceptions.md).
+Changing any YAML file follows [baseline-governance.md](../process/baseline-governance.md),
+[compat-exceptions.md](../process/compat-exceptions.md) or, for the image lock,
+[systemvm-bringup.md](../process/systemvm-bringup.md).

@@ -51,14 +51,19 @@ errors to stderr and exits with code 1 on failure.
   (default `testdata/contracts/firecracker-routes.golden.json`). Calls
   `vesper::spec::load_routes`.
 - `systemvmctl.rs:main` (binary `systemvmctl`). Subcommands (`Commands`):
-  `build` (`--kernel`, `--rootfs`, `--out` default
-  `build/systemvm/image-manifest.json`), `launch-config` (`--kernel`,
-  `--rootfs`, `--console-log` default `run/systemvm/console.log`, `--out`
-  default `build/systemvm/launch-config.json`), `boot-smoke` (`--iterations` 5,
+  `build` (`--kernel`, optional `--rootfs` and `--initrd`, `--out` default
+  `build/systemvm/image-manifest.json`), `launch-config` (`--kernel`, optional
+  `--rootfs` and `--initrd`, `--console-log` default
+  `run/systemvm/console.log`, `--out` default
+  `build/systemvm/launch-config.json`), `lock-env` (`--lock` default
+  `docs/specs/systemvm-image.lock.yaml`; prints `KEY='VALUE'` lines),
+  `verify-image` (`--lock`, `--dir` default `build/systemvm`, `--out` default
+  `build/systemvm/image-manifest.json`), `boot-smoke` (`--iterations` 5,
   `--timeout-seconds` 20, `--command` `sh`, `--args` `-c,echo boot-ok`,
   `--log` default `run/systemvm/boot.log`, `--report` default
   `run/systemvm/boot-report.json`). Calls `vesper::systemvm::{build_manifest,
-  write_manifest, default_launch_config, write_launch_config, run_boot_check}`.
+  write_manifest, default_launch_config, write_launch_config, load_image_lock,
+  image_lock_env, verify_image, run_boot_check}`.
 
 Subdirectories: none.
 
@@ -79,7 +84,10 @@ Subdirectories: none.
 - `contractgen.rs:run`: `--mode` must be `generate` or `check`; in `check`
   mode the golden file must equal the serialized routes byte for byte.
 - `systemvmctl.rs:Commands`: exactly one subcommand is required; `--kernel`
-  and `--rootfs` are required for `build` and `launch-config`.
+  is required for `build` and `launch-config`, and the library rejects a
+  call with neither `--rootfs` nor `--initrd`. `verify-image` exits non-zero
+  on a missing artifact, a digest mismatch, or an `image_id` that differs
+  from the lock's `expected_image_id`.
 - `vesper-proxy.rs:main`: dial timeout is clamped to at least 1 second.
 - `vesperd.rs:run`: when `--entitlements-file` is given it is validated first
   and must contain `com.apple.security.virtualization` (no check without the
@@ -101,9 +109,11 @@ Subdirectories: none.
 - `compatexctl.rs:run` reads the registry YAML and the system clock when
   `--today` is absent.
 - `contractgen.rs:run` reads the swagger file and writes or reads `--out`.
-- `systemvmctl.rs` writes the image manifest and launch config to `--out`;
+- `systemvmctl.rs` writes the image manifest and launch config to `--out`
+  (`verify-image` also writes the manifest); `lock-env` only prints;
   `boot-smoke` delegates process spawning and log/report writes to
-  `vesper::systemvm::run_boot_check`.
+  `vesper::systemvm::run_boot_check`. No subcommand performs network access;
+  downloading is done by `scripts/systemvm/fetch-image.sh`.
 - All binaries except `vesper-proxy` print a success line to stdout; every
   binary prints the error string to stderr.
 

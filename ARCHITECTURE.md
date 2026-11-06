@@ -165,8 +165,9 @@ control-plane modules.
   `--entitlements-file` is given; both plists are linted by `scripts/ci/validate-entitlements.sh` (syntax lint on macOS,
   required-key check on Linux CI, TD-010).
 - `testdata/contracts/`: golden route list written by `contractgen`.
-- `assets/systemvm/`: kernel and rootfs inputs for `systemvmctl`. The checked-in files are placeholders, not bootable
-  images (`wc -c assets/systemvm/vmlinux assets/systemvm/rootfs.ext4` prints 47 bytes each).
+- `docs/specs/systemvm-image.lock.yaml`: the pinned System VM boot image (Alpine netboot kernel and initramfs,
+  archive URL and SHA-256 digests, expected `image_id`). `make systemvm-fetch` downloads it into `build/systemvm/`
+  (gitignored) and `systemvmctl verify-image` checks the digests; nothing boots it yet (TD-005).
 - `.symphony/templates/`: templates for Symphony (see [Terms](#terms)):
   `verification-manifest-template.yaml` (used by WORKFLOW.md), `symphony-milestones-template.md` and
   `milestone-report-template.md` (used by [docs/progress/index.md](docs/progress/index.md)), and `council-rubric.md`
@@ -241,6 +242,7 @@ artefacts in step with the pinned baseline ([docs/process/baseline-governance.md
 | Behavior capture registry | `docs/specs/firecracker-api-behavior-captures.yaml` | Upstream evidence that feeds the behavior matrix | `baselinectl` |
 | Baseline capture registry | `docs/specs/firecracker-api-baseline-captures.yaml` | Empty placeholder (`captures: []`) kept for a code path that `route_uses_matrix_backed_placeholder` currently disables (it always returns `false`); generation requires it to stay empty ([src/README.md](src/README.md)) | `baselinectl` |
 | Compat registry | `docs/specs/compat-exceptions.yaml` | Allowed behaviour deviations before GA | `compatexctl` |
+| System VM image lock | `docs/specs/systemvm-image.lock.yaml` | Pinned upstream boot image: archive URL, SHA-256 of archive, kernel and initramfs, expected `image_id` | `systemvmctl lock-env` and `verify-image` (`src/systemvm.rs`), `scripts/systemvm/fetch-image.sh`, `validates_repo_image_lock` unit test, `systemvm-image.yml` |
 | Parity metadata | `artifacts/parity-metadata.json` (not committed) | Backend, host and baseline revision stamp for a parity claim | `baselinectl --mode validate` |
 
 ## Deployment topology
@@ -251,8 +253,9 @@ its upstream set to `vesperd`'s socket, so `run/docker.sock` is a second path to
 `--entitlements-file packaging/macos/vesperd.entitlements`, so the entitlement check runs and the plist must exist.
 `vesper-proxy` sets no mode on its listener (TD-017) and handles Ctrl-C only (TD-021;
 [scripts/macos/README.md](scripts/macos/README.md)). Entitlement
-plists live in `packaging/macos/`. No installer, launchd or packaging manifests exist; `systemvmctl` writes an image
-manifest and launch config, but the checked-in kernel and rootfs are placeholders, so nothing boots (TD-005, TD-010).
+plists live in `packaging/macos/`. No installer, launchd or packaging manifests exist; `systemvmctl` fetches and
+verifies a pinned kernel and initramfs and writes an image manifest and launch config, but no launcher boots them
+(TD-005).
 
 **Intended:** design-v0 describes a packaged macOS host process plus a Linux System VM running containerd and
 Firecracker.
