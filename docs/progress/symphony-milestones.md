@@ -6,6 +6,19 @@ last_reviewed: 2026-11-05
 
 # Symphony milestones
 
+### 2026-11-06 — WOR-26 — Backend A parity and performance baseline, GH #21 (conformance subset; upstream suite under CE-0001)
+- GitHub issue: #21 (mirror #63, left open pending approval of the compat exceptions)
+- PR: #131
+- Commit: `c50effa` (squash merge of PR #131; remote CI green, eight workflows incl. the new Parity Baseline)
+- Phase: 2
+- Parity unit: `vesper-fcparity` conformance (19 checks against the stock v1.16.0 Firecracker in a jailed microVM) and perf (two runs of 20 cycles, boot p50 1510/1520 ms, drift 0.7 %), assembled with the lock revisions, parity metadata and compat summary into a capture CI validates and publishes
+- Result: keep
+- Verification bundle: `.symphony/runs/WOR-26/current/` (evidence in `run/WOR-26/systemvm/`, incl. `parity-baseline-report.json`)
+- Council summary: skipped; no control-plane path changed; CI green
+- Harness update: `vesper-fcparity`; agent `FCPARITY`; `run_parity_suite`; `parity-baseline.sh` + `parity_baseline_report.py`; `make systemvm-parity-baseline` / `parity-baseline-check`; `parity-baseline.yml`; CE-0001..CE-0003; microVM memory cap 640 MiB; TD-033
+- Remaining risks: the upstream pytest suite is not run (CE-0001); release binary vs pinned commit (CE-0002, TD-029); no Linux same-host baseline (CE-0003); sequential-only perf, no overhead or I/O numbers (TD-033); the exceptions await a human's approval
+- Truthful project state after this milestone: Backend A has a reproducible, CI-validated parity and performance capture against stock Firecracker; the Phase 2 exit bar ("upstream suite with no exclusions") is not met and is tracked as CE-0001; Phase 2 epic WOR-14 (#4) stays open on that item
+
 ### 2026-11-06 — WOR-30 — MicroVM-per-container workload lifecycle, GH #20 complete
 - GitHub issue: #20 (mirror #69)
 - PR: #130

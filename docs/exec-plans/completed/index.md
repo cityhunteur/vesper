@@ -4,6 +4,7 @@ Finished plans. Keep them: their Decision Logs and retrospectives explain why th
 
 | Plan | Outcome | Completed |
 |---|---|---|
+| [2026-11-06-WOR-26-parity-baseline.md](2026-11-06-WOR-26-parity-baseline.md) | Backend A parity and performance baseline: 19 Firecracker API conformance checks, two comparable perf runs, compat exceptions CE-0001..CE-0003, CI-validated capture (GH #21; upstream pytest suite still open under CE-0001) | 2026-11-06 |
 | [2026-11-06-WOR-30-microvm-per-container.md](2026-11-06-WOR-30-microvm-per-container.md) | MicroVM-per-container workload lifecycle: concurrent jailed microVMs with private rootfs copies, isolation, stop teardown, exit mapping (GH #20 closed) | 2026-11-06 |
 | [2026-11-06-WOR-28-oci-rootfs-pipeline.md](2026-11-06-WOR-28-oci-rootfs-pipeline.md) | Byte-reproducible OCI image to ext4 rootfs with embedded provenance and a digest-verified cache, booted in a jailed microVM (GH #19 closed) | 2026-11-06 |
 | [2026-11-06-WOR-31-firecracker-lifecycle.md](2026-11-06-WOR-31-firecracker-lifecycle.md) | Stock Firecracker v1.16.0 under the jailer on nested KVM inside the System VM: launch, isolation, stop, crash cleanup and guest power-off proven (GH #18 closed) | 2026-11-06 |

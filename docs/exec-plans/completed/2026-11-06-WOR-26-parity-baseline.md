@@ -30,7 +30,7 @@ binary, the missing Linux comparison) are registered as compat exceptions CE-000
   Baseline` workflow; compat exceptions CE-0001..CE-0003; microVM cgroup memory cap raised to 640 MiB.
   Capture on an M3 Pro: conformance 19/19; boot p50 1510/1520 ms, p95 1520 ms, 38.8/38.6 creates per minute over
   two runs of 20, drift 0.7 %.
-- [ ] PR merged, CI green, GH #21 checklist and WOR-26 updated, milestone entry; plan moved to completed.
+- [x] (2026-11-06 22:05Z) PR #131 merged as `c50effa`, CI green (eight workflows incl. Parity Baseline), GH #21 checklist items 2-4 ticked (item 1, the upstream pytest suite, stays open under CE-0001), WOR-26 in review pending human approval of CE-0001..CE-0003, milestone entry; plan moved to completed.
 
 ## Surprises & Discoveries
 
