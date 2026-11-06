@@ -13,6 +13,7 @@
 #   MICROVM <args...>     -> MICROVM <rc> <count> then <count> output lines of `vesper-microvm <args>`
 #   ROOTFS <args...>      -> ROOTFS <rc> <count> then <count> output lines of `vesper-rootfs <args>`
 #   WORKLOAD <args...>    -> WORKLOAD <rc> <count> then <count> output lines of `vesper-workload <args>`
+#   FCPARITY <args...>    -> FCPARITY <rc> <count> then <count> output lines of `vesper-fcparity <args>`
 #   DROP                  -> DROP then the connection is closed (simulates a server-side drop)
 #   SHUTDOWN              -> BYE then poweroff
 #   QUIT                  -> BYE then the connection is closed
@@ -77,9 +78,9 @@ while IFS= read -r line; do
         echo "LOGS 0"
       fi
       ;;
-    MICROVM|ROOTFS|WORKLOAD)
+    MICROVM|ROOTFS|WORKLOAD|FCPARITY)
       tool=$1; shift
-      case "$tool" in MICROVM) bin=/usr/local/bin/vesper-microvm ;; ROOTFS) bin=/usr/local/bin/vesper-rootfs ;; *) bin=/usr/local/bin/vesper-workload ;; esac
+      case "$tool" in MICROVM) bin=/usr/local/bin/vesper-microvm ;; ROOTFS) bin=/usr/local/bin/vesper-rootfs ;; WORKLOAD) bin=/usr/local/bin/vesper-workload ;; *) bin=/usr/local/bin/vesper-fcparity ;; esac
       out="$("$bin" "$@" 2>&1)"; rc=$?
       count="$(printf '%s\n' "$out" | grep -c '')"
       [ -z "$out" ] && count=0

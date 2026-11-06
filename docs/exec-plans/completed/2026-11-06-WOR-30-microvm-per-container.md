@@ -6,7 +6,7 @@ docs/PLANS.md.
 
 ## Purpose / Big Picture
 
-GitHub #20 (Linear WOR-30, mirror #72) asks for a 1:1 mapping between a container-style workload and a jailed
+GitHub #20 (Linear WOR-30, mirror #69) asks for a 1:1 mapping between a container-style workload and a jailed
 Firecracker microVM: run, list, logs, wait, stop and remove; isolation between concurrent microVMs; several microVMs
 at once without resource conflicts; stop tears the microVM down. After this plan `make systemvm-up && make
 systemvm-workload-suite` runs three workloads concurrently in three microVMs, proves their isolation, stops one

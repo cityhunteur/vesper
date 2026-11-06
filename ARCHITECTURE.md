@@ -151,6 +151,7 @@ control-plane modules.
   - `rust-tests.yml`: `make build`, `cargo test`, both matrix checks, entitlement lint (`src/**`, `tests/**`,
     `Cargo.*`, `Makefile`, `third_party/**`, `docs/generated/**`, `docs/specs/*.yaml`, `packaging/**`, `scripts/ci/**`).
   - `contract-tests.yml`: golden check, `make contract-test` (swagger, `src/spec.rs`, `src/api.rs`, `contractgen`, golden file).
+  - `parity-baseline.yml`: assembler self-test, validation of the committed Backend A parity capture against the lock, archives and compat registry, artifact upload.
   - `baseline-governance.yml`: `cargo test`, parity metadata generate and validate (lock file, `src/baseline.rs`, `baselinectl`).
   - `compat-exceptions.yml`: `cargo test`, `compatexctl` (registry, `src/compat.rs`, `compatexctl`).
   - `harness-docs.yml`: `check_docs.py` (docs, `AGENTS.md`, `ARCHITECTURE.md`, `WORKFLOW.md`).
@@ -284,7 +285,9 @@ launches a stock Firecracker v1.16.0 microVM under the jailer (uid 10000, pivot-
 the System VM in about 1.5 s and proves stop, SIGKILL cleanup and guest power-off; `make systemvm-rootfs-suite`
 converts an image from the guest's Docker into a reproducible ext4 rootfs with embedded provenance and boots a
 microVM from it; `make systemvm-workload-suite` runs concurrent container-style workloads one per jailed microVM
-with private rootfs copies. MicroVMs have no network yet (TD-032).
+with private rootfs copies; `make systemvm-parity-baseline` runs 19 Firecracker API conformance checks and two
+comparable performance runs against the stock release binary and publishes the capture that CI validates. The
+upstream pytest suite is not run yet (CE-0001). MicroVMs have no network yet (TD-032).
 
 **Intended:** design-v0 describes a packaged macOS host process plus a Linux System VM running containerd and
 Firecracker.

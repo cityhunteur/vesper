@@ -200,6 +200,19 @@ enum ControlAction {
         #[arg(long, default_value = "run/systemvm/workload-report.json")]
         report: String,
     },
+    /// Run `vesper-fcparity <args>` in the guest (api ID METHOD PATH [BODY] [TIMEOUT]|conformance ID|perf N).
+    Fcparity {
+        args: Vec<String>,
+    },
+    /// Run the GH #21 baseline (Firecracker API conformance plus two performance runs) and write a JSON report.
+    ParitySuite {
+        #[arg(long, default_value = "run/systemvm/parity-suite-report.json")]
+        report: String,
+        #[arg(long, default_value = "vesper-parity")]
+        id: String,
+        #[arg(long, default_value_t = 20)]
+        perf_cycles: u32,
+    },
     /// Run the GH #18 checklist (launch, jailer isolation, stop, crash, poweroff, cleanup) and write a JSON report.
     MicrovmSuite {
         #[arg(long, default_value = "run/systemvm/microvm-report.json")]
@@ -347,6 +360,34 @@ fn run_control(endpoint: vesper::control::ControlEndpoint, action: ControlAction
                 return Err(format!("workload suite failed (report: {report})"));
             }
             println!("workload suite passed (report: {report})");
+        }
+        ControlAction::Fcparity { args } => {
+            let mut session = control::connect(&endpoint)?;
+            let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+            let (rc, lines) = session.fcparity(&refs)?;
+            for line in &lines {
+                println!("{line}");
+            }
+            if rc != 0 {
+                return Err(format!("vesper-fcparity exited with {rc}"));
+            }
+        }
+        ControlAction::ParitySuite { report, id, perf_cycles } => {
+            let result = control::run_parity_suite(&endpoint, &id, perf_cycles);
+            control::write_report(&report, &result)?;
+            for step in &result.steps {
+                println!(
+                    "{} {}: {} ({} ms)",
+                    if step.ok { "ok  " } else { "FAIL" },
+                    step.name,
+                    step.detail.chars().take(220).collect::<String>(),
+                    step.elapsed_ms
+                );
+            }
+            if !result.passed {
+                return Err(format!("parity suite failed (report: {report})"));
+            }
+            println!("parity suite passed (report: {report})");
         }
         ControlAction::MicrovmSuite { report, id } => {
             let result = control::run_microvm_suite(&endpoint, &id);

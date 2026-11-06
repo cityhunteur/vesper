@@ -7,7 +7,7 @@ last_reviewed: 2026-11-05
 # Symphony milestones
 
 ### 2026-11-06 — WOR-30 — MicroVM-per-container workload lifecycle, GH #20 complete
-- GitHub issue: #20 (mirror #72)
+- GitHub issue: #20 (mirror #69)
 - PR: #130
 - Commit: `2475a4f` (squash merge of PR #130; remote CI green)
 - Phase: 2

@@ -247,13 +247,18 @@ impl Session {
         self.guest_tool("WORKLOAD", args)
     }
 
-    /// Runs a guest tool command (`MICROVM`, `ROOTFS`): waits up to 120 s because launches and image
-    /// builds take longer than the default I/O timeout.
+    /// Runs `vesper-fcparity <args>` in the guest; returns its exit code and output lines.
+    pub fn fcparity(&mut self, args: &[&str]) -> Result<(i32, Vec<String>), String> {
+        self.guest_tool("FCPARITY", args)
+    }
+
+    /// Runs a guest tool command (`MICROVM`, `ROOTFS`, `WORKLOAD`, `FCPARITY`): waits up to 10 min
+    /// because launches, image builds and performance runs take longer than the default I/O timeout.
     fn guest_tool(&mut self, tool: &str, args: &[&str]) -> Result<(i32, Vec<String>), String> {
         let stream = self.reader.get_ref();
         let previous = stream.read_timeout().map_err(|err| format!("read timeout: {err}"))?;
         stream
-            .set_read_timeout(Some(Duration::from_secs(120)))
+            .set_read_timeout(Some(Duration::from_secs(600)))
             .map_err(|err| format!("set read timeout: {err}"))?;
         let result = self.guest_tool_inner(tool, args);
         let _ = self.reader.get_ref().set_read_timeout(previous);
