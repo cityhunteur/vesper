@@ -52,7 +52,10 @@ def missing_route_behaviors(root: Path) -> List[str]:
     total = {(item["method"], item["path"]) for item in golden_routes}
     api_text = api.read_text(encoding="utf-8")
     handled = set(METHOD_PATH_RE.findall(api_text))
-    if 'if route.method == "PUT" && route.template == "/actions"' in api_text:
+    if (
+        'if route.method == "PUT" && route.template == "/actions"' in api_text
+        or 'if route_match.template.method == "PUT" && route_match.template.template == "/actions"' in api_text
+    ):
         handled.add(("PUT", "/actions"))
     return [f"warning: missing explicit route behavior for {method} {path}" for method, path in sorted(total - handled)]
 

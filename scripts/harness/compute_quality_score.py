@@ -63,7 +63,10 @@ def compute_route_coverage(root: Path) -> Tuple[int, int, List[str]]:
     total = {(item["method"], item["path"]) for item in golden}
     api_text = api_path.read_text(encoding="utf-8")
     handled = set(METHOD_PATH_RE.findall(api_text))
-    if 'if route.method == "PUT" && route.template == "/actions"' in api_text:
+    if (
+        'if route.method == "PUT" && route.template == "/actions"' in api_text
+        or 'if route_match.template.method == "PUT" && route_match.template.template == "/actions"' in api_text
+    ):
         handled.add(("PUT", "/actions"))
     missing = sorted(f"{method} {path}" for method, path in total - handled)
     return len(handled), len(total), missing

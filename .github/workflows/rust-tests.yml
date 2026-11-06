@@ -1,0 +1,58 @@
+name: Rust Tests
+
+on:
+  pull_request:
+    paths:
+      - src/**
+      - tests/**
+      - Cargo.toml
+      - Cargo.lock
+      - Makefile
+      - third_party/**
+      - docs/generated/**
+      - docs/specs/*.yaml
+      - packaging/**
+      - scripts/ci/**
+      - .github/workflows/rust-tests.yml
+  push:
+    branches: [main]
+    paths:
+      - src/**
+      - tests/**
+      - Cargo.toml
+      - Cargo.lock
+      - Makefile
+      - third_party/**
+      - docs/generated/**
+      - docs/specs/*.yaml
+      - packaging/**
+      - scripts/ci/**
+      - .github/workflows/rust-tests.yml
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build all binaries
+        run: make build
+
+      - name: Full test suite
+        run: cargo test
+
+      - name: Surface stub matrix is fresh
+        run: make surface-matrix-check
+
+      - name: Behavior matrix is fresh
+        run: make behavior-matrix-check
+
+      - name: Entitlement plists are valid
+        run: make validate-entitlements
