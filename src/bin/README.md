@@ -63,7 +63,7 @@ errors to stderr and exits with code 1 on failure.
   prints `file<TAB>url<TAB>sha256` lines), `verify-packages` (`--lock`,
   `--dir` default `build/systemvm/cache/apks`),
   `verify-image` (`--lock`, `--dir` default `build/systemvm`, `--out` default
-  `build/systemvm/image-manifest.json`), `boot-smoke` (`--iterations` 5,
+  `build/systemvm/image-manifest.json`, `--require-overlay`), `boot-smoke` (`--iterations` 5,
   `--timeout-seconds` 20, `--command` `sh`, `--args` `-c,echo boot-ok`,
   optional `--max-boot-ms`, `--log` default `run/systemvm/boot.log`,
   `--report` default `run/systemvm/boot-report.json`; prints `boot smoke
@@ -96,8 +96,9 @@ Subdirectories: none.
   given (`--from-lock` conflicts with every explicit input flag), and the
   library rejects a call with neither `--rootfs` nor `--initrd`.
   `verify-image` exits non-zero on a missing artifact or boot media, a digest
-  mismatch, or an `image_id` that differs from the lock's
-  `expected_image_id`.
+  mismatch, an `image_id` that differs from the lock's `expected_image_id`,
+  a derived initramfs that does not start with the pinned one, or (with
+  `--require-overlay`) a missing derived initramfs.
 - `vesper-proxy.rs:main`: dial timeout is clamped to at least 1 second.
 - `vesperd.rs:run`: when `--entitlements-file` is given it is validated first
   and must contain `com.apple.security.virtualization` (no check without the

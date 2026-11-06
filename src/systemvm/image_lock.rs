@@ -288,8 +288,13 @@ fn unpack_name(method: UnpackMethod) -> &'static str {
 
 /// Checks that `dir` holds the kernel, initrd and boot media named by the lock with the pinned
 /// digests, and returns the manifest for them. The manifest `image_id` must equal
-/// `lock.expected_image_id`.
-pub fn verify_image(lock: &ImageLock, dir: impl AsRef<Path>) -> Result<ImageManifest, String> {
+/// `lock.expected_image_id`. A derived overlay initramfs is verified and recorded when present;
+/// `require_overlay` makes its absence an error (after `make systemvm-overlay`).
+pub fn verify_image(
+    lock: &ImageLock,
+    dir: impl AsRef<Path>,
+    require_overlay: bool,
+) -> Result<ImageManifest, String> {
     let dir = dir.as_ref();
     let kernel = artifact_path(dir, lock.artifacts.kernel.file_name()?)?;
     let initrd = artifact_path(dir, lock.artifacts.initrd.file_name()?)?;
@@ -319,10 +324,13 @@ pub fn verify_image(lock: &ImageLock, dir: impl AsRef<Path>) -> Result<ImageMani
     if let Some(overlay) = &lock.overlay {
         let derived = dir.join(overlay.file.trim());
         if !derived.is_file() {
-            return Err(format!(
-                "derived initramfs {} is missing; run `make systemvm-overlay`",
-                derived.display()
-            ));
+            if require_overlay {
+                return Err(format!(
+                    "derived initramfs {} is missing; run `make systemvm-overlay`",
+                    derived.display()
+                ));
+            }
+            return Ok(manifest);
         }
         let base = fs::read(&initrd).map_err(|err| format!("read {}: {err}", initrd.display()))?;
         let derived_bytes =
@@ -349,7 +357,16 @@ pub fn launch_config_from_lock(
     let dir = dir.as_ref();
     let kernel = dir.join(lock.artifacts.kernel.file_name()?).display().to_string();
     let initrd_name = match &lock.overlay {
-        Some(overlay) => overlay.file.trim(),
+        Some(overlay) => {
+            let derived = dir.join(overlay.file.trim());
+            if !derived.is_file() {
+                return Err(format!(
+                    "derived initramfs {} is missing; run `make systemvm-overlay` before the launch config",
+                    derived.display()
+                ));
+            }
+            overlay.file.trim()
+        }
         None => lock.artifacts.initrd.file_name()?,
     };
     let initrd = dir.join(initrd_name).display().to_string();
@@ -484,7 +501,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let mut lock = sample_lock();
 
-        let err = verify_image(&lock, dir.path()).unwrap_err();
+        let err = verify_image(&lock, dir.path(), false).unwrap_err();
         assert!(err.contains("missing"));
 
         let kernel = dir.path().join("Image-virt");
@@ -493,19 +510,19 @@ mod tests {
         fs::write(&kernel, "kernel").unwrap();
         fs::write(&initrd, "initrd").unwrap();
         fs::write(&media, "iso").unwrap();
-        let err = verify_image(&lock, dir.path()).unwrap_err();
+        let err = verify_image(&lock, dir.path(), false).unwrap_err();
         assert!(err.contains("kernel") && err.contains("does not match pinned"));
 
         lock.artifacts.kernel.sha256 = digest_file(&kernel.display().to_string()).unwrap();
         lock.artifacts.initrd.sha256 = digest_file(&initrd.display().to_string()).unwrap();
         lock.artifacts.initrd.member_sha256 = lock.artifacts.initrd.sha256.clone();
-        let err = verify_image(&lock, dir.path()).unwrap_err();
+        let err = verify_image(&lock, dir.path(), false).unwrap_err();
         assert!(err.contains("boot media") && err.contains("does not match pinned"));
 
         let media_sha = digest_file(&media.display().to_string()).unwrap();
         lock.boot_media.as_mut().unwrap().sha256 = media_sha.clone();
         lock.source.sha256 = media_sha.clone();
-        let err = verify_image(&lock, dir.path()).unwrap_err();
+        let err = verify_image(&lock, dir.path(), false).unwrap_err();
         assert!(err.contains("expected_image_id"));
 
         lock.expected_image_id = image_id(
@@ -514,17 +531,21 @@ mod tests {
             Some(&lock.artifacts.initrd.sha256),
             Some(&media_sha),
         );
-        let err = verify_image(&lock, dir.path()).unwrap_err();
+        let without = verify_image(&lock, dir.path(), false).unwrap();
+        assert!(without.overlay_initrd_path.is_none(), "missing overlay is tolerated before the overlay step");
+        let err = verify_image(&lock, dir.path(), true).unwrap_err();
         assert!(err.contains("derived initramfs") && err.contains("missing"));
+        let err = launch_config_from_lock(&lock, dir.path(), "console.log").unwrap_err();
+        assert!(err.contains("before the launch config"));
         let derived = dir.path().join(lock.overlay.as_ref().unwrap().file.clone());
         fs::write(&derived, "initrdX").unwrap();
-        let manifest = verify_image(&lock, dir.path()).unwrap();
+        let manifest = verify_image(&lock, dir.path(), true).unwrap();
         assert_eq!(manifest.image_id, lock.expected_image_id);
         assert_eq!(manifest.initrd_path.as_deref(), Some(initrd.display().to_string().as_str()));
         assert_eq!(manifest.boot_media_sha256.as_deref(), Some(media_sha.as_str()));
         assert_eq!(manifest.overlay_initrd_path.as_deref(), Some(derived.display().to_string().as_str()));
         fs::write(&derived, "unrelated").unwrap();
-        assert!(verify_image(&lock, dir.path()).unwrap_err().contains("does not start with"));
+        assert!(verify_image(&lock, dir.path(), false).unwrap_err().contains("does not start with"));
         fs::write(&derived, "initrdX").unwrap();
 
         let launch = launch_config_from_lock(&lock, dir.path(), "console.log").unwrap();

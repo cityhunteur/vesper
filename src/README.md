@@ -238,8 +238,10 @@ Public symbols by file:
   source.sha256`, and distinct bare file names for kernel, initrd and boot
   media. `verify_image(lock, dir)` requires `dir/<file>` to exist for both
   artifacts and the boot media, match the pinned digests, and produce
-  `expected_image_id`; with an overlay it also requires `dir/<overlay.file>`
-  to exist and start with the pinned initramfs bytes, and records its digest.
+  `expected_image_id`; with an overlay it verifies `dir/<overlay.file>`
+  when present (it must start with the pinned initramfs bytes) and records
+  its digest, and with `require_overlay` its absence is an error.
+  `launch_config_from_lock` errors when the overlay file is missing.
   `launch_config_from_lock` names those files (the derived initramfs when
   there is an overlay), the lock's `kernel_cmdline` and `ready_pattern`, and
   NAT networking.

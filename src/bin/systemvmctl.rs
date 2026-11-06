@@ -80,6 +80,9 @@ enum Commands {
         dir: String,
         #[arg(long, default_value = DEFAULT_MANIFEST)]
         out: String,
+        /// Fail when the lock has an overlay but the derived initramfs has not been built.
+        #[arg(long)]
+        require_overlay: bool,
     },
     BootSmoke {
         #[arg(long, default_value_t = 5)]
@@ -177,9 +180,14 @@ fn run() -> Result<(), String> {
             println!("verified {count} pinned packages in {dir}");
             Ok(())
         }
-        Commands::VerifyImage { lock, dir, out } => {
+        Commands::VerifyImage {
+            lock,
+            dir,
+            out,
+            require_overlay,
+        } => {
             let lock = vesper::systemvm::load_image_lock(&lock)?;
-            let manifest = vesper::systemvm::verify_image(&lock, &dir)?;
+            let manifest = vesper::systemvm::verify_image(&lock, &dir, require_overlay)?;
             vesper::systemvm::write_manifest(&out, &manifest)?;
             println!(
                 "verified {} {} {} image in {dir}: image_id={} (manifest: {out})",

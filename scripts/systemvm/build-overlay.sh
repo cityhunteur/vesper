@@ -34,4 +34,4 @@ python3 -I "${ROOT_DIR}/scripts/systemvm/build-initramfs.py" \
   --out-apkovl "${IMAGE_DIR}/localhost.apkovl.tar.gz" \
   --out-initrd "${IMAGE_DIR}/${VESPER_IMAGE_OVERLAY_FILE}"
 
-cargo run -q --bin systemvmctl -- verify-image --lock "${LOCK_PATH}" --dir "${IMAGE_DIR}" --out "${IMAGE_DIR}/image-manifest.json"
+cargo run -q --bin systemvmctl -- verify-image --require-overlay --lock "${LOCK_PATH}" --dir "${IMAGE_DIR}" --out "${IMAGE_DIR}/image-manifest.json"
