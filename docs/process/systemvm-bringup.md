@@ -25,7 +25,12 @@ Rust (`systemvm::load_image_lock`, `deny_unknown_fields`); the shell never inter
   device, so the initramfs finds its modloop and apks offline and boots to a login prompt. No block rootfs is
   written; a writable rootfs for containerd arrives with the Phase 1 containerd slice.
 - Boot: `kernel_cmdline` is the ISO's grub line with the console moved to the virtio console (`console=hvc0
-  modules=loop,squashfs,sd-mod,usb-storage`); `ready_pattern` is `login:`.
+  modules=loop,squashfs,sd-mod,usb-storage`); `ready_pattern` is `login:`; `max_boot_ms` is the agreed boot-time
+  threshold (5000, 2026-11-06), checked by boot smoke against the launcher's `ready` time.
+- Probe (`boot.probe`): after the login prompt the launcher logs in as `root` (the live ISO has no password),
+  brings `eth0` up and runs `udhcpc` against the Virtualization.framework NAT, pings the default gateway, prints
+  `VESPER-NAT-OK` and runs `poweroff`, so every boot proves NAT from inside the guest and ends with a clean
+  shutdown. The marker is split in the typed command because the console echoes input.
 
 ## Commands
 
@@ -48,12 +53,14 @@ Rust (`systemvm::load_image_lock`, `deny_unknown_fields`); the shell never inter
 
 4. Boot repeatedly and record diagnostics:
    `make systemvm-boot-smoke` (`scripts/systemvm/boot-smoke.sh [ITERATIONS] [TIMEOUT] [COMMAND] [ARGS]`, defaults
-   5 boots, 60 s each, through the launcher with `--config build/systemvm/launch-config.json`). Each iteration boots
-   the VM until the ready pattern appears on the console, then stops it. Outputs: `run/systemvm/console.log` (last
-   boot), `run/systemvm/boot.log` (one `result=… duration_ms=…` line per iteration) and
+   5 boots, 60 s each, through the launcher with `--config build/systemvm/launch-config.json`; `MAX_BOOT_MS` in the
+   environment overrides the lock's threshold). Each iteration boots the VM to the ready pattern, runs the probe
+   and waits for the guest to power off. Outputs: `run/systemvm/console.log` (last boot), `run/systemvm/boot.log`
+   (one `result=… duration_ms=… boot_ms=…` line per iteration plus the launcher's `stdout=` JSON lines) and
    `run/systemvm/boot-report.json` (`iterations`, `successful`, `failed`, `failures`, `durations_ms`,
-   `max_duration_ms`, `mean_duration_ms`). On 2026-11-06 a MacBook Pro (M3, macOS 27.0.1) booted to the login
-   prompt in about 1.1 s per iteration.
+   `max_duration_ms`, `mean_duration_ms`, `boot_ms`, `max_boot_ms`, `max_boot_allowed_ms`). An iteration fails when
+   the launcher exits non-zero or `boot_ms` exceeds the threshold. On 2026-11-06 a MacBook Pro (M3, macOS 27.0.1)
+   reached the login prompt in about 1.05 s and finished the probe and power-off in about 3.5 s per iteration.
 
 5. Re-verify the fetched files or digest explicit ones into a manifest:
    `make systemvm-build` (no arguments re-runs `verify-image`; `scripts/systemvm/build-image.sh KERNEL [INITRD]
@@ -90,7 +97,9 @@ produced on developer hardware and attached to the issue (`run/WOR-27/systemvm/`
    result's SHA-256 into `artifacts.kernel.sha256` (`artifacts.initrd.sha256` equals its `member_sha256`).
 3. Check `boot/grub/grub.cfg` on the ISO for a changed `modules=` list and update `boot.kernel_cmdline`.
 4. Run `make systemvm-fetch`; it fails on `expected_image_id`. Copy the printed `image_id` into the lock and rerun.
-5. Run `cargo test systemvm`, `make systemvm-launch-config`, `make systemvm-boot-smoke`, then record the bump in
+5. Check that the probe still matches the guest (root login without password, `udhcpc`, `ip`, `ping`,
+   `poweroff` in the live image) and that `max_boot_ms` still holds.
+6. Run `cargo test systemvm`, `make systemvm-launch-config`, `make systemvm-boot-smoke`, then record the bump in
    the milestone log.
 
 ## Proxy bridge convention

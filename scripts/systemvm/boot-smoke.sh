@@ -19,10 +19,17 @@ fi
 
 mkdir -p "${ROOT_DIR}/run/systemvm"
 
+# The boot-time threshold comes from the image lock (boot.max_boot_ms); MAX_BOOT_MS overrides it.
+if [ -z "${MAX_BOOT_MS:-}" ]; then
+  eval "$(cargo run -q --bin systemvmctl -- lock-env --lock "${ROOT_DIR}/docs/specs/systemvm-image.lock.yaml" | grep '^VESPER_IMAGE_MAX_BOOT_MS=')"
+  MAX_BOOT_MS="${VESPER_IMAGE_MAX_BOOT_MS}"
+fi
+
 cargo run --bin systemvmctl -- boot-smoke \
   --iterations "${ITERATIONS}" \
   --timeout-seconds "$((TIMEOUT + 10))" \
   --command "${COMMAND}" \
   --args="${ARGS}" \
+  --max-boot-ms "${MAX_BOOT_MS}" \
   --log "${ROOT_DIR}/run/systemvm/boot.log" \
   --report "${ROOT_DIR}/run/systemvm/boot-report.json"

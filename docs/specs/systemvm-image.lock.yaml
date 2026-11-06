@@ -3,7 +3,7 @@
 #          systemvmctl lock-env / verify-image / launch-config --from-lock,
 #          scripts/systemvm/fetch-image.sh, .github/workflows/systemvm-image.yml.
 # Change procedure: docs/process/systemvm-bringup.md, "Bumping the pinned image".
-schema_version: 2
+schema_version: 3
 distribution: alpine
 branch: v3.22
 release: 3.22.8
@@ -43,6 +43,20 @@ boot:
   kernel_cmdline: "console=hvc0 modules=loop,squashfs,sd-mod,usb-storage"
   # Console text that marks a healthy boot: the getty prompt on hvc0.
   ready_pattern: "login:"
+  # Boot-time threshold (GH #12 "boot time within acceptable threshold"), agreed 2026-11-06: 5 s to ready_pattern.
+  max_boot_ms: 5000
+  # Console-driven guest probe (GH #12 "NAT networking is functional from guest"): the launcher logs in as root
+  # (the live ISO has no root password), configures eth0 over DHCP from the Virtualization.framework NAT, pings the
+  # NAT gateway, prints the success marker, then powers off so the VM stops cleanly. The marker is split in the
+  # typed command ("VESPER-NAT-"OK) because the console echoes input; only real output contains VESPER-NAT-OK.
+  probe:
+    login_user: root
+    shell_prompt: "~# "
+    commands:
+      - "ip link set eth0 up && udhcpc -i eth0 -n -q -t 10"
+      - "ip -4 addr show eth0 | grep -q 'inet ' && ping -c 1 -W 3 \"$(ip route | awk '/^default/ {print $3; exit}')\" > /dev/null && echo \"VESPER-NAT-\"OK"
+    success_pattern: "VESPER-NAT-OK"
+    shutdown_command: poweroff
 # sha256("<kernel_sha256>:<rootfs or empty>:<initrd_sha256>:<boot_media_sha256>") as computed by
 # systemvm::build_manifest. systemvmctl verify-image fails if the fetched artifacts do not produce it.
 expected_image_id: b1965de508d579c75a9f55c761a9114d42e6220a81d0d101517733ff546e8abe

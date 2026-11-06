@@ -5,11 +5,24 @@
 // virtio console, streams the console to `console_log_path`, and exits as soon as the console
 // shows `--ready-pattern` (default "login:").
 //
-// Exit codes: 0 ready pattern seen and VM stopped; 1 VM failed to start or stopped before ready;
-// 2 timeout waiting for the ready pattern; 3 bad arguments or configuration.
+// When the config carries a `probe`, the launcher then logs in on the console, types the probe
+// commands, waits for the success pattern and types the shutdown command, so the guest stops itself.
+//
+// Exit codes: 0 ready pattern seen and VM stopped (probe, if any, succeeded); 1 VM failed to start,
+// stopped before ready, or stopped before the probe succeeded; 2 timeout waiting for the ready
+// pattern or for a probe step; 3 bad arguments or configuration; 4 probe step produced no match
+// before the guest stopped.
 
 import Foundation
 import Virtualization
+
+struct ProbeSettings: Decodable {
+    let login_user: String
+    let shell_prompt: String
+    let commands: [String]
+    let success_pattern: String
+    let shutdown_command: String
+}
 
 struct LaunchConfig: Decodable {
     let kernel_path: String
@@ -18,6 +31,8 @@ struct LaunchConfig: Decodable {
     let boot_media_path: String?
     let kernel_cmdline: String
     let ready_pattern: String?
+    let max_boot_ms: UInt64?
+    let probe: ProbeSettings?
     let network_mode: String
     let cpu_count: Int
     let memory_mib: UInt64
@@ -29,15 +44,17 @@ struct Options {
     var readyPattern: String? = nil
     var timeoutSeconds: Double = 60
     var keepRunning = false
+    var skipProbe = false
 }
 
 func usage() -> String {
     """
-    usage: vesper-vmlauncher [--config PATH] [--ready-pattern TEXT] [--timeout-seconds N] [--keep-running]
+    usage: vesper-vmlauncher [--config PATH] [--ready-pattern TEXT] [--timeout-seconds N] [--keep-running] [--skip-probe]
       --config PATH          launch config JSON (default build/systemvm/launch-config.json)
       --ready-pattern TEXT   console text that marks a healthy boot (default: ready_pattern from the config, else "login:")
       --timeout-seconds N    give up after N seconds (default 60)
       --keep-running         do not stop the VM after the ready pattern; wait for guest shutdown
+      --skip-probe           ignore the config's probe: stop right after the ready pattern
     """
 }
 
@@ -65,6 +82,8 @@ func parseOptions() -> Options {
             options.timeoutSeconds = value
         case "--keep-running":
             options.keepRunning = true
+        case "--skip-probe":
+            options.skipProbe = true
         case "--help", "-h":
             print(usage())
             exit(0)
@@ -171,6 +190,12 @@ final class Launcher: NSObject, VZVirtualMachineDelegate {
     let log: FileHandle
     let readyPattern: String
     let patternData: Data
+    var consoleInput: FileHandle?
+    // Probe state machine: the pattern currently awaited and what to type once it appears.
+    var probe: ProbeSettings?
+    var probeStep = 0  // 0 = waiting for login prompt handled by `ready`; then index into steps
+    var awaiting: Data?
+    var probeDone = false
 
     init(options: Options, config: LaunchConfig) {
         self.options = options
@@ -179,6 +204,7 @@ final class Launcher: NSObject, VZVirtualMachineDelegate {
         if pattern.isEmpty { fail(3, "ready pattern must not be empty") }
         self.readyPattern = pattern
         self.patternData = pattern.data(using: .utf8)!
+        self.probe = options.skipProbe ? nil : config.probe
         let logURL = URL(fileURLWithPath: config.console_log_path)
         try? FileManager.default.createDirectory(
             at: logURL.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -196,12 +222,64 @@ final class Launcher: NSObject, VZVirtualMachineDelegate {
         log.write(chunk)
         tail.append(chunk)
         if tail.count > 65536 { tail.removeFirst(tail.count - 65536) }
-        if !ready, tail.range(of: patternData) != nil {
+        if !ready {
+            guard tail.range(of: patternData) != nil else { return }
             ready = true
             report(status: "ready")
+            if let probe = probe {
+                tail.removeAll()
+                startProbe(probe)
+                return
+            }
             if options.keepRunning { return }
             stopAndExit(0)
+            return
         }
+        advanceProbe()
+    }
+
+    // Probe steps after login: wait for the shell prompt, type each command and wait for the prompt
+    // again, then wait for the success pattern, then type the shutdown command and wait for the
+    // guest to stop. Input is only typed after the awaited pattern appeared, so nothing is lost.
+    func typeLine(_ line: String) {
+        consoleInput?.write((line + "\n").data(using: .utf8)!)
+    }
+
+    func expect(_ pattern: String) {
+        awaiting = pattern.data(using: .utf8)!
+        tail.removeAll()
+    }
+
+    func startProbe(_ probe: ProbeSettings) {
+        typeLine(probe.login_user)
+        probeStep = 0
+        expect(probe.shell_prompt)
+    }
+
+    func advanceProbe() {
+        guard let probe = probe, !probeDone, let pattern = awaiting else { return }
+        guard tail.range(of: pattern) != nil else { return }
+        // Steps 0..<commands.count: prompt seen, type command i. Step commands.count: all commands
+        // typed and prompt seen again, now require the success pattern. Last: shut down.
+        if probeStep < probe.commands.count {
+            let command = probe.commands[probeStep]
+            probeStep += 1
+            typeLine(command)
+            expect(probe.shell_prompt)
+            return
+        }
+        // The prompt came back after the last command; `tail` holds everything since that command
+        // was typed (its echo included), so the success pattern must be in there.
+        probeStep += 1
+        awaiting = nil
+        if tail.range(of: probe.success_pattern.data(using: .utf8)!) == nil {
+            report(status: "probe-failed")
+            stopAndExit(4)
+            return
+        }
+        probeDone = true
+        report(status: "probe-ok")
+        typeLine(probe.shutdown_command)
     }
 
     func report(status: String) {
@@ -224,6 +302,7 @@ final class Launcher: NSObject, VZVirtualMachineDelegate {
             config, consoleOutput: output.fileHandleForWriting, consoleInput: input.fileHandleForReading)
         machine = VZVirtualMachine(configuration: configuration, queue: .main)
         machine.delegate = self
+        consoleInput = input.fileHandleForWriting
 
         output.fileHandleForReading.readabilityHandler = { handle in
             let chunk = handle.availableData
@@ -232,8 +311,8 @@ final class Launcher: NSObject, VZVirtualMachineDelegate {
         }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + options.timeoutSeconds) {
-            if self.ready { return }
-            self.report(status: "timeout")
+            if self.ready && (self.probe == nil || self.probeDone) { return }
+            self.report(status: self.ready ? "probe-timeout" : "timeout")
             self.stopAndExit(2)
         }
 
@@ -249,8 +328,9 @@ final class Launcher: NSObject, VZVirtualMachineDelegate {
     }
 
     func guestDidStop(_ virtualMachine: VZVirtualMachine) {
-        report(status: ready ? "stopped" : "stopped-before-ready")
-        exit(ready ? 0 : 1)
+        let ok = ready && (probe == nil || probeDone)
+        report(status: ok ? "stopped" : (ready ? "stopped-before-probe" : "stopped-before-ready"))
+        exit(ok ? 0 : 1)
     }
 
     func virtualMachine(_ virtualMachine: VZVirtualMachine, didStopWithError error: Error) {

@@ -99,19 +99,23 @@ Public symbols by file:
   initrd_path: Option, boot_media_path: Option }`, `ImageManifest` (schema
   `"2"`, optional rootfs, initrd and boot-media digests), `LaunchConfig {
   kernel_path, rootfs_path?, initrd_path?, boot_media_path?, kernel_cmdline,
-  ready_pattern, network_mode, cpu_count, memory_mib, console_log_path }`,
+  ready_pattern, max_boot_ms?, probe?: ProbeSettings, network_mode, cpu_count,
+  memory_mib, console_log_path }`, `ProbeSettings { login_user, shell_prompt,
+  commands, success_pattern, shutdown_command }` with `validate()`,
   `LaunchInputs` (borrowed inputs for `default_launch_config`),
-  `BootCheckConfig`, `BootCheckReport { iterations, successful, failed,
-  failures, durations_ms, max_duration_ms, mean_duration_ms }`, `ImageLock {
+  `BootCheckConfig { …, max_boot_ms: Option }`, `BootCheckReport {
+  iterations, successful, failed, failures, durations_ms, max_duration_ms,
+  mean_duration_ms, boot_ms, max_boot_ms, max_boot_allowed_ms? }`, `ImageLock {
   source: ImageSource, artifacts: ImageArtifacts { kernel, initrd:
   ImageArtifact { member, member_sha256, unpack: UnpackMethod, file, sha256,
   format } }, boot_media: Option<BootMedia>, boot: BootSettings {
-  kernel_cmdline, ready_pattern }, expected_image_id }`, `UnpackMethod {
+  kernel_cmdline, ready_pattern, max_boot_ms, probe: Option<ProbeSettings> },
+  expected_image_id }`, `UnpackMethod {
   None, ZbootGzip }`, `build_manifest`, `image_id`, `write_manifest`,
   `load_image_lock`, `validate_image_lock`, `image_lock_env`, `verify_image`,
   `default_launch_config`, `launch_config_from_lock`, `write_launch_config`,
   `run_boot_check`; constants `MANIFEST_SCHEMA_VERSION`,
-  `IMAGE_LOCK_SCHEMA_VERSION` (2), `DEFAULT_KERNEL_CMDLINE` (`console=hvc0`),
+  `IMAGE_LOCK_SCHEMA_VERSION` (3), `DEFAULT_KERNEL_CMDLINE` (`console=hvc0`),
   `DEFAULT_READY_PATTERN` (`login:`).
 
 ## Invariants
@@ -200,8 +204,15 @@ Public symbols by file:
   missing `paths` section or empty route list.
 - `systemvm.rs:run_boot_check` requires `iterations > 0` and non-blank
   `command`, `log_path`, and `report_path`, clamps `timeout_seconds` to at
-  least 1, and returns `Err` if any iteration fails, after writing the log and
-  report.
+  least 1, captures the command's stdout (logged as `stdout=` lines), takes
+  `boot_ms` from the first `{"status":"ready","elapsed_ms":N}` JSON line
+  (else the wall-clock duration), fails an iteration whose `boot_ms` exceeds
+  `max_boot_ms`, and returns `Err` if any iteration fails, after writing the
+  log and report.
+- `systemvm.rs:ProbeSettings::validate` requires non-blank fields, a
+  non-empty command list, no newlines in typed lines, and a
+  `success_pattern` that appears in no typed line (the console echoes
+  input). `default_launch_config` runs it and rejects `max_boot_ms == 0`.
 - `systemvm.rs:build_manifest` and `default_launch_config` require a kernel
   plus at least one of rootfs or initrd; `image_id` is
   `sha256("<kernel>:<rootfs or empty>:<initrd or empty>:<boot media or
@@ -212,7 +223,8 @@ Public symbols by file:
   defaults to `login:`.
 - `systemvm.rs:load_image_lock` parses the YAML into `ImageLock` with
   `deny_unknown_fields`, then `validate_image_lock` requires schema version
-  `2`, an `https://` URL, non-zero `size_bytes`, non-blank `boot.*`, 64-char
+  `3`, an `https://` URL, non-zero `size_bytes`, non-blank `boot.*`,
+  `boot.max_boot_ms > 0`, a valid `boot.probe` when present, 64-char
   lowercase hex for every digest and `expected_image_id`, `member_sha256 ==
   sha256` for artifacts with `unpack: none`, `boot_media.sha256 ==
   source.sha256`, and distinct bare file names for kernel, initrd and boot

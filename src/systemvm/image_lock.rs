@@ -3,7 +3,8 @@
 
 use super::{
     artifact_path, build_manifest, check_digest, default_launch_config, is_sha256_hex,
-    ImageBuildConfig, ImageManifest, LaunchConfig, LaunchInputs, IMAGE_LOCK_SCHEMA_VERSION,
+    ImageBuildConfig, ImageManifest, LaunchConfig, LaunchInputs, ProbeSettings,
+    IMAGE_LOCK_SCHEMA_VERSION,
 };
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -42,6 +43,11 @@ pub struct BootMedia {
 pub struct BootSettings {
     pub kernel_cmdline: String,
     pub ready_pattern: String,
+    /// Boot-time threshold (design-v0 "boot time within acceptable threshold"): time to `ready_pattern`.
+    pub max_boot_ms: u64,
+    /// Console-driven guest probe run after the ready pattern (NAT proof and clean shutdown).
+    #[serde(default)]
+    pub probe: Option<ProbeSettings>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -129,6 +135,12 @@ pub fn validate_image_lock(lock: &ImageLock) -> Result<(), String> {
             return Err(format!("image lock field {name} must not be blank"));
         }
     }
+    if lock.boot.max_boot_ms == 0 {
+        return Err("image lock boot.max_boot_ms must be > 0".to_string());
+    }
+    if let Some(probe) = &lock.boot.probe {
+        probe.validate().map_err(|err| format!("image lock boot.probe: {err}"))?;
+    }
     if !lock.source.url.starts_with("https://") {
         return Err("image lock source.url must use https".to_string());
     }
@@ -181,6 +193,7 @@ pub fn validate_image_lock(lock: &ImageLock) -> Result<(), String> {
 
 /// Shell-sourceable `KEY=VALUE` lines for `scripts/systemvm/fetch-image.sh`.
 pub fn image_lock_env(lock: &ImageLock) -> String {
+    let max_boot_ms = lock.boot.max_boot_ms.to_string();
     let pairs = [
         ("VESPER_IMAGE_DISTRIBUTION", lock.distribution.as_str()),
         ("VESPER_IMAGE_RELEASE", lock.release.as_str()),
@@ -203,6 +216,7 @@ pub fn image_lock_env(lock: &ImageLock) -> String {
         ),
         ("VESPER_IMAGE_KERNEL_CMDLINE", lock.boot.kernel_cmdline.as_str()),
         ("VESPER_IMAGE_READY_PATTERN", lock.boot.ready_pattern.as_str()),
+        ("VESPER_IMAGE_MAX_BOOT_MS", &max_boot_ms),
         ("VESPER_IMAGE_EXPECTED_ID", lock.expected_image_id.as_str()),
     ];
     let mut out = String::new();
@@ -276,6 +290,8 @@ pub fn launch_config_from_lock(
         boot_media_path: boot_media.as_deref(),
         kernel_cmdline: Some(&lock.boot.kernel_cmdline),
         ready_pattern: Some(&lock.boot.ready_pattern),
+        max_boot_ms: Some(lock.boot.max_boot_ms),
+        probe: lock.boot.probe.as_ref(),
         console_log_path,
     })
 }
@@ -305,6 +321,12 @@ mod tests {
         assert!(media.file.ends_with(".iso"));
         assert!(lock.boot.kernel_cmdline.contains("console=hvc0"));
         assert_eq!(lock.boot.ready_pattern, DEFAULT_READY_PATTERN);
+        assert_eq!(lock.boot.max_boot_ms, 5000);
+        let probe = lock.boot.probe.as_ref().expect("the lock pins a guest probe");
+        assert_eq!(probe.login_user, "root");
+        assert!(probe.commands.iter().any(|c| c.contains("ping")));
+        assert!(probe.success_pattern.contains("VESPER"));
+        assert_eq!(probe.shutdown_command, "poweroff");
         assert_eq!(
             lock.expected_image_id,
             image_id(
@@ -340,6 +362,14 @@ mod tests {
         lock.artifacts.kernel.file = "initramfs-virt".to_string();
         assert!(validate_image_lock(&lock).unwrap_err().contains("distinct"));
 
+        let mut lock = sample_lock();
+        lock.boot.max_boot_ms = 0;
+        assert!(validate_image_lock(&lock).unwrap_err().contains("max_boot_ms"));
+
+        let mut lock = sample_lock();
+        lock.boot.probe.as_mut().unwrap().commands.clear();
+        assert!(validate_image_lock(&lock).unwrap_err().contains("probe"));
+
         let with_extra = fs::read_to_string(REPO_LOCK).unwrap() + "\nextra_field: 1\n";
         let err = serde_yaml::from_str::<ImageLock>(&with_extra).unwrap_err().to_string();
         assert!(err.contains("extra_field"));
@@ -359,6 +389,7 @@ mod tests {
             "VESPER_IMAGE_BOOT_MEDIA_FILE='alpine-virt-",
             "VESPER_IMAGE_KERNEL_CMDLINE='console=hvc0",
             "VESPER_IMAGE_READY_PATTERN='login:'",
+            "VESPER_IMAGE_MAX_BOOT_MS='5000'",
             "VESPER_IMAGE_EXPECTED_ID=",
         ] {
             assert!(env.contains(key), "missing {key} in\n{env}");
@@ -411,5 +442,10 @@ mod tests {
         assert_eq!(launch.boot_media_path.as_deref(), Some(media.display().to_string().as_str()));
         assert_eq!(launch.kernel_cmdline, lock.boot.kernel_cmdline);
         assert_eq!(launch.ready_pattern, lock.boot.ready_pattern);
+        assert_eq!(launch.max_boot_ms, Some(lock.boot.max_boot_ms));
+        assert_eq!(
+            launch.probe.as_ref().map(|p| p.shutdown_command.as_str()),
+            Some("poweroff")
+        );
     }
 }

@@ -62,9 +62,10 @@ errors to stderr and exits with code 1 on failure.
   `verify-image` (`--lock`, `--dir` default `build/systemvm`, `--out` default
   `build/systemvm/image-manifest.json`), `boot-smoke` (`--iterations` 5,
   `--timeout-seconds` 20, `--command` `sh`, `--args` `-c,echo boot-ok`,
-  `--log` default `run/systemvm/boot.log`, `--report` default
-  `run/systemvm/boot-report.json`; the wrapper script substitutes the
-  launcher). Calls `vesper::systemvm::{build_manifest, write_manifest,
+  optional `--max-boot-ms`, `--log` default `run/systemvm/boot.log`,
+  `--report` default `run/systemvm/boot-report.json`; prints `boot smoke
+  passed: successful=… failed=… max_boot_ms=… (threshold …)`; the wrapper
+  script substitutes the launcher and the lock's threshold). Calls `vesper::systemvm::{build_manifest, write_manifest,
   default_launch_config, launch_config_from_lock, write_launch_config,
   load_image_lock, image_lock_env, verify_image, run_boot_check}`.
 

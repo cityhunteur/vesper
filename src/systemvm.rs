@@ -5,12 +5,12 @@ use std::path::{Path, PathBuf};
 
 mod image_lock;
 pub use image_lock::*;
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
 pub const MANIFEST_SCHEMA_VERSION: &str = "2";
-pub const IMAGE_LOCK_SCHEMA_VERSION: u32 = 2;
+pub const IMAGE_LOCK_SCHEMA_VERSION: u32 = 3;
 pub const DEFAULT_KERNEL_CMDLINE: &str = "console=hvc0";
 pub const DEFAULT_READY_PATTERN: &str = "login:";
 
@@ -59,10 +59,65 @@ pub struct LaunchConfig {
     pub kernel_cmdline: String,
     /// Console text that marks a healthy boot for the launcher and boot smoke.
     pub ready_pattern: String,
+    /// Boot-time threshold checked by boot smoke against the launcher's reported ready time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_boot_ms: Option<u64>,
+    /// Console-driven guest probe the launcher runs after the ready pattern.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub probe: Option<ProbeSettings>,
     pub network_mode: String,
     pub cpu_count: u16,
     pub memory_mib: u32,
     pub console_log_path: String,
+}
+
+/// Console-driven guest probe: log in on the serial console, run commands, expect a pattern, shut down.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProbeSettings {
+    /// Typed at the `ready_pattern` prompt (password-less login expected).
+    pub login_user: String,
+    /// Console text that marks an interactive shell, for example `~# `.
+    pub shell_prompt: String,
+    /// Typed one per line at the shell prompt, in order.
+    pub commands: Vec<String>,
+    /// Console text that proves the probe succeeded; must be produced by the commands, not echoed input.
+    pub success_pattern: String,
+    /// Typed last; the guest must stop on its own afterwards.
+    pub shutdown_command: String,
+}
+
+impl ProbeSettings {
+    pub fn validate(&self) -> Result<(), String> {
+        for (name, value) in [
+            ("login_user", &self.login_user),
+            ("shell_prompt", &self.shell_prompt),
+            ("success_pattern", &self.success_pattern),
+            ("shutdown_command", &self.shutdown_command),
+        ] {
+            if value.trim().is_empty() {
+                return Err(format!("{name} must not be blank"));
+            }
+        }
+        if self.commands.is_empty() || self.commands.iter().any(|c| c.trim().is_empty()) {
+            return Err("commands must be a non-empty list of non-blank lines".to_string());
+        }
+        let lines = [self.login_user.as_str(), self.shutdown_command.as_str()]
+            .into_iter()
+            .chain(self.commands.iter().map(String::as_str));
+        for line in lines {
+            if line.contains('\n') {
+                return Err("console lines must not contain newlines".to_string());
+            }
+            if line.contains(&self.success_pattern) {
+                return Err(format!(
+                    "success_pattern {:?} appears in a typed line; the console echoes input, so the match would be a false positive",
+                    self.success_pattern
+                ));
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Inputs for `default_launch_config`; every optional field may be omitted.
@@ -75,6 +130,8 @@ pub struct LaunchInputs<'a> {
     /// Full kernel command line; `None` derives one from `DEFAULT_KERNEL_CMDLINE` and the disks.
     pub kernel_cmdline: Option<&'a str>,
     pub ready_pattern: Option<&'a str>,
+    pub max_boot_ms: Option<u64>,
+    pub probe: Option<&'a ProbeSettings>,
     pub console_log_path: &'a str,
 }
 
@@ -86,6 +143,9 @@ pub struct BootCheckConfig {
     pub args: Vec<String>,
     pub log_path: String,
     pub report_path: String,
+    /// Fail an iteration whose boot time (launcher `ready` line, else wall clock) exceeds this.
+    #[serde(default)]
+    pub max_boot_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -102,6 +162,14 @@ pub struct BootCheckReport {
     pub max_duration_ms: u64,
     #[serde(default)]
     pub mean_duration_ms: u64,
+    /// Boot time per iteration: `elapsed_ms` of the launcher's `{"status":"ready",...}` line when the
+    /// command printed one, otherwise the wall-clock duration.
+    #[serde(default)]
+    pub boot_ms: Vec<u64>,
+    #[serde(default)]
+    pub max_boot_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_boot_allowed_ms: Option<u64>,
 }
 
 pub fn build_manifest(config: &ImageBuildConfig) -> Result<ImageManifest, String> {
@@ -194,6 +262,12 @@ pub fn default_launch_config(inputs: &LaunchInputs<'_>) -> Result<LaunchConfig, 
     };
     let ready_pattern =
         non_blank(inputs.ready_pattern).unwrap_or_else(|| DEFAULT_READY_PATTERN.to_string());
+    if inputs.max_boot_ms == Some(0) {
+        return Err("max_boot_ms must be > 0 when given".to_string());
+    }
+    if let Some(probe) = inputs.probe {
+        probe.validate().map_err(|err| format!("probe: {err}"))?;
+    }
 
     Ok(LaunchConfig {
         kernel_path: inputs.kernel_path.trim().to_string(),
@@ -202,6 +276,8 @@ pub fn default_launch_config(inputs: &LaunchInputs<'_>) -> Result<LaunchConfig, 
         boot_media_path,
         kernel_cmdline,
         ready_pattern,
+        max_boot_ms: inputs.max_boot_ms,
+        probe: inputs.probe.cloned(),
         network_mode: "nat".to_string(),
         cpu_count: 2,
         memory_mib: 2048,
@@ -245,6 +321,9 @@ pub fn run_boot_check(config: &BootCheckConfig) -> Result<BootCheckReport, Strin
         durations_ms: Vec::new(),
         max_duration_ms: 0,
         mean_duration_ms: 0,
+        boot_ms: Vec::new(),
+        max_boot_ms: 0,
+        max_boot_allowed_ms: config.max_boot_ms,
     };
 
     let mut log = String::new();
@@ -257,8 +336,15 @@ pub fn run_boot_check(config: &BootCheckConfig) -> Result<BootCheckReport, Strin
         ));
         let mut child = Command::new(&config.command)
             .args(&config.args)
+            .stdout(Stdio::piped())
             .spawn()
             .map_err(|err| format!("spawn boot command: {err}"))?;
+        let stdout = child.stdout.take().ok_or("capture boot command stdout")?;
+        let reader = thread::spawn(move || {
+            let mut out = String::new();
+            let _ = std::io::Read::read_to_string(&mut std::io::BufReader::new(stdout), &mut out);
+            out
+        });
 
         let started_at = Instant::now();
         let status = loop {
@@ -280,10 +366,22 @@ pub fn run_boot_check(config: &BootCheckConfig) -> Result<BootCheckReport, Strin
 
         let duration_ms = started_at.elapsed().as_millis() as u64;
         report.durations_ms.push(duration_ms);
+        let output = reader.join().unwrap_or_default();
+        for line in output.lines().filter(|line| !line.trim().is_empty()) {
+            log.push_str(&format!("stdout={line}\n"));
+        }
+        let boot_ms = ready_elapsed_ms(&output).unwrap_or(duration_ms);
+        report.boot_ms.push(boot_ms);
+        let status = match (status, config.max_boot_ms) {
+            (Ok(exit), Some(limit)) if exit.success() && boot_ms > limit => {
+                Err(format!("boot took {boot_ms} ms, over the {limit} ms threshold"))
+            }
+            (other, _) => other,
+        };
         match status {
             Ok(exit) if exit.success() => {
                 report.successful += 1;
-                log.push_str(&format!("result=ok duration_ms={duration_ms}\n"));
+                log.push_str(&format!("result=ok duration_ms={duration_ms} boot_ms={boot_ms}\n"));
             }
             Ok(exit) => {
                 report.failed += 1;
@@ -304,6 +402,7 @@ pub fn run_boot_check(config: &BootCheckConfig) -> Result<BootCheckReport, Strin
     }
 
     report.max_duration_ms = report.durations_ms.iter().copied().max().unwrap_or(0);
+    report.max_boot_ms = report.boot_ms.iter().copied().max().unwrap_or(0);
     report.mean_duration_ms = report.durations_ms.iter().sum::<u64>() / report.durations_ms.len().max(1) as u64;
 
     fs::write(log_path, log)
@@ -323,6 +422,15 @@ pub fn run_boot_check(config: &BootCheckConfig) -> Result<BootCheckReport, Strin
     }
 
     Ok(report)
+}
+
+/// `elapsed_ms` from the first `{"status":"ready",...}` JSON line the launcher printed.
+fn ready_elapsed_ms(stdout: &str) -> Option<u64> {
+    stdout
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line.trim()).ok())
+        .find(|value| value.get("status").and_then(|s| s.as_str()) == Some("ready"))
+        .and_then(|value| value.get("elapsed_ms").and_then(|ms| ms.as_u64()))
 }
 
 pub(crate) fn non_blank(value: Option<&str>) -> Option<String> {
@@ -506,6 +614,25 @@ mod tests {
         })
         .unwrap_err();
         assert!(err.contains("rootfs path or an initrd path"));
+
+        let bad_probe = ProbeSettings {
+            login_user: "root".to_string(),
+            shell_prompt: "~# ".to_string(),
+            commands: vec![],
+            success_pattern: "OK".to_string(),
+            shutdown_command: "poweroff".to_string(),
+        };
+        let err = default_launch_config(&LaunchInputs {
+            kernel_path: "vmlinuz",
+            initrd_path: Some("initramfs"),
+            probe: Some(&bad_probe),
+            console_log_path: "console.log",
+            ..Default::default()
+        })
+        .unwrap_err();
+        assert!(err.contains("probe"));
+        let json = serde_json::to_string(&initrd).unwrap();
+        assert!(!json.contains("probe") && !json.contains("max_boot_ms"));
     }
 
     #[test]
@@ -518,10 +645,41 @@ mod tests {
             args: vec!["-c".to_string(), "exit 1".to_string()],
             log_path: dir.path().join("boot.log").display().to_string(),
             report_path: dir.path().join("boot-report.json").display().to_string(),
+            max_boot_ms: None,
         };
 
         let err = run_boot_check(&config).unwrap_err();
         assert!(err.contains("boot check failed"));
+    }
+
+    #[test]
+    fn boot_check_reads_launcher_ready_time_and_enforces_threshold() {
+        let dir = tempdir().unwrap();
+        let script = r#"echo '{"status":"ready","elapsed_ms":1200,"ready_pattern":"login:"}'; echo '{"status":"stopped","elapsed_ms":1900}'"#;
+        let mut config = BootCheckConfig {
+            iterations: 1,
+            timeout_seconds: 5,
+            command: "sh".to_string(),
+            args: vec!["-c".to_string(), script.to_string()],
+            log_path: dir.path().join("boot.log").display().to_string(),
+            report_path: dir.path().join("boot-report.json").display().to_string(),
+            max_boot_ms: Some(5000),
+        };
+        let report = run_boot_check(&config).unwrap();
+        assert_eq!(report.boot_ms, vec![1200]);
+        assert_eq!(report.max_boot_ms, 1200);
+        assert_eq!(report.max_boot_allowed_ms, Some(5000));
+        let log = fs::read_to_string(&config.log_path).unwrap();
+        assert!(log.contains("boot_ms=1200"));
+        assert!(log.contains(r#"stdout={"status":"ready""#));
+
+        config.max_boot_ms = Some(1000);
+        let err = run_boot_check(&config).unwrap_err();
+        assert!(err.contains("boot check failed"));
+        let written: BootCheckReport =
+            serde_json::from_str(&fs::read_to_string(&config.report_path).unwrap()).unwrap();
+        assert_eq!(written.failed, 1);
+        assert!(written.failures[0].contains("over the 1000 ms threshold"));
     }
 
     #[test]
@@ -535,10 +693,12 @@ mod tests {
             args: vec!["-c".to_string(), "exit 0".to_string()],
             log_path: dir.path().join("boot.log").display().to_string(),
             report_path: report_path.display().to_string(),
+            max_boot_ms: None,
         };
 
         let report = run_boot_check(&config).unwrap();
         assert_eq!(report.durations_ms.len(), 2);
+        assert_eq!(report.boot_ms, report.durations_ms, "no ready line: boot_ms falls back to wall clock");
         assert!(report.max_duration_ms >= report.mean_duration_ms);
         let written: BootCheckReport =
             serde_json::from_str(&fs::read_to_string(&report_path).unwrap()).unwrap();
