@@ -6,6 +6,19 @@ last_reviewed: 2026-11-05
 
 # Symphony milestones
 
+### 2026-11-06 — WOR-29 — containerd shim v2 Task lifecycle RPCs, GH #22 complete
+- GitHub issue: #22 (mirror #70)
+- PR: #132
+- Commit: `d1bd355` (squash merge of PR #132; remote CI green, seven workflows incl. the new Shim Tests)
+- Phase: 3
+- Parity unit: `containerd-shim-vesper-v2` (Go, ADR 0004) serving Create/Start/Kill/Delete/State/Wait, each task a jailed Firecracker microVM booted from an ext4 built out of the bundle rootfs; `ctr run` end to end with exit code and output
+- Result: keep
+- Verification bundle: `.symphony/runs/WOR-29/current/` (evidence in `run/WOR-29/systemvm/`, incl. `shim-report.json`)
+- Council summary: skipped; no control-plane path changed; CI green
+- Harness update: `shim/` module and tests; `build-shim.sh`; overlay ships the shim; `vesper-ctr`; agent `CTR`; `run_shim_suite`; `make shim-build shim-test systemvm-shim-suite`; `shim-tests.yml`; Go in `systemvm-image.yml`; TD-034
+- Remaining risks: shell required in the image, no stdin/terminal/exec/resize (P3.2, TD-034), no rootfs cache (P3.3), Go is a new toolchain for contributors and CI
+- Truthful project state after this milestone: containerd inside the System VM can run tasks as microVMs through the Vesper shim; Phase 3 continues with WOR-32 (#23 exec, resize, stdio streaming, exit status) and WOR-37 (#24 bundle unpack and block-first rootfs)
+
 ### 2026-11-06 — WOR-26 — Backend A parity and performance baseline, GH #21 (conformance subset; upstream suite under CE-0001)
 - GitHub issue: #21 (mirror #63, left open pending approval of the compat exceptions)
 - PR: #131

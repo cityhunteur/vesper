@@ -23,7 +23,7 @@ Firecracker microVM from the container's rootfs, returns the command's output an
   `systemvmctl control ctr|shim-suite`; `make shim-build shim-test systemvm-shim-suite`; `Shim Tests`
   workflow; Go in the image workflow. Suite 21/21 on an M3 Pro; workload, microvm, rootfs and parity suites
   still pass.
-- [ ] PR merged, CI green, GH #22 checklist and WOR-29 updated, milestone entry; plan moved to completed.
+- [x] (2026-11-06 22:30Z) PR #132 merged as `d1bd355`, CI green (seven workflows incl. Shim Tests), GH #22 checklist ticked, mirror #70 closed, WOR-29 Done, milestone entry; plan moved to completed.
 
 ## Surprises & Discoveries
 
