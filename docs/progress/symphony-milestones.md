@@ -6,6 +6,19 @@ last_reviewed: 2026-11-05
 
 # Symphony milestones
 
+### 2026-11-06 — WOR-23 — Docker socket ingress through vesper-proxy, trivial container runs from macOS, GH #15 complete
+- GitHub issue: #15 (mirror #65); advances the #3 epic
+- PR: #125
+- Commit: `9da6e5f` (squash merge of PR #125; remote CI green)
+- Phase: 1
+- Parity unit: owner-only host socket served by `vesper-proxy` with startup upstream validation, reaching the guest's Docker through the launcher bridge and a supervised vsock relay; offline trivial image from the pinned ISO; raw-socket denial proven
+- Result: keep
+- Verification bundle: `.symphony/runs/WOR-23/current/` (evidence in `run/WOR-23/systemvm/`, incl. `docker-smoke-report.json`)
+- Council summary: skipped; no control-plane path changed; six remote workflows green
+- Harness update: `vesper-proxy --listen-mode --validate-upstream` + SIGTERM; `vesper-docker-relay`; `docker-up.sh`, `docker-down.sh`, `build-trivial-image.sh`, `docker-smoke.sh`; `make docker-up/docker-down/docker-smoke/systemvm-trivial-image`; SECURITY.md host-socket inventory; invariant 1b Verified
+- Remaining risks: packaged `/var/run/vesper/docker.sock` and launchd supervision do not exist; bridge exposure (TD-027); relay limits (TD-021); evidence is developer-hardware only (TD-005)
+- Truthful project state after this milestone: design-v0's Phase 1 exit criterion holds on developer hardware (`docker version` and a trivial container from macOS through `vesper-proxy`); Phase 1 closes with WOR-21 (reliability suite) and the WOR-12 epic
+
 ### 2026-11-06 — WOR-33 — containerd and dockerd supervised in the System VM, GH #14 complete
 - GitHub issue: #14 (mirror #73)
 - PR: #124

@@ -22,7 +22,7 @@ the Phase 1 exit criterion of design-v0.
   Smoke 7/7 through the real path: socket 0600, `docker version` (server 28.3.3 linux/arm64), `docker info`
   (overlay2, cgroup 2), 1.6 MB `docker import` through the proxy, `docker run … echo vesper-container-ok`,
   no other host sockets, guest port without a listener refused.
-- [ ] PR merged, CI green, GH #15 checklist and WOR-23 updated, milestone entry; plan moved to completed.
+- [x] (2026-11-06 19:35Z) PR #125 merged as `9da6e5f`, CI green, GH #15 checklist and WOR-23 updated, milestone entry; plan moved to completed.
 
 ## Surprises & Discoveries
 
