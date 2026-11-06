@@ -17,7 +17,11 @@ def read_text(path: Path) -> str:
 
 def broken_doc_links(root: Path) -> List[str]:
     issues: List[str] = []
-    markdown_files = [p for p in root.glob("docs/**/*.md")] + [root / "AGENTS.md"]
+    markdown_files = [p for p in root.glob("docs/**/*.md")] + [
+        root / "AGENTS.md",
+        root / "ARCHITECTURE.md",
+        root / "WORKFLOW.md",
+    ]
     for path in markdown_files:
         if not path.exists():
             continue

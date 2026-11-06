@@ -1,0 +1,23 @@
+---
+status: verified
+owner: cityhunteur
+last_reviewed: 2026-11-05
+---
+
+# Specifications and baselines
+
+The normative sources for Vesper's behaviour and parity claims. [CLAUDE.md](../../CLAUDE.md) names the two
+Markdown documents as the authoritative design and parity references; the YAML files are read by the binaries.
+
+| File | Role | Read by |
+|---|---|---|
+| [design-v0.md](design-v0.md) | Normative product and architecture design: requirements, backends, phases, verification and test strategy, security model | humans, council rubric |
+| [firecracker-feature-parity.md](firecracker-feature-parity.md) | Parity matrix (route and field level) and the GitHub issue eval audit | humans, milestone reports |
+| [design-v0.baselines.lock.yaml](design-v0.baselines.lock.yaml) | Pinned upstream revisions for Firecracker, containerd and Apple Containerization, plus required parity metadata keys | `vesperd`, `baselinectl` (`src/baseline.rs`) |
+| [compat-exceptions.yaml](compat-exceptions.yaml) | Registry of allowed behaviour deviations before GA | `compatexctl` (`src/compat.rs`) |
+| [firecracker-api-baseline-captures.yaml](firecracker-api-baseline-captures.yaml) | Upstream evidence for matrix-backed placeholder routes | `baselinectl` (`src/api_matrix.rs`) |
+| [firecracker-api-behavior-captures.yaml](firecracker-api-behavior-captures.yaml) | Upstream evidence for route-level status and error behaviour | `baselinectl` (`src/api_behavior_matrix.rs`) |
+| `assets/` | Mermaid sources and PNG renders of the design-v0 component and lifecycle diagrams | design-v0.md |
+
+Changing any YAML file follows [baseline-governance.md](../process/baseline-governance.md) or
+[compat-exceptions.md](../process/compat-exceptions.md).

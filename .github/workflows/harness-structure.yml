@@ -5,14 +5,14 @@ on:
     paths:
       - src/**
       - scripts/harness/check_structure.py
-      - docs/ARCHITECTURE.md
+      - ARCHITECTURE.md
       - .github/workflows/harness-structure.yml
   push:
     branches: [main]
     paths:
       - src/**
       - scripts/harness/check_structure.py
-      - docs/ARCHITECTURE.md
+      - ARCHITECTURE.md
       - .github/workflows/harness-structure.yml
 
 jobs:

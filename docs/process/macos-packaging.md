@@ -1,3 +1,9 @@
+---
+status: verified
+owner: cityhunteur
+last_reviewed: 2026-11-05
+---
+
 # macOS Packaging and Entitlements
 
 This repository includes a baseline packaging workflow for local macOS development:

@@ -1,3 +1,9 @@
+---
+status: verified
+owner: cityhunteur
+last_reviewed: 2026-11-05
+---
+
 # Vesper Security Review Map
 
 Vesper’s security model is part of its parity contract. Treat this file as the entry point for security-sensitive work.

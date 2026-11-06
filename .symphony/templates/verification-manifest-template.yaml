@@ -16,8 +16,8 @@ attempt:
 guides:
   consulted:
     - AGENTS.md
-    - docs/index.md
-    - docs/ARCHITECTURE.md
+    - docs/README.md
+    - ARCHITECTURE.md
   task_specific: []
 
 baseline:

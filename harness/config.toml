@@ -1,0 +1,69 @@
+# Configuration for harness/check_docs.py.
+# Paths are relative to the repository root. Globs use fnmatch semantics,
+# so `*` also matches `/`.
+
+# Markdown files that form the knowledge base. Only these are checked.
+scope = ["AGENTS.md", "ARCHITECTURE.md", "docs/*.md"]
+
+# AGENTS.md is a map, not a manual.
+[agents_md]
+path = "AGENTS.md"
+target_lines = 100 # warn above this
+max_lines = 150    # fail above this
+
+[required]
+files = [
+  "AGENTS.md",
+  "ARCHITECTURE.md",
+  "docs/README.md",
+  "docs/DEVELOPMENT.md",
+  "docs/TESTING.md",
+  "docs/OBSERVABILITY.md",
+  "docs/RELIABILITY.md",
+  "docs/SECURITY.md",
+  "docs/QUALITY_SCORE.md",
+  "docs/PLANS.md",
+  "docs/design-docs/index.md",
+  "docs/design-docs/core-beliefs.md",
+  "docs/design-docs/adr/index.md",
+  "docs/exec-plans/index.md",
+  "docs/exec-plans/active/index.md",
+  "docs/exec-plans/completed/index.md",
+  "docs/exec-plans/tech-debt-tracker.md",
+  "docs/product-specs/index.md",
+  "docs/references/index.md",
+  "docs/generated/README.md",
+]
+
+[front_matter]
+required_keys = ["status", "owner", "last_reviewed"]
+# Document statuses plus ADR statuses.
+statuses = [
+  "template", "draft", "verified", "stale", "deprecated",
+  "proposed", "accepted", "rejected", "superseded",
+]
+stale_after_days = 90
+# Files that carry no front matter. ExecPlans are pure plan documents
+# (see docs/PLANS.md); generated files are owned by their generator.
+exempt = [
+  "AGENTS.md",
+  "docs/generated/*",
+  "docs/exec-plans/active/*",
+  "docs/exec-plans/completed/*",
+]
+
+[exec_plans]
+dirs = ["docs/exec-plans/active", "docs/exec-plans/completed"]
+completed_dir = "docs/exec-plans/completed"
+required_sections = [
+  "Purpose / Big Picture",
+  "Progress",
+  "Surprises & Discoveries",
+  "Decision Log",
+  "Outcomes & Retrospective",
+  "Context and Orientation",
+  "Plan of Work",
+  "Concrete Steps",
+  "Validation and Acceptance",
+  "Idempotence and Recovery",
+]

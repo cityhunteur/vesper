@@ -1,3 +1,9 @@
+---
+status: verified
+owner: cityhunteur
+last_reviewed: 2026-11-05
+---
+
 # Symphony milestones
 
 ### 2026-04-12 — WOR-71 — `vesper-proxy` gains a Phase 0 vsock CONNECT bridge

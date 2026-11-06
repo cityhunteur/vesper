@@ -1,3 +1,9 @@
+---
+status: verified
+owner: cityhunteur
+last_reviewed: 2026-11-05
+---
+
 # Harness Engineering for Vesper
 
 This document adapts harness-engineering practices to Vesper’s repository and runtime constraints.
@@ -21,8 +27,8 @@ Tracker truth is split intentionally:
 
 These tell the agent how to work before it writes code:
 - `AGENTS.md`
-- `docs/index.md`
-- `docs/ARCHITECTURE.md`
+- `docs/README.md`
+- `ARCHITECTURE.md`
 - `docs/PLANS.md`
 - `docs/RELIABILITY.md`
 - `docs/SECURITY.md`
@@ -80,7 +86,7 @@ Do not mark parity complete from:
 
 Do not start with a giant instruction blob. Start from:
 1. `AGENTS.md`
-2. `docs/index.md`
+2. `docs/README.md`
 3. only the specific docs needed for the task.
 
 This keeps context focused and reduces stale or irrelevant guidance.
@@ -100,7 +106,7 @@ This keeps context focused and reduces stale or irrelevant guidance.
 ## Architecture enforcement
 
 Use docs and scripts together:
-- `docs/ARCHITECTURE.md` defines allowed boundaries,
+- `ARCHITECTURE.md` defines allowed boundaries,
 - `scripts/harness/check_structure.py` checks them mechanically,
 - `docs/QUALITY_SCORE.md` tracks whether coherence is improving.
 
@@ -137,7 +143,7 @@ Run janitor tasks on a cadence:
 Use:
 - `scripts/harness/janitor_scan.py`
 - `scripts/harness/compute_quality_score.py`
-- `docs/plans/tech-debt-tracker.md`
+- `docs/exec-plans/tech-debt-tracker.md`
 
 ## Tracker and GitHub update protocol
 

@@ -1,3 +1,9 @@
+---
+status: draft
+owner: cityhunteur
+last_reviewed: 2026-11-05
+---
+
 # Vesper ↔ Firecracker Feature Parity Matrix
 
 ## Legend

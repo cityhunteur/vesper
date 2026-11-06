@@ -12,8 +12,8 @@ METHOD_PATH_RE = re.compile(r'\("([A-Z]+)",\s*"([^"]+)"\)\s*=>')
 CORE_DOCS = [
     "AGENTS.md",
     "WORKFLOW.md",
-    "docs/index.md",
-    "docs/ARCHITECTURE.md",
+    "docs/README.md",
+    "ARCHITECTURE.md",
     "docs/QUALITY_SCORE.md",
     "docs/RELIABILITY.md",
     "docs/SECURITY.md",

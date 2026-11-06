@@ -10,26 +10,35 @@ from typing import List, Tuple
 REQUIRED_FILES = [
     "AGENTS.md",
     "WORKFLOW.md",
-    "docs/index.md",
-    "docs/ARCHITECTURE.md",
+    "ARCHITECTURE.md",
+    "docs/README.md",
     "docs/PLANS.md",
     "docs/QUALITY_SCORE.md",
     "docs/RELIABILITY.md",
     "docs/SECURITY.md",
-    "docs/design/index.md",
-    "docs/design/core-beliefs.md",
-    "docs/plans/active/README.md",
-    "docs/plans/completed/README.md",
-    "docs/plans/tech-debt-tracker.md",
+    "docs/DEVELOPMENT.md",
+    "docs/TESTING.md",
+    "docs/OBSERVABILITY.md",
+    "docs/design-docs/index.md",
+    "docs/design-docs/core-beliefs.md",
+    "docs/design-docs/adr/index.md",
+    "docs/exec-plans/index.md",
+    "docs/exec-plans/active/index.md",
+    "docs/exec-plans/completed/index.md",
+    "docs/exec-plans/tech-debt-tracker.md",
+    "docs/product-specs/index.md",
     "docs/generated/README.md",
+    "docs/process/index.md",
     "docs/process/harness-engineering.md",
     "docs/progress/symphony-milestones.md",
-    "docs/references/README.md",
+    "docs/references/index.md",
+    "docs/specs/index.md",
 ]
 
 MARKDOWN_GLOBS = [
     "AGENTS.md",
     "WORKFLOW.md",
+    "ARCHITECTURE.md",
     "docs/**/*.md",
 ]
 
@@ -103,10 +112,10 @@ def main() -> int:
         agents_lines = read_text(agents_path).splitlines()
         if len(agents_lines) > 160:
             warnings.append(f"AGENTS.md is {len(agents_lines)} lines; keep it short and map-like")
-        if "docs/index.md" not in read_text(agents_path):
-            errors.append("AGENTS.md does not link to docs/index.md")
+        if "docs/README.md" not in read_text(agents_path):
+            errors.append("AGENTS.md does not link to docs/README.md")
 
-    index_path = root / "docs/index.md"
+    index_path = root / "docs/README.md"
     if index_path.exists():
         index_text = read_text(index_path)
         for needle in [
@@ -117,7 +126,7 @@ def main() -> int:
             "PLANS.md",
         ]:
             if needle not in index_text:
-                errors.append(f"docs/index.md does not reference {needle}")
+                errors.append(f"docs/README.md does not reference {needle}")
 
     for path in find_markdown_files(root):
         content = read_text(path)

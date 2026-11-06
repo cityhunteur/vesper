@@ -1,3 +1,9 @@
+---
+status: verified
+owner: cityhunteur
+last_reviewed: 2026-11-05
+---
+
 # System VM Build and Boot Pipeline (Phase 1 scaffold)
 
 This project includes a deterministic scaffold for System VM image metadata, NAT-default launch config generation, and repeated boot diagnostics capture.

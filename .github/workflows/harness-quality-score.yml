@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - AGENTS.md
+      - ARCHITECTURE.md
       - WORKFLOW.md
       - .symphony/templates/**
       - docs/**
@@ -16,6 +17,7 @@ on:
     branches: [main]
     paths:
       - AGENTS.md
+      - ARCHITECTURE.md
       - WORKFLOW.md
       - .symphony/templates/**
       - docs/**

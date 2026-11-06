@@ -1,3 +1,9 @@
+---
+status: verified
+owner: cityhunteur
+last_reviewed: 2026-11-05
+---
+
 # Vesper Quality Score
 
 This file tracks the quality dimensions that matter most for agent-driven work on Vesper. It should be updated from durable reports, not intuition alone.

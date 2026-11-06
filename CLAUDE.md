@@ -1,3 +1,5 @@
+@AGENTS.md
+
 # Vesper Repository Guidance
 
 ## Source Of Truth

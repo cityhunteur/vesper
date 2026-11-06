@@ -86,12 +86,12 @@ No description provided.
 ## Required reading order
 
 1. `AGENTS.md`
-2. `docs/index.md`
+2. `docs/README.md`
 3. The smallest relevant docs for the task:
    - API / parity work:
      - `docs/specs/design-v0.md`
      - `docs/specs/firecracker-feature-parity.md`
-     - `docs/ARCHITECTURE.md`
+     - `ARCHITECTURE.md`
      - `docs/RELIABILITY.md`
    - governance / policy work:
      - `docs/process/baseline-governance.md`
@@ -371,7 +371,7 @@ If this attempt uncovered recurring review comments, stale guidance, or repeated
 - update `AGENTS.md` only if the map itself is wrong,
 - otherwise update the deeper doc in `docs/`,
 - promote recurring review taste into a script, workflow, or template when possible,
-- record janitor follow-up work in `docs/plans/tech-debt-tracker.md`.
+- record janitor follow-up work in `docs/exec-plans/tech-debt-tracker.md`.
 
 ## Promotion rules
 

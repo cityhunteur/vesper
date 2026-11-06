@@ -1,3 +1,9 @@
+---
+status: verified
+owner: cityhunteur
+last_reviewed: 2026-11-05
+---
+
 # Baseline Governance
 
 This document defines the required workflow for updating `docs/specs/design-v0.baselines.lock.yaml`.

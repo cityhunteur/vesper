@@ -1,3 +1,9 @@
+---
+status: verified
+owner: cityhunteur
+last_reviewed: 2026-11-05
+---
+
 # Compat Exception Lifecycle
 
 Compatibility exceptions are allowed only before parity-GA. They must be tracked in

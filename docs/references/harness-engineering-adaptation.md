@@ -1,3 +1,11 @@
+---
+status: deprecated
+owner: cityhunteur
+last_reviewed: 2026-11-05
+---
+
+> Historical note from the 2026-03 harness-engineering bundle. Paths such as `docs/index.md`, `docs/design/` and `docs/plans/` refer to the layout that was replaced on 2026-11-05; see [index.md](index.md).
+
 # Harness engineering adaptation for Vesper
 
 This note explains how the bundle translates OpenAI’s harness-engineering ideas into Vesper-specific files and workflows.

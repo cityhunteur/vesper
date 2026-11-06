@@ -1,3 +1,9 @@
+---
+status: verified
+owner: cityhunteur
+last_reviewed: 2026-11-05
+---
+
 # Vesper Reliability and Legibility
 
 Harness engineering for Vesper means making runtime behavior legible to the agent and durable for reviewers.
