@@ -4,4 +4,4 @@ Finished plans. Keep them: their Decision Logs and retrospectives explain why th
 
 | Plan | Outcome | Completed |
 |---|---|---|
-| | *None* | |
+| [2026-11-06-WOR-27-systemvm-image-pipeline.md](2026-11-06-WOR-27-systemvm-image-pipeline.md) | Pinned, verified System VM image; Swift launcher; 200/200 probed boots with NAT proof under 5 s (GH #12 closed) | 2026-11-06 |

@@ -30,8 +30,8 @@ with console output. The parity unit for slice 1 is "pinned, verified, CI-reprod
   carries `boot.max_boot_ms` and `boot.probe`; the launcher logs in, runs `udhcpc`, pings the NAT gateway, prints
   `VESPER-NAT-OK` and powers off; boot smoke parses the launcher's ready time and enforces the threshold; 5/5 and
   200/200 probed boots recorded.
-- [ ] Slice 3: PR merged, CI green, GH #74, GH #12 checklist and WOR-27 updated, milestone entry written; plan
-  moved to completed.
+- [x] (2026-11-06 19:10Z) Slice 3: PR #121 merged as `8ae5a7d`, CI green, GH #74, GH #12 checklist and WOR-27
+  updated, milestone entry written; plan moved to completed.
 
 ## Surprises & Discoveries
 
@@ -106,7 +106,8 @@ with console output. The parity unit for slice 1 is "pinned, verified, CI-reprod
 Slice 1 delivered a verifiable image pipeline with no new crate dependencies. Slice 2 delivered the launcher and
 real boot evidence (200/200 to the login prompt, about 1.1 s each on an M3; `run/WOR-27/systemvm/boot-report-200.json`).
 Slice 3 delivered the guest probe and threshold: every boot now proves NAT from inside the guest and powers off
-cleanly, under 5 s (`run/WOR-27/systemvm/boot-report-probe-200.json`). All four GH #12 checklist items are proven.
+cleanly, under 5 s (`run/WOR-27/systemvm/boot-report-probe-200.json`: 200/200, max boot 1197 ms). All four GH #12
+checklist items are proven and the issue is closed (PRs #119, #120, #121; merges `8bd505b`, `a638c34`, `8ae5a7d`).
 Gaps: no workload inside the guest and no control channel beyond the console script; boot evidence cannot be
 produced in CI (TD-005). Lesson: verify an image format by booting it, not by `file` output; slice 1's
 "EFI-stubbed Image" claim was wrong.

@@ -51,7 +51,7 @@ Added `launcher/Package.swift`, `launcher/Sources/vesper-vmlauncher/main.swift`,
 image files), `scripts/macos/build-vmlauncher.sh`, `make vmlauncher-build`, a `launcher-build` job in
 `systemvm-image.yml`, and `boot_media_path` plus `ready_pattern` in the launch config. Nothing migrates; the
 placeholder boot-smoke defaults (`sh -c 'echo boot-ok'`) are replaced by the launcher in `scripts/systemvm/boot-smoke.sh`.
-ExecPlan: [2026-11-06-WOR-27-systemvm-image-pipeline.md](../../exec-plans/active/2026-11-06-WOR-27-systemvm-image-pipeline.md).
+ExecPlan: [2026-11-06-WOR-27-systemvm-image-pipeline.md](../../exec-plans/completed/2026-11-06-WOR-27-systemvm-image-pipeline.md).
 
 ## References
 

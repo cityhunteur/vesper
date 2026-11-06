@@ -6,6 +6,19 @@ last_reviewed: 2026-11-05
 
 # Symphony milestones
 
+### 2026-11-06 — WOR-27 — NAT proven from the guest, 5 s boot threshold enforced, GH #12 complete
+- GitHub issue: #12 (mirror #74)
+- PR: #121
+- Commit: `8ae5a7d` (squash merge of PR #121; remote CI green)
+- Phase: 1
+- Parity unit: console-driven guest probe (root login, DHCP from the NAT, gateway ping, `poweroff`) pinned in the image lock and run by the launcher on every boot; boot smoke enforces the owner's 5 s threshold against the launcher's ready time
+- Result: keep
+- Verification bundle: `.symphony/runs/WOR-27/current/` (evidence in `run/WOR-27/systemvm/`, incl. `boot-report-probe-200.json`)
+- Council summary: skipped; no control-plane path changed; six remote workflows green
+- Harness update: image lock schema 3 (`boot.max_boot_ms`, `boot.probe`); `ProbeSettings`; `run_boot_check` reads the launcher's `ready` JSON line and reports `boot_ms`; `systemvmctl boot-smoke --max-boot-ms`; launcher probe state machine and `--skip-probe`; ExecPlan moved to `docs/exec-plans/completed/`
+- Remaining risks: no workload runs inside the guest and the console script is not a control channel (vsock under WOR-25, containerd under WOR-33); boot evidence is developer-hardware only (TD-005)
+- Truthful project state after this milestone: every GH #12 acceptance criterion and checklist item is proven (200/200 probed boots, max boot 1197 ms under the 5 s threshold, DHCP lease and gateway ping from the guest, clean power-off); Phase 1 continues with WOR-25 (vsock control channel) and WOR-33 (containerd in the System VM)
+
 ### 2026-11-06 — WOR-27 — System VM boots on Virtualization.framework, 200/200 to the login prompt
 - GitHub issue: #12 (mirror #74)
 - PR: #120
