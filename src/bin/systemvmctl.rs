@@ -30,7 +30,7 @@ enum Commands {
     /// Write the NAT-default launch configuration, from explicit paths or from the image lock.
     LaunchConfig {
         /// Derive kernel, initrd, boot media, cmdline and ready pattern from the lock and --dir.
-        #[arg(long, conflicts_with_all = ["kernel", "rootfs", "initrd", "boot_media", "cmdline", "ready_pattern"])]
+        #[arg(long, conflicts_with_all = ["kernel", "rootfs", "initrd", "boot_media", "cmdline", "ready_pattern", "nested"])]
         from_lock: bool,
         #[arg(long, default_value = DEFAULT_IMAGE_LOCK)]
         lock: String,
@@ -50,6 +50,9 @@ enum Commands {
         /// Console text that marks a healthy boot (default "login:").
         #[arg(long)]
         ready_pattern: Option<String>,
+        /// Nested virtualization policy: auto, require or off.
+        #[arg(long)]
+        nested: Option<String>,
         #[arg(long, default_value = "run/systemvm/console.log")]
         console_log: String,
         #[arg(long, default_value = "build/systemvm/launch-config.json")]
@@ -83,6 +86,19 @@ enum Commands {
         /// Fail when the lock has an overlay but the derived initramfs has not been built.
         #[arg(long)]
         require_overlay: bool,
+    },
+    /// Probe the host through the launcher and print the backend selection (GH #17).
+    BackendSelect {
+        #[arg(long, default_value = "build/vmlauncher/vesper-vmlauncher")]
+        launcher: String,
+        /// auto, require or off (default: the image lock's boot.nested_virtualization).
+        #[arg(long)]
+        policy: Option<String>,
+        #[arg(long, default_value = DEFAULT_IMAGE_LOCK)]
+        lock: String,
+        /// Print the raw host capabilities instead of the selection.
+        #[arg(long)]
+        capabilities: bool,
     },
     /// Talk to the guest agent over the vsock bridge (GH #13).
     Control {
@@ -332,6 +348,7 @@ fn run() -> Result<(), String> {
             boot_media,
             cmdline,
             ready_pattern,
+            nested,
             console_log,
             out,
         } => {
@@ -350,6 +367,7 @@ fn run() -> Result<(), String> {
                     probe: None,
                     vsock_bridge_path: None,
                     agent_port: None,
+                    nested_virtualization: nested.as_deref(),
                     console_log_path: &console_log,
                 })?
             };
@@ -386,6 +404,27 @@ fn run() -> Result<(), String> {
                 "verified {} {} {} image in {dir}: image_id={} (manifest: {out})",
                 lock.distribution, lock.release, lock.arch, manifest.image_id
             );
+            Ok(())
+        }
+        Commands::BackendSelect {
+            launcher,
+            policy,
+            lock,
+            capabilities,
+        } => {
+            let caps = vesper::platform::probe_host_capabilities(std::path::Path::new(&launcher))?;
+            if capabilities {
+                println!("{}", serde_json::to_string(&caps).unwrap());
+                return Ok(());
+            }
+            let policy = match policy {
+                Some(value) => vesper::platform::NestedPolicy::parse(&value)?,
+                None => vesper::platform::NestedPolicy::parse(
+                    &vesper::systemvm::load_image_lock(&lock)?.boot.nested_virtualization,
+                )?,
+            };
+            let selection = vesper::platform::select_backend(&caps, policy)?;
+            println!("{}", serde_json::to_string_pretty(&selection).unwrap());
             Ok(())
         }
         Commands::Control {

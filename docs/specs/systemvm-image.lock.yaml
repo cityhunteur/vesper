@@ -3,7 +3,7 @@
 #          systemvmctl lock-env / verify-image / launch-config --from-lock,
 #          scripts/systemvm/fetch-image.sh, .github/workflows/systemvm-image.yml.
 # Change procedure: docs/process/systemvm-bringup.md, "Bumping the pinned image".
-schema_version: 5
+schema_version: 6
 distribution: alpine
 branch: v3.22
 release: 3.22.8
@@ -60,6 +60,9 @@ boot:
   ready_pattern: "login:"
   # Boot-time threshold (GH #12 "boot time within acceptable threshold"), agreed 2026-11-06: 5 s to ready_pattern.
   max_boot_ms: 5000
+  # Nested virtualization for Backend A (GH #17): auto enables it on macOS 15+ with an M3 or later and falls back
+  # (Backend B, not implemented) with diagnostics elsewhere; require refuses to run; off never enables it.
+  nested_virtualization: auto
   # Console-driven guest probe (GH #12 "NAT networking is functional from guest"): the launcher logs in as root
   # (the live ISO has no root password), configures eth0 over DHCP from the Virtualization.framework NAT, pings the
   # NAT gateway, prints the success marker, then powers off so the VM stops cleanly. The marker is split in the
@@ -73,6 +76,7 @@ boot:
       - "for i in $(seq 1 90); do [ -f /run/vesper/packages-ready ] && break; sleep 1; done; test -f /run/vesper/packages-ready && command -v socat >/dev/null && command -v containerd >/dev/null && command -v dockerd >/dev/null && echo \"VESPER-EXTRAS-\"OK"
       - "for i in $(seq 1 30); do rc-service vesper-agent status 2>/dev/null | grep -q started && break; sleep 1; done; rc-service vesper-agent status | grep -q started && echo \"VESPER-AGENT-\"OK"
       - "for i in $(seq 1 60); do [ -f /run/vesper/services-ready ] && break; sleep 1; done; rc-service containerd status | grep -q started && rc-service docker status | grep -q started && docker version --format '{{.Server.Version}}' >/dev/null 2>&1 && echo \"VESPER-SERVICES-\"OK"
+      - "if [ -c /dev/kvm ]; then echo \"VESPER-KVM-\"OK; else echo \"VESPER-KVM-\"ABSENT; fi"
       - "test -f /run/vesper-nat-ok && test -f /run/vesper/packages-ready && test -f /run/vesper/services-ready && rc-service vesper-agent status | grep -q started && echo \"VESPER-PROBE-\"OK"
     success_pattern: "VESPER-PROBE-OK"
     shutdown_command: poweroff

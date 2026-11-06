@@ -35,6 +35,20 @@ Rust (`systemvm::load_image_lock`, `deny_unknown_fields`); the shell never inter
   the overlay from inside the guest and ends with a clean shutdown. Markers are split in the typed commands
   because the console echoes input.
 
+## Nested virtualization and backend selection (GH #17)
+
+Backend A runs stock Firecracker under KVM inside the System VM, which needs nested virtualization: macOS 15 or
+later on an Apple M3 or later. `build/vmlauncher/vesper-vmlauncher --host-capabilities` prints the host facts
+(`api_available`, `nested_virtualization_supported`, `virtualization_supported`, `macos`, `chip`, `model`) and
+`cargo run --bin systemvmctl -- backend-select [--policy auto|require|off]` turns them into a selection:
+`backend-a` with `nested_virtualization: true` when supported; otherwise `backend-b` (`implemented: false`) with
+diagnostics naming the missing requirement, or an error under `require`. The lock's `boot.nested_virtualization`
+(`auto`) flows into the launch config; the launcher enables `VZGenericPlatformConfiguration.isNestedVirtualizationEnabled`
+accordingly, prints a `platform` status line (`"nested_virtualization":"enabled|unsupported|off"`), and under
+`require` exits 3 with the same diagnostic. In the guest the probe prints `VESPER-KVM-OK` or `VESPER-KVM-ABSENT`
+and `HEALTH` carries `kvm`. CI runs the probe and the selection on GitHub's M-series runner, which lacks nested
+virtualization, so the fallback path is exercised on every change.
+
 ## Overlay and packages (ADR 0002)
 
 `systemvm/overlay/` is an Alpine `apkovl` tree applied over the tmpfs root at boot. `make systemvm-overlay`

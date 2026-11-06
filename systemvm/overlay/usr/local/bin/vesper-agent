@@ -7,7 +7,7 @@
 #   VERSION               -> VERSION 1
 #   ECHO <n>              -> ECHO <n> then the next <n> bytes are read and written back unchanged
 #   HEALTH                -> HEALTH {"packages_ready":bool,"services_ready":bool,"services":{...},
-#                             "containerd_ok":bool,"docker_ok":bool,"docker_version":"..."}
+#                             "containerd_ok":bool,"docker_ok":bool,"docker_version":"...","kvm":bool}
 #   KILL <containerd|docker> -> KILL <name> <pid> after SIGKILL to the daemon (crash simulation)
 #   LOGS <messages|containerd|docker> <n> -> LOGS <count> then <count> log lines
 #   DROP                  -> DROP then the connection is closed (simulates a server-side drop)
@@ -34,14 +34,15 @@ while IFS= read -r line; do
       head -c "$n"
       ;;
     HEALTH)
-      ready=false; sready=false; cok=false; dok=false; dver=""
+      ready=false; sready=false; cok=false; dok=false; dver=""; kvm=false
+      [ -c /dev/kvm ] && kvm=true
       [ -f /run/vesper/packages-ready ] && ready=true
       [ -f /run/vesper/services-ready ] && sready=true
       ctr --connect-timeout 2s version >/dev/null 2>&1 && cok=true
       dver="$(docker version --format '{{.Server.Version}}' 2>/dev/null || true)"
       [ -n "$dver" ] && dok=true
-      printf 'HEALTH {"packages_ready":%s,"services_ready":%s,"services":{"containerd":"%s","docker":"%s","vesper-agent":"%s"},"containerd_ok":%s,"docker_ok":%s,"docker_version":"%s"}\n' \
-        "$ready" "$sready" "$(service_state containerd)" "$(service_state docker)" "$(service_state vesper-agent)" "$cok" "$dok" "$dver"
+      printf 'HEALTH {"packages_ready":%s,"services_ready":%s,"services":{"containerd":"%s","docker":"%s","vesper-agent":"%s"},"containerd_ok":%s,"docker_ok":%s,"docker_version":"%s","kvm":%s}\n' \
+        "$ready" "$sready" "$(service_state containerd)" "$(service_state docker)" "$(service_state vesper-agent)" "$cok" "$dok" "$dver" "$kvm"
       ;;
     KILL)
       case "$2" in

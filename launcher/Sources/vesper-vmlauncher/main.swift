@@ -39,6 +39,8 @@ struct LaunchConfig: Decodable {
     let probe: ProbeSettings?
     let vsock_bridge_path: String?
     let agent_port: UInt32?
+    /// "auto" (enable when the host supports it), "require" (fail otherwise) or "off".
+    let nested_virtualization: String?
     let network_mode: String
     let cpu_count: Int
     let memory_mib: UInt64
@@ -51,16 +53,41 @@ struct Options {
     var timeoutSeconds: Double = 60
     var keepRunning = false
     var skipProbe = false
+    var hostCapabilities = false
+}
+
+/// Host facts for backend selection (GH #17): nested virtualisation needs macOS 15 and an M3 or later.
+func hostCapabilitiesJSON() -> String {
+    func sysctl(_ name: String) -> String {
+        var size = 0
+        sysctlbyname(name, nil, &size, nil, 0)
+        var buffer = [CChar](repeating: 0, count: max(size, 1))
+        sysctlbyname(name, &buffer, &size, nil, 0)
+        return String(cString: buffer)
+    }
+    let version = ProcessInfo.processInfo.operatingSystemVersion
+    let macos = "\(version.majorVersion).\(version.minorVersion).\(version.patchVersion)"
+    var apiAvailable = false
+    var supported = false
+    if #available(macOS 15.0, *) {
+        apiAvailable = true
+        supported = VZGenericPlatformConfiguration.isNestedVirtualizationSupported
+    }
+    return """
+    {"api_available":\(apiAvailable),"nested_virtualization_supported":\(supported),"virtualization_supported":\(VZVirtualMachine.isSupported),"macos":"\(macos)","chip":"\(sysctl("machdep.cpu.brand_string"))","model":"\(sysctl("hw.model"))"}
+    """
 }
 
 func usage() -> String {
     """
     usage: vesper-vmlauncher [--config PATH] [--ready-pattern TEXT] [--timeout-seconds N] [--keep-running] [--skip-probe]
+           vesper-vmlauncher --host-capabilities
       --config PATH          launch config JSON (default build/systemvm/launch-config.json)
       --ready-pattern TEXT   console text that marks a healthy boot (default: ready_pattern from the config, else "login:")
       --timeout-seconds N    give up after N seconds (default 60)
       --keep-running         do not stop the VM after the ready pattern; wait for guest shutdown
       --skip-probe           ignore the config's probe: stop right after the ready pattern
+      --host-capabilities    print host facts (nested virtualization support, macOS, chip) as JSON and exit
     """
 }
 
@@ -68,6 +95,8 @@ func fail(_ code: Int32, _ message: String) -> Never {
     FileHandle.standardError.write(("vesper-vmlauncher: " + message + "\n").data(using: .utf8)!)
     exit(code)
 }
+
+var nestedVirtualizationState = "off"
 
 func parseOptions() -> Options {
     var options = Options()
@@ -90,6 +119,8 @@ func parseOptions() -> Options {
             options.keepRunning = true
         case "--skip-probe":
             options.skipProbe = true
+        case "--host-capabilities":
+            options.hostCapabilities = true
         case "--help", "-h":
             print(usage())
             exit(0)
@@ -130,6 +161,28 @@ func buildConfiguration(_ config: LaunchConfig, consoleOutput: FileHandle, conso
 
     let vm = VZVirtualMachineConfiguration()
     vm.bootLoader = bootLoader
+    // Nested virtualization (GH #17): "auto" enables it when supported, "require" fails otherwise, "off" never.
+    let platform = VZGenericPlatformConfiguration()
+    let nestedMode = (config.nested_virtualization ?? "auto").lowercased()
+    var nestedState = "off"
+    if nestedMode != "off" {
+        var supported = false
+        if #available(macOS 15.0, *) {
+            supported = VZGenericPlatformConfiguration.isNestedVirtualizationSupported
+            if supported { platform.isNestedVirtualizationEnabled = true }
+        }
+        if supported {
+            nestedState = "enabled"
+        } else if nestedMode == "require" {
+            fail(3, "nested virtualization is required but this host does not support it (needs macOS 15 or later on an Apple M3 or later chip); use nested_virtualization \"auto\" or \"off\" for a Backend B host")
+        } else {
+            nestedState = "unsupported"
+        }
+    } else if nestedMode != "off" && nestedMode != "auto" && nestedMode != "require" {
+        fail(3, "nested_virtualization must be auto, require or off, got \(nestedMode)")
+    }
+    vm.platform = platform
+    nestedVirtualizationState = nestedState
     vm.cpuCount = min(
         max(config.cpu_count, VZVirtualMachineConfiguration.minimumAllowedCPUCount),
         VZVirtualMachineConfiguration.maximumAllowedCPUCount)
@@ -461,6 +514,7 @@ final class Launcher: NSObject, VZVirtualMachineDelegate {
         }
 
         installSignalHandler()
+        report(status: "platform", extra: "\"nested_virtualization\":\"\(nestedVirtualizationState)\"")
         machine.start { result in
             if case .failure(let error) = result {
                 FileHandle.standardError.write(
@@ -496,6 +550,10 @@ final class Launcher: NSObject, VZVirtualMachineDelegate {
 }
 
 let options = parseOptions()
+if options.hostCapabilities {
+    print(hostCapabilitiesJSON())
+    exit(0)
+}
 let config = loadConfig(options.configPath)
 guard VZVirtualMachine.isSupported else {
     fail(3, "Virtualization.framework is not supported on this host")

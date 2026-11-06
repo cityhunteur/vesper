@@ -93,7 +93,7 @@ allowlist and the line budgets (TD-015).
 | Layer | Purpose | Modules | May reference | Enforced |
 |---|---|---|---|---|
 | 0. Leaf modules | Pinned upstream contract, parity metadata, build metadata | `spec`, `baseline`, `compat`, `buildinfo` | nothing local | mechanical |
-| 1. Platform policy | Host capability and entitlement rules | `platform` | nothing local | mechanical |
+| 1. Platform policy | Host capability and entitlement rules; nested-virtualization probe and backend selection (GH #17) | `platform` | nothing local | mechanical |
 | 2. Control plane: `api` | State machine, dispatch, deterministic errors | `api` | `api_matrix`, `baseline`, `buildinfo`, `compat`, `platform`, `spec` | mechanical |
 | 2. Control plane: matrices | Generated route matrices | `api_matrix`, `api_behavior_matrix` | `api`, `baseline`, `spec`; `api_behavior_matrix` also `api_matrix` | mechanical |
 | 2. Control plane: families | Extracted route-family handlers | `api/*` | `super` only (no `crate::` references) | mechanical |
@@ -276,6 +276,9 @@ reconnect and 2 MiB echo proven by `make systemvm-control-suite`); `make systemv
 owner-only `run/vesper/docker.sock` with `vsock://3:2375` as upstream, reached through the bridge and the guest's
 Docker relay, so the macOS Docker CLI talks to Docker 28 in the VM; `make docker-smoke` runs a trivial container
 built offline from the pinned ISO. That is design-v0's Phase 1 exit criterion, met on developer hardware.
+`systemvmctl backend-select` decides between Backend A (nested virtualization on macOS 15+ with an M3 or later;
+the guest then has `/dev/kvm`) and the unimplemented Backend B fallback, with diagnostics; the lock's
+`boot.nested_virtualization: auto` drives the launcher.
 
 **Intended:** design-v0 describes a packaged macOS host process plus a Linux System VM running containerd and
 Firecracker.

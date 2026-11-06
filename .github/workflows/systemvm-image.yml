@@ -113,5 +113,18 @@ jobs:
           build/vmlauncher/vesper-vmlauncher --help
           if build/vmlauncher/vesper-vmlauncher --config /nonexistent.json; then exit 1; fi
 
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Host capabilities and backend selection do not crash on GitHub's M-series runner (GH #17)
+        run: |
+          build/vmlauncher/vesper-vmlauncher --host-capabilities
+          cargo run -q --bin systemvmctl -- backend-select --launcher build/vmlauncher/vesper-vmlauncher
+          if cargo run -q --bin systemvmctl -- backend-select --launcher build/vmlauncher/vesper-vmlauncher --policy require; then
+            echo "require policy accepted: this runner supports nested virtualization"
+          else
+            echo "require policy refused with diagnostics (expected on M1/M2 runners)"
+          fi
+
       - name: Entitlement plists are valid
         run: make validate-entitlements
