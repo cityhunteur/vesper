@@ -97,7 +97,9 @@ Minimum:
 - `make systemvm-up && make systemvm-control-suite && make systemvm-down` with `passed: true` in
   `run/systemvm/control-report.json` for any change to the launcher bridge, the overlay services or the agent,
 - `make systemvm-services-suite` with `passed: true` in `run/systemvm/services-report.json` for any change to
-  the guest services, the package pins or cgroup configuration.
+  the guest services, the package pins or cgroup configuration,
+- `make systemvm-reliability` (50 cycles; 200 for launcher, lock or kernel command-line changes) with
+  `passed: true` in `run/systemvm/reliability-report.json`, copied into `run/<ISSUE-ID>/systemvm/`.
 
 ### Governance work
 

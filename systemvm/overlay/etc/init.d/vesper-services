@@ -7,26 +7,41 @@ description="Vesper runtime services (containerd, docker)"
 
 depend() {
   need localmount vesper-packages
-  use net
 }
 
 start() {
-  ebegin "Starting Vesper runtime services"
+  ebegin "Starting Vesper runtime services (in the background)"
   for svc in containerd docker; do
     if [ ! -x "/etc/init.d/$svc" ]; then
       echo "vesper: service $svc is missing" > /dev/console
       eend 1
       return 1
     fi
-    # A clean environment: inside a runlevel change rc-service would only schedule the start.
-    if ! out="$(env -i PATH=/sbin:/usr/sbin:/bin:/usr/bin rc-service "$svc" start 2>&1)"; then
-      echo "vesper: service $svc failed to start: $(printf '%s' "$out" | tail -2 | tr '\n' ' ')" > /dev/console
-      eend 1
-      return 1
-    fi
-    echo "vesper: service $svc started" > /dev/console
   done
-  mkdir -p /run/vesper && touch /run/vesper/services-ready
+  mkdir -p /run/vesper
+  # Detached so the default runlevel (and the login prompt) does not wait for dockerd;
+  # /run/vesper/services-ready marks completion and the probe and HEALTH wait for it.
+  # A clean environment: inside a runlevel change rc-service would only schedule the start.
+  env -i PATH=/sbin:/usr/sbin:/bin:/usr/bin setsid sh -c '
+    # networking (eth0 DHCP, provides "net" for docker) runs here, not in the boot runlevel,
+    # so its DHCP wait does not delay the login prompt either.
+    if rc-service networking start > /dev/null 2>&1; then
+      touch /run/vesper/net-ready
+      echo "vesper: networking up" > /dev/console
+    else
+      echo "vesper: networking failed to start" > /dev/console
+      exit 1
+    fi
+    for svc in containerd docker; do
+      if out="$(rc-service "$svc" start 2>&1)"; then
+        echo "vesper: service $svc started" > /dev/console
+      else
+        echo "vesper: service $svc failed to start: $(printf "%s" "$out" | tail -2 | tr "\n" " ")" > /dev/console
+        exit 1
+      fi
+    done
+    touch /run/vesper/services-ready
+  ' < /dev/null > /dev/null 2>&1 &
   eend 0
 }
 

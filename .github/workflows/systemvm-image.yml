@@ -52,6 +52,9 @@ jobs:
       - name: systemvm unit tests
         run: cargo test systemvm
 
+      - name: Reliability report assembler self-test
+        run: python3 -I scripts/systemvm/reliability_report.py --self-test
+
       - name: Cache pinned guest packages
         uses: actions/cache@v4
         with:
