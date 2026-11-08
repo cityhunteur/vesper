@@ -5,7 +5,7 @@ CYCLES ?= 50
 .PHONY: build test contract-generate contract-check contract-test surface-matrix-generate \
 	surface-matrix-check behavior-matrix-generate behavior-matrix-check \
 	validate-entitlements dev-up dev-down vmlauncher-build systemvm-fetch systemvm-overlay systemvm-prepare systemvm-build systemvm-launch-config \
-	systemvm-boot-smoke systemvm-up systemvm-down systemvm-control-suite systemvm-services-suite systemvm-trivial-image docker-up docker-down docker-smoke docker-conformance ports-suite binds-suite systemvm-up-shares dns-suite workflow-suite crossarch-suite systemvm-reliability systemvm-microvm-suite systemvm-rootfs-suite systemvm-workload-suite systemvm-parity-baseline parity-baseline-check shim-build shim-test systemvm-shim-suite systemvm-bundle-suite systemvm-restart-suite
+	systemvm-boot-smoke systemvm-up systemvm-down systemvm-control-suite systemvm-services-suite systemvm-trivial-image docker-up docker-down docker-smoke docker-conformance ports-suite binds-suite systemvm-up-shares dns-suite workflow-suite crossarch-suite ctr-conformance ctr-conformance-check systemvm-reliability systemvm-microvm-suite systemvm-rootfs-suite systemvm-workload-suite systemvm-parity-baseline parity-baseline-check shim-build shim-test systemvm-shim-suite systemvm-bundle-suite systemvm-restart-suite
 
 build:
 	$(CARGO) build --bins
@@ -142,6 +142,13 @@ workflow-suite:
 
 crossarch-suite:
 	bash scripts/systemvm/crossarch-suite.sh
+
+ctr-conformance:
+	bash scripts/systemvm/ctr-conformance.sh $(CTR_FLAGS)
+
+ctr-conformance-check:
+	python3 -I scripts/systemvm/ctr_conformance_report.py --self-test
+	python3 -I scripts/systemvm/ctr_conformance_report.py --validate docs/specs/ctr-conformance-baseline.json
 
 systemvm-reliability:
 	bash scripts/systemvm/reliability-suite.sh $(CYCLES)

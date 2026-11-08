@@ -71,7 +71,9 @@ The durable signals this project relies on are artifacts rather than live teleme
   (resolver, addresses and subnet seen by the compose stack); `run/systemvm/workflow-report.json` from
   `make workflow-suite` (each workflow step's output and the baseline revisions it ran against);
   `systemvmctl control arch status|mode <arch>` for the registered interpreters and the execution mode of an
-  architecture, and `run/systemvm/crossarch-report.json` from `make crossarch-suite`.
+  architecture, and `run/systemvm/crossarch-report.json` from `make crossarch-suite`; `run/systemvm/ctr-conformance-report.json`
+  from `make ctr-conformance` and `systemvmctl control ctr metrics <task>` for a running task's cgroup figures;
+  the runbook `docs/process/shim-operations.md` maps symptoms to these sources.
 - `build/systemvm/image-manifest.json` (SHA-256 digests, stable `image_id`) and `build/systemvm/launch-config.json`.
 - `artifacts/parity-metadata.json` from `baselinectl --mode generate`.
 - JSON and Markdown reports from the Python sensors (`--json-out`, `--markdown-out`), uploaded by the `harness-*`

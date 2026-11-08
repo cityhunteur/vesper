@@ -352,10 +352,11 @@ Public symbols by file:
 - `control/suites.rs:run_shim_suite` force-deletes `e2e`, `det`, `ca`, `cb`, `cc`, then runs `handshake`,
   `import_image` (`IMPORTED`), `e2e_run_exit_code_and_output` (`vesper-ctr run e2e echo hello-from-task; exit 3`
   → `RC 3` and an `OUT hello-from-task` line), `start_detached` (`STARTED`), `state_running` (`RUNNING` with a
-  non-zero `pid=`), `invalid_start_running` and `invalid_delete_running` (`vesper-ctr try task start|delete det`
+  non-zero `pid=`), `task_metrics` (`vesper-ctr metrics det` → `METRICS det memory_bytes=<non-zero> …`),
+  `invalid_start_running` and `invalid_delete_running` (`vesper-ctr try task start|delete det`
   must fail), `kill_detached`, `delete_detached`, `invalid_unknown_task`, `start_ca|cb|cc`,
   `three_tasks_running` (three `RUNNING` rows with distinct non-zero pids), `kill_*`/`delete_*` for each and
-  `no_leftovers` (`CLEAN`); `passed` requires every step ok and at least 18 steps.
+  `no_leftovers` (`CLEAN`); `passed` requires every step ok and at least 19 steps.
 - `control/suites/bundle.rs:run_bundle_suite` force-deletes `l1`, `la`, `lb`, `e2e-base`, then runs
   `handshake`, `import_base_image`, `import_layered_image` (`IMPORTED … layers=2`), `layered_rootfs_boots`
   (`cat /etc/layer2-marker` → `layer-two`, rc 0), `start_la`, `meta_la_recorded` (`strategy` block-first,

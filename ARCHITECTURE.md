@@ -152,6 +152,7 @@ control-plane modules.
     `Cargo.*`, `Makefile`, `third_party/**`, `docs/generated/**`, `docs/specs/*.yaml`, `packaging/**`, `scripts/ci/**`).
   - `contract-tests.yml`: golden check, `make contract-test` (swagger, `src/spec.rs`, `src/api.rs`, `contractgen`, golden file).
   - `shim-tests.yml`: `go vet`, `go test` and the static linux/arm64 cross-build of `shim/`, binary uploaded as an artifact.
+  - `ctr-conformance.yml`: assembler self-test, validation of the committed ctr conformance capture against the lock, artifact upload.
   - `parity-baseline.yml`: assembler self-test, validation of the committed Backend A parity capture against the lock, archives and compat registry, artifact upload.
   - `baseline-governance.yml`: `cargo test`, parity metadata generate and validate (lock file, `src/baseline.rs`, `baselinectl`).
   - `compat-exceptions.yml`: `cargo test`, `compatexctl` (registry, `src/compat.rs`, `compatexctl`).

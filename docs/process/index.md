@@ -16,3 +16,4 @@ How work is executed and governed in this repository. Each document is authorita
 | [compat-exceptions.md](compat-exceptions.md) | Fields and lifecycle of `docs/specs/compat-exceptions.yaml`; `compatexctl` checks |
 | [macos-packaging.md](macos-packaging.md) | Entitlement plists, `make validate-entitlements`, the local dev loop |
 | [systemvm-bringup.md](systemvm-bringup.md) | `systemvmctl` commands, Make targets, manifest reproducibility, the Phase 0 vsock bridge convention |
+| [shim-operations.md](shim-operations.md) | Runbook for the Vesper containerd runtime: deploy, verify (`make ctr-conformance`), troubleshoot by symptom, recover; known limits |
