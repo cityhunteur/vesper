@@ -1,0 +1,18 @@
+# Minimal multi-service stack for the DNS/network conformance suite (GH #30): a TCP "web" service
+# with a network alias, and a client on the same compose network. Both use the pinned test image.
+services:
+  web:
+    image: ${DNS_IMAGE:-alpine:3.22}
+    command:
+      - sh
+      - -c
+      - 'while true; do printf "HTTP/1.1 200 OK\r\nContent-Length: 8\r\nConnection: close\r\n\r\nweb-ok\r\n" | nc -l -p 80 >/dev/null; done'
+    networks:
+      stack:
+        aliases: [api, backend.internal]
+  client:
+    image: ${DNS_IMAGE:-alpine:3.22}
+    command: sleep 300
+    networks: [stack]
+networks:
+  stack: {}
