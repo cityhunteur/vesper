@@ -13,6 +13,12 @@
 #        vesper-ctr start-image REF NAME WORDS... like start, against any containerd image ref
 #        vesper-ctr meta NAME                     the task's vesper-rootfs.json (one line) or ERR
 #        vesper-ctr cache                         CACHE <n> then one line per cached root drive
+#        vesper-ctr shim-pid NAME                 SHIMPID NAME <pid> (the containerd-shim-vesper-v2 process for NAME)
+#        vesper-ctr kill-shim NAME                SIGKILL that shim; KILLED-SHIM NAME <pid>
+#        vesper-ctr wait-gone NAME [TIMEOUT]      wait until ctr lists no task NAME; GONE NAME or ERR
+#        vesper-ctr state-file NAME               the task's vesper-task.json line or ERR
+#        vesper-ctr inflight-start NAME WORDS...  start `ctr run --rm` in the background; INFLIGHT NAME
+#        vesper-ctr inflight-result NAME [T]      wait for it; RC <code> then OUT lines
 set -u
 NS=vesper
 RT=io.containerd.vesper.v2
@@ -46,6 +52,47 @@ meta() {
   name=${1:?}; f="$BUNDLES/$name/vesper-rootfs.json"
   [ -f "$f" ] || { echo "ERR no $f (task gone or never created)"; return 1; }
   tr -d '\n' < "$f" | tr -s ' '; echo
+}
+
+shim_pid() { pgrep -f "containerd-shim-vesper-v2 -namespace $NS -id ${1:?}" 2>/dev/null | head -1; }
+
+shimpid() { name=${1:?}; p=$(shim_pid "$name"); [ -n "$p" ] || { echo "ERR no shim for $name"; return 1; }; echo "SHIMPID $name $p"; }
+
+kill_shim() {
+  name=${1:?}; p=$(shim_pid "$name"); [ -n "$p" ] || { echo "ERR no shim for $name"; return 1; }
+  kill -9 "$p" 2>/dev/null || { echo "ERR kill failed"; return 1; }
+  echo "KILLED-SHIM $name $p"
+}
+
+wait_gone() {
+  name=${1:?}; t=${2:-20}; i=0
+  while [ "$i" -lt "$((t * 4))" ]; do
+    ctr_ task ls 2>/dev/null | awk -v n="$name" '$1==n' | grep -q . || { echo "GONE $name"; return 0; }
+    sleep 0.25; i=$((i + 1))
+  done
+  echo "ERR task $name still listed after ${t}s"; return 1
+}
+
+state_file() {
+  name=${1:?}; f="$BUNDLES/$name/vesper-task.json"
+  [ -f "$f" ] || { echo "ERR no $f"; return 1; }
+  cat "$f"; echo
+}
+
+inflight_start() {
+  name=${1:?}; shift
+  r=$(ref) || true; [ -n "$r" ] || { echo "ERR import first"; return 1; }
+  rm -f "/tmp/inflight-$name.out" "/tmp/inflight-$name.rc"
+  ( ctr_ run --rm --runtime "$RT" "$r" "$name" sh -c "$*" > "/tmp/inflight-$name.out" 2>&1; echo $? > "/tmp/inflight-$name.rc" ) </dev/null >/dev/null 2>&1 &
+  for _ in $(seq 1 80); do ctr_ task ls 2>/dev/null | awk -v n="$name" '$1==n' | grep -q . && break; sleep 0.25; done
+  echo "INFLIGHT $name"
+}
+
+inflight_result() {
+  name=${1:?}; t=${2:-60}; i=0
+  while [ "$i" -lt "$((t * 4))" ]; do [ -f "/tmp/inflight-$name.rc" ] && break; sleep 0.25; i=$((i + 1)); done
+  [ -f "/tmp/inflight-$name.rc" ] || { echo "ERR ctr run $name still running after ${t}s"; return 1; }
+  emit "$(cat "/tmp/inflight-$name.rc")" "$(cat "/tmp/inflight-$name.out")"
 }
 
 cache() {
@@ -145,5 +192,11 @@ case "$cmd" in
   start-image) start_image "$@" ;;
   meta) meta "$@" ;;
   cache) cache ;;
+  shim-pid) shimpid "$@" ;;
+  kill-shim) kill_shim "$@" ;;
+  wait-gone) wait_gone "$@" ;;
+  state-file) state_file "$@" ;;
+  inflight-start) inflight_start "$@" ;;
+  inflight-result) inflight_result "$@" ;;
   *) echo "ERR usage: vesper-ctr import|run|start|state|kill|delete|try|leftovers"; exit 2 ;;
 esac

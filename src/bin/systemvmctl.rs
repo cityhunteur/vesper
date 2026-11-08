@@ -227,6 +227,11 @@ enum ControlAction {
         #[arg(long, default_value = "run/systemvm/bundle-report.json")]
         report: String,
     },
+    /// Run the GH #25 checklist (containerd restart, shim crash cleanup, in-flight failure, durable state) and write a JSON report.
+    RestartSuite {
+        #[arg(long, default_value = "run/systemvm/restart-report.json")]
+        report: String,
+    },
     /// Run the GH #18 checklist (launch, jailer isolation, stop, crash, poweroff, cleanup) and write a JSON report.
     MicrovmSuite {
         #[arg(long, default_value = "run/systemvm/microvm-report.json")]
@@ -447,6 +452,23 @@ fn run_control(endpoint: vesper::control::ControlEndpoint, action: ControlAction
                 return Err(format!("bundle suite failed (report: {report})"));
             }
             println!("bundle suite passed (report: {report})");
+        }
+        ControlAction::RestartSuite { report } => {
+            let result = control::run_restart_suite(&endpoint);
+            control::write_report(&report, &result)?;
+            for step in &result.steps {
+                println!(
+                    "{} {}: {} ({} ms)",
+                    if step.ok { "ok  " } else { "FAIL" },
+                    step.name,
+                    step.detail.chars().take(220).collect::<String>(),
+                    step.elapsed_ms
+                );
+            }
+            if !result.passed {
+                return Err(format!("restart suite failed (report: {report})"));
+            }
+            println!("restart suite passed (report: {report})");
         }
         ControlAction::MicrovmSuite { report, id } => {
             let result = control::run_microvm_suite(&endpoint, &id);

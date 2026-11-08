@@ -299,6 +299,18 @@ runs the GH #24 checklist (15 steps: a two-layer image built from the trivial on
 layer, two tasks from the chain share key and digest with `cached=true`, one drive per chain, the layered
 chain reuses the base snapshot) into `run/systemvm/bundle-report.json`. Limits: TD-035.
 
+## Shim restart resilience (GH #25)
+
+containerd 2.1 reconnects to a live shim through the bootstrap record it keeps in the bundle, so a task survives
+a containerd restart with its microVM untouched. For the shim's own death the shim writes
+`<bundle>/vesper-task.json` on every transition (created, running, stopped, deleted, with the VMM pid and exit),
+and containerd's `delete` of the dead shim reconciles from it: real exit status for a finished task, 137 for a
+running one, and `vesper-microvm cleanup` in every case. `vesper-ctr shim-pid|kill-shim|wait-gone|state-file|
+inflight-start|inflight-result` drive the scenarios and `make systemvm-restart-suite` runs the GH #25 checklist
+(18 steps: SIGKILL containerd with a running task and find it RUNNING with the same pid after respawn, kill and
+delete it; SIGKILL a shim and see the task gone, the microVM EXITED and the jail CLEAN; an in-flight
+`ctr run --rm` across a restart fails with EOF and leaves nothing) into `run/systemvm/restart-report.json`.
+
 ## MicroVM vsock transport (GH #23, in progress)
 
 `vesper-microvm launch ID --vsock` attaches a Firecracker vsock device (guest CID 3) whose host side is the

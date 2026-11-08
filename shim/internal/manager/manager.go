@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/cityhunteur/vesper/shim/internal/backend"
+	"github.com/cityhunteur/vesper/shim/internal/task"
 	"github.com/containerd/containerd/api/types"
 	"github.com/containerd/containerd/v2/core/mount"
 	"github.com/containerd/containerd/v2/pkg/namespaces"
@@ -127,6 +128,22 @@ func (m manager) Stop(ctx context.Context, id string) (shim.StopStatus, error) {
 	if _, err := namespaces.NamespaceRequired(ctx); err != nil {
 		return shim.StopStatus{}, err
 	}
+	// Reconcile from the durable record: a task that had already exited keeps its real exit status; a
+	// task that was still running when the shim died is reported as killed. Either way the microVM, the
+	// jail and the drive are removed so nothing is orphaned.
+	status := shim.StopStatus{ExitedAt: time.Now(), ExitStatus: 128 + int(syscall.SIGKILL)}
+	if st, err := task.ReadState(bundle); err == nil {
+		status.Pid = st.Pid
+		if st.Phase == "stopped" || st.Phase == "deleted" {
+			status.ExitStatus = int(st.ExitStatus)
+			if !st.ExitedAt.IsZero() {
+				status.ExitedAt = st.ExitedAt
+			}
+		}
+		log.G(ctx).WithFields(log.Fields{"id": id, "phase": st.Phase, "pid": st.Pid}).Info("reconciling task after shim exit")
+	} else if !os.IsNotExist(err) {
+		log.G(ctx).WithError(err).Warn("read task state during shim delete")
+	}
 	b := backend.NewMicroVM()
 	if err := b.Cleanup(ctx, id); err != nil {
 		log.G(ctx).WithError(err).Warn("microVM cleanup during shim delete")
@@ -135,7 +152,7 @@ func (m manager) Stop(ctx context.Context, id string) (shim.StopStatus, error) {
 		log.G(ctx).WithError(err).Warn("rootfs unmount during shim delete")
 	}
 	_ = os.Remove(filepath.Join(bundle, backend.RootfsImageName))
-	return shim.StopStatus{ExitedAt: time.Now(), ExitStatus: 128 + int(syscall.SIGKILL)}, nil
+	return status, nil
 }
 
 func (m manager) Info(ctx context.Context, optionsR io.Reader) (*types.RuntimeInfo, error) {
