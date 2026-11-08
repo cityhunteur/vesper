@@ -8,12 +8,52 @@
 #        vesper-ctr delete NAME                   ctr task delete + container delete; DELETED NAME (or ERR …)
 #        vesper-ctr try CTR-ARGS...               run any ctr command; prints RC <code> then OUT lines (for invalid sequences)
 #        vesper-ctr leftovers                     CLEAN or DIRTY <what>
+#        vesper-ctr import-layered                commit a second layer on the trivial image into containerd; IMPORTED <ref> layers=N
+#        vesper-ctr run-image REF NAME WORDS...   like run, against any containerd image ref
+#        vesper-ctr start-image REF NAME WORDS... like start, against any containerd image ref
+#        vesper-ctr meta NAME                     the task's vesper-rootfs.json (one line) or ERR
+#        vesper-ctr cache                         CACHE <n> then one line per cached root drive
 set -u
 NS=vesper
 RT=io.containerd.vesper.v2
 IMAGE_TAG=vesper/trivial:guest
+LAYERED_TAG=vesper/layered:guest
+BUNDLES=/run/containerd/io.containerd.runtime.v2.task/$NS
+CACHE=/var/lib/vesper/rootfs-cache
 ctr_() { ctr -n "$NS" "$@"; }
-ref() { ctr_ images ls -q 2>/dev/null | grep -F "$IMAGE_TAG" | head -1; }
+ref() { ctr_ images ls -q 2>/dev/null | grep -F "${1:-$IMAGE_TAG}" | head -1; }
+
+import_layered() {
+  docker image inspect "$IMAGE_TAG" >/dev/null 2>&1 || /usr/local/bin/vesper-rootfs import-trivial >/dev/null 2>&1
+  if ! docker image inspect "$LAYERED_TAG" >/dev/null 2>&1; then
+    cid=$(docker create "$IMAGE_TAG" /bin/true) || { echo "ERR docker create failed"; return 1; }
+    printf 'layer-two\n' > /tmp/layer2-marker
+    docker cp /tmp/layer2-marker "$cid:/etc/layer2-marker" >/dev/null || { echo "ERR docker cp failed"; return 1; }
+    docker commit "$cid" "$LAYERED_TAG" >/dev/null || { echo "ERR docker commit failed"; return 1; }
+    docker rm -f "$cid" >/dev/null 2>&1
+  fi
+  r=$(ref "$LAYERED_TAG")
+  if [ -z "$r" ]; then
+    out=$(docker save "$LAYERED_TAG" | ctr_ images import - 2>&1) || { echo "ERR import failed: $(printf '%s' "$out" | tail -1)"; return 1; }
+    r=$(ref "$LAYERED_TAG")
+  fi
+  [ -n "$r" ] || { echo "ERR layered image not in containerd"; return 1; }
+  layers=$(docker image inspect --format '{{len .RootFS.Layers}}' "$LAYERED_TAG" 2>/dev/null)
+  echo "IMPORTED $r layers=${layers:-?}"
+}
+
+meta() {
+  name=${1:?}; f="$BUNDLES/$name/vesper-rootfs.json"
+  [ -f "$f" ] || { echo "ERR no $f (task gone or never created)"; return 1; }
+  tr -d '\n' < "$f" | tr -s ' '; echo
+}
+
+cache() {
+  n=$(ls "$CACHE"/*.ext4 2>/dev/null | wc -l | tr -d ' ')
+  echo "CACHE $n"
+  for f in "$CACHE"/*.ext4; do [ -f "$f" ] && echo "$(basename "$f" .ext4) bytes=$(stat -c %s "$f") sha256=$(cut -c1-16 "$f.sha256" 2>/dev/null)"; done
+  return 0
+}
 
 import() {
   docker image inspect "$IMAGE_TAG" >/dev/null 2>&1 || /usr/local/bin/vesper-rootfs import-trivial >/dev/null 2>&1
@@ -31,16 +71,19 @@ emit() { # RC then OUT lines from a captured output
   printf '%s\n' "$2" | sed '/^$/d; s/^/OUT /'
 }
 
-run() {
-  name=${1:?}; shift
-  r=$(ref) || true; [ -n "$r" ] || { echo "ERR import first"; return 1; }
+run() { run_image "$(ref)" "$@"; }
+start() { start_image "$(ref)" "$@"; }
+
+run_image() {
+  r=${1:-}; name=${2:?}; shift 2
+  [ -n "$r" ] || { echo "ERR import first"; return 1; }
   out=$(ctr_ run --rm --runtime "$RT" "$r" "$name" sh -c "$*" 2>&1); rc=$?
   emit "$rc" "$out"
 }
 
-start() {
-  name=${1:?}; shift
-  r=$(ref) || true; [ -n "$r" ] || { echo "ERR import first"; return 1; }
+start_image() {
+  r=${1:-}; name=${2:?}; shift 2
+  [ -n "$r" ] || { echo "ERR import first"; return 1; }
   out=$(ctr_ run -d --runtime "$RT" "$r" "$name" sh -c "$*" 2>&1) || { echo "ERR start failed: $(printf '%s' "$out" | tail -1)"; return 1; }
   pid=$(ctr_ task ls 2>/dev/null | awk -v n="$name" '$1==n {print $2}')
   echo "STARTED $name pid=${pid:-0}"
@@ -97,5 +140,10 @@ case "$cmd" in
   delete) delete "$@" ;;
   try) try "$@" ;;
   leftovers) leftovers ;;
+  import-layered) import_layered ;;
+  run-image) run_image "$@" ;;
+  start-image) start_image "$@" ;;
+  meta) meta "$@" ;;
+  cache) cache ;;
   *) echo "ERR usage: vesper-ctr import|run|start|state|kill|delete|try|leftovers"; exit 2 ;;
 esac

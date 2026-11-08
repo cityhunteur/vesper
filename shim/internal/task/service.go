@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/cityhunteur/vesper/shim/internal/backend"
+	"github.com/cityhunteur/vesper/shim/internal/bundle"
 	eventstypes "github.com/containerd/containerd/api/events"
 	taskAPI "github.com/containerd/containerd/api/runtime/task/v3"
 	"github.com/containerd/containerd/api/types"
@@ -103,13 +104,6 @@ func (s *Service) Create(ctx context.Context, r *taskAPI.CreateTaskRequest) (_ *
 	if r.Checkpoint != "" || r.ParentCheckpoint != "" {
 		return nil, errgrpc.ToGRPCf(errdefs.ErrNotImplemented, "checkpoint restore is not supported")
 	}
-	spec, err := readSpec(r.Bundle)
-	if err != nil {
-		return nil, errgrpc.ToGRPCf(errdefs.ErrInvalidArgument, "bundle %s: %v", r.Bundle, err)
-	}
-	if spec.Process == nil || len(spec.Process.Args) == 0 {
-		return nil, errgrpc.ToGRPCf(errdefs.ErrInvalidArgument, "bundle %s: process.args is empty", r.Bundle)
-	}
 	rootfs := filepath.Join(r.Bundle, "rootfs")
 	if err := os.MkdirAll(rootfs, 0o711); err != nil {
 		return nil, err
@@ -117,6 +111,10 @@ func (s *Service) Create(ctx context.Context, r *taskAPI.CreateTaskRequest) (_ *
 	mounts := make([]mount.Mount, 0, len(r.Rootfs))
 	for _, m := range r.Rootfs {
 		mounts = append(mounts, mount.Mount{Type: m.Type, Source: m.Source, Target: m.Target, Options: m.Options})
+	}
+	spec, err := bundle.Validate(r.Bundle, mounts)
+	if err != nil {
+		return nil, errgrpc.ToGRPCf(errdefs.ErrInvalidArgument, "%v", err)
 	}
 	if len(mounts) > 0 {
 		if err := mount.All(mounts, rootfs); err != nil {
@@ -130,10 +128,11 @@ func (s *Service) Create(ctx context.Context, r *taskAPI.CreateTaskRequest) (_ *
 			}
 		}
 	}()
-	image, err := s.backend.Prepare(ctx, r.Bundle)
+	image, meta, err := s.backend.Prepare(ctx, r.ID, r.Bundle, mounts)
 	if err != nil {
-		return nil, fmt.Errorf("prepare root drive: %w", err)
+		return nil, errgrpc.ToGRPCf(errdefs.ErrFailedPrecondition, "%v", err)
 	}
+	log.G(ctx).WithFields(log.Fields{"task": r.ID, "strategy": meta.Strategy, "cached": meta.Cached, "layers": len(meta.Layers.Lower), "build_ms": meta.BuildMS}).Info("root drive ready")
 	cmdB64, err := backend.EncodeCommand(spec.Process.Args, spec.Process.Env, spec.Process.Cwd)
 	if err != nil {
 		return nil, errgrpc.ToGRPCf(errdefs.ErrInvalidArgument, "%v", err)
@@ -421,16 +420,6 @@ func (s *Service) Stats(context.Context, *taskAPI.StatsRequest) (*taskAPI.StatsR
 	return nil, notImplemented("stats")
 }
 
-func readSpec(bundle string) (*specs.Spec, error) {
-	raw, err := os.ReadFile(filepath.Join(bundle, "config.json"))
-	if err != nil {
-		return nil, err
-	}
-	var spec specs.Spec
-	if err := json.Unmarshal(raw, &spec); err != nil {
-		return nil, fmt.Errorf("config.json: %w", err)
-	}
-	return &spec, nil
-}
-
 var _ types.Mount
+var _ = json.Marshal
+var _ specs.Spec

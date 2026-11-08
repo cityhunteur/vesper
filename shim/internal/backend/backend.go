@@ -3,14 +3,21 @@ package backend
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
+
+	"github.com/cityhunteur/vesper/shim/internal/bundle"
+	"github.com/containerd/containerd/v2/core/mount"
 )
 
 // RootfsImageName is the ext4 image built from the bundle rootfs, next to config.json.
@@ -20,12 +27,16 @@ const (
 	microvmBin = "/usr/local/bin/vesper-microvm"
 	logDir     = "/var/log"
 	minSizeKiB = 16 * 1024
+	// CacheDir holds one ext4 per image layer chain (block-first strategy, GH #24).
+	CacheDir = "/var/lib/vesper/rootfs-cache"
 )
 
 // Backend is what the task service needs from the runtime; MicroVM is the real one and tests use a fake.
 type Backend interface {
-	// Prepare builds the root drive image for the task from the mounted bundle rootfs.
-	Prepare(ctx context.Context, bundle string) (image string, err error)
+	// Prepare produces the task's private root drive image: from the layer-chain cache when the same
+	// chain was built before, else by building it from the mounted bundle rootfs. The record describes
+	// what happened.
+	Prepare(ctx context.Context, task, bundleDir string, mounts []mount.Mount) (image string, meta bundle.Meta, err error)
 	// Launch boots the microVM with the image and the encoded command; returns the VMM pid.
 	Launch(ctx context.Context, id, image, cmdB64 string) (pid int, err error)
 	// Stop terminates the microVM (SIGTERM, then SIGKILL after a grace period).
@@ -39,30 +50,161 @@ type Backend interface {
 }
 
 // MicroVM shells out to vesper-microvm and mke2fs.
-type MicroVM struct{}
+type MicroVM struct {
+	cacheDir string
+}
 
 // NewMicroVM returns the production backend.
-func NewMicroVM() *MicroVM { return &MicroVM{} }
+func NewMicroVM() *MicroVM { return &MicroVM{cacheDir: CacheDir} }
 
 var pidRe = regexp.MustCompile(`pid=(\d+)`)
 
-func (m *MicroVM) Prepare(ctx context.Context, bundle string) (string, error) {
-	rootfs := filepath.Join(bundle, "rootfs")
-	image := filepath.Join(bundle, RootfsImageName)
+func (m *MicroVM) Prepare(ctx context.Context, task, bundleDir string, mounts []mount.Mount) (string, bundle.Meta, error) {
+	started := time.Now()
+	rootfs := filepath.Join(bundleDir, "rootfs")
+	image := filepath.Join(bundleDir, RootfsImageName)
+	layers := bundle.Inspect(mounts)
+	meta := bundle.Meta{Task: task, Image: image, Layers: layers, Strategy: "block-first"}
+	_ = os.Remove(image)
+	if layers.Key == "" {
+		// Documented fallback: a pre-populated rootfs directory has no stable identity, so it is built
+		// per task and never cached.
+		meta.Fallback = true
+		meta.Strategy = "direct"
+		if err := mkfs(ctx, rootfs, image); err != nil {
+			return "", meta, diagnose("build root drive from the bundle directory", err, "check free space in the bundle filesystem and that mke2fs (e2fsprogs) is installed")
+		}
+	} else {
+		cached := filepath.Join(m.cacheDir, layers.Key+".ext4")
+		meta.Cache = cached
+		if err := os.MkdirAll(m.cacheDir, 0o700); err != nil {
+			return "", meta, diagnose("create the rootfs cache directory", err, "the cache lives in "+m.cacheDir+"; check permissions and free space")
+		}
+		if ok, _ := cacheValid(cached); ok {
+			meta.Cached = true
+		} else {
+			tmp := cached + ".tmp"
+			_ = os.Remove(tmp)
+			if err := mkfs(ctx, rootfs, tmp); err != nil {
+				_ = os.Remove(tmp)
+				return "", meta, diagnose("build the layer-chain root drive", err, "the image layers are mounted at "+rootfs+"; check free space in "+m.cacheDir)
+			}
+			sum, err := fileSha256(tmp)
+			if err != nil {
+				return "", meta, diagnose("digest the root drive", err, "")
+			}
+			if err := os.WriteFile(tmp+".sha256", []byte(sum), 0o644); err != nil {
+				return "", meta, diagnose("record the root drive digest", err, "")
+			}
+			if err := os.Rename(tmp, cached); err != nil {
+				return "", meta, diagnose("publish the cached root drive", err, "")
+			}
+			if err := os.Rename(tmp+".sha256", cached+".sha256"); err != nil {
+				return "", meta, diagnose("publish the cached digest", err, "")
+			}
+		}
+		if err := copyFile(cached, image); err != nil {
+			return "", meta, diagnose("copy the cached root drive into the bundle", err, "check free space in the bundle filesystem")
+		}
+	}
+	sum, err := fileSha256(image)
+	if err != nil {
+		return "", meta, diagnose("digest the task root drive", err, "")
+	}
+	st, _ := os.Stat(image)
+	meta.Sha256 = sum
+	if st != nil {
+		meta.Bytes = st.Size()
+	}
+	meta.BuildMS = time.Since(started).Milliseconds()
+	if err := bundle.WriteMeta(bundleDir, meta); err != nil {
+		return "", meta, diagnose("write "+bundle.MetaName, err, "")
+	}
+	return image, meta, nil
+}
+
+// PrepareError is an actionable rootfs preparation failure.
+type PrepareError struct {
+	Step string
+	Err  error
+	Hint string
+}
+
+func (e *PrepareError) Error() string {
+	if e.Hint == "" {
+		return fmt.Sprintf("rootfs: %s: %v", e.Step, e.Err)
+	}
+	return fmt.Sprintf("rootfs: %s: %v (%s)", e.Step, e.Err, e.Hint)
+}
+
+func (e *PrepareError) Unwrap() error { return e.Err }
+
+func diagnose(step string, err error, hint string) error {
+	return &PrepareError{Step: step, Err: err, Hint: hint}
+}
+
+func mkfs(ctx context.Context, rootfs, image string) error {
 	used, err := diskUsageKiB(rootfs)
 	if err != nil {
-		return "", fmt.Errorf("size rootfs: %w", err)
+		return fmt.Errorf("size rootfs: %w", err)
 	}
 	size := used + used/5 + 4096
 	if size < minSizeKiB {
 		size = minSizeKiB
 	}
-	_ = os.Remove(image)
 	cmd := exec.CommandContext(ctx, "mke2fs", "-q", "-F", "-t", "ext4", "-d", rootfs, "-L", "vesper-task", "-E", "root_owner=0:0", image, strconv.FormatInt(size, 10)+"K")
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return "", fmt.Errorf("mke2fs: %w: %s", err, strings.TrimSpace(string(out)))
+		return fmt.Errorf("mke2fs: %w: %s", err, strings.TrimSpace(string(out)))
 	}
-	return image, nil
+	return nil
+}
+
+// cacheValid is true when the cached image exists and matches its recorded digest.
+func cacheValid(path string) (bool, error) {
+	want, err := os.ReadFile(path + ".sha256")
+	if err != nil {
+		return false, err
+	}
+	got, err := fileSha256(path)
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(string(want)) == got, nil
+}
+
+func fileSha256(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	tmp := dst + ".tmp"
+	out, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := out.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp, dst)
 }
 
 func (m *MicroVM) Launch(ctx context.Context, id, image, cmdB64 string) (int, error) {
