@@ -6,6 +6,19 @@ last_reviewed: 2026-11-05
 
 # Symphony milestones
 
+### 2026-11-08 — WOR-32 slice 1 — vsock transport for microVMs (GH #23 in progress)
+- GitHub issue: #23 (mirror #72, open)
+- PR: #133
+- Commit: `ecba8ac` (squash merge of PR #133; remote CI green)
+- Phase: 3
+- Parity unit: `vesper-microvm launch --vsock` attaches a Firecracker vsock device, the initramfs carries and loads the guest transport modules, `status` reports the host-side socket
+- Result: keep
+- Verification bundle: `run/WOR-32/systemvm/` (launch, status, `GET /vm/config` evidence in the ExecPlan)
+- Council summary: skipped; no control-plane path changed
+- Harness update: `--vsock`, `vesper_vsock=1`, `VESPER-VSOCK-OK`, `status … vsock=present|absent`; ExecPlan with the guest agent protocol contract
+- Remaining risks: the guest agent, shim exec sessions and the exec suite are open (TD-034); the agent is the next unit
+- Truthful project state after this milestone: the microVM has a bidirectional channel to the System VM; exec, TTY, stdin and signals still do not work through the shim
+
 ### 2026-11-06 — WOR-29 — containerd shim v2 Task lifecycle RPCs, GH #22 complete
 - GitHub issue: #22 (mirror #70)
 - PR: #132

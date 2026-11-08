@@ -15,7 +15,7 @@ behave as with runc, proven by a `make systemvm-exec-suite` checklist.
 
 ## Progress
 
-- [x] (2026-11-08) Transport plumbing: `vesper-microvm launch ID --vsock` adds `{"vsock":{"guest_cid":3,
+- [x] (2026-11-08, PR #133 `ecba8ac`, CI green) Transport plumbing: `vesper-microvm launch ID --vsock` adds `{"vsock":{"guest_cid":3,
   "uds_path":"/v.sock"}}` to the Firecracker config and `vesper_vsock=1` to the kernel command line; the
   initramfs now carries `vsock`, `vmw_vsock_virtio_transport_common` and `vmw_vsock_virtio_transport` from the
   modloop and the init loads them (`VESPER-VSOCK-OK`); `status ID` reports `vsock=present|absent` for the
