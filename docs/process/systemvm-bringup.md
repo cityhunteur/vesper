@@ -221,6 +221,17 @@ route (clients fall back to IPv4); `host.docker.internal` is not provided (TD-03
 (`scripts/systemvm/dns-suite.sh` with `fixtures/dns-stack.yml`) runs the GH #30 checklist (12 steps) from macOS
 into `run/systemvm/dns-report.json`.
 
+### Developer workflow suite (GH #31)
+
+`make workflow-suite` (`scripts/systemvm/workflow-suite.sh`) runs the everyday Docker workflow from macOS through
+the ingress: the compose stack from `fixtures/dns-stack.yml`, `docker build` of `fixtures/wf-build/` (BuildKit,
+RUN and COPY layers) and a run of the result, `docker logs -f` streaming, an interactive `docker exec -it`
+driven by `expect` through a pty, HUP/TERM/KILL signal delivery, and a `--platform linux/amd64` probe that
+records the cross-architecture gap until GH #39 (`WF_REQUIRE_AMD64=1` makes it required). The report
+`run/systemvm/workflow-report.json` embeds the `baselinectl` metadata so a regression is tied to the baseline
+revisions. The suite first makes sure the test image is the native arm64 variant, because an amd64 pull
+re-tags the same reference.
+
 ### Docker API conformance (GH #27)
 
 `make docker-conformance` (`scripts/systemvm/docker-conformance.sh`) runs 22 checks from macOS through the
