@@ -141,6 +141,7 @@ func (s *Service) Create(ctx context.Context, r *taskAPI.CreateTaskRequest) (_ *
 	t.Image, t.CmdB64 = image, cmdB64
 	t.Stdin, t.Stdout, t.Stderr, t.Terminal = r.Stdin, r.Stdout, r.Stderr, r.Terminal
 	s.task = t
+	s.persist(ctx, t)
 	s.publish(ctx, runtime.TaskCreateEventTopic, &eventstypes.TaskCreate{
 		ContainerID: r.ID,
 		Bundle:      r.Bundle,
@@ -171,6 +172,7 @@ func (s *Service) Start(ctx context.Context, r *taskAPI.StartRequest) (*taskAPI.
 		_ = s.backend.Cleanup(ctx, t.ID)
 		return nil, errgrpc.ToGRPC(err)
 	}
+	s.persist(ctx, t)
 	go s.watch(t)
 	s.publish(ctx, runtime.TaskStartEventTopic, &eventstypes.TaskStart{ContainerID: t.ID, Pid: uint32(pid)})
 	return &taskAPI.StartResponse{Pid: uint32(pid)}, nil
@@ -193,6 +195,7 @@ func (s *Service) watch(t *Task) {
 		out.Close()
 	}
 	if t.MarkExited(status, at) {
+		s.persist(ctx, t)
 		s.publish(ctx, runtime.TaskExitEventTopic, &eventstypes.TaskExit{
 			ContainerID: t.ID, ID: t.ID, Pid: uint32(t.Pid()), ExitStatus: status, ExitedAt: protobuf.ToTimestamp(at),
 		})
@@ -269,6 +272,7 @@ func (s *Service) Kill(ctx context.Context, r *taskAPI.KillRequest) (*emptypb.Em
 	switch t.Phase() {
 	case PhaseCreated:
 		if t.MarkExited(exitKilled, time.Now()) {
+			s.persist(ctx, t)
 			s.publish(ctx, runtime.TaskExitEventTopic, &eventstypes.TaskExit{ContainerID: t.ID, ID: t.ID, ExitStatus: exitKilled, ExitedAt: protobuf.ToTimestamp(time.Now())})
 		}
 		return &emptypb.Empty{}, nil
@@ -294,6 +298,7 @@ func (s *Service) Delete(ctx context.Context, r *taskAPI.DeleteRequest) (*taskAP
 	if err := t.MarkDeleted(); err != nil {
 		return nil, errgrpc.ToGRPC(err)
 	}
+	s.persist(ctx, t)
 	if err := s.backend.Cleanup(ctx, t.ID); err != nil {
 		log.G(ctx).WithError(err).Warn("microVM cleanup on delete")
 	}
@@ -389,6 +394,12 @@ func (s *Service) Shutdown(ctx context.Context, r *taskAPI.ShutdownRequest) (*em
 		s.shutdown.Shutdown()
 	}
 	return &emptypb.Empty{}, nil
+}
+
+func (s *Service) persist(ctx context.Context, t *Task) {
+	if err := t.persist(); err != nil {
+		log.G(ctx).WithError(err).WithField("task", t.ID).Warn("persist task state")
+	}
 }
 
 func notImplemented(what string) error {

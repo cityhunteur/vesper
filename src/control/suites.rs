@@ -8,7 +8,9 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 mod bundle;
+mod restart;
 pub use bundle::run_bundle_suite;
+pub use restart::run_restart_suite;
 
 /// Result of one checklist step of the GH #13 control suite.
 #[derive(Debug, Clone, Serialize, Deserialize)]

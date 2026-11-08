@@ -72,14 +72,15 @@
   .bar-ink { background: var(--ink); }
 
   .spec-header-inner {
-    max-width: 1680px;
+    width: 100%;
+    max-width: 100%;
     margin: 0 auto;
-    padding: 16px 24px;
+    padding: clamp(10px, 1.5vw, 16px) clamp(12px, 2vw, 24px);
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
-    gap: 16px;
+    gap: 12px 16px;
   }
 
   .brand-block {
@@ -172,10 +173,12 @@
 
   /* Primary Navigation Tabs */
   .nav-bar {
-    max-width: 1680px;
+    width: 100%;
+    max-width: 100%;
     margin: 0 auto;
-    padding: 0 24px;
+    padding: 0 clamp(12px, 2vw, 24px);
     display: flex;
+    flex-wrap: wrap;
     gap: 0;
     border-top: var(--border-mid);
     overflow-x: auto;
@@ -224,9 +227,10 @@
 
   /* Main Container */
   .workspace {
-    max-width: 1680px;
+    width: 100%;
+    max-width: 100%;
     margin: 0 auto;
-    padding: 24px 24px 56px;
+    padding: clamp(14px, 2vw, 24px) clamp(12px, 2vw, 24px) 48px;
   }
 
   .view-section {
@@ -284,14 +288,14 @@
   /* Layout Grid for System Context */
   .arch-grid {
     display: grid;
-    grid-template-columns: 1fr 440px;
-    gap: 24px;
+    grid-template-columns: minmax(0, 1fr) clamp(320px, 28vw, 460px);
+    gap: clamp(14px, 1.8vw, 24px);
     align-items: start;
   }
 
-  @media (max-width: 1240px) {
+  @media (max-width: 1100px) {
     .arch-grid {
-      grid-template-columns: 1fr;
+      grid-template-columns: minmax(0, 1fr);
     }
   }
 
@@ -300,6 +304,7 @@
     border: var(--border-heavy);
     box-shadow: var(--shadow-hard);
     position: relative;
+    min-width: 0;
   }
 
   .panel-header {
@@ -374,7 +379,7 @@
   .canvas-wrap {
     width: 100%;
     overflow-x: auto;
-    padding: 14px;
+    padding: clamp(8px, 1.2vw, 14px);
     position: relative;
     background:
       radial-gradient(var(--ink) 1px, transparent 1px);
@@ -384,8 +389,10 @@
 
   svg.arch-svg {
     width: 100%;
-    min-width: 960px;
+    min-width: 0;
     height: auto;
+    max-height: calc(100vh - 240px);
+    min-height: 360px;
     display: block;
     user-select: none;
   }
@@ -655,13 +662,13 @@
   /* View 2: API Request & State Machine Simulator */
   .sim-grid {
     display: grid;
-    grid-template-columns: 400px 1fr;
-    gap: 24px;
+    grid-template-columns: clamp(280px, 30vw, 400px) minmax(0, 1fr);
+    gap: clamp(14px, 1.8vw, 24px);
   }
 
-  @media (max-width: 1100px) {
+  @media (max-width: 960px) {
     .sim-grid {
-      grid-template-columns: 1fr;
+      grid-template-columns: minmax(0, 1fr);
     }
   }
 
@@ -747,15 +754,9 @@
 
   .pipeline-steps {
     display: grid;
-    grid-template-columns: repeat(5, 1fr);
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
     gap: 12px;
     margin-bottom: 20px;
-  }
-
-  @media (max-width: 900px) {
-    .pipeline-steps {
-      grid-template-columns: 1fr;
-    }
   }
 
   .pipe-step {
@@ -822,7 +823,7 @@
 
   .layer-row {
     display: grid;
-    grid-template-columns: 240px 1fr 320px;
+    grid-template-columns: minmax(180px, 240px) minmax(0, 1fr) minmax(220px, 320px);
     gap: 14px;
     background: var(--paper);
     border: var(--border-mid);
@@ -831,9 +832,9 @@
     align-items: center;
   }
 
-  @media (max-width: 1024px) {
+  @media (max-width: 960px) {
     .layer-row {
-      grid-template-columns: 1fr;
+      grid-template-columns: minmax(0, 1fr);
     }
   }
 
