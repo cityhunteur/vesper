@@ -16,6 +16,7 @@
 #   FCPARITY <args...>    -> FCPARITY <rc> <count> then <count> output lines of `vesper-fcparity <args>`
 #   CTR <args...>         -> CTR <rc> <count> then <count> output lines of `vesper-ctr <args>`
 #   SHARE <args...>       -> SHARE <rc> <count> then <count> output lines of `vesper-share <args>`
+#   ARCH <args...>        -> ARCH <rc> <count> then <count> output lines of `vesper-arch <args>`
 #   DROP                  -> DROP then the connection is closed (simulates a server-side drop)
 #   SHUTDOWN              -> BYE then poweroff
 #   QUIT                  -> BYE then the connection is closed
@@ -81,9 +82,9 @@ while IFS= read -r line; do
         echo "LOGS 0"
       fi
       ;;
-    MICROVM|ROOTFS|WORKLOAD|FCPARITY|CTR|SHARE)
+    MICROVM|ROOTFS|WORKLOAD|FCPARITY|CTR|SHARE|ARCH)
       tool=$1; shift
-      case "$tool" in MICROVM) bin=/usr/local/bin/vesper-microvm ;; ROOTFS) bin=/usr/local/bin/vesper-rootfs ;; WORKLOAD) bin=/usr/local/bin/vesper-workload ;; FCPARITY) bin=/usr/local/bin/vesper-fcparity ;; CTR) bin=/usr/local/bin/vesper-ctr ;; *) bin=/usr/local/bin/vesper-share ;; esac
+      case "$tool" in MICROVM) bin=/usr/local/bin/vesper-microvm ;; ROOTFS) bin=/usr/local/bin/vesper-rootfs ;; WORKLOAD) bin=/usr/local/bin/vesper-workload ;; FCPARITY) bin=/usr/local/bin/vesper-fcparity ;; CTR) bin=/usr/local/bin/vesper-ctr ;; SHARE) bin=/usr/local/bin/vesper-share ;; *) bin=/usr/local/bin/vesper-arch ;; esac
       out="$("$bin" "$@" 2>&1)"; rc=$?
       count="$(printf '%s\n' "$out" | grep -c '')"
       [ -z "$out" ] && count=0

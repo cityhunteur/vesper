@@ -5,4 +5,5 @@ Plans currently in progress. Add a row when you create a plan, and move the row 
 
 | Plan | Goal | Started | Owner |
 |---|---|---|---|
+| [2026-11-08-WOR-55-cross-arch.md](2026-11-08-WOR-55-cross-arch.md) | linux/amd64 containers through binfmt_misc and qemu-user in the System VM, execution-mode metadata, suite (GH #39) | 2026-11-08 | cityhunteur |
 | [2026-11-08-WOR-32-exec-stdio.md](2026-11-08-WOR-32-exec-stdio.md) | Exec, PTY, stdio and signals through a vsock guest agent in the microVM (GH #23); transport landed, agent open | 2026-11-08 | cityhunteur |

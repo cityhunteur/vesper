@@ -217,6 +217,10 @@ enum ControlAction {
         #[arg(long, default_value_t = 20)]
         perf_cycles: u32,
     },
+    /// Run `vesper-arch <args>` in the guest (status|mode ARCH): native vs emulated execution modes.
+    Arch {
+        args: Vec<String>,
+    },
     /// Run `vesper-share <args>` in the guest (mount TAG PATH [ro]|list|umount PATH|probe TAG PATH).
     Share {
         args: Vec<String>,
@@ -415,6 +419,17 @@ fn run_control(endpoint: vesper::control::ControlEndpoint, action: ControlAction
                 return Err(format!("parity suite failed (report: {report})"));
             }
             println!("parity suite passed (report: {report})");
+        }
+        ControlAction::Arch { args } => {
+            let mut session = control::connect(&endpoint)?;
+            let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+            let (rc, lines) = session.arch(&refs)?;
+            for line in &lines {
+                println!("{line}");
+            }
+            if rc != 0 {
+                return Err(format!("vesper-arch exited with {rc}"));
+            }
         }
         ControlAction::Share { args } => {
             let mut session = control::connect(&endpoint)?;

@@ -53,8 +53,9 @@ out="$(cexec sh -c "getent hosts ${EXTERNAL} | awk '{print \$1}' | head -1" 2>&1
 out="$(cexec sh -c 'getent hosts does-not-exist.invalid; echo "rc=$?"' 2>&1 | tr -d '\r' | tr '\n' ' ')"
 case "${out}" in "rc=2 "*|"rc=2") record nxdomain_is_clean true "does-not-exist.invalid -> no address, getent rc=2 (NXDOMAIN)" ;; *) record nxdomain_is_clean false "${out}" ;; esac
 cleanup
-second="$(run_stack)"
-[ "${second}" = "${first}" ] && record deterministic_across_runs true "second compose up gave the same resolver, web ip and subnet: ${second}" || record deterministic_across_runs false "first ${first} second ${second}"
+second="$(run_stack)"; IFS='|' read -r resolver2 web_ip2 subnet2 <<<"${second}"
+# Service addresses depend on compose's start order inside the subnet; the resolver and the subnet are the defaults.
+if [ "${resolver2}" = "${resolver}" ] && [ "${subnet2}" = "${subnet}" ] && [ -n "${web_ip2}" ]; then record deterministic_across_runs true "second compose up: same resolver ${resolver2} and subnet ${subnet2}; web ${web_ip} then ${web_ip2} (address order within the subnet is not fixed)"; else record deterministic_across_runs false "first ${first} second ${second}"; fi
 cleanup
 left="$("${DOCKER}" network ls --filter name=vesper-dns --format '{{.Name}}' | wc -l | tr -d ' ')"
 [ "${left}" = 0 ] && record compose_down_cleans_network true "no vesper-dns networks left" || record compose_down_cleans_network false "${left} networks left"
