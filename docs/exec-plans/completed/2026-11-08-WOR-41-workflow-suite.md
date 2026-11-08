@@ -22,8 +22,7 @@ from macOS, stamps the report with the baseline lock revisions, and records the 
   separate image and recorded as the known gap (exec format error, GH #39). The report embeds `baselinectl`
   metadata (Firecracker, containerd and Apple containerization revisions). 8/8 on an M3 Pro; DNS and Docker
   conformance suites still pass.
-- [ ] PR merged, CI green, GH #31 checklist (amd64 item stays open) and WOR-41 updated, milestone entry; plan
-  moved to completed.
+- [x] (2026-11-08) PR #140 merged as `c88e4f8`, CI green, GH #31 checklist items 1-5 ticked (item 6 open for GH #39), mirror #81 closed, WOR-41 Done, milestone entry; plan moved to completed.
 
 ## Surprises & Discoveries
 

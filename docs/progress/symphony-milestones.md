@@ -6,6 +6,19 @@ last_reviewed: 2026-11-05
 
 # Symphony milestones
 
+### 2026-11-08 — WOR-41 — Developer workflow suite, GH #31 (5 of 6 items; amd64 open for #39)
+- GitHub issue: #31 (mirror #81)
+- PR: #140
+- Commit: `c88e4f8` (squash merge of PR #140; remote CI green)
+- Phase: 4
+- Parity unit: `make workflow-suite` (compose, build from a host context, logs -f streaming, interactive exec -it, HUP/TERM/KILL, amd64 probe), report stamped with the baseline revisions
+- Result: keep
+- Verification bundle: `.symphony/runs/WOR-41/current/` (evidence in `run/WOR-41/systemvm/`, incl. `workflow-report.json`)
+- Council summary: skipped; no code change; CI green
+- Harness update: `scripts/systemvm/workflow-suite.sh`, `fixtures/wf-build/`, `make workflow-suite`, native-image architecture guard
+- Remaining risks: `--platform linux/amd64` not available (GH #39); developer-hardware only (TD-005)
+- Truthful project state after this milestone: the everyday Docker workflow works from macOS; Phase 4 has one issue left (#39 cross-architecture) plus the epic
+
 ### 2026-11-08 — WOR-40 — DNS and network defaults verified and documented, GH #30 complete
 - GitHub issue: #30 (mirror #80)
 - PR: #139
