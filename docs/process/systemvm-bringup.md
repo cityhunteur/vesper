@@ -198,6 +198,18 @@ ip) and the proxy log names binds and releases. `make ports-suite` runs the GH #
 `run/systemvm/ports-report.json`. The launcher ignores SIGPIPE since this slice: a proxy dying with a live
 bridge stream used to take the VM down.
 
+### Bind mounts over virtio-fs (GH #29)
+
+`VESPER_SHARES="/abs/path /other:ro" make systemvm-launch-config` (or `systemvmctl launch-config --share`) adds
+`shared_directories` to the launch config; the launcher attaches one virtio-fs device per entry (tags
+`share0`, `share1`, …) and `up.sh` asks the guest (`vesper-share mount TAG PATH ro|rw` through the agent) to mount
+each tag at the same absolute path, so `docker run -v /abs/path:/x` from macOS binds the host directory. No
+share is configured by default. Semantics, recorded by `make binds-suite` (10 steps, `run/systemvm/binds-report.json`):
+host files appear owned by uid 0 in the guest, guest writes appear on the host owned by the sharing user, `chmod`
+round-trips, `chown` is ignored, read-only is enforced by the share flag and by `:ro`, host edits are visible on
+the next access, inotify fires for guest writes but not for host edits (TD-038), and a `-v` path outside the
+configured shares is a guest-local directory. `make systemvm-up-shares` boots with the two suite shares.
+
 ### Docker API conformance (GH #27)
 
 `make docker-conformance` (`scripts/systemvm/docker-conformance.sh`) runs 22 checks from macOS through the

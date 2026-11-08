@@ -28,6 +28,13 @@ struct ProbeSettings: Decodable {
     let shutdown_command: String
 }
 
+/// A host directory shared into the guest over virtio-fs (GH #29); the guest mounts it by `tag`.
+struct SharedDirectory: Decodable {
+    let tag: String
+    let host_path: String
+    let read_only: Bool?
+}
+
 struct LaunchConfig: Decodable {
     let kernel_path: String
     let rootfs_path: String?
@@ -45,6 +52,7 @@ struct LaunchConfig: Decodable {
     let cpu_count: Int
     let memory_mib: UInt64
     let console_log_path: String
+    let shared_directories: [SharedDirectory]?
 }
 
 struct Options {
@@ -208,6 +216,25 @@ func buildConfiguration(_ config: LaunchConfig, consoleOutput: FileHandle, conso
 
     vm.entropyDevices = [VZVirtioEntropyDeviceConfiguration()]
     vm.socketDevices = [VZVirtioSocketDeviceConfiguration()]
+
+    // virtio-fs shares (GH #29): one device per configured host directory, mounted in the guest by tag.
+    var shares: [VZDirectorySharingDeviceConfiguration] = []
+    for share in config.shared_directories ?? [] {
+        do {
+            try VZVirtioFileSystemDeviceConfiguration.validateTag(share.tag)
+        } catch {
+            fail(3, "shared directory tag \(share.tag) is invalid: \(error)")
+        }
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: share.host_path, isDirectory: &isDir), isDir.boolValue else {
+            fail(3, "shared directory \(share.host_path) is not a directory")
+        }
+        let device = VZVirtioFileSystemDeviceConfiguration(tag: share.tag)
+        device.share = VZSingleDirectoryShare(
+            directory: VZSharedDirectory(url: URL(fileURLWithPath: share.host_path), readOnly: share.read_only ?? false))
+        shares.append(device)
+    }
+    vm.directorySharingDevices = shares
 
     // Block devices in order: boot media (read-only) first, then the writable rootfs, so the
     // kernel command line can name them as /dev/vda and /dev/vdb.

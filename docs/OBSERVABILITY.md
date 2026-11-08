@@ -66,7 +66,8 @@ The durable signals this project relies on are artifacts rather than live teleme
   phase, VMM pid, exit, shim pid, last update); `run/systemvm/docker-conformance-report.json` from
   `make docker-conformance` (each step's dockerd response or error text); `run/vesper/ports.json` (the live
   published-port mappings with state and error) and `ports:` lines in `run/vesper/vesper-proxy.log`;
-  `run/systemvm/ports-report.json` from `make ports-suite`.
+  `run/systemvm/ports-report.json` from `make ports-suite`; `systemvmctl control share list|probe` for the
+  guest's virtio-fs mounts and `run/systemvm/binds-report.json` from `make binds-suite`.
 - `build/systemvm/image-manifest.json` (SHA-256 digests, stable `image_id`) and `build/systemvm/launch-config.json`.
 - `artifacts/parity-metadata.json` from `baselinectl --mode generate`.
 - JSON and Markdown reports from the Python sensors (`--json-out`, `--markdown-out`), uploaded by the `harness-*`

@@ -102,6 +102,10 @@ Public symbols by file:
   run_server(config, shutdown)`.
 - `spec.rs`: `Route { method, path }`, `load_routes(path)`,
   `load_info_version(path)`.
+- `systemvm.rs:SharedDirectory { tag, host_path, read_only }` and `LaunchConfig.shared_directories`
+  (serde default, omitted when empty); `shared_directories_from_specs(&[String])` turns `PATH` or `PATH:ro`
+  into tags `share0`, `share1`, … and rejects relative paths or non-directories.
+- `control.rs:Session::share(args)` runs `vesper-share` in the guest (same shape as the other guest tools).
 - `ports.rs`: `PortsConfig { docker_socket, bridge_path, relay_port, status_path, bind_ip }` (`Default`:
   `run/vesper/docker.sock`, `run/systemvm/vsock/3.sock`, 2400, `run/vesper/ports.json`, 127.0.0.1);
   `parse_bindings(inspect) -> Vec<Binding>` (`NetworkSettings.Ports`, IPv6 twins of a `0.0.0.0` binding

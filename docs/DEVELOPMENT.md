@@ -40,6 +40,7 @@ There is no `.env` file. The binaries take flags, not environment variables; see
 | Variable | Purpose | Required | Local default |
 |---|---|---|---|
 | `VESPER_GIT_COMMIT`, `VESPER_BUILD_DATE` | Baked into `buildinfo` at compile time | no | `unknown` when unset ([src/buildinfo.rs](../src/buildinfo.rs)) |
+| `VESPER_SHARES` | Host directories to share into the System VM over virtio-fs, space-separated `PATH` or `PATH:ro`; read by `make systemvm-launch-config` | no | empty |
 | `VALIDATE_ENTITLEMENTS_FORCE_PYTHON` | Force the Python plist validator | no | `0` |
 | `REPO` | Target repo for `scripts/update-issue-checklists.sh` | no | `cityhunteur/vesper` |
 | `VESPER_ISSUE_ID`, `VESPER_RUN_DIR`, `VESPER_BUNDLE_DIR` | Exported by the `env.sh` that `scripts/harness/init_issue_run.sh` writes | no | per issue |

@@ -43,6 +43,16 @@ for _ in $(seq 1 "${TIMEOUT}"); do
   if grep -q "${WANT}" "${LOG_FILE}" && { [ -z "${BRIDGE}" ] || [ -S "${ROOT_DIR}/${BRIDGE}" ] || [ -S "${BRIDGE}" ]; }; then
     echo "systemvm-up: running (pid ${PID}); bridge ${BRIDGE:-none}; log ${LOG_FILE}"
     grep -E '"status":"(ready|probe-ok|bridge-listening)"' "${LOG_FILE}"
+    # virtio-fs shares (GH #29): mount each configured host directory in the guest at the same path.
+    python3 -c 'import json,sys
+for s in json.load(open(sys.argv[1])).get("shared_directories", []):
+    print(s["tag"], s["host_path"], "ro" if s.get("read_only") else "rw")' "${LAUNCH_CONFIG}" | while read -r tag path mode; do
+      if out="$(cargo run -q --bin systemvmctl -- control share mount "${tag}" "${path}" "${mode}" 2>&1)"; then
+        echo "systemvm-up: ${out}"
+      else
+        echo "systemvm-up: share ${tag} -> ${path} failed: ${out}" >&2
+      fi
+    done
     exit 0
   fi
   sleep 1

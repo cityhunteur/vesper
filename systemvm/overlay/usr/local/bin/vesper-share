@@ -1,0 +1,52 @@
+#!/bin/sh
+# virtio-fs shares from the host (GH #29): the launcher exposes each shared host directory as a virtio-fs
+# tag; this mounts it at the same absolute path so Docker bind mounts name host paths unchanged.
+# usage: vesper-share mount TAG PATH [ro|rw]   MOUNTED TAG PATH mode=<ro|rw> (idempotent) or ERR …
+#        vesper-share list                     one line per mount: SHARE TAG PATH mode=<ro|rw>
+#        vesper-share umount PATH              UNMOUNTED PATH or ERR
+#        vesper-share probe TAG PATH           modules, tag presence and mount state as key=value words
+set -u
+
+tags() { cat /sys/fs/virtiofs/*/tag 2>/dev/null; }
+
+mount_() {
+  tag=${1:?}; path=${2:?}; mode=${3:-rw}
+  case "$path" in /*) ;; *) echo "ERR path must be absolute: $path"; return 2 ;; esac
+  /sbin/modprobe virtiofs 2>/dev/null
+  if grep -q " $path virtiofs " /proc/mounts; then
+    cur=$(grep " $path virtiofs " /proc/mounts | awk '{print $4}' | grep -q '^ro' && echo ro || echo rw)
+    echo "MOUNTED $tag $path mode=$cur (already)"; return 0
+  fi
+  tags | grep -qx "$tag" || { echo "ERR virtio-fs tag $tag is not present (tags: $(tags | tr '\n' ' '))"; return 1; }
+  mkdir -p "$path" || { echo "ERR cannot create $path"; return 1; }
+  opts=""; [ "$mode" = ro ] && opts="-o ro"
+  if out=$(mount -t virtiofs $opts "$tag" "$path" 2>&1); then
+    echo "MOUNTED $tag $path mode=$mode"
+  else
+    echo "ERR mount $tag at $path failed: $out"; return 1
+  fi
+}
+
+list() { awk '$3=="virtiofs" {m=($4 ~ /^ro/)?"ro":"rw"; print "SHARE", $1, $2, "mode=" m}' /proc/mounts; }
+
+umount_() {
+  path=${1:?}
+  out=$(umount "$path" 2>&1) && echo "UNMOUNTED $path" || { echo "ERR umount $path: $out"; return 1; }
+}
+
+probe() {
+  tag=${1:?}; path=${2:?}
+  mod=$(grep -q '^virtiofs ' /proc/modules && echo loaded || echo absent)
+  present=$(tags | grep -qx "$tag" && echo yes || echo no)
+  mounted=$(grep -q " $path virtiofs " /proc/mounts && echo yes || echo no)
+  echo "PROBE module=$mod tag_present=$present mounted=$mounted sysfs=$(ls -d /sys/fs/virtiofs 2>/dev/null | wc -l | tr -d ' ') inotifyd=$(command -v inotifyd >/dev/null && echo yes || echo no)"
+}
+
+cmd=${1:-}; shift 2>/dev/null
+case "$cmd" in
+  mount) mount_ "$@" ;;
+  list) list ;;
+  umount) umount_ "$@" ;;
+  probe) probe "$@" ;;
+  *) echo "ERR usage: vesper-share mount TAG PATH [ro|rw]|list|umount PATH|probe TAG PATH"; exit 2 ;;
+esac

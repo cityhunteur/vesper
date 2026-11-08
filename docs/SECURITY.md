@@ -92,3 +92,11 @@ stops or the proxy exits. Listeners are loopback only; a binding to any other ho
 `unsupported` and not opened. Every connection travels the bridge to the guest gateway `vesper-port-relay`, which
 only connects to guest loopback ports, so nothing in the guest becomes reachable that dockerd did not publish.
 The live set is `run/vesper/ports.json`. Widening to non-loopback addresses is a human decision.
+
+## Shared host directories (GH #29)
+
+A host directory enters the System VM only when named in `VESPER_SHARES` (or `systemvmctl launch-config
+--share`); nothing is shared by default. Shares are mounted in the guest at the host's absolute path and are
+visible to every container that bind-mounts them; `PATH:ro` makes the share read-only at the virtio-fs level,
+which no container can override. Guest writes land on the host as the sharing user. Sharing `$HOME` or wider
+trees is a human decision.

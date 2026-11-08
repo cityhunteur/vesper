@@ -55,6 +55,35 @@ pub struct ImageManifest {
     pub image_id: String,
 }
 
+/// A host directory shared into the System VM over virtio-fs (GH #29). The guest mounts `tag` at the
+/// same absolute path as `host_path`, so Docker bind mounts name host paths unchanged.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SharedDirectory {
+    pub tag: String,
+    pub host_path: String,
+    #[serde(default)]
+    pub read_only: bool,
+}
+
+/// Builds the share list from `PATH[:ro]` specs; tags are `share0`, `share1`, … (virtio-fs tags are short).
+pub fn shared_directories_from_specs(specs: &[String]) -> Result<Vec<SharedDirectory>, String> {
+    let mut out = Vec::new();
+    for (i, spec) in specs.iter().enumerate() {
+        let (path, ro) = match spec.strip_suffix(":ro") {
+            Some(p) => (p, true),
+            None => (spec.as_str(), false),
+        };
+        if path.is_empty() || !path.starts_with('/') {
+            return Err(format!("share {spec:?}: the host path must be absolute"));
+        }
+        if !Path::new(path).is_dir() {
+            return Err(format!("share {spec:?}: {path} is not a directory"));
+        }
+        out.push(SharedDirectory { tag: format!("share{i}"), host_path: path.trim_end_matches('/').to_string(), read_only: ro });
+    }
+    Ok(out)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LaunchConfig {
     pub kernel_path: String,
@@ -87,6 +116,8 @@ pub struct LaunchConfig {
     pub cpu_count: u16,
     pub memory_mib: u32,
     pub console_log_path: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shared_directories: Vec<SharedDirectory>,
 }
 
 /// Console-driven guest probe: log in on the serial console, run commands, expect a pattern, shut down.
@@ -315,6 +346,7 @@ pub fn default_launch_config(inputs: &LaunchInputs<'_>) -> Result<LaunchConfig, 
         cpu_count: 2,
         memory_mib: 2048,
         console_log_path: inputs.console_log_path.trim().to_string(),
+        shared_directories: Vec::new(),
     })
 }
 
