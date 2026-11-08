@@ -292,7 +292,9 @@ upstream pytest suite is not run yet (CE-0001). `shim/` (Go, ADR 0004) is the co
 `ctr run --runtime io.containerd.vesper.v2` boots a jailed microVM from the container rootfs and maps exit code,
 output, kill and delete (`make systemvm-shim-suite`); root drives are built block-first once per image layer
 chain and copied per task (`make systemvm-bundle-suite`); tasks survive a containerd restart and a dead shim
-leaves no microVM (`make systemvm-restart-suite`); exec, terminal and stdin are P3.2. MicroVMs have no network
+leaves no microVM (`make systemvm-restart-suite`); exec, terminal and stdin are P3.2. From macOS,
+`make docker-conformance` proves the Docker CLI (run, exec, ps, stop, rm, images, pull) through `vesper-proxy`
+with dockerd's errors intact and no bypass of the ingress. MicroVMs have no network
 yet (TD-032).
 
 **Intended:** design-v0 describes a packaged macOS host process plus a Linux System VM running containerd and
