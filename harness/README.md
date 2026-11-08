@@ -1,16 +1,19 @@
 # harness/
 
 This directory holds the tooling that keeps the knowledge base (`AGENTS.md`, `ARCHITECTURE.md`, `docs/`) honest.
-Everything in it is Python 3.11+ standard library only.
+The checker and installer use Python 3.11+ standard library only; `architecture-viz.html` is a standalone interactive
+HTML visualization of the architecture and data flows.
 
 | File | Purpose |
 |---|---|
+| `architecture-viz.html` | Interactive Bauhaus monospace HTML visualization of Vesper's architecture and data flows |
 | `check_docs.py` | Knowledge-base linter, run locally and in CI |
 | `config.toml` | Checker configuration: scope, required files, front matter, ExecPlan sections |
 | `install.py` | Copies the template into another repository without overwriting anything |
 | `prompts/bootstrap.md` | Agent prompt that fills the template for a specific repository |
 | `prompts/doc-gardening.md` | Recurring agent prompt: make documents match the code |
 | `prompts/entropy-sweep.md` | Recurring agent prompt: make code match the documented principles |
+| `prompts/update-architecture-viz.md` | Recurring agent prompt: keep `architecture-viz.html` in sync with `ARCHITECTURE.md` and code |
 | `tests/` | Tests for the checker and the installer |
 
 ## check_docs.py

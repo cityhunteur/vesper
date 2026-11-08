@@ -286,6 +286,14 @@ NAME WORDS…`, `start`, `state`, `kill`, `delete`, `try CTR-ARGS…`, `leftover
 task RUNNING with a pid, start-twice and delete-while-running rejected, unknown task rejected, three concurrent
 tasks with distinct VMM pids, kill and delete of each, no leftovers) into `run/systemvm/shim-report.json`.
 
+## MicroVM vsock transport (GH #23, in progress)
+
+`vesper-microvm launch ID --vsock` attaches a Firecracker vsock device (guest CID 3) whose host side is the
+Unix socket `/srv/jailer/firecracker/ID/root/v.sock`; a connection sends `CONNECT <port>\n` and gets `OK <port>`,
+the same preface as the launcher bridge. The initramfs carries the guest transport modules and the init loads
+them (`VESPER-VSOCK-OK`); `status ID` shows `vsock=present`. The guest agent that will serve exec, PTY and
+stdio sessions over this transport is the open unit of WOR-32 (see the active ExecPlan).
+
 ## Proxy bridge convention
 
 Phase 0 keeps the proxy-side vsock bridge inspectable by resolving

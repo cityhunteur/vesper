@@ -1,12 +1,15 @@
 #!/bin/sh
 # Vesper microVM manager (GH #18): stock Firecracker under the jailer inside the System VM.
 # usage: vesper-microvm prepare
-#        vesper-microvm launch ID [--exit] [--rootfs PATH] [--cmd BASE64]
+#        vesper-microvm launch ID [--exit] [--rootfs PATH] [--cmd BASE64] [--vsock]
 #                                             boot a microVM (kernel + busybox initramfs); --exit powers off after the
 #                                             marker; --rootfs attaches an ext4 image as /dev/vda, mounts it, prints
 #                                             VESPER-ROOTFS-OK <source digest> from its provenance and switches root;
 #                                             --cmd runs the base64-encoded shell command inside the rootfs, prints
-#                                             VESPER-WORKLOAD-START, its output, VESPER-WORKLOAD-EXIT <code>, then powers off
+#                                             VESPER-WORKLOAD-START, its output, VESPER-WORKLOAD-EXIT <code>, then powers off;
+#                                             --vsock attaches a vsock device (guest CID 3) whose host side is the Unix
+#                                             socket <jail root>/v.sock (CONNECT <port> preface) and loads the guest
+#                                             vsock modules at boot (vesper_vsock=1)
 #        vesper-microvm status ID            RUNNING ID pid=N | EXITED ID | ABSENT ID
 #        vesper-microvm isolation ID         JSON with uid, chroot, cgroup and seccomp checks
 #        vesper-microvm stop ID              SIGTERM, wait up to 10 s
@@ -47,7 +50,7 @@ prepare() {
     kver=$(uname -r)
     mdir="$MVM/initroot/lib/modules/$kver"
     mkdir -p "$mdir"
-    for rel in kernel/drivers/virtio/virtio_mmio kernel/drivers/block/virtio_blk kernel/crypto/crc32c_generic kernel/lib/libcrc32c kernel/fs/ext4/ext4 kernel/fs/jbd2/jbd2 kernel/fs/mbcache kernel/lib/crc16; do
+    for rel in kernel/drivers/virtio/virtio_mmio kernel/drivers/block/virtio_blk kernel/crypto/crc32c_generic kernel/lib/libcrc32c kernel/fs/ext4/ext4 kernel/fs/jbd2/jbd2 kernel/fs/mbcache kernel/lib/crc16 kernel/net/vmw_vsock/vsock kernel/net/vmw_vsock/vmw_vsock_virtio_transport_common kernel/net/vmw_vsock/vmw_vsock_virtio_transport; do
       src=$(ls "/lib/modules/$kver/$rel".ko* 2>/dev/null | head -1)
       [ -n "$src" ] || { echo "ERR module $rel missing from /lib/modules/$kver"; return 1; }
       mkdir -p "$mdir/$(dirname "$rel")"
@@ -64,6 +67,10 @@ prepare() {
 echo "VESPER-MICROVM-OK"
 if /bin/busybox grep -q vesper_exit=1 /proc/cmdline; then
   /bin/busybox poweroff -f
+fi
+if /bin/busybox grep -q vesper_vsock=1 /proc/cmdline; then
+  /bin/busybox modprobe -a virtio_mmio vsock vmw_vsock_virtio_transport_common vmw_vsock_virtio_transport 2>&1 \
+    && echo "VESPER-VSOCK-OK" || echo "VESPER-VSOCK-FAILED"
 fi
 if /bin/busybox grep -q vesper_rootfs=1 /proc/cmdline; then
   /bin/busybox modprobe -a virtio_mmio virtio_blk crc32c_generic libcrc32c ext4 2>&1
@@ -102,10 +109,11 @@ INIT
 
 launch() {
   id=$1; shift
-  mode=""; rootfs=""; cmd64=""
+  mode=""; rootfs=""; cmd64=""; vsock=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --exit) mode=--exit ;;
+      --vsock) vsock=1 ;;
       --rootfs) rootfs=$2; shift ;;
       --cmd) cmd64=$2; shift ;;
       *) echo "ERR unknown launch option $1"; return 2 ;;
@@ -132,7 +140,12 @@ launch() {
     extra="$extra vesper_rootfs=1"
     drives='[{"drive_id":"rootfs","path_on_host":"/rootfs.ext4","is_root_device":true,"is_read_only":false}]'
   fi
-  printf '{"boot-source":{"kernel_image_path":"/Image","initrd_path":"/initrd.gz","boot_args":"console=ttyS0 reboot=k panic=1 pci=off rdinit=/init%s"},"drives":%s,"machine-config":{"vcpu_count":1,"mem_size_mib":256}}\n' "$extra" "$drives" > "$root/vm.json"
+  vsockcfg=""
+  if [ "$vsock" = 1 ]; then
+    extra="$extra vesper_vsock=1"
+    vsockcfg=',"vsock":{"guest_cid":3,"uds_path":"/v.sock"}'
+  fi
+  printf '{"boot-source":{"kernel_image_path":"/Image","initrd_path":"/initrd.gz","boot_args":"console=ttyS0 reboot=k panic=1 pci=off rdinit=/init%s"},"drives":%s,"machine-config":{"vcpu_count":1,"mem_size_mib":256}%s}\n' "$extra" "$drives" "$vsockcfg" > "$root/vm.json"
   chown -R "$JUID:$JGID" "$JAIL/firecracker/$id"
   lf=$(logfile "$id")
   : > "$lf"
@@ -157,7 +170,9 @@ launch() {
 
 status() {
   id=$1; pid=$(fcpid "$id")
-  if [ -n "$pid" ]; then echo "RUNNING $id pid=$pid"
+  if [ -n "$pid" ]; then
+    vs="absent"; [ -S "$JAIL/firecracker/$id/root/v.sock" ] && vs="present"
+    echo "RUNNING $id pid=$pid vsock=$vs"
   elif [ -f "$(logfile "$id")" ]; then echo "EXITED $id"
   else echo "ABSENT $id"; fi
 }
