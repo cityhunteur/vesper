@@ -210,6 +210,17 @@ round-trips, `chown` is ignored, read-only is enforced by the share flag and by 
 the next access, inotify fires for guest writes but not for host edits (TD-038), and a `-v` path outside the
 configured shares is a guest-local directory. `make systemvm-up-shares` boots with the two suite shares.
 
+### DNS and network defaults (GH #30)
+
+Containers on the default bridge inherit the System VM's resolver, which DHCP sets to the NAT gateway
+(`nameserver 192.168.64.1`); user-defined and compose networks use dockerd's embedded DNS (`127.0.0.11`), which
+answers service names and aliases and forwards everything else to that resolver. The System VM's network mode is
+`nat` from the image lock and dockerd runs with its default bridge and address pools, so the defaults are the
+same on every boot. Caveats: the host resolver may return IPv6 addresses although containers have no IPv6
+route (clients fall back to IPv4); `host.docker.internal` is not provided (TD-039). `make dns-suite`
+(`scripts/systemvm/dns-suite.sh` with `fixtures/dns-stack.yml`) runs the GH #30 checklist (12 steps) from macOS
+into `run/systemvm/dns-report.json`.
+
 ### Docker API conformance (GH #27)
 
 `make docker-conformance` (`scripts/systemvm/docker-conformance.sh`) runs 22 checks from macOS through the
