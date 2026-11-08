@@ -8,8 +8,8 @@ last_reviewed: 2026-11-08
 
 ### 2026-11-08 — WOR-26 — compat exceptions CE-0001..CE-0003 approved as pre-GA deviations, GH #21 complete, Phase 2 epic closed
 - GitHub issue: #21 (mirror #63); epic #4 (WOR-14)
-- PR: pending
-- Commit: pending
+- PR: #143
+- Commit: `ddf7fb2` (squash merge of PR #143; remote CI green incl. Compat Exceptions Policy and Parity Baseline)
 - Phase: 2
 - Parity unit: human approval of the three Phase 2 compat exceptions recorded in the registry (`approved_by`, `approved_on`), validated by `compatexctl` (pair set together, date not in the future) and reported as `approved=`
 - Result: keep
