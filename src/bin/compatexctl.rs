@@ -31,8 +31,8 @@ fn run() -> Result<(), String> {
     let summary = vesper::compat::validate(&registry, today, args.require_zero_open)?;
 
     println!(
-        "compat exceptions valid: open={} closed={}",
-        summary.open, summary.closed
+        "compat exceptions valid: open={} closed={} approved={}",
+        summary.open, summary.closed, summary.approved
     );
 
     Ok(())
