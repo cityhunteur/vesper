@@ -186,6 +186,16 @@ On 2026-11-06 (M3): 7/7, the container printed `vesper-container-ok`.
 The packaged canonical path from the issue, `/var/run/vesper/docker.sock`, is Intended: it needs root and no
 packaging exists yet.
 
+### Docker API conformance (GH #27)
+
+`make docker-conformance` (`scripts/systemvm/docker-conformance.sh`) runs 22 checks from macOS through the
+ingress: protocol (`/_ping`, `/version`), a named Docker context, images (import, list, inspect), `run` with
+exit code and separated streams, `ps`, `exec`, `stop` (SIGTERM reaches the process), `kill`, `rm`, `pull` from
+Docker Hub through the System VM's NAT, dockerd's own errors for `login` to an unknown registry, `checkpoint`
+and an unknown runtime passing through intact, and the boundary (socket mode 600, no TCP listener, no other
+host sockets, guest ports without a listener refused). The proxy stays a byte-level forwarder; Vesper-specific
+unsupported behaviours (published ports from macOS, bind mounts) are GH #28 and #29 (TD-036).
+
 ## Reliability suite (GH #16)
 
 `make systemvm-reliability` (`scripts/systemvm/reliability-suite.sh [CYCLES]`, default 50, `CYCLES=200 make
