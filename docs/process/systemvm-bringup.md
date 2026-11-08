@@ -221,6 +221,18 @@ route (clients fall back to IPv4); `host.docker.internal` is not provided (TD-03
 (`scripts/systemvm/dns-suite.sh` with `fixtures/dns-stack.yml`) runs the GH #30 checklist (12 steps) from macOS
 into `run/systemvm/dns-report.json`.
 
+### Cross-architecture containers (GH #39)
+
+The packages lock pins `qemu-x86_64`; `vesper-binfmt` (OpenRC, default runlevel) mounts `binfmt_misc` and
+registers it for x86-64 ELF with flags `OCF` (fix-binary: the interpreter is opened at registration, so
+containers need no qemu in their rootfs). `docker run --platform linux/amd64 …` from macOS then runs emulated;
+`vesper-arch status` lists the native arch and the registered interpreters, `vesper-arch mode linux/<arch>`
+answers `native`, `emulated:qemu-x86_64` or `unsupported (…; supported: aarch64 native, x86_64 emulated)`
+(`systemvmctl control arch …` from the host). Caveat: `docker run --platform` on an existing tag re-tags that
+reference with the foreign variant; use a separate reference for foreign platforms. `make crossarch-suite`
+runs the GH #39 checklist (9 steps, incl. a native-vs-emulated timing of a shell loop) into
+`run/systemvm/crossarch-report.json`; the workflow suite's amd64 step is required since this landed.
+
 ### Developer workflow suite (GH #31)
 
 `make workflow-suite` (`scripts/systemvm/workflow-suite.sh`) runs the everyday Docker workflow from macOS through

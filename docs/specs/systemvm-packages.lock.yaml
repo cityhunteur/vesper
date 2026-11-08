@@ -4,7 +4,7 @@
 schema_version: 2
 branch: v3.22
 arch: aarch64
-requested: [socat, containerd, containerd-ctr, containerd-openrc, docker-engine, docker-cli, docker-openrc, e2fsprogs, e2fsprogs-extra]
+requested: [socat, containerd, containerd-ctr, containerd-openrc, docker-engine, docker-cli, docker-openrc, e2fsprogs, e2fsprogs-extra, qemu-x86_64]
 packages:
   - name: ca-certificates
     version: "20261020-r0"
@@ -125,6 +125,13 @@ packages:
     url: https://dl-cdn.alpinelinux.org/alpine/v3.22/community/aarch64/log_proxy-0.7.4-r0.apk
     sha256: 61255f4ce11fe570677adcfc0f3c08cf2ffdc117281625e1c4f3314a00d7aaa1
     size_bytes: 19149
+  - name: qemu-x86_64
+    version: "10.0.0-r1"
+    repo: community
+    file: qemu-x86_64-10.0.0-r1.apk
+    url: https://dl-cdn.alpinelinux.org/alpine/v3.22/community/aarch64/qemu-x86_64-10.0.0-r1.apk
+    sha256: 5b6c5682db8d509424dd6772395283a7782dc032c7c1ab621a5bb4c45280141f
+    size_bytes: 1389706
   - name: readline
     version: "8.2.13-r1"
     repo: main

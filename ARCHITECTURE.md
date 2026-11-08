@@ -299,8 +299,8 @@ localhost through the bridge and the guest port relay (ADR 0005). `make binds-su
 named in `VESPER_SHARES` reach containers over virtio-fs at their host paths, read-only when asked, with
 ownership mapped to the sharing user and no inotify for host edits (TD-038). `make dns-suite` proves dockerd's
 embedded DNS, aliases and external forwarding for a compose stack driven from macOS; `make workflow-suite` covers
-compose, build, `logs -f`, interactive `exec -it` and signals, with `--platform linux/amd64` recorded as the gap
-until GH #39. MicroVMs have no network
+compose, build, `logs -f`, interactive `exec -it` and signals, and `--platform linux/amd64` now runs through `binfmt_misc` and the pinned `qemu-x86_64` in the
+System VM (`make crossarch-suite`, `vesper-arch mode` for native/emulated/unsupported). MicroVMs have no network
 yet (TD-032).
 
 **Intended:** design-v0 describes a packaged macOS host process plus a Linux System VM running containerd and

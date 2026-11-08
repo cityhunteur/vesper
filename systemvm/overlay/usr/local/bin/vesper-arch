@@ -1,0 +1,39 @@
+#!/bin/sh
+# Execution-mode metadata for cross-architecture containers (GH #39).
+# usage: vesper-arch status            NATIVE <arch> then one INTERP line per binfmt_misc entry: name enabled flags interpreter version
+#        vesper-arch mode ARCH         MODE <arch> native|emulated:<interpreter>|unsupported (ARCH as linux/amd64, amd64, x86_64, arm64, aarch64, …)
+set -u
+native() { uname -m; }
+interp_for() { # normalized arch -> binfmt entry name or empty
+  case "$1" in
+    x86_64|amd64) [ -f /proc/sys/fs/binfmt_misc/qemu-x86_64 ] && echo qemu-x86_64 ;;
+    aarch64|arm64) echo native ;;
+    *) ;;
+  esac
+}
+status() {
+  echo "NATIVE $(native) binfmt_misc=$(grep -q '^enabled' /proc/sys/fs/binfmt_misc/status 2>/dev/null && echo enabled || echo absent)"
+  for f in /proc/sys/fs/binfmt_misc/qemu-*; do
+    [ -f "$f" ] || continue
+    name=$(basename "$f"); en=$(head -1 "$f"); flags=$(sed -n 's/^flags: //p' "$f"); ip=$(sed -n 's/^interpreter //p' "$f")
+    ver=$("$ip" --version 2>/dev/null | head -1 | sed 's/.*version //; s/ .*//')
+    echo "INTERP $name $en flags=$flags interpreter=$ip version=${ver:-?}"
+  done
+}
+mode() {
+  a=${1:?}; a=${a#linux/}
+  case "$a" in amd64) n=x86_64 ;; arm64|arm64/v8) n=aarch64 ;; *) n=$a ;; esac
+  if [ "$n" = "$(native)" ]; then echo "MODE $a native"; return 0; fi
+  i=$(interp_for "$n")
+  case "$i" in
+    "") echo "MODE $a unsupported (no binfmt_misc interpreter for $n; supported: $(native) native$( [ -f /proc/sys/fs/binfmt_misc/qemu-x86_64 ] && echo ', x86_64 emulated'))"; return 1 ;;
+    native) echo "MODE $a native" ;;
+    *) echo "MODE $a emulated:$i" ;;
+  esac
+}
+cmd=${1:-}; shift 2>/dev/null
+case "$cmd" in
+  status) status ;;
+  mode) mode "$@" ;;
+  *) echo "ERR usage: vesper-arch status|mode ARCH"; exit 2 ;;
+esac

@@ -76,7 +76,7 @@ case "${logs}" in *got-hup*got-term*) [ "${code}" = 0 ] && record stop_signals_p
 # A separate image reference keeps the amd64 pull from re-tagging the native test image.
 out="$("${DOCKER}" run --rm --platform linux/amd64 "${WF_AMD64_IMAGE:-busybox:1.37}" uname -m 2>&1 | tail -1)"; "${DOCKER}" rmi -f "${WF_AMD64_IMAGE:-busybox:1.37}" >/dev/null 2>&1
 if [ "${out}" = "x86_64" ]; then record platform_amd64 true "uname -m -> ${out}"; else
-  if [ "${WF_REQUIRE_AMD64:-0}" = 1 ]; then record platform_amd64 false "${out}"; else record platform_amd64_known_gap true "not available yet (GH #39, cross-architecture mode): ${out}"; fi; fi
+  if [ "${WF_REQUIRE_AMD64:-1}" = 1 ]; then record platform_amd64 false "${out}"; else record platform_amd64_known_gap true "not available yet (GH #39, cross-architecture mode): ${out}"; fi; fi
 
 cleanup
 cargo run -q --bin baselinectl -- --mode generate --backend backend-a --host-os macos --host-cpu "$(sysctl -n machdep.cpu.brand_string 2>/dev/null | tr ' ' '-' | tr '[:upper:]' '[:lower:]')" --metadata "${ROOT_DIR}/run/systemvm/workflow-metadata.json" >/dev/null 2>&1
