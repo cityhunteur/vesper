@@ -21,7 +21,7 @@ proves 12 checks from macOS with a compose stack through the ingress, and the de
   embedded DNS, an unknown name is a clean NXDOMAIN, a second `compose up` yields the same resolver, address
   and subnet (`172.18.0.0/16`), and `compose down` leaves no network. 12/12 on an M3 Pro; Docker conformance
   still passes.
-- [ ] PR merged, CI green, GH #30 checklist and WOR-40 updated, milestone entry; plan moved to completed.
+- [x] (2026-11-08) PR #139 merged as `7d35acc`, CI green, GH #30 checklist ticked, mirror #80 closed, WOR-40 Done, milestone entry; plan moved to completed.
 
 ## Surprises & Discoveries
 

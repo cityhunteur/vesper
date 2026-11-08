@@ -6,6 +6,19 @@ last_reviewed: 2026-11-05
 
 # Symphony milestones
 
+### 2026-11-08 — WOR-40 — DNS and network defaults verified and documented, GH #30 complete
+- GitHub issue: #30 (mirror #80)
+- PR: #139
+- Commit: `7d35acc` (squash merge of PR #139; remote CI green)
+- Phase: 4
+- Parity unit: `make dns-suite` with a compose fixture, 12 checks from macOS (resolver, external DNS and egress, embedded DNS, service discovery, aliases, NXDOMAIN, determinism, cleanup); defaults and caveats documented
+- Result: keep
+- Verification bundle: `.symphony/runs/WOR-40/current/` (evidence in `run/WOR-40/systemvm/`, incl. `dns-report.json`)
+- Council summary: skipped; no code change; CI green
+- Harness update: `scripts/systemvm/dns-suite.sh`, `fixtures/dns-stack.yml`, `make dns-suite`, TD-039
+- Remaining risks: no `host.docker.internal`, IPv6 answers without a route (TD-039)
+- Truthful project state after this milestone: Phase 4 has #27, #28, #29 (3 of 4 items) and #30 done; #31 (workflow suite) and #39 (cross-arch) remain
+
 ### 2026-11-08 — WOR-39 — Bind mounts over virtio-fs at host paths, GH #29 (3 of 4 items; inotify for host edits open)
 - GitHub issue: #29 (mirror #77)
 - PR: #138
