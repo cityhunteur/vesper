@@ -6,6 +6,19 @@ last_reviewed: 2026-11-05
 
 # Symphony milestones
 
+### 2026-11-08 — WOR-37 — OCI bundle validation and block-first rootfs cache, GH #24 complete
+- GitHub issue: #24 (mirror #76)
+- PR: #134
+- Commit: `d52cff2` (squash merge of PR #134; remote CI green, seven workflows)
+- Phase: 3
+- Parity unit: `shim/internal/bundle` validation before any mount; root drives built once per image layer chain with digest-verified reuse and a private copy per task; `vesper-rootfs.json` record; documented direct-build fallback
+- Result: keep
+- Verification bundle: `.symphony/runs/WOR-37/current/` (evidence in `run/WOR-37/systemvm/`, incl. `bundle-report.json`)
+- Council summary: skipped; no control-plane path changed; CI green
+- Harness update: `vesper-ctr import-layered|run-image|start-image|meta|cache`; `run_bundle_suite` (`src/control/suites/bundle.rs`); `make systemvm-bundle-suite`; shim runs without the framework reaper; TD-034 narrowed, TD-035 added
+- Remaining risks: cache keyed per containerd instance, never pruned, whole-drive copy per task (TD-035); exec/TTY/stdin still open (WOR-32)
+- Truthful project state after this milestone: containerd tasks boot microVMs from cached block-first root drives with validated bundles; Phase 3 continues with WOR-36 (#25 restart resilience), WOR-32 (agent) and WOR-35 (#26 conformance)
+
 ### 2026-11-08 — WOR-32 slice 1 — vsock transport for microVMs (GH #23 in progress)
 - GitHub issue: #23 (mirror #72, open)
 - PR: #133

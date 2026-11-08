@@ -29,7 +29,7 @@ chain shares one ext4 build in `/var/lib/vesper/rootfs-cache`, gets a private co
   second-layer file, two tasks from the chain share key and digest with `cached=true` in 16 ms, one cached drive
   per chain, the layered image's chain reuses the base image's snapshot. Unit tests: 7 malformed bundles,
   keys, metadata round trip, cache validity and copy. Workload, microvm, rootfs, parity and shim suites pass.
-- [ ] PR merged, CI green, GH #24 checklist and WOR-37 updated, milestone entry; plan moved to completed.
+- [x] (2026-11-08) PR #134 merged as `d52cff2`, CI green (seven workflows), GH #24 checklist ticked, mirror #76 closed, WOR-37 Done, milestone entry; plan moved to completed.
 
 ## Surprises & Discoveries
 

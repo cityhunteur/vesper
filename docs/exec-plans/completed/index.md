@@ -4,6 +4,7 @@ Finished plans. Keep them: their Decision Logs and retrospectives explain why th
 
 | Plan | Outcome | Completed |
 |---|---|---|
+| [2026-11-08-WOR-37-block-first-rootfs.md](2026-11-08-WOR-37-block-first-rootfs.md) | OCI bundle validation with actionable errors and a block-first rootfs cache keyed by the image layer chain, digest-verified, per-task copies (GH #24 closed) | 2026-11-08 |
 | [2026-11-06-WOR-29-shim-task-rpcs.md](2026-11-06-WOR-29-shim-task-rpcs.md) | containerd shim v2 (Go) Task lifecycle RPCs: ctr run/kill/delete over jailed microVMs with exit codes, output, invalid sequences and concurrency (GH #22 closed) | 2026-11-06 |
 | [2026-11-06-WOR-26-parity-baseline.md](2026-11-06-WOR-26-parity-baseline.md) | Backend A parity and performance baseline: 19 Firecracker API conformance checks, two comparable perf runs, compat exceptions CE-0001..CE-0003, CI-validated capture (GH #21; upstream pytest suite still open under CE-0001) | 2026-11-06 |
 | [2026-11-06-WOR-30-microvm-per-container.md](2026-11-06-WOR-30-microvm-per-container.md) | MicroVM-per-container workload lifecycle: concurrent jailed microVMs with private rootfs copies, isolation, stop teardown, exit mapping (GH #20 closed) | 2026-11-06 |
