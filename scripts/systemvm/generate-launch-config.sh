@@ -14,7 +14,9 @@ cd "${ROOT_DIR}"
 
 if [ $# -eq 0 ]; then
   [ -f "${IMAGE_DIR}/image-manifest.json" ] || { echo "generate-launch-config: ${IMAGE_DIR}/image-manifest.json missing; run 'make systemvm-fetch' first" >&2; exit 2; }
-  exec cargo run --bin systemvmctl -- launch-config --from-lock --dir "${IMAGE_DIR}" --console-log "${CONSOLE_LOG}" --out "${OUT}"
+  # VESPER_SHARES: space-separated host directories to share over virtio-fs, each `PATH` or `PATH:ro` (GH #29).
+  SHARE_ARGS=(); for s in ${VESPER_SHARES:-}; do SHARE_ARGS+=(--share "$s"); done
+  exec cargo run --bin systemvmctl -- launch-config --from-lock --dir "${IMAGE_DIR}" --console-log "${CONSOLE_LOG}" --out "${OUT}" "${SHARE_ARGS[@]}"
 fi
 
 KERNEL_PATH="$1"

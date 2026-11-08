@@ -257,6 +257,11 @@ impl Session {
         self.guest_tool("CTR", args)
     }
 
+    /// Runs `vesper-share <args>` in the guest (virtio-fs mounts); returns its exit code and output lines.
+    pub fn share(&mut self, args: &[&str]) -> Result<(i32, Vec<String>), String> {
+        self.guest_tool("SHARE", args)
+    }
+
     /// Runs a guest tool command (`MICROVM`, `ROOTFS`, `WORKLOAD`, `FCPARITY`, `CTR`): waits up to 10 min
     /// because launches, image builds and performance runs take longer than the default I/O timeout.
     fn guest_tool(&mut self, tool: &str, args: &[&str]) -> Result<(i32, Vec<String>), String> {

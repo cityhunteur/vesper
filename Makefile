@@ -5,7 +5,7 @@ CYCLES ?= 50
 .PHONY: build test contract-generate contract-check contract-test surface-matrix-generate \
 	surface-matrix-check behavior-matrix-generate behavior-matrix-check \
 	validate-entitlements dev-up dev-down vmlauncher-build systemvm-fetch systemvm-overlay systemvm-prepare systemvm-build systemvm-launch-config \
-	systemvm-boot-smoke systemvm-up systemvm-down systemvm-control-suite systemvm-services-suite systemvm-trivial-image docker-up docker-down docker-smoke docker-conformance ports-suite systemvm-reliability systemvm-microvm-suite systemvm-rootfs-suite systemvm-workload-suite systemvm-parity-baseline parity-baseline-check shim-build shim-test systemvm-shim-suite systemvm-bundle-suite systemvm-restart-suite
+	systemvm-boot-smoke systemvm-up systemvm-down systemvm-control-suite systemvm-services-suite systemvm-trivial-image docker-up docker-down docker-smoke docker-conformance ports-suite binds-suite systemvm-up-shares systemvm-reliability systemvm-microvm-suite systemvm-rootfs-suite systemvm-workload-suite systemvm-parity-baseline parity-baseline-check shim-build shim-test systemvm-shim-suite systemvm-bundle-suite systemvm-restart-suite
 
 build:
 	$(CARGO) build --bins
@@ -124,6 +124,15 @@ docker-conformance:
 
 ports-suite:
 	bash scripts/systemvm/ports-suite.sh
+
+# Regenerate the launch config with the two bind-mount test shares and boot (GH #29).
+systemvm-up-shares:
+	mkdir -p run/WOR-39/share run/WOR-39/share-ro
+	VESPER_SHARES="$(CURDIR)/run/WOR-39/share $(CURDIR)/run/WOR-39/share-ro:ro" bash scripts/systemvm/generate-launch-config.sh
+	bash scripts/systemvm/up.sh
+
+binds-suite:
+	bash scripts/systemvm/binds-suite.sh
 
 systemvm-reliability:
 	bash scripts/systemvm/reliability-suite.sh $(CYCLES)

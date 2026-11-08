@@ -50,6 +50,10 @@ enum Commands {
         /// Console text that marks a healthy boot (default "login:").
         #[arg(long)]
         ready_pattern: Option<String>,
+        /// Host directory to share into the System VM over virtio-fs as `PATH` or `PATH:ro` (repeatable);
+        /// the guest mounts it at the same absolute path (GH #29).
+        #[arg(long = "share")]
+        shares: Vec<String>,
         /// Nested virtualization policy: auto, require or off.
         #[arg(long)]
         nested: Option<String>,
@@ -212,6 +216,10 @@ enum ControlAction {
         id: String,
         #[arg(long, default_value_t = 20)]
         perf_cycles: u32,
+    },
+    /// Run `vesper-share <args>` in the guest (mount TAG PATH [ro]|list|umount PATH|probe TAG PATH).
+    Share {
+        args: Vec<String>,
     },
     /// Run `vesper-ctr <args>` in the guest (import|run NAME CMD...|start|state|kill|delete|try CTR-ARGS...|leftovers).
     Ctr {
@@ -408,6 +416,17 @@ fn run_control(endpoint: vesper::control::ControlEndpoint, action: ControlAction
             }
             println!("parity suite passed (report: {report})");
         }
+        ControlAction::Share { args } => {
+            let mut session = control::connect(&endpoint)?;
+            let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+            let (rc, lines) = session.share(&refs)?;
+            for line in &lines {
+                println!("{line}");
+            }
+            if rc != 0 {
+                return Err(format!("vesper-share exited with {rc}"));
+            }
+        }
         ControlAction::Ctr { args } => {
             let mut session = control::connect(&endpoint)?;
             let refs: Vec<&str> = args.iter().map(String::as_str).collect();
@@ -595,8 +614,9 @@ fn run() -> Result<(), String> {
             nested,
             console_log,
             out,
+            shares,
         } => {
-            let config = if from_lock {
+            let mut config = if from_lock {
                 let lock = vesper::systemvm::load_image_lock(&lock)?;
                 vesper::systemvm::launch_config_from_lock(&lock, &dir, &console_log)?
             } else {
@@ -615,8 +635,9 @@ fn run() -> Result<(), String> {
                     console_log_path: &console_log,
                 })?
             };
+            config.shared_directories = vesper::systemvm::shared_directories_from_specs(&shares)?;
             vesper::systemvm::write_launch_config(&out, &config)?;
-            println!("wrote launch config: {out}");
+            println!("wrote launch config: {out} ({} shared director{})", config.shared_directories.len(), if config.shared_directories.len() == 1 { "y" } else { "ies" });
             Ok(())
         }
         Commands::LockEnv { lock } => {

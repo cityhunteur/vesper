@@ -30,6 +30,7 @@ optional vsock bridge socket the config names, and reports.
 ## Invariants
 
 - The VM always has one `VZVirtioSocketDeviceConfiguration`; the bridge is served only when the config names a path.
+- `shared_directories` (optional, GH #29): each `{tag, host_path, read_only}` becomes a `VZVirtioFileSystemDeviceConfiguration` with a `VZSingleDirectoryShare`; an invalid tag or a `host_path` that is not a directory exits 3 before the VM is created.
 - Block devices are attached in order: `boot_media_path` read-only first, then `rootfs_path` writable, so a kernel command line can address them as `/dev/vda` and `/dev/vdb`.
 - `network_mode` must be `nat` (one `VZVirtioNetworkDeviceConfiguration` with `VZNATNetworkDeviceAttachment`) or `none`; anything else exits 3 before the VM is created.
 - `cpu_count` and `memory_mib` are clamped to the framework's allowed ranges; the config is `validate()`d before start.
