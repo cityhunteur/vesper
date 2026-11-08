@@ -6,6 +6,19 @@ last_reviewed: 2026-11-05
 
 # Symphony milestones
 
+### 2026-11-08 — WOR-35 — ctr conformance, metrics, CI validation and runbook, GH #26 (3 of 4 items; ctr exec open)
+- GitHub issue: #26 (mirror #79)
+- PR: #142
+- Commit: `eeac45f` (squash merge of PR #142; remote CI green, eight workflows incl. the new ctr Conformance)
+- Phase: 3
+- Parity unit: shim `Stats` from the microVM's cgroup v2; `make ctr-conformance` (shim 21 + bundle 15 + restart 18 steps) assembled with the baseline revisions; committed capture validated and published by CI; `docs/process/shim-operations.md`
+- Result: keep
+- Verification bundle: `.symphony/runs/WOR-35/current/` (evidence in `run/WOR-35/systemvm/`, incl. `ctr-conformance-report.json`)
+- Council summary: skipped; CI green
+- Harness update: `vesper-ctr metrics`, `task_metrics` step, `ctr-conformance.sh`, `ctr_conformance_report.py`, `make ctr-conformance[-check]`, `ctr-conformance.yml`, runbook
+- Remaining risks: `ctr exec` on the Vesper runtime needs the WOR-32 guest agent; developer-hardware capture only (TD-005)
+- Truthful project state after this milestone: Phase 3 is complete except the exec/TTY/stdin paths (WOR-32); Phase 4 is complete except inotify for host edits (TD-038); Phase 5 has not started
+
 ### 2026-11-08 — WOR-55 — linux/amd64 containers through binfmt_misc and qemu-user, GH #39 complete (and GH #31 item 6)
 - GitHub issue: #39 (mirror #95); also GH #31 item 6
 - PR: #141

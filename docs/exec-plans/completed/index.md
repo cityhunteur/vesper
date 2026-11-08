@@ -4,6 +4,7 @@ Finished plans. Keep them: their Decision Logs and retrospectives explain why th
 
 | Plan | Outcome | Completed |
 |---|---|---|
+| [2026-11-08-WOR-35-ctr-conformance.md](2026-11-08-WOR-35-ctr-conformance.md) | ctr conformance: shim Stats from the microVM cgroup, 55-step report with baseline revisions, CI validation workflow, operator runbook; ctr exec open for WOR-32 (GH #26 closed) | 2026-11-08 |
 | [2026-11-08-WOR-55-cross-arch.md](2026-11-08-WOR-55-cross-arch.md) | linux/amd64 containers via binfmt_misc + pinned qemu-x86_64, execution-mode metadata, unsupported-arch diagnosis, 9 checks; workflow suite's amd64 step required (GH #39 closed) | 2026-11-08 |
 | [2026-11-08-WOR-41-workflow-suite.md](2026-11-08-WOR-41-workflow-suite.md) | Developer workflow suite: compose, build, logs -f, interactive exec, signals, baseline-stamped report; amd64 recorded as the gap (GH #31 closed) | 2026-11-08 |
 | [2026-11-08-WOR-40-dns-network.md](2026-11-08-WOR-40-dns-network.md) | DNS and network defaults: default-bridge resolver, embedded DNS, service discovery, aliases, external forwarding, determinism, 12 checks from macOS (GH #30 closed) | 2026-11-08 |

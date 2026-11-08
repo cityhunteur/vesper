@@ -21,8 +21,7 @@ the baseline revisions, the `ctr Conformance` workflow validates and publishes t
   checklist mapping and open gaps; `--validate`; `--self-test`); `make ctr-conformance` (`CTR_FLAGS=--publish`
   writes `docs/specs/ctr-conformance-baseline.json`) and `make ctr-conformance-check`; `.github/workflows/
   ctr-conformance.yml`; runbook `docs/process/shim-operations.md`. Capture on an M3 Pro: 55/55 steps.
-- [ ] PR merged, CI green, GH #26 checklist (`ctr exec` item stays open) and WOR-35 updated, milestone entry;
-  plan moved to completed.
+- [x] (2026-11-08) PR #142 merged as `eeac45f`, CI green (eight workflows incl. ctr Conformance), GH #26 items 1, 3 and 4 ticked (item 2 `ctr exec` open for WOR-32), mirror #79 closed, WOR-35 Done, milestone entry; plan moved to completed.
 
 ## Surprises & Discoveries
 
