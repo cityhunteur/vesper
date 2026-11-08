@@ -102,8 +102,8 @@ Public symbols by file:
   run_server(config, shutdown)`.
 - `spec.rs`: `Route { method, path }`, `load_routes(path)`,
   `load_info_version(path)`.
-- `control.rs` (client), `control/suites.rs` (checklists, re-exported) and `control/suites/bundle.rs`
-  (the GH #24 checklist, `super::` helpers only):
+- `control.rs` (client), `control/suites.rs` (checklists, re-exported) and `control/suites/{bundle,restart}.rs`
+  (the GH #24 and #25 checklists, `super::` helpers only):
   `ControlEndpoint { bridge_path, port, io_timeout }` with
   `new(bridge, port)` (10 s timeouts), `Handshake { protocol_version,
   hostname, connect_ms }`, `Session` with `ping`, `version`, `echo(payload)`,
@@ -115,7 +115,7 @@ Public symbols by file:
   payload_bytes)`, `run_services_suite(&endpoint, &[service], recovery_timeout)`,
   `run_microvm_suite(&endpoint, id)`, `run_rootfs_suite(&endpoint, id)`,
   `run_workload_suite(&endpoint)`, `run_parity_suite(&endpoint, id, perf_cycles)`, `run_shim_suite(&endpoint)`,
-  `run_bundle_suite(&endpoint)`,
+  `run_bundle_suite(&endpoint)`, `run_restart_suite(&endpoint)`,
   `write_report(path, &report)`; constants
   `AGENT_PROTOCOL_VERSION` (1), `DEFAULT_AGENT_PORT` (1024).
 - `systemvm.rs` (manifest, launch config, boot smoke),
@@ -346,6 +346,15 @@ Public symbols by file:
   `sha256` as `la`), `cache_one_drive_per_chain` (`CACHE n` with n lines), `layer_dedup_shared_base` (the trivial
   image's lower snapshot appears in the layered chain), `kill_*`, `delete_*`, `no_leftovers`; `passed` requires
   every step ok and at least 13 steps.
+- `control/suites/restart.rs:run_restart_suite` force-deletes `rs1`..`rs3`, then runs `handshake`,
+  `import_image`, `start_rs1`, `state_file_running` (`vesper-task.json` has `phase running` and the VMM pid),
+  `containerd_killed_and_respawned` (`kill_service("containerd")`, then HEALTH shows containerd ok and started
+  within 60 s), `task_survives_restart` (`RUNNING` with the same pid within 30 s), `kill_after_restart`,
+  `delete_after_restart`, `start_rs2`, `kill_shim_rs2`, `task_gone_after_shim_crash` (`wait-gone` 30 s),
+  `no_orphaned_microvm` (microVM status not RUNNING within 20 s, then `cleanup` CLEAN),
+  `container_delete_after_crash`, `inflight_start_rs3`, `containerd_killed_during_inflight`,
+  `inflight_fails_gracefully` (`ctr run --rm` exits non-zero), `inflight_task_reconciled` (whatever remains is
+  killed and deleted) and `no_leftovers`; `passed` requires every step ok and at least 16 steps.
 - `systemvm/packages.rs:validate_packages_lock` requires schema `2`,
   non-blank branch and arch, every requested package in the closure,
   packages sorted by name without duplicates, `file ==

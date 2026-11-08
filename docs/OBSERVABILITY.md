@@ -61,7 +61,9 @@ The durable signals this project relies on are artifacts rather than live teleme
   control ctr state <name>` and `ctr -n vesper task ls` in the guest; the shim logs through containerd's shim log
   FIFO (`ctr` prints them with `--debug`), and each task's console is `/var/log/vesper-microvm-<task>.log`; `run/systemvm/bundle-report.json` from
   `make systemvm-bundle-suite`, `systemvmctl control ctr meta <task>` (the task's `vesper-rootfs.json`: strategy,
-  cached, key, layers, digest, build time) and `systemvmctl control ctr cache` (cached root drives).
+  cached, key, layers, digest, build time) and `systemvmctl control ctr cache` (cached root drives); `run/systemvm/restart-report.json` from
+  `make systemvm-restart-suite` and `systemvmctl control ctr state-file <task>` (the task's `vesper-task.json`:
+  phase, VMM pid, exit, shim pid, last update).
 - `build/systemvm/image-manifest.json` (SHA-256 digests, stable `image_id`) and `build/systemvm/launch-config.json`.
 - `artifacts/parity-metadata.json` from `baselinectl --mode generate`.
 - JSON and Markdown reports from the Python sensors (`--json-out`, `--markdown-out`), uploaded by the `harness-*`

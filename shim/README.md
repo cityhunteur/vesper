@@ -13,8 +13,9 @@ the guest overlay. Runtime name `io.containerd.vesper.v2`.
 - `internal/manager`: `RuntimeName = "io.containerd.vesper.v2"`, `Version` (ldflags), `New(name) shim.Manager`.
   `Start` spawns the daemon (`-namespace`, `-id`, `-address`, optional `-debug`; socket inherited as fd 3; OOM
   score adjusted) and returns `BootstrapParams{Version: 3, Protocol: "ttrpc", Address}`; a live socket at the
-  address is reused. `Stop` (containerd's `delete` after a dead shim) runs `vesper-microvm cleanup <id>`,
-  unmounts `<bundle>/rootfs`, removes `rootfs.ext4` and reports exit 137. `Info` returns the runtime name and
+  address is reused. `Stop` (containerd's `delete` after a dead shim) reconciles from `vesper-task.json` (a
+  stopped or deleted task keeps its exit status and time, a running one is reported as 137, the VMM pid is
+  carried), then runs `vesper-microvm cleanup <id>`, unmounts `<bundle>/rootfs` and removes `rootfs.ext4`. `Info` returns the runtime name and
   version.
 - `internal/bundle`: `Validate(bundle, mounts) (*specs.Spec, error)` rejects, before any mount, a relative or
   symlinked bundle, a missing or invalid `config.json`, a spec without `ociVersion` or `process.args`, a
@@ -45,7 +46,9 @@ the guest overlay. Runtime name `io.containerd.vesper.v2`.
   `Wait` (blocks on the exit channel), `Pids` (the VMM pid while running), `Connect`, `Shutdown`; `Pause`,
   `Resume`, `Checkpoint`, `Exec`, `ResizePty`, `CloseIO`, `Update`, `Stats` → `NotImplemented`. `Task` state
   machine: created → running → stopped → deleted (`MarkRunning`, `MarkExited` once, `MarkDeleted`;
-  `Exited()` channel). `followLog(path, out, alive)` tails the microVM console log (which may not exist yet),
+  `Exited()` channel). `StateFileName = "vesper-task.json"`: `State{id, phase, pid, image, exit_status,
+  exited_at, shim_pid, updated_at}` persisted atomically on create, start, exit, kill and delete;
+  `ReadState(bundle)`. `followLog(path, out, alive)` tails the microVM console log (which may not exist yet),
   writes lines between `VESPER-WORKLOAD-START` and `VESPER-WORKLOAD-EXIT <n>` to `out`, returns `n`, or 137
   after three quiet polls with the VMM gone.
 
@@ -57,6 +60,7 @@ the guest overlay. Runtime name `io.containerd.vesper.v2`.
 - The image must contain `/bin/sh`; terminal, stdin, exec and resize are not supported in this slice (P3.2).
 - One cached drive per layer chain; a task never boots a drive whose digest differs from its sidecar.
 - The shim runs with the framework's reaper and subreaper disabled; it waits on its own children itself.
+- Every task transition is on disk before it is reported; a dead shim never leaves a microVM behind.
 
 ## Verification
 
@@ -64,3 +68,4 @@ the guest overlay. Runtime name `io.containerd.vesper.v2`.
     make shim-build                                  # build/shim/containerd-shim-vesper-v2 (linux/arm64, static)
     make systemvm-up && make systemvm-shim-suite     # GH #22 checklist through ctr (21 steps)
     make systemvm-bundle-suite                       # GH #24 checklist: block-first cache, layered image, dedup (15 steps)
+    make systemvm-restart-suite                      # GH #25 checklist: containerd restart, shim crash, in-flight (18 steps)
