@@ -63,6 +63,7 @@ binary, the missing Linux comparison) are registered as compat exceptions CE-000
 
 See Progress; `run/WOR-26/systemvm/parity-baseline-report.json` is the capture. The compat exceptions need a
 human's approval as pre-GA exceptions (they are `open` with expiry 2027-03-31).
+Approved by cityhunteur on 2026-11-08 (`approved_by`/`approved_on` in the registry); WOR-26 and the Phase 2 epic WOR-14 closed.
 
 ## Context and Orientation
 

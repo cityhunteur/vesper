@@ -1,7 +1,7 @@
 ---
 status: verified
 owner: cityhunteur
-last_reviewed: 2026-11-06
+last_reviewed: 2026-11-08
 ---
 
 # Compat Exception Lifecycle
@@ -20,7 +20,11 @@ Top level: `version` (non-zero integer) and `exceptions`. Required fields per ex
 - `target_release`
 - `status` (`open` or `closed`, matched case-insensitively after trimming)
 
-Optional: `description`. See `src/compat.rs`.
+Optional: `description`, and the approval pair `approved_by` (a human, per AGENTS.md "Ask a human first") and
+`approved_on` (YYYY-MM-DD, not in the future). The pair must be set together; `compatexctl` reports how many open
+exceptions carry it as `approved=`. An exception without the pair is registered but not yet accepted as a pre-GA
+deviation, so an issue whose acceptance criteria need "approved pre-GA compat exceptions" stays open. See
+`src/compat.rs`.
 
 ## Registered exceptions
 
@@ -28,8 +32,10 @@ Three open exceptions back the GH #21 parity baseline (WOR-26, 2026-11-06), all 
 2027-03-31 and target release `parity-ga`: CE-0001 (the upstream Firecracker pytest suite is not run; an API
 conformance subset stands in), CE-0002 (the guest runs the v1.16.0 release, not a build of the pinned commit;
 TD-029) and CE-0003 (performance is captured under nested virtualization with no Linux baseline on the same host
-class). They are summarised in `docs/specs/backend-a-parity-baseline.json`; the `Parity Baseline` workflow fails
-if the capture and the registry disagree about which ids are open.
+class). All three were approved by cityhunteur on 2026-11-08 (`approved_by`/`approved_on`), which satisfied the
+GH #21 criterion "tracked as approved pre-GA compat exceptions" and closed WOR-26 and the Phase 2 epic WOR-14.
+They are summarised in `docs/specs/backend-a-parity-baseline.json`; the `Parity Baseline` workflow fails if the
+capture and the registry disagree about which ids are open.
 
 ## Policy checks
 

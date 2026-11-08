@@ -1,10 +1,23 @@
 ---
 status: verified
 owner: cityhunteur
-last_reviewed: 2026-11-05
+last_reviewed: 2026-11-08
 ---
 
 # Symphony milestones
+
+### 2026-11-08 — WOR-26 — compat exceptions CE-0001..CE-0003 approved as pre-GA deviations, GH #21 complete, Phase 2 epic closed
+- GitHub issue: #21 (mirror #63); epic #4 (WOR-14)
+- PR: pending
+- Commit: pending
+- Phase: 2
+- Parity unit: human approval of the three Phase 2 compat exceptions recorded in the registry (`approved_by`, `approved_on`), validated by `compatexctl` (pair set together, date not in the future) and reported as `approved=`
+- Result: keep
+- Verification bundle: `.symphony/runs/WOR-26/current/` (unchanged capture; registry validation only)
+- Council summary: skipped; governance-only change
+- Harness update: `src/compat.rs` approval fields and checks, `compatexctl` summary, lifecycle doc, parity matrix row #21
+- Remaining risks: the exceptions stay open until the upstream pytest suite runs (CE-0001), the pinned commit is built or the lock moves to the tag (CE-0002, TD-029) and a Linux same-host baseline exists (CE-0003); all expire 2027-03-31
+- Truthful project state after this milestone: Phase 2 is closed with three approved, time-boxed deviations; Phase 3 waits on the WOR-32 guest agent; Phase 4 waits on a TD-038 decision; Phase 5 has not started
 
 ### 2026-11-08 — WOR-35 — ctr conformance, metrics, CI validation and runbook, GH #26 (3 of 4 items; ctr exec open)
 - GitHub issue: #26 (mirror #79)
