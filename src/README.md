@@ -102,7 +102,8 @@ Public symbols by file:
   run_server(config, shutdown)`.
 - `spec.rs`: `Route { method, path }`, `load_routes(path)`,
   `load_info_version(path)`.
-- `control.rs` (client) and `control/suites.rs` (checklists, re-exported):
+- `control.rs` (client), `control/suites.rs` (checklists, re-exported) and `control/suites/bundle.rs`
+  (the GH #24 checklist, `super::` helpers only):
   `ControlEndpoint { bridge_path, port, io_timeout }` with
   `new(bridge, port)` (10 s timeouts), `Handshake { protocol_version,
   hostname, connect_ms }`, `Session` with `ping`, `version`, `echo(payload)`,
@@ -114,6 +115,7 @@ Public symbols by file:
   payload_bytes)`, `run_services_suite(&endpoint, &[service], recovery_timeout)`,
   `run_microvm_suite(&endpoint, id)`, `run_rootfs_suite(&endpoint, id)`,
   `run_workload_suite(&endpoint)`, `run_parity_suite(&endpoint, id, perf_cycles)`, `run_shim_suite(&endpoint)`,
+  `run_bundle_suite(&endpoint)`,
   `write_report(path, &report)`; constants
   `AGENT_PROTOCOL_VERSION` (1), `DEFAULT_AGENT_PORT` (1024).
 - `systemvm.rs` (manifest, launch config, boot smoke),
@@ -337,6 +339,13 @@ Public symbols by file:
   must fail), `kill_detached`, `delete_detached`, `invalid_unknown_task`, `start_ca|cb|cc`,
   `three_tasks_running` (three `RUNNING` rows with distinct non-zero pids), `kill_*`/`delete_*` for each and
   `no_leftovers` (`CLEAN`); `passed` requires every step ok and at least 18 steps.
+- `control/suites/bundle.rs:run_bundle_suite` force-deletes `l1`, `la`, `lb`, `e2e-base`, then runs
+  `handshake`, `import_base_image`, `import_layered_image` (`IMPORTED … layers=2`), `layered_rootfs_boots`
+  (`cat /etc/layer2-marker` → `layer-two`, rc 0), `start_la`, `meta_la_recorded` (`strategy` block-first,
+  `kind` overlay, two lower layers), `start_lb_same_chain`, `meta_lb_cache_hit` (`cached` true, same `key` and
+  `sha256` as `la`), `cache_one_drive_per_chain` (`CACHE n` with n lines), `layer_dedup_shared_base` (the trivial
+  image's lower snapshot appears in the layered chain), `kill_*`, `delete_*`, `no_leftovers`; `passed` requires
+  every step ok and at least 13 steps.
 - `systemvm/packages.rs:validate_packages_lock` requires schema `2`,
   non-blank branch and arch, every requested package in the closure,
   packages sorted by name without duplicates, `file ==
