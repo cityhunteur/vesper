@@ -6,6 +6,19 @@ last_reviewed: 2026-11-05
 
 # Symphony milestones
 
+### 2026-11-08 — WOR-34 — Published ports on localhost through vesper-proxy and a guest vsock gateway, GH #28 complete
+- GitHub issue: #28 (mirror #104)
+- PR: #137
+- Commit: `3400ba4` (squash merge of PR #137; remote CI green)
+- Phase: 4
+- Parity unit: `vesper-proxy --publish-ports` (loopback listener per TCP `-p` binding, forwarded through the bridge to `vesper-port-relay` in the guest), `ports.json` status, conflict handling, teardown, republish after restart (ADR 0005)
+- Result: keep
+- Verification bundle: `.symphony/runs/WOR-34/current/` (evidence in `run/WOR-34/systemvm/`, incl. `ports-report.json`)
+- Council summary: skipped; CI green; the launcher SIGPIPE fix is a reliability repair found by the suite
+- Harness update: `src/ports.rs`; `vesper-port-relay`; `make ports-suite`; HEALTH `ip`; launcher ignores SIGPIPE; TD-037
+- Remaining risks: TCP and loopback only, no UDP, no metrics (TD-037); the host now opens loopback TCP listeners while containers with `-p` run (SECURITY.md)
+- Truthful project state after this milestone: `docker run -p` from macOS reaches the container on localhost; Phase 4 continues with GH #29 (bind mounts), #30 (DNS), #31 (workflow suite), #39 (cross-arch)
+
 ### 2026-11-08 — WOR-38 — Docker Engine API conformance through vesper-proxy, GH #27 complete
 - GitHub issue: #27 (mirror #78)
 - PR: #136

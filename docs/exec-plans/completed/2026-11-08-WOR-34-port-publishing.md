@@ -23,7 +23,7 @@ plan `make ports-suite` proves 11 checks from macOS, and ADR 0005 records the pa
   ports and clears the status, the launcher survives a proxy restart, a restarted proxy republishes a running
   container, `rm -f` closes the port. Docker conformance and smoke, shim and bundle suites still pass; 12 Rust
   unit tests for parsing, planning, HTTP framing and conflict reporting.
-- [ ] PR merged, CI green, GH #28 checklist and WOR-34 updated, milestone entry; plan moved to completed.
+- [x] (2026-11-08) PR #137 merged as `3400ba4`, CI green, GH #28 checklist ticked, mirror #104 closed, WOR-34 Done, milestone entry; plan moved to completed.
 
 ## Surprises & Discoveries
 
