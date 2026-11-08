@@ -427,9 +427,6 @@ func (s *Service) CloseIO(context.Context, *taskAPI.CloseIORequest) (*emptypb.Em
 func (s *Service) Update(context.Context, *taskAPI.UpdateTaskRequest) (*emptypb.Empty, error) {
 	return nil, notImplemented("update")
 }
-func (s *Service) Stats(context.Context, *taskAPI.StatsRequest) (*taskAPI.StatsResponse, error) {
-	return nil, notImplemented("stats")
-}
 
 var _ types.Mount
 var _ = json.Marshal

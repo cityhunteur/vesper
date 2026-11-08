@@ -1,0 +1,354 @@
+{
+ "schema_version": 1,
+ "generated_at": "2026-11-08T17:40:26Z",
+ "host": {
+  "description": "macOS 27.0.1 / Apple M3 Pro",
+  "commit": "822d907"
+ },
+ "baseline": {
+  "firecracker": {
+   "repo": "firecracker-microvm/firecracker",
+   "revision": "083c4cf69281178acc910f7f857f88e69c51d3b5"
+  },
+  "containerd": {
+   "repo": "containerd/containerd",
+   "revision": "d1d9d07f1960f7f3648298e44963a263eac87fa5"
+  },
+  "apple_containerization": {
+   "repo": "apple/containerization",
+   "revision": "636eef0eff00e451de6d5d426e6a6785b90b44e2"
+  }
+ },
+ "parity_metadata": [
+  {
+   "key": "baseline.apple_containerization.revision",
+   "value": "636eef0eff00e451de6d5d426e6a6785b90b44e2"
+  },
+  {
+   "key": "baseline.containerd.revision",
+   "value": "d1d9d07f1960f7f3648298e44963a263eac87fa5"
+  },
+  {
+   "key": "baseline.firecracker.revision",
+   "value": "083c4cf69281178acc910f7f857f88e69c51d3b5"
+  },
+  {
+   "key": "candidate.backend",
+   "value": "backend-a"
+  },
+  {
+   "key": "candidate.host_cpu",
+   "value": "apple-m3-pro"
+  },
+  {
+   "key": "candidate.host_os",
+   "value": "macos"
+  }
+ ],
+ "suites": {
+  "shim": {
+   "passed": true,
+   "steps": [
+    {
+     "name": "handshake",
+     "ok": true,
+     "detail": "protocol 1 host vesper"
+    },
+    {
+     "name": "import_image",
+     "ok": true,
+     "detail": "IMPORTED docker.io/vesper/trivial:guest"
+    },
+    {
+     "name": "e2e_run_exit_code_and_output",
+     "ok": true,
+     "detail": "ctr run --rm exited 3; output [\"hello-from-task\"]"
+    },
+    {
+     "name": "start_detached",
+     "ok": true,
+     "detail": "STARTED det pid=7343"
+    },
+    {
+     "name": "state_running",
+     "ok": true,
+     "detail": "STATE det RUNNING pid=7343"
+    },
+    {
+     "name": "task_metrics",
+     "ok": true,
+     "detail": "ctr task metrics -> METRICS det memory_bytes=74203136 cpu_usec=1349169 pids=3"
+    },
+    {
+     "name": "invalid_start_running",
+     "ok": true,
+     "detail": "rc 1: ctr: task det: already exists"
+    },
+    {
+     "name": "invalid_delete_running",
+     "ok": true,
+     "detail": "rc 1: time=\"2026-11-08T17:40:03Z\" level=error msg=\"unable to delete det\" error=\"task must be stopped before deletion: running: failed precondition\" ctr: task must be stopped before deletion: running: failed precondition"
+    },
+    {
+     "name": "kill_detached",
+     "ok": true,
+     "detail": "KILLED det"
+    },
+    {
+     "name": "delete_detached",
+     "ok": true,
+     "detail": "DELETED det"
+    },
+    {
+     "name": "invalid_unknown_task",
+     "ok": true,
+     "detail": "rc 1: ctr: container \"nope\" in namespace \"vesper\": not found"
+    },
+    {
+     "name": "start_ca",
+     "ok": true,
+     "detail": "STARTED ca pid=7610"
+    },
+    {
+     "name": "start_cb",
+     "ok": true,
+     "detail": "STARTED cb pid=7696"
+    },
+    {
+     "name": "start_cc",
+     "ok": true,
+     "detail": "STARTED cc pid=7842"
+    },
+    {
+     "name": "three_tasks_running",
+     "ok": true,
+     "detail": "ca, cb, cc RUNNING with pids {\"7842\", \"7610\", \"7696\"}"
+    },
+    {
+     "name": "kill_ca",
+     "ok": true,
+     "detail": "KILLED ca"
+    },
+    {
+     "name": "delete_ca",
+     "ok": true,
+     "detail": "DELETED ca"
+    },
+    {
+     "name": "kill_cb",
+     "ok": true,
+     "detail": "KILLED cb"
+    },
+    {
+     "name": "delete_cb",
+     "ok": true,
+     "detail": "DELETED cb"
+    },
+    {
+     "name": "kill_cc",
+     "ok": true,
+     "detail": "KILLED cc"
+    },
+    {
+     "name": "delete_cc",
+     "ok": true,
+     "detail": "DELETED cc"
+    },
+    {
+     "name": "no_leftovers",
+     "ok": true,
+     "detail": "CLEAN"
+    }
+   ]
+  },
+  "bundle": {
+   "passed": true,
+   "steps": [
+    {
+     "name": "handshake",
+     "ok": true,
+     "detail": "protocol 1 host vesper"
+    },
+    {
+     "name": "import_base_image",
+     "ok": true,
+     "detail": "IMPORTED docker.io/vesper/trivial:guest"
+    },
+    {
+     "name": "import_layered_image",
+     "ok": true,
+     "detail": "IMPORTED docker.io/vesper/layered:guest layers=2"
+    },
+    {
+     "name": "layered_rootfs_boots",
+     "ok": true,
+     "detail": "second layer's file read from the block-first root drive"
+    },
+    {
+     "name": "start_la",
+     "ok": true,
+     "detail": "STARTED la pid=8762"
+    },
+    {
+     "name": "meta_la_recorded",
+     "ok": true,
+     "detail": "strategy block-first, overlay, 2 lower layers, cached=true, build_ms=17"
+    },
+    {
+     "name": "start_lb_same_chain",
+     "ok": true,
+     "detail": "STARTED lb pid=8843"
+    },
+    {
+     "name": "meta_lb_cache_hit",
+     "ok": true,
+     "detail": "cached=true, same key and sha256 as la, build_ms=18"
+    },
+    {
+     "name": "cache_one_drive_per_chain",
+     "ok": true,
+     "detail": "2 cached drive(s): 153183014b083f885fa6717928d0a2edaccb6c27e805e757588e2482b45ab6f2 bytes=16777216 sha256=1c96f9554b5b6a70; 1ca8dac6b4200a598b9d6d2d6956817c012d549fe949180513f1a2ebe1583563 bytes=16777216 sha256=3b6d1c4ce9a83317"
+    },
+    {
+     "name": "layer_dedup_shared_base",
+     "ok": true,
+     "detail": "base layer snapshot /var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/1/fs shared by both images (content store dedup)"
+    },
+    {
+     "name": "kill_la",
+     "ok": true,
+     "detail": "KILLED la"
+    },
+    {
+     "name": "delete_la",
+     "ok": true,
+     "detail": "DELETED la"
+    },
+    {
+     "name": "kill_lb",
+     "ok": true,
+     "detail": "KILLED lb"
+    },
+    {
+     "name": "delete_lb",
+     "ok": true,
+     "detail": "DELETED lb"
+    },
+    {
+     "name": "no_leftovers",
+     "ok": true,
+     "detail": "CLEAN"
+    }
+   ]
+  },
+  "restart": {
+   "passed": true,
+   "steps": [
+    {
+     "name": "handshake",
+     "ok": true,
+     "detail": "protocol 1 host vesper"
+    },
+    {
+     "name": "import_image",
+     "ok": true,
+     "detail": "IMPORTED docker.io/vesper/trivial:guest"
+    },
+    {
+     "name": "start_rs1",
+     "ok": true,
+     "detail": "STARTED rs1 pid=9734"
+    },
+    {
+     "name": "state_file_running",
+     "ok": true,
+     "detail": "vesper-task.json: phase running, VMM pid recorded"
+    },
+    {
+     "name": "containerd_killed_and_respawned",
+     "ok": true,
+     "detail": "containerd pid 6636 SIGKILLed; containerd respawned and healthy"
+    },
+    {
+     "name": "task_survives_restart",
+     "ok": true,
+     "detail": "after restart: STATE rs1 RUNNING pid=9734 (same VMM pid)"
+    },
+    {
+     "name": "kill_after_restart",
+     "ok": true,
+     "detail": "KILLED rs1"
+    },
+    {
+     "name": "delete_after_restart",
+     "ok": true,
+     "detail": "DELETED rs1"
+    },
+    {
+     "name": "start_rs2",
+     "ok": true,
+     "detail": "STARTED rs2 pid=10147"
+    },
+    {
+     "name": "kill_shim_rs2",
+     "ok": true,
+     "detail": "KILLED-SHIM rs2 10126"
+    },
+    {
+     "name": "task_gone_after_shim_crash",
+     "ok": true,
+     "detail": "GONE rs2"
+    },
+    {
+     "name": "no_orphaned_microvm",
+     "ok": true,
+     "detail": "microVM EXITED rs2; jail CLEAN rs2"
+    },
+    {
+     "name": "container_delete_after_crash",
+     "ok": true,
+     "detail": "container record removed"
+    },
+    {
+     "name": "inflight_start_rs3",
+     "ok": true,
+     "detail": "INFLIGHT rs3"
+    },
+    {
+     "name": "containerd_killed_during_inflight",
+     "ok": true,
+     "detail": "containerd pid 9782 SIGKILLed; containerd respawned and healthy"
+    },
+    {
+     "name": "inflight_fails_gracefully",
+     "ok": true,
+     "detail": "ctr exited 1: ctr: error reading from server: EOF"
+    },
+    {
+     "name": "inflight_task_reconciled",
+     "ok": true,
+     "detail": "after restart the task was ABSENT; killed and deleted"
+    },
+    {
+     "name": "no_leftovers",
+     "ok": true,
+     "detail": "CLEAN"
+    }
+   ]
+  }
+ },
+ "checklist": {
+  "ctr run creates and starts container": true,
+  "ctr kill and ctr metrics return expected data": true,
+  "ctr kill tears the task down": true,
+  "restart resilience": true,
+  "block-first rootfs": true
+ },
+ "open_gaps": [
+  "ctr exec attaches to running container (guest agent, WOR-32)",
+  "CI boots the System VM (TD-005)"
+ ],
+ "steps_total": 55,
+ "steps_failed": 0,
+ "passed": true
+}

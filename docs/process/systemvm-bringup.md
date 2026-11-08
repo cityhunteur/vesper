@@ -379,6 +379,15 @@ inflight-start|inflight-result` drive the scenarios and `make systemvm-restart-s
 delete it; SIGKILL a shim and see the task gone, the microVM EXITED and the jail CLEAN; an in-flight
 `ctr run --rm` across a restart fails with EOF and leaves nothing) into `run/systemvm/restart-report.json`.
 
+## ctr conformance (GH #26)
+
+`make ctr-conformance` runs the shim, bundle and restart suites on a booted System VM and assembles
+`run/systemvm/ctr-conformance-report.json` (`scripts/systemvm/ctr_conformance_report.py`: baseline lock revisions,
+`baselinectl` metadata, every step per suite, the GH #26 checklist mapping and the open gaps). `CTR_FLAGS=--publish`
+copies a passing report to `docs/specs/ctr-conformance-baseline.json`, which the `ctr Conformance` workflow
+validates against the lock (`make ctr-conformance-check`) and uploads. The shim's `Stats` reads the microVM's
+cgroup v2 files so `ctr task metrics` answers. Operations are in [shim-operations.md](shim-operations.md).
+
 ## MicroVM vsock transport (GH #23, in progress)
 
 `vesper-microvm launch ID --vsock` attaches a Firecracker vsock device (guest CID 3) whose host side is the

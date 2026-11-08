@@ -19,6 +19,7 @@
 #        vesper-ctr state-file NAME               the task's vesper-task.json line or ERR
 #        vesper-ctr inflight-start NAME WORDS...  start `ctr run --rm` in the background; INFLIGHT NAME
 #        vesper-ctr inflight-result NAME [T]      wait for it; RC <code> then OUT lines
+#        vesper-ctr metrics NAME                  METRICS NAME memory_bytes=<n> cpu_usec=<n> pids=<n> from `ctr task metrics`
 set -u
 NS=vesper
 RT=io.containerd.vesper.v2
@@ -93,6 +94,17 @@ inflight_result() {
   while [ "$i" -lt "$((t * 4))" ]; do [ -f "/tmp/inflight-$name.rc" ] && break; sleep 0.25; i=$((i + 1)); done
   [ -f "/tmp/inflight-$name.rc" ] || { echo "ERR ctr run $name still running after ${t}s"; return 1; }
   emit "$(cat "/tmp/inflight-$name.rc")" "$(cat "/tmp/inflight-$name.out")"
+}
+
+metrics() {
+  name=${1:?}
+  out=$(ctr_ task metrics --format json "$name" 2>&1) || { echo "ERR task metrics: $(printf '%s' "$out" | tail -1)"; return 1; }
+  out=$(printf '%s' "$out" | tr -d ' \n\t')
+  mem=$(printf '%s' "$out" | sed -n 's/.*"usage":\([0-9]*\).*/\1/p' | head -1)
+  cpu=$(printf '%s' "$out" | sed -n 's/.*"usage_usec":\([0-9]*\).*/\1/p' | head -1)
+  pids=$(printf '%s' "$out" | sed -n 's/.*"pids":{"current":\([0-9]*\).*/\1/p' | head -1)
+  [ -n "$mem" ] && [ -n "$cpu" ] || { echo "ERR metrics lack memory/cpu: $(printf '%s' "$out" | tr -d '\n' | cut -c1-200)"; return 1; }
+  echo "METRICS $name memory_bytes=$mem cpu_usec=$cpu pids=${pids:-?}"
 }
 
 cache() {
@@ -192,6 +204,7 @@ case "$cmd" in
   start-image) start_image "$@" ;;
   meta) meta "$@" ;;
   cache) cache ;;
+  metrics) metrics "$@" ;;
   shim-pid) shimpid "$@" ;;
   kill-shim) kill_shim "$@" ;;
   wait-gone) wait_gone "$@" ;;

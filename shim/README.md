@@ -44,7 +44,11 @@ the guest overlay. Runtime name `io.containerd.vesper.v2`.
   exits 137 immediately; running → `backend.Stop`; stopped → `NotFound`. `Delete`: running →
   `FailedPrecondition`; otherwise cleanup, image removal, unmount, `/tasks/delete`, shim shutdown. `State`,
   `Wait` (blocks on the exit channel), `Pids` (the VMM pid while running), `Connect`, `Shutdown`; `Pause`,
-  `Resume`, `Checkpoint`, `Exec`, `ResizePty`, `CloseIO`, `Update`, `Stats` → `NotImplemented`. `Task` state
+  `Resume`, `Checkpoint`, `Exec`, `ResizePty`, `CloseIO`, `Update` → `NotImplemented`; `Stats` (Linux build,
+  `stats.go`) reads the VMM's cgroup v2 directory from `/proc/<pid>/cgroup` (`memory.current/max/swap.current`,
+  `memory.stat`, `cpu.stat`, `pids.current/max`) into `cgroups/v2 Metrics` (type URL
+  `io.containerd.cgroups.v2.Metrics`), `NotFound` unless the task is running; the non-Linux stub returns
+  `NotImplemented`. `Task` state
   machine: created → running → stopped → deleted (`MarkRunning`, `MarkExited` once, `MarkDeleted`;
   `Exited()` channel). `StateFileName = "vesper-task.json"`: `State{id, phase, pid, image, exit_status,
   exited_at, shim_pid, updated_at}` persisted atomically on create, start, exit, kill and delete;

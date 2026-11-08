@@ -635,6 +635,15 @@ pub fn run_shim_suite(endpoint: &ControlEndpoint) -> SuiteReport {
             }
             Ok(((), line))
         });
+        step(&mut steps, "task_metrics", || {
+            let (rc, lines) = session.ctr(&["metrics", "det"])?;
+            let line = lines.first().cloned().unwrap_or_default();
+            let mem: u64 = field(&line, "memory_bytes=").and_then(|v| v.parse().ok()).unwrap_or(0);
+            if rc != 0 || !line.starts_with("METRICS det") || mem == 0 {
+                return Err(format!("expected cgroup metrics for the running microVM: {}", lines.join(" | ")));
+            }
+            Ok(((), format!("ctr task metrics -> {line}")))
+        });
         step(&mut steps, "invalid_start_running", || {
             let (_, lines) = session.ctr(&["try", "task", "start", "det"])?;
             let (rc, out) = rc_out(&lines);
@@ -688,7 +697,7 @@ pub fn run_shim_suite(endpoint: &ControlEndpoint) -> SuiteReport {
         }
     }
     ctr_step(&mut session, &mut steps, "no_leftovers", &["leftovers"], "CLEAN");
-    let passed = steps.iter().all(|s| s.ok) && steps.len() >= 18;
+    let passed = steps.iter().all(|s| s.ok) && steps.len() >= 19;
     report(endpoint, steps, passed)
 }
 
