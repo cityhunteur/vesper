@@ -27,8 +27,7 @@ path, so `docker run -v /host/path:/x` from macOS works unchanged; `make binds-s
   edit visible on the next read, inotify events for guest writes, no inotify events for host edits (recorded as
   a documented limitation, TD-038), and an unshared `-v` path staying guest-local (path policy). Docker
   conformance, ports and shim suites still pass with shares configured.
-- [ ] PR merged, CI green, GH #29 checklist (item 3 stays open) and WOR-39 updated, milestone entry; plan moved
-  to completed.
+- [x] (2026-11-08) PR #138 merged as `f83dc1d`, CI green, GH #29 checklist items 1, 2 and 4 ticked (item 3 open under TD-038), mirror #77 closed, WOR-39 Done, milestone entry; plan moved to completed.
 
 ## Surprises & Discoveries
 

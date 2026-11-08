@@ -4,6 +4,7 @@ Finished plans. Keep them: their Decision Logs and retrospectives explain why th
 
 | Plan | Outcome | Completed |
 |---|---|---|
+| [2026-11-08-WOR-39-bind-mounts.md](2026-11-08-WOR-39-bind-mounts.md) | Bind mounts over virtio-fs at host paths; ownership, chmod/chown, read-only and inotify semantics recorded; inotify for host edits open as TD-038 (GH #29 closed) | 2026-11-08 |
 | [2026-11-08-WOR-34-port-publishing.md](2026-11-08-WOR-34-port-publishing.md) | Published ports on localhost through vesper-proxy, the bridge and a guest vsock gateway; conflicts, teardown, restart; launcher SIGPIPE fix (GH #28 closed) | 2026-11-08 |
 | [2026-11-08-WOR-38-docker-api-conformance.md](2026-11-08-WOR-38-docker-api-conformance.md) | Docker Engine API conformance from macOS through vesper-proxy: core CLI, context, pull, error passthrough, ingress boundary, 22 checks (GH #27 closed) | 2026-11-08 |
 | [2026-11-08-WOR-36-shim-restart.md](2026-11-08-WOR-36-shim-restart.md) | Shim restart resilience: durable task record, reconciliation after a dead shim, task survives a containerd restart, in-flight run fails cleanly (GH #25 closed) | 2026-11-08 |

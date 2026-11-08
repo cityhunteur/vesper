@@ -6,6 +6,19 @@ last_reviewed: 2026-11-05
 
 # Symphony milestones
 
+### 2026-11-08 — WOR-39 — Bind mounts over virtio-fs at host paths, GH #29 (3 of 4 items; inotify for host edits open)
+- GitHub issue: #29 (mirror #77)
+- PR: #138
+- Commit: `f83dc1d` (squash merge of PR #138; remote CI green)
+- Phase: 4
+- Parity unit: `VESPER_SHARES` → virtio-fs devices in the launcher → `vesper-share` mounts at the host paths; `docker run -v` from macOS binds host directories; semantics recorded by `make binds-suite`
+- Result: keep
+- Verification bundle: `.symphony/runs/WOR-39/current/` (evidence in `run/WOR-39/systemvm/`, incl. `binds-report.json`)
+- Council summary: skipped; CI green
+- Harness update: `shared_directories` in the launch config, `--share`, `VESPER_SHARES`, `vesper-share`, agent `SHARE`, `control share`, `up.sh` mounting, `make systemvm-up-shares`, `make binds-suite`, TD-038
+- Remaining risks: no inotify for host edits (TD-038); ownership fixed to the sharing user; no default share (a human decides what to share)
+- Truthful project state after this milestone: `docker run -v /host/dir:/x` works from macOS for configured shares with documented semantics; Phase 4 continues with GH #30 (DNS/network defaults), #31 (workflow suite), #39 (cross-arch)
+
 ### 2026-11-08 — WOR-34 — Published ports on localhost through vesper-proxy and a guest vsock gateway, GH #28 complete
 - GitHub issue: #28 (mirror #104)
 - PR: #137
