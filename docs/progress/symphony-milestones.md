@@ -6,6 +6,19 @@ last_reviewed: 2026-11-05
 
 # Symphony milestones
 
+### 2026-11-08 — WOR-38 — Docker Engine API conformance through vesper-proxy, GH #27 complete
+- GitHub issue: #27 (mirror #78)
+- PR: #136
+- Commit: `5914811` (squash merge of PR #136; remote CI green)
+- Phase: 4
+- Parity unit: `make docker-conformance`, 22 checks from macOS through the canonical ingress (protocol, context, images, run/exec/stop/kill/rm, pull, dockerd error passthrough, boundary)
+- Result: keep
+- Verification bundle: `.symphony/runs/WOR-38/current/` (evidence in `run/WOR-38/systemvm/`, incl. `docker-conformance-report.json`)
+- Council summary: skipped; no crate code changed; CI green
+- Harness update: `scripts/systemvm/docker-conformance.sh`; `make docker-conformance`; TD-036
+- Remaining risks: Vesper-specific unsupported behaviours (ports from macOS, bind mounts) pass through with guest-local semantics until #28/#29 (TD-036); the pull step needs outbound network
+- Truthful project state after this milestone: the Docker CLI works from macOS against the System VM's dockerd for the core workflow; Phase 4 continues with GH #28 (published ports on localhost)
+
 ### 2026-11-08 — WOR-36 — Shim restart resilience and reconciliation, GH #25 complete
 - GitHub issue: #25 (mirror #75)
 - PR: #135

@@ -4,6 +4,7 @@ Finished plans. Keep them: their Decision Logs and retrospectives explain why th
 
 | Plan | Outcome | Completed |
 |---|---|---|
+| [2026-11-08-WOR-38-docker-api-conformance.md](2026-11-08-WOR-38-docker-api-conformance.md) | Docker Engine API conformance from macOS through vesper-proxy: core CLI, context, pull, error passthrough, ingress boundary, 22 checks (GH #27 closed) | 2026-11-08 |
 | [2026-11-08-WOR-36-shim-restart.md](2026-11-08-WOR-36-shim-restart.md) | Shim restart resilience: durable task record, reconciliation after a dead shim, task survives a containerd restart, in-flight run fails cleanly (GH #25 closed) | 2026-11-08 |
 | [2026-11-08-WOR-37-block-first-rootfs.md](2026-11-08-WOR-37-block-first-rootfs.md) | OCI bundle validation with actionable errors and a block-first rootfs cache keyed by the image layer chain, digest-verified, per-task copies (GH #24 closed) | 2026-11-08 |
 | [2026-11-06-WOR-29-shim-task-rpcs.md](2026-11-06-WOR-29-shim-task-rpcs.md) | containerd shim v2 (Go) Task lifecycle RPCs: ctr run/kill/delete over jailed microVMs with exit codes, output, invalid sequences and concurrency (GH #22 closed) | 2026-11-06 |

@@ -23,7 +23,7 @@ Docker daemon.
   `--runtime` return dockerd's own clear errors intact; ingress boundary: socket mode 600, no TCP Docker
   listener on localhost, only the ingress and the owner-only bridge exist under `run/`, guest ports without a
   listener and a would-be containerd relay port are refused. 22/22 on an M3 Pro; `make docker-smoke` passes.
-- [ ] PR merged, CI green, GH #27 checklist and WOR-38 updated, milestone entry; plan moved to completed.
+- [x] (2026-11-08) PR #136 merged as `5914811`, CI green, GH #27 checklist ticked, mirror #78 closed, WOR-38 Done, milestone entry; plan moved to completed.
 
 ## Surprises & Discoveries
 
