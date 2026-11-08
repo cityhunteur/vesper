@@ -25,8 +25,7 @@ checks from macOS and the workflow suite's amd64 step is required.
   container start (limit 40×), and the native test image is left untouched. 9/9 on an M3 Pro. The workflow
   suite's `platform_amd64` step is now required and passes; conformance and DNS suites pass (the DNS
   determinism step now compares resolver and subnet, since service address order is not fixed).
-- [ ] PR merged, CI green, GH #39 and GH #31 item 6 ticked, WOR-55 updated, milestone entry; plan moved to
-  completed.
+- [x] (2026-11-08) PR #141 merged as `20c9c28`, CI green, GH #39 checklist and GH #31 item 6 ticked, mirror #95 closed, WOR-55 Done, milestone entry; plan moved to completed.
 
 ## Surprises & Discoveries
 

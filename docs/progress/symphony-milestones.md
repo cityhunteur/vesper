@@ -6,6 +6,19 @@ last_reviewed: 2026-11-05
 
 # Symphony milestones
 
+### 2026-11-08 — WOR-55 — linux/amd64 containers through binfmt_misc and qemu-user, GH #39 complete (and GH #31 item 6)
+- GitHub issue: #39 (mirror #95); also GH #31 item 6
+- PR: #141
+- Commit: `20c9c28` (squash merge of PR #141; remote CI green)
+- Phase: 4
+- Parity unit: pinned `qemu-x86_64` registered by `vesper-binfmt` (OCF), `vesper-arch` execution-mode metadata, `make crossarch-suite` 9/9, workflow suite amd64 step required
+- Result: keep
+- Verification bundle: `.symphony/runs/WOR-55/current/` (evidence in `run/WOR-55/systemvm/`, incl. `crossarch-report.json`)
+- Council summary: skipped; CI green
+- Harness update: packages lock 22 entries; `vesper-binfmt`; `vesper-arch`; agent `ARCH`; `control arch`; `make crossarch-suite`; DNS determinism step compares resolver and subnet; TD-040
+- Remaining risks: x86-64 only, shell-loop benchmark only (TD-040); `docker run --platform` re-tags the pulled reference (documented)
+- Truthful project state after this milestone: every Phase 4 sub-issue is landed (#27, #28, #30, #31, #39 complete; #29 complete except inotify for host edits, TD-038); the Phase 4 epic goes to review; Phase 3 keeps two gated items (WOR-32 agent, WOR-35 CI conformance) and Phase 5 is untouched
+
 ### 2026-11-08 — WOR-41 — Developer workflow suite, GH #31 (5 of 6 items; amd64 open for #39)
 - GitHub issue: #31 (mirror #81)
 - PR: #140

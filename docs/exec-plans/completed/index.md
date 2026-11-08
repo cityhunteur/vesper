@@ -4,6 +4,7 @@ Finished plans. Keep them: their Decision Logs and retrospectives explain why th
 
 | Plan | Outcome | Completed |
 |---|---|---|
+| [2026-11-08-WOR-55-cross-arch.md](2026-11-08-WOR-55-cross-arch.md) | linux/amd64 containers via binfmt_misc + pinned qemu-x86_64, execution-mode metadata, unsupported-arch diagnosis, 9 checks; workflow suite's amd64 step required (GH #39 closed) | 2026-11-08 |
 | [2026-11-08-WOR-41-workflow-suite.md](2026-11-08-WOR-41-workflow-suite.md) | Developer workflow suite: compose, build, logs -f, interactive exec, signals, baseline-stamped report; amd64 recorded as the gap (GH #31 closed) | 2026-11-08 |
 | [2026-11-08-WOR-40-dns-network.md](2026-11-08-WOR-40-dns-network.md) | DNS and network defaults: default-bridge resolver, embedded DNS, service discovery, aliases, external forwarding, determinism, 12 checks from macOS (GH #30 closed) | 2026-11-08 |
 | [2026-11-08-WOR-39-bind-mounts.md](2026-11-08-WOR-39-bind-mounts.md) | Bind mounts over virtio-fs at host paths; ownership, chmod/chown, read-only and inotify semantics recorded; inotify for host edits open as TD-038 (GH #29 closed) | 2026-11-08 |
