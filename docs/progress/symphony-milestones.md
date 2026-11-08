@@ -6,6 +6,19 @@ last_reviewed: 2026-11-05
 
 # Symphony milestones
 
+### 2026-11-08 — WOR-36 — Shim restart resilience and reconciliation, GH #25 complete
+- GitHub issue: #25 (mirror #75)
+- PR: #135
+- Commit: `ccf239d` (squash merge of PR #135; remote CI green, seven workflows)
+- Phase: 3
+- Parity unit: durable `vesper-task.json` per transition; containerd's `delete` after a dead shim reconciles exit status and removes the microVM; tasks survive a containerd restart
+- Result: keep
+- Verification bundle: `.symphony/runs/WOR-36/current/` (evidence in `run/WOR-36/systemvm/`, incl. `restart-report.json`)
+- Council summary: skipped; no control-plane path changed; CI green
+- Harness update: `vesper-ctr shim-pid|kill-shim|wait-gone|state-file|inflight-start|inflight-result`; `run_restart_suite` (`src/control/suites/restart.rs`); `make systemvm-restart-suite`
+- Remaining risks: containerd's own recovery of an in-flight Create is containerd behaviour (the suite proves only a clean failure); exec/TTY/stdin still open (WOR-32)
+- Truthful project state after this milestone: Phase 3 has 4 of 5 sub-issues done (#22, #24, #25 complete; #23 transport only; #26 gated on exec and on CI boot); Phase 4 can start with GH #27
+
 ### 2026-11-08 — WOR-37 — OCI bundle validation and block-first rootfs cache, GH #24 complete
 - GitHub issue: #24 (mirror #76)
 - PR: #134

@@ -24,7 +24,7 @@ through `ctr` inside the System VM.
   leads containerd to run `delete`, the task disappears, the microVM is EXITED and the jail CLEAN; an in-flight
   `ctr run --rm` across a containerd restart exits 1 with `error reading from server: EOF` and leaves nothing;
   `vesper-task.json` shows `phase running` with the VMM pid. Shim, bundle, workload and microvm suites pass.
-- [ ] PR merged, CI green, GH #25 checklist and WOR-36 updated, milestone entry; plan moved to completed.
+- [x] (2026-11-08) PR #135 merged as `ccf239d`, CI green (seven workflows), GH #25 checklist ticked, mirror #75 closed, WOR-36 Done, milestone entry; plan moved to completed.
 
 ## Surprises & Discoveries
 
