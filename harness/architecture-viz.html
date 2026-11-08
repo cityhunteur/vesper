@@ -1,0 +1,2471 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>VESPER // ARCHITECTURE &amp; DATA FLOWS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #F4F0E6;
+    --paper-alt: #EAE4D3;
+    --paper-card: #FAF7F0;
+    --ink: #111111;
+    --ink-muted: #4A4843;
+    --red: #D92B2B;
+    --red-soft: #F9DADA;
+    --blue: #1648CE;
+    --blue-soft: #DCE6FA;
+    --yellow: #F2B705;
+    --yellow-soft: #FDF3C7;
+    --green: #0E7C47;
+    --green-soft: #D7F2E3;
+    --font-mono: 'IBM Plex Mono', 'Space Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    --border-heavy: 3px solid var(--ink);
+    --border-mid: 2px solid var(--ink);
+    --border-thin: 1px solid var(--ink);
+    --shadow-hard: 5px 5px 0px var(--ink);
+    --shadow-sm: 3px 3px 0px var(--ink);
+  }
+
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    font-family: var(--font-mono) !important;
+  }
+
+  body {
+    background-color: var(--paper);
+    background-image:
+      linear-gradient(to right, rgba(17, 17, 17, 0.08) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(17, 17, 17, 0.08) 1px, transparent 1px);
+    background-size: 32px 32px;
+    color: var(--ink);
+    font-family: var(--font-mono);
+    line-height: 1.5;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Bauhaus Top Constructivist Header */
+  .spec-header {
+    border-bottom: var(--border-heavy);
+    background: var(--paper);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+
+  .bauhaus-color-bar {
+    display: grid;
+    grid-template-columns: 2fr 1fr 3fr 1.5fr;
+    height: 10px;
+    border-bottom: var(--border-mid);
+  }
+
+  .bar-red { background: var(--red); border-right: var(--border-mid); }
+  .bar-yellow { background: var(--yellow); border-right: var(--border-mid); }
+  .bar-blue { background: var(--blue); border-right: var(--border-mid); }
+  .bar-ink { background: var(--ink); }
+
+  .spec-header-inner {
+    max-width: 1680px;
+    margin: 0 auto;
+    padding: 16px 24px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+  }
+
+  .brand-block {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  /* Bauhaus Geometric Emblem: Square + Circle + Triangle */
+  .bauhaus-emblem {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border: var(--border-mid);
+    background: var(--paper-card);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .shape-square {
+    width: 18px;
+    height: 18px;
+    background: var(--red);
+    border: 1.5px solid var(--ink);
+  }
+
+  .shape-circle {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--blue);
+    border: 1.5px solid var(--ink);
+  }
+
+  .shape-triangle {
+    width: 0;
+    height: 0;
+    border-left: 10px solid transparent;
+    border-right: 10px solid transparent;
+    border-bottom: 18px solid var(--yellow);
+    filter: drop-shadow(0 0 0 var(--ink));
+  }
+
+  .brand-title h1 {
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    text-transform: uppercase;
+    color: var(--ink);
+  }
+
+  .brand-title p {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--ink-muted);
+    letter-spacing: 0.02em;
+  }
+
+  .spec-stamps {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+  }
+
+  .stamp {
+    font-size: 11px;
+    font-weight: 700;
+    padding: 5px 10px;
+    border: var(--border-mid);
+    background: var(--paper-card);
+    color: var(--ink);
+    box-shadow: 2px 2px 0px var(--ink);
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    text-transform: uppercase;
+  }
+
+  .stamp .dot {
+    width: 9px;
+    height: 9px;
+    border: 1.5px solid var(--ink);
+    display: inline-block;
+  }
+
+  .dot-emerald { background: var(--red); }
+  .dot-amber { background: var(--yellow); border-radius: 50%; }
+  .dot-cyan { background: var(--blue); }
+
+  /* Primary Navigation Tabs */
+  .nav-bar {
+    max-width: 1680px;
+    margin: 0 auto;
+    padding: 0 24px;
+    display: flex;
+    gap: 0;
+    border-top: var(--border-mid);
+    overflow-x: auto;
+    background: var(--paper-alt);
+  }
+
+  .nav-tab {
+    background: var(--paper-alt);
+    border: none;
+    border-right: var(--border-mid);
+    color: var(--ink);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    padding: 12px 20px;
+    cursor: pointer;
+    transition: transform 0.1s ease, background 0.1s ease;
+    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .nav-tab:first-child {
+    border-left: var(--border-mid);
+  }
+
+  .nav-tab:hover {
+    background: var(--yellow-soft);
+  }
+
+  .nav-tab.active {
+    background: var(--ink);
+    color: var(--paper);
+  }
+
+  .nav-tab .tab-num {
+    font-size: 11px;
+    padding: 1px 5px;
+    background: var(--yellow);
+    color: var(--ink);
+    border: 1px solid var(--ink);
+    font-weight: 700;
+  }
+
+  /* Main Container */
+  .workspace {
+    max-width: 1680px;
+    margin: 0 auto;
+    padding: 24px 24px 56px;
+  }
+
+  .view-section {
+    display: none;
+  }
+
+  .view-section.active {
+    display: block;
+  }
+
+  /* STE100 Bauhaus Banner */
+  .ste-banner {
+    background: var(--yellow);
+    border: var(--border-heavy);
+    box-shadow: var(--shadow-hard);
+    padding: 14px 18px;
+    margin-bottom: 24px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+  }
+
+  .ste-banner-text {
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--ink);
+  }
+
+  .ste-banner-text strong {
+    background: var(--ink);
+    color: var(--paper);
+    padding: 2px 7px;
+    margin-right: 8px;
+    font-weight: 700;
+  }
+
+  .ste-rules-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .ste-pill {
+    font-size: 10.5px;
+    font-weight: 700;
+    padding: 3px 8px;
+    background: var(--paper-card);
+    border: var(--border-thin);
+    color: var(--ink);
+    box-shadow: 2px 2px 0px var(--ink);
+  }
+
+  /* Layout Grid for System Context */
+  .arch-grid {
+    display: grid;
+    grid-template-columns: 1fr 440px;
+    gap: 24px;
+    align-items: start;
+  }
+
+  @media (max-width: 1240px) {
+    .arch-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  .panel {
+    background: var(--paper-card);
+    border: var(--border-heavy);
+    box-shadow: var(--shadow-hard);
+    position: relative;
+  }
+
+  .panel-header {
+    padding: 12px 16px;
+    border-bottom: var(--border-heavy);
+    background: var(--ink);
+    color: var(--paper);
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  .panel-title {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--paper);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .panel-title::before {
+    content: '';
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    background: var(--red);
+    border: 1.5px solid var(--paper);
+  }
+
+  /* Flow Filter Buttons */
+  .flow-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 12px 16px;
+    border-bottom: var(--border-mid);
+    background: var(--paper-alt);
+  }
+
+  .filter-btn {
+    font-size: 11px;
+    font-weight: 700;
+    padding: 6px 12px;
+    background: var(--paper-card);
+    border: var(--border-mid);
+    color: var(--ink);
+    cursor: pointer;
+    box-shadow: 2px 2px 0px var(--ink);
+    transition: all 0.1s ease;
+    text-transform: uppercase;
+  }
+
+  .filter-btn:hover {
+    background: var(--yellow-soft);
+    transform: translate(-1px, -1px);
+    box-shadow: 3px 3px 0px var(--ink);
+  }
+
+  .filter-btn.active {
+    background: var(--red);
+    color: var(--paper-card);
+    transform: translate(1px, 1px);
+    box-shadow: 1px 1px 0px var(--ink);
+  }
+
+  /* SVG Canvas */
+  .canvas-wrap {
+    width: 100%;
+    overflow-x: auto;
+    padding: 14px;
+    position: relative;
+    background:
+      radial-gradient(var(--ink) 1px, transparent 1px);
+    background-size: 20px 20px;
+    background-color: var(--paper-card);
+  }
+
+  svg.arch-svg {
+    width: 100%;
+    min-width: 960px;
+    height: auto;
+    display: block;
+    user-select: none;
+  }
+
+  .svg-zone {
+    fill: rgba(234, 228, 211, 0.72);
+    stroke: var(--ink);
+    stroke-width: 2;
+    stroke-dasharray: 6 4;
+  }
+
+  .svg-zone-label {
+    font-size: 10.5px;
+    font-weight: 700;
+    fill: var(--ink);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .arch-node {
+    cursor: pointer;
+    transition: opacity 0.18s ease;
+  }
+
+  .arch-node rect.node-shadow {
+    fill: var(--ink);
+    transition: transform 0.12s ease;
+  }
+
+  .arch-node rect.node-box {
+    fill: var(--paper-card);
+    stroke: var(--ink);
+    stroke-width: 2.2;
+    transition: all 0.12s ease;
+  }
+
+  .arch-node:hover rect.node-box {
+    fill: var(--yellow-soft);
+  }
+
+  .arch-node.selected rect.node-box {
+    fill: var(--yellow);
+    stroke: var(--ink);
+    stroke-width: 3;
+  }
+
+  .arch-node.dimmed {
+    opacity: 0.2;
+  }
+
+  .node-title {
+    font-size: 11.5px;
+    font-weight: 700;
+    fill: var(--ink);
+  }
+
+  .node-sub {
+    font-size: 9.5px;
+    font-weight: 500;
+    fill: var(--ink-muted);
+  }
+
+  .node-badge {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    fill: var(--paper-card);
+  }
+
+  /* Edges */
+  .arch-edge {
+    fill: none;
+    stroke-width: 2.4;
+    transition: opacity 0.18s ease;
+  }
+
+  .arch-edge.verified {
+    stroke: var(--ink);
+  }
+
+  .arch-edge.governance {
+    stroke: var(--blue);
+  }
+
+  .arch-edge.systemvm {
+    stroke: var(--red);
+  }
+
+  .arch-edge.intended {
+    stroke: var(--blue);
+    stroke-dasharray: 7 5;
+  }
+
+  .arch-edge.active-flow {
+    stroke-width: 2.8;
+    stroke-dasharray: 9 5;
+    animation: flowDash 0.85s linear infinite;
+  }
+
+  .arch-edge.dimmed {
+    opacity: 0.12;
+  }
+
+  .edge-label {
+    font-size: 9.5px;
+    font-weight: 700;
+    fill: var(--ink);
+    pointer-events: none;
+    transition: opacity 0.18s ease;
+  }
+
+  .edge-label.dimmed {
+    opacity: 0.12;
+  }
+
+  @keyframes flowDash {
+    to {
+      stroke-dashoffset: -28;
+    }
+  }
+
+  /* Legend Footer */
+  .canvas-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+    padding: 12px 16px;
+    border-top: var(--border-heavy);
+    background: var(--paper-alt);
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--ink);
+  }
+
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .legend-line {
+    width: 26px;
+    height: 4px;
+  }
+
+  /* Dossier Inspector Panel */
+  .dossier-body {
+    padding: 18px;
+  }
+
+  .dossier-header {
+    border-bottom: var(--border-heavy);
+    padding-bottom: 14px;
+    margin-bottom: 14px;
+  }
+
+  .dossier-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 10px;
+  }
+
+  .tag {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 3px 8px;
+    text-transform: uppercase;
+    border: var(--border-mid);
+    box-shadow: 2px 2px 0px var(--ink);
+  }
+
+  .tag-verified { color: var(--paper-card); background: var(--ink); }
+  .tag-intended { color: var(--paper-card); background: var(--blue); }
+  .tag-amber { color: var(--ink); background: var(--yellow); }
+  .tag-violet { color: var(--paper-card); background: var(--red); }
+
+  .dossier-name {
+    font-size: 19px;
+    font-weight: 700;
+    color: var(--ink);
+    text-transform: uppercase;
+  }
+
+  .dossier-path {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--red);
+    margin-top: 4px;
+  }
+
+  .ste-box {
+    background: var(--paper);
+    border: var(--border-mid);
+    border-left: 8px solid var(--red);
+    box-shadow: var(--shadow-sm);
+    padding: 14px;
+    margin-bottom: 16px;
+  }
+
+  .ste-box-title {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--ink);
+    border-bottom: var(--border-thin);
+    padding-bottom: 6px;
+    margin-bottom: 10px;
+    display: flex;
+    justify-content: space-between;
+  }
+
+  .ste-sentences {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .ste-sentences li {
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--ink);
+    padding-left: 18px;
+    position: relative;
+  }
+
+  .ste-sentences li::before {
+    content: '■';
+    position: absolute;
+    left: 0;
+    font-size: 9px;
+    top: 3px;
+    color: var(--red);
+  }
+
+  .meta-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+
+  .meta-item {
+    background: var(--paper-alt);
+    border: var(--border-mid);
+    padding: 10px 12px;
+    box-shadow: 2px 2px 0px var(--ink);
+  }
+
+  .meta-label {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: var(--blue);
+    margin-bottom: 4px;
+  }
+
+  .meta-val {
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--ink);
+    word-break: break-word;
+  }
+
+  /* View 2: API Request & State Machine Simulator */
+  .sim-grid {
+    display: grid;
+    grid-template-columns: 400px 1fr;
+    gap: 24px;
+  }
+
+  @media (max-width: 1100px) {
+    .sim-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  .state-cards {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    margin-bottom: 18px;
+  }
+
+  .state-card {
+    background: var(--paper);
+    border: var(--border-mid);
+    box-shadow: var(--shadow-sm);
+    padding: 10px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.12s ease;
+  }
+
+  .state-card.active {
+    background: var(--yellow);
+    border: var(--border-heavy);
+    transform: translate(1px, 1px);
+    box-shadow: 2px 2px 0px var(--ink);
+  }
+
+  .state-card-name {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--ink);
+  }
+
+  .state-card-desc {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--ink-muted);
+    margin-top: 2px;
+  }
+
+  .route-btn-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .route-btn {
+    background: var(--paper);
+    border: var(--border-mid);
+    box-shadow: 2px 2px 0px var(--ink);
+    padding: 10px 12px;
+    text-align: left;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    color: var(--ink);
+    font-size: 11.5px;
+    font-weight: 700;
+    transition: all 0.1s ease;
+  }
+
+  .route-btn:hover {
+    background: var(--yellow-soft);
+  }
+
+  .route-btn.active {
+    background: var(--blue);
+    color: var(--paper-card);
+  }
+
+  .method-pill {
+    font-size: 10px;
+    padding: 2px 6px;
+    font-weight: 700;
+    margin-right: 8px;
+    border: 1.5px solid var(--ink);
+  }
+
+  .m-put { background: var(--yellow); color: var(--ink); }
+  .m-patch { background: var(--blue-soft); color: var(--ink); }
+  .m-get { background: var(--red); color: var(--paper-card); }
+
+  .pipeline-steps {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+
+  @media (max-width: 900px) {
+    .pipeline-steps {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  .pipe-step {
+    background: var(--paper);
+    border: var(--border-mid);
+    box-shadow: var(--shadow-sm);
+    padding: 12px;
+    position: relative;
+  }
+
+  .pipe-step.pass {
+    border-top: 8px solid var(--green);
+    background: var(--green-soft);
+  }
+
+  .pipe-step.bypass {
+    border-top: 8px solid var(--blue);
+    background: var(--blue-soft);
+  }
+
+  .pipe-step.fail {
+    border-top: 8px solid var(--red);
+    background: var(--red-soft);
+  }
+
+  .pipe-step-num {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--ink-muted);
+    margin-bottom: 4px;
+  }
+
+  .pipe-step-title {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--ink);
+    margin-bottom: 4px;
+  }
+
+  .pipe-step-detail {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--ink);
+  }
+
+  .code-console {
+    background: var(--ink);
+    border: var(--border-heavy);
+    box-shadow: var(--shadow-sm);
+    padding: 14px 16px;
+    font-size: 12px;
+    color: var(--yellow);
+    overflow-x: auto;
+    white-space: pre;
+    line-height: 1.55;
+  }
+
+  /* View 3: Layer Matrix */
+  .layer-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .layer-row {
+    display: grid;
+    grid-template-columns: 240px 1fr 320px;
+    gap: 14px;
+    background: var(--paper);
+    border: var(--border-mid);
+    box-shadow: var(--shadow-sm);
+    padding: 14px 16px;
+    align-items: center;
+  }
+
+  @media (max-width: 1024px) {
+    .layer-row {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  .layer-id {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--ink);
+    text-transform: uppercase;
+    background: var(--yellow);
+    display: inline-block;
+    padding: 2px 8px;
+    border: var(--border-thin);
+  }
+
+  .layer-purpose {
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--ink-muted);
+    margin-top: 4px;
+  }
+
+  .module-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .mod-chip {
+    font-size: 11.5px;
+    font-weight: 700;
+    padding: 6px 12px;
+    background: var(--paper-card);
+    border: var(--border-mid);
+    box-shadow: 2px 2px 0px var(--ink);
+    color: var(--ink);
+    cursor: pointer;
+    transition: all 0.1s ease;
+  }
+
+  .mod-chip:hover, .mod-chip.selected {
+    background: var(--yellow);
+    color: var(--ink);
+  }
+
+  .mod-chip.allowed-ref {
+    background: var(--blue);
+    color: var(--paper-card);
+  }
+
+  .mod-chip.forbidden-ref {
+    background: var(--red-soft);
+    color: var(--red);
+    text-decoration: line-through;
+  }
+
+  .layer-rule-note {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--ink);
+    border-left: 4px solid var(--red);
+    padding-left: 10px;
+  }
+
+  /* View 4: ASD-STE100 Full Reference Table */
+  .search-bar {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+  }
+
+  .search-input {
+    flex: 1;
+    min-width: 260px;
+    background: var(--paper-card);
+    border: var(--border-heavy);
+    box-shadow: var(--shadow-sm);
+    color: var(--ink);
+    font-size: 13px;
+    font-weight: 600;
+    padding: 10px 14px;
+  }
+
+  .search-input:focus {
+    outline: none;
+    background: var(--yellow-soft);
+  }
+
+  .ste-table-wrap {
+    overflow-x: auto;
+    border: var(--border-heavy);
+    box-shadow: var(--shadow-hard);
+  }
+
+  table.ste-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--paper-card);
+    text-align: left;
+  }
+
+  table.ste-table th {
+    background: var(--ink);
+    border-bottom: var(--border-heavy);
+    border-right: var(--border-thin);
+    padding: 12px 14px;
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--yellow);
+  }
+
+  table.ste-table td {
+    border-bottom: var(--border-mid);
+    border-right: var(--border-thin);
+    padding: 12px 14px;
+    vertical-align: top;
+    font-size: 12.5px;
+  }
+
+  table.ste-table tr:nth-child(even) td {
+    background: var(--paper);
+  }
+
+  table.ste-table tr:hover td {
+    background: var(--yellow-soft);
+  }
+</style>
+</head>
+<body>
+
+<header class="spec-header">
+  <div class="bauhaus-color-bar">
+    <div class="bar-red"></div>
+    <div class="bar-yellow"></div>
+    <div class="bar-blue"></div>
+    <div class="bar-ink"></div>
+  </div>
+  <div class="spec-header-inner">
+    <div class="brand-block">
+      <div class="bauhaus-emblem" aria-hidden="true">
+        <span class="shape-square"></span>
+        <span class="shape-circle"></span>
+        <span class="shape-triangle"></span>
+      </div>
+      <div class="brand-title">
+        <h1>VESPER // ARCHITECTURE &amp; DATA FLOWS</h1>
+        <p>FIRECRACKER-COMPATIBLE CONTROL PLANE ON MACOS</p>
+      </div>
+    </div>
+    <div class="spec-stamps">
+      <span class="stamp"><span class="dot dot-emerald"></span>VERIFIED: 2026-11-06</span>
+      <span class="stamp"><span class="dot dot-amber"></span>RUST 2024 + SWIFT</span>
+      <span class="stamp"><span class="dot dot-cyan"></span>BASELINE: PINNED</span>
+    </div>
+  </div>
+  <nav class="nav-bar" role="tablist">
+    <button class="nav-tab active" data-tab="view-context">
+      <span class="tab-num">01</span> SYSTEM CONTEXT &amp; DATA FLOWS
+    </button>
+    <button class="nav-tab" data-tab="view-sim">
+      <span class="tab-num">02</span> API DISPATCH &amp; STATE SIMULATOR
+    </button>
+    <button class="nav-tab" data-tab="view-layers">
+      <span class="tab-num">03</span> LAYER BOUNDARIES (L0–L5)
+    </button>
+    <button class="nav-tab" data-tab="view-ste100">
+      <span class="tab-num">04</span> COMPONENT INDEX
+    </button>
+  </nav>
+</header>
+
+<main class="workspace">
+  <!-- VIEW 01: SYSTEM CONTEXT & DATA FLOWS -->
+  <section id="view-context" class="view-section active">
+    <div class="arch-grid">
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-title">INTERACTIVE TOPOLOGY &amp; DATA-FLOW SCHEMATIC</div>
+          <div style="font-size: 11px; color: var(--yellow); font-weight: 700;">
+            [CLICK ANY BLOCK TO INSPECT COMPONENT]
+          </div>
+        </div>
+        <div class="flow-filters">
+          <button class="filter-btn active" data-flow="all">[00] ALL FLOWS</button>
+          <button class="filter-btn" data-flow="control">[01] CONTROL PLANE</button>
+          <button class="filter-btn" data-flow="proxy">[02] SOCKET PROXY</button>
+          <button class="filter-btn" data-flow="governance">[03] PARITY GOVERNANCE</button>
+          <button class="filter-btn" data-flow="systemvm">[04] SYSTEM VM BRINGUP</button>
+          <button class="filter-btn" data-flow="intended">[05] INTENDED BACKEND A</button>
+        </div>
+
+        <div class="canvas-wrap">
+          <svg class="arch-svg" viewBox="0 0 1060 660" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <marker id="arrow-emerald" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 1 L 10 5 L 0 9 z" fill="#111111" />
+              </marker>
+              <marker id="arrow-amber" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 1 L 10 5 L 0 9 z" fill="#D92B2B" />
+              </marker>
+              <marker id="arrow-violet" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 1 L 10 5 L 0 9 z" fill="#1648CE" />
+              </marker>
+              <marker id="arrow-cyan" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 1 L 10 5 L 0 9 z" fill="#1648CE" />
+              </marker>
+            </defs>
+
+            <!-- Zone Boxes -->
+            <rect class="svg-zone" x="15" y="20" width="215" height="620" rx="0" />
+            <rect x="15" y="20" width="215" height="24" fill="#111111" />
+            <text class="svg-zone-label" x="24" y="36" fill="#F4F0E6">ZONE A // CLIENTS &amp; CLI</text>
+
+            <rect class="svg-zone" x="255" y="20" width="470" height="405" rx="0" />
+            <rect x="255" y="20" width="470" height="24" fill="#D92B2B" />
+            <text class="svg-zone-label" x="266" y="36" fill="#FAF7F0">ZONE B // MACOS HOST DAEMONS &amp; POLICY</text>
+
+            <rect class="svg-zone" x="255" y="440" width="470" height="200" rx="0" />
+            <rect x="255" y="440" width="470" height="24" fill="#F2B705" stroke="#111111" stroke-width="1.5" />
+            <text class="svg-zone-label" x="266" y="456" fill="#111111">ZONE C // SYSTEM VM TOOLING &amp; SWIFT HELPER</text>
+
+            <rect class="svg-zone" x="750" y="20" width="295" height="620" rx="0" />
+            <rect x="750" y="20" width="295" height="24" fill="#1648CE" />
+            <text class="svg-zone-label" x="762" y="36" fill="#FAF7F0">ZONE D // SPECS, MATRICES &amp; VM</text>
+
+            <!-- EDGES -->
+            <!-- Client -> vesperd -->
+            <path class="arch-edge verified active-flow" data-flows="control" data-from="client" data-to="vesperd"
+              d="M 210 105 L 285 105" marker-end="url(#arrow-emerald)" />
+            <text class="edge-label" data-flows="control" x="218" y="97">Unix HTTP</text>
+
+            <!-- Docker/Unix client -> vesper-proxy -->
+            <path class="arch-edge verified active-flow" data-flows="proxy" data-from="docker_client" data-to="vesper_proxy"
+              d="M 210 245 L 285 245" marker-end="url(#arrow-emerald)" />
+            <text class="edge-label" data-flows="proxy" x="215" y="237">docker.sock</text>
+
+            <!-- vesper-proxy -> vesperd (make dev-up) -->
+            <path class="arch-edge verified active-flow" data-flows="proxy,control" data-from="vesper_proxy" data-to="vesperd"
+              d="M 385 215 L 385 148" marker-end="url(#arrow-emerald)" />
+            <text class="edge-label" data-flows="proxy,control" x="393" y="185">dev-up upstream</text>
+
+            <!-- vesper-proxy -> upstream socket -->
+            <path class="arch-edge verified active-flow" data-flows="proxy" data-from="vesper_proxy" data-to="upstream_sock"
+              d="M 485 245 L 555 245" marker-end="url(#arrow-emerald)" />
+            <text class="edge-label" data-flows="proxy" x="490" y="237">unix/tcp/vsock</text>
+
+            <!-- vesperd reads spec, lock, matrix, entitlements -->
+            <path class="arch-edge verified active-flow" data-flows="control,governance" data-from="vesperd" data-to="swagger_spec"
+              d="M 485 88 L 770 88" marker-end="url(#arrow-emerald)" />
+            <text class="edge-label" data-flows="control,governance" x="555" y="80">loads routes &amp; version</text>
+
+            <path class="arch-edge verified active-flow" data-flows="control,governance" data-from="vesperd" data-to="baseline_lock"
+              d="M 485 108 L 770 165" marker-end="url(#arrow-emerald)" />
+            <text class="edge-label" data-flows="control,governance" x="595" y="128">reads revision</text>
+
+            <path class="arch-edge verified active-flow" data-flows="control,governance" data-from="vesperd" data-to="matrices"
+              d="M 485 125 L 770 250" marker-end="url(#arrow-emerald)" />
+            <text class="edge-label" data-flows="control,governance" x="575" y="195">loads RouteSemantics</text>
+
+            <path class="arch-edge verified active-flow" data-flows="control" data-from="vesperd" data-to="entitlements"
+              d="M 340 148 L 340 330" marker-end="url(#arrow-emerald)" />
+            <text class="edge-label" data-flows="control" x="268" y="310">--entitlements-file</text>
+
+            <!-- Governance CLI edges -->
+            <path class="arch-edge governance active-flow" data-flows="governance" data-from="baselinectl" data-to="matrices"
+              d="M 210 365 L 770 265" marker-end="url(#arrow-violet)" />
+            <text class="edge-label" data-flows="governance" x="515" y="302">generates/validates matrices</text>
+
+            <path class="arch-edge governance active-flow" data-flows="governance" data-from="contractgen" data-to="golden_routes"
+              d="M 210 445 L 770 340" marker-end="url(#arrow-violet)" />
+            <text class="edge-label" data-flows="governance" x="530" y="382">writes/checks golden routes</text>
+
+            <path class="arch-edge governance active-flow" data-flows="governance" data-from="compatexctl" data-to="compat_reg"
+              d="M 210 525 L 770 415" marker-end="url(#arrow-violet)" />
+            <text class="edge-label" data-flows="governance" x="550" y="455">validates expiry &amp; owner</text>
+
+            <!-- System VM Bringup edges -->
+            <path class="arch-edge systemvm active-flow" data-flows="systemvm" data-from="systemvmctl" data-to="image_lock"
+              d="M 465 510 L 770 495" marker-end="url(#arrow-amber)" />
+            <text class="edge-label" data-flows="systemvm" x="555" y="495">verifies SHA-256 &amp; image_id</text>
+
+            <path class="arch-edge systemvm active-flow" data-flows="systemvm" data-from="systemvmctl" data-to="vmlauncher"
+              d="M 465 555 L 535 555" marker-end="url(#arrow-amber)" />
+            <text class="edge-label" data-flows="systemvm" x="468" y="546">boot-smoke</text>
+
+            <path class="arch-edge systemvm active-flow" data-flows="systemvm" data-from="vmlauncher" data-to="sysvm"
+              d="M 705 555 L 770 575" marker-end="url(#arrow-amber)" />
+            <text class="edge-label" data-flows="systemvm" x="710" y="550">VZ.framework</text>
+
+            <!-- Intended Backend A edges -->
+            <path class="arch-edge intended active-flow" data-flows="intended" data-from="upstream_sock" data-to="sysvm"
+              d="M 630 280 L 840 540" marker-end="url(#arrow-cyan)" />
+            <text class="edge-label" data-flows="intended" x="670" y="415">Intended: Backend A</text>
+
+            <path class="arch-edge intended active-flow" data-flows="intended" data-from="vesperd" data-to="sysvm"
+              d="M 485 138 L 885 540" marker-end="url(#arrow-cyan)" />
+
+            <!-- NODES (BAUHAUS HARD-SHADOW BLOCKS) -->
+            <!-- 1. Firecracker API Client -->
+            <g class="arch-node" data-id="client" data-flows="control" transform="translate(30, 70)">
+              <rect class="node-shadow" x="4" y="4" width="180" height="68" />
+              <rect class="node-box" width="180" height="68" />
+              <rect width="180" height="19" fill="#111111" />
+              <text class="node-badge" x="8" y="13">■ EXTERNAL CLIENT</text>
+              <text class="node-title" x="10" y="38">Firecracker Client</text>
+              <text class="node-sub" x="10" y="54">HTTP over Unix socket</text>
+            </g>
+
+            <!-- 2. Unix Socket Client -->
+            <g class="arch-node" data-id="docker_client" data-flows="proxy" transform="translate(30, 210)">
+              <rect class="node-shadow" x="4" y="4" width="180" height="68" />
+              <rect class="node-box" width="180" height="68" />
+              <rect width="180" height="19" fill="#1648CE" />
+              <text class="node-badge" x="8" y="13">● SOCKET CLIENT</text>
+              <text class="node-title" x="10" y="38">Unix Socket Client</text>
+              <text class="node-sub" x="10" y="54">Dials vesper-proxy</text>
+            </g>
+
+            <!-- 3. baselinectl -->
+            <g class="arch-node" data-id="baselinectl" data-flows="governance" transform="translate(30, 330)">
+              <rect class="node-shadow" x="4" y="4" width="180" height="64" />
+              <rect class="node-box" width="180" height="64" />
+              <rect width="180" height="19" fill="#1648CE" />
+              <text class="node-badge" x="8" y="13">▲ CLI // GOVERNANCE</text>
+              <text class="node-title" x="10" y="36">baselinectl</text>
+              <text class="node-sub" x="10" y="52">Matrix &amp; metadata tool</text>
+            </g>
+
+            <!-- 4. contractgen -->
+            <g class="arch-node" data-id="contractgen" data-flows="governance" transform="translate(30, 412)">
+              <rect class="node-shadow" x="4" y="4" width="180" height="64" />
+              <rect class="node-box" width="180" height="64" />
+              <rect width="180" height="19" fill="#1648CE" />
+              <text class="node-badge" x="8" y="13">▲ CLI // GOVERNANCE</text>
+              <text class="node-title" x="10" y="36">contractgen</text>
+              <text class="node-sub" x="10" y="52">Golden route generator</text>
+            </g>
+
+            <!-- 5. compatexctl -->
+            <g class="arch-node" data-id="compatexctl" data-flows="governance" transform="translate(30, 494)">
+              <rect class="node-shadow" x="4" y="4" width="180" height="64" />
+              <rect class="node-box" width="180" height="64" />
+              <rect width="180" height="19" fill="#1648CE" />
+              <text class="node-badge" x="8" y="13">▲ CLI // GOVERNANCE</text>
+              <text class="node-title" x="10" y="36">compatexctl</text>
+              <text class="node-sub" x="10" y="52">Compat exception check</text>
+            </g>
+
+            <!-- 6. vesperd -->
+            <g class="arch-node selected" data-id="vesperd" data-flows="control,proxy,intended" transform="translate(285, 68)">
+              <rect class="node-shadow" x="4" y="4" width="200" height="78" />
+              <rect class="node-box" width="200" height="78" />
+              <rect width="200" height="20" fill="#D92B2B" />
+              <text class="node-badge" x="8" y="14">■ PRIMARY DAEMON // L2/L4</text>
+              <text class="node-title" x="10" y="38">vesperd (src/api.rs)</text>
+              <text class="node-sub" x="10" y="54">HTTP Control Plane &amp; AppState</text>
+              <text class="node-sub" x="10" y="68">Binds 0o660 Unix Socket</text>
+            </g>
+
+            <!-- 7. vesper-proxy -->
+            <g class="arch-node" data-id="vesper_proxy" data-flows="proxy,control" transform="translate(285, 215)">
+              <rect class="node-shadow" x="4" y="4" width="200" height="68" />
+              <rect class="node-box" width="200" height="68" />
+              <rect width="200" height="19" fill="#111111" />
+              <text class="node-badge" x="8" y="13">● RELAY DAEMON // L3/L4</text>
+              <text class="node-title" x="10" y="38">vesper-proxy</text>
+              <text class="node-sub" x="10" y="54">Bidirectional byte relay</text>
+            </g>
+
+            <!-- 8. Upstream Socket -->
+            <g class="arch-node" data-id="upstream_sock" data-flows="proxy,intended" transform="translate(555, 215)">
+              <rect class="node-shadow" x="4" y="4" width="155" height="68" />
+              <rect class="node-box" width="155" height="68" />
+              <rect width="155" height="19" fill="#1648CE" />
+              <text class="node-badge" x="8" y="13">● TARGET SOCKET</text>
+              <text class="node-title" x="10" y="38">Upstream Target</text>
+              <text class="node-sub" x="10" y="54">unix / tcp / vsock</text>
+            </g>
+
+            <!-- 9. Entitlements -->
+            <g class="arch-node" data-id="entitlements" data-flows="control" transform="translate(285, 332)">
+              <rect class="node-shadow" x="4" y="4" width="200" height="68" />
+              <rect class="node-box" width="200" height="68" />
+              <rect width="200" height="19" fill="#111111" />
+              <text class="node-badge" x="8" y="13">■ POLICY // L1 PLATFORM</text>
+              <text class="node-title" x="10" y="38">vesperd.entitlements</text>
+              <text class="node-sub" x="10" y="54">security.virtualization</text>
+            </g>
+
+            <!-- 10. systemvmctl -->
+            <g class="arch-node" data-id="systemvmctl" data-flows="systemvm" transform="translate(285, 495)">
+              <rect class="node-shadow" x="4" y="4" width="180" height="76" />
+              <rect class="node-box" width="180" height="76" />
+              <rect width="180" height="19" fill="#D92B2B" />
+              <text class="node-badge" x="8" y="13">▲ BINARY // L3/L4</text>
+              <text class="node-title" x="10" y="38">systemvmctl</text>
+              <text class="node-sub" x="10" y="54">Image verify, manifest,</text>
+              <text class="node-sub" x="10" y="67">launch-config &amp; smoke</text>
+            </g>
+
+            <!-- 11. vesper-vmlauncher -->
+            <g class="arch-node" data-id="vmlauncher" data-flows="systemvm" transform="translate(535, 495)">
+              <rect class="node-shadow" x="4" y="4" width="170" height="76" />
+              <rect class="node-box" width="170" height="76" />
+              <rect width="170" height="19" fill="#D92B2B" />
+              <text class="node-badge" x="8" y="13">▲ SWIFT // ADR-0001</text>
+              <text class="node-title" x="10" y="38">vesper-vmlauncher</text>
+              <text class="node-sub" x="10" y="54">Virtualization.framework</text>
+              <text class="node-sub" x="10" y="67">NAT + virtio console</text>
+            </g>
+
+            <!-- 12. Swagger Spec -->
+            <g class="arch-node" data-id="swagger_spec" data-flows="control,governance" transform="translate(770, 56)">
+              <rect class="node-shadow" x="4" y="4" width="255" height="62" />
+              <rect class="node-box" width="255" height="62" />
+              <rect width="255" height="18" fill="#111111" />
+              <text class="node-badge" x="8" y="13">■ NORMATIVE SPEC // L0</text>
+              <text class="node-title" x="10" y="35">firecracker.yaml</text>
+              <text class="node-sub" x="10" y="50">Vendored OpenAPI routes</text>
+            </g>
+
+            <!-- 13. Baseline Lock -->
+            <g class="arch-node" data-id="baseline_lock" data-flows="control,governance" transform="translate(770, 134)">
+              <rect class="node-shadow" x="4" y="4" width="255" height="62" />
+              <rect class="node-box" width="255" height="62" />
+              <rect width="255" height="18" fill="#D92B2B" />
+              <text class="node-badge" x="8" y="13">■ BASELINE LOCK // L0</text>
+              <text class="node-title" x="10" y="35">design-v0.baselines.lock</text>
+              <text class="node-sub" x="10" y="50">Pinned Firecracker revision</text>
+            </g>
+
+            <!-- 14. Generated Matrices -->
+            <g class="arch-node" data-id="matrices" data-flows="control,governance" transform="translate(770, 212)">
+              <rect class="node-shadow" x="4" y="4" width="255" height="68" />
+              <rect class="node-box" width="255" height="68" />
+              <rect width="255" height="18" fill="#1648CE" />
+              <text class="node-badge" x="8" y="13">● GENERATED MATRICES // L2</text>
+              <text class="node-title" x="10" y="35">Surface &amp; Behavior JSON</text>
+              <text class="node-sub" x="10" y="50">PreBoot / PostBoot / Any gates</text>
+            </g>
+
+            <!-- 15. Golden Routes -->
+            <g class="arch-node" data-id="golden_routes" data-flows="governance" transform="translate(770, 296)">
+              <rect class="node-shadow" x="4" y="4" width="255" height="60" />
+              <rect class="node-box" width="255" height="60" />
+              <rect width="255" height="18" fill="#1648CE" />
+              <text class="node-badge" x="8" y="13">● CONTRACT GOLDEN // L0</text>
+              <text class="node-title" x="10" y="35">firecracker-routes.golden</text>
+              <text class="node-sub" x="10" y="50">Canonical 37 route list</text>
+            </g>
+
+            <!-- 16. Compat Exceptions -->
+            <g class="arch-node" data-id="compat_reg" data-flows="governance" transform="translate(770, 372)">
+              <rect class="node-shadow" x="4" y="4" width="255" height="60" />
+              <rect class="node-box" width="255" height="60" />
+              <rect width="255" height="18" fill="#1648CE" />
+              <text class="node-badge" x="8" y="13">● COMPAT REGISTRY // L0</text>
+              <text class="node-title" x="10" y="35">compat-exceptions.yaml</text>
+              <text class="node-sub" x="10" y="50">Tracked pre-GA deviations</text>
+            </g>
+
+            <!-- 17. System VM Image Lock -->
+            <g class="arch-node" data-id="image_lock" data-flows="systemvm" transform="translate(770, 448)">
+              <rect class="node-shadow" x="4" y="4" width="255" height="66" />
+              <rect class="node-box" width="255" height="66" />
+              <rect width="255" height="18" fill="#D92B2B" />
+              <text class="node-badge" x="8" y="13">▲ IMAGE LOCK // L3</text>
+              <text class="node-title" x="10" y="35">systemvm-image.lock.yaml</text>
+              <text class="node-sub" x="10" y="50">Pinned Alpine ISO &amp; SHA-256</text>
+            </g>
+
+            <!-- 18. Linux System VM -->
+            <g class="arch-node" data-id="sysvm" data-flows="systemvm,intended" transform="translate(770, 534)">
+              <rect class="node-shadow" x="4" y="4" width="255" height="84" />
+              <rect class="node-box" width="255" height="84" stroke-dasharray="6 4" />
+              <rect width="255" height="19" fill="#1648CE" />
+              <text class="node-badge" x="8" y="13">◆ GUEST VM // SMOKE / BACKEND A</text>
+              <text class="node-title" x="10" y="38">Linux System VM</text>
+              <text class="node-sub" x="10" y="54">Today: Boots Alpine to login:</text>
+              <text class="node-sub" x="10" y="69">Intended: containerd + KVM</text>
+            </g>
+          </svg>
+        </div>
+
+        <div class="canvas-legend">
+          <div class="legend-item">
+            <span class="legend-line" style="background: var(--ink);"></span>
+            <span>■ VERIFIED CONTROL / PROXY FLOW</span>
+          </div>
+          <div class="legend-item">
+            <span class="legend-line" style="background: var(--blue);"></span>
+            <span>● VERIFIED GOVERNANCE FLOW</span>
+          </div>
+          <div class="legend-item">
+            <span class="legend-line" style="background: var(--red);"></span>
+            <span>▲ VERIFIED SYSTEM VM BRINGUP</span>
+          </div>
+          <div class="legend-item">
+            <span class="legend-line" style="border-top: 3px dashed var(--blue); background: transparent;"></span>
+            <span>◆ INTENDED BACKEND A (DESIGN)</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- RIGHT PANEL: COMPONENT -->
+      <aside class="panel" id="dossier-panel">
+        <div class="panel-header">
+          <div class="panel-title">COMPONENT</div>
+        </div>
+        <div class="dossier-body" id="dossier-content">
+          <!-- Populated dynamically by JS -->
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- VIEW 02: API DISPATCH & STATE MACHINE SIMULATOR -->
+  <section id="view-sim" class="view-section">
+    <div class="sim-grid">
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-title">[01] SELECT VM STATE &amp; ROUTE</div>
+        </div>
+        <div class="dossier-body">
+          <div class="meta-label" style="margin-bottom: 8px;">CURRENT IN-MEMORY VM STATE (AppState.vm_state)</div>
+          <div class="state-cards">
+            <div class="state-card active" data-vmstate="PreBoot">
+              <div class="state-card-name">PreBoot</div>
+              <div class="state-card-desc">Initial state</div>
+            </div>
+            <div class="state-card" data-vmstate="Running">
+              <div class="state-card-name">Running</div>
+              <div class="state-card-desc">InstanceStart</div>
+            </div>
+            <div class="state-card" data-vmstate="Paused">
+              <div class="state-card-name">Paused</div>
+              <div class="state-card-desc">PATCH /vm</div>
+            </div>
+          </div>
+
+          <div class="meta-label" style="margin-bottom: 8px;">SEND TEST HTTP REQUEST OVER UNIX SOCKET</div>
+          <div class="route-btn-list" id="sim-routes">
+            <button class="route-btn active" data-route="boot_source">
+              <span><span class="method-pill m-put">PUT</span>/boot-source</span>
+              <span class="ste-pill">PreBoot</span>
+            </button>
+            <button class="route-btn" data-route="actions_start">
+              <span><span class="method-pill m-put">PUT</span>/actions (InstanceStart)</span>
+              <span class="ste-pill">Bypass Guard</span>
+            </button>
+            <button class="route-btn" data-route="patch_vm_pause">
+              <span><span class="method-pill m-patch">PATCH</span>/vm (state: Paused)</span>
+              <span class="ste-pill">Bypass Guard</span>
+            </button>
+            <button class="route-btn" data-route="patch_vm_resume">
+              <span><span class="method-pill m-patch">PATCH</span>/vm (state: Resumed)</span>
+              <span class="ste-pill">Bypass Guard</span>
+            </button>
+            <button class="route-btn" data-route="snapshot_create">
+              <span><span class="method-pill m-put">PUT</span>/snapshot/create</span>
+              <span class="ste-pill">PostBoot</span>
+            </button>
+            <button class="route-btn" data-route="mmds_get">
+              <span><span class="method-pill m-get">GET</span>/mmds</span>
+              <span class="ste-pill">Any</span>
+            </button>
+            <button class="route-btn" data-route="unknown_route">
+              <span><span class="method-pill m-get">GET</span>/non-existent-route</span>
+              <span class="ste-pill">404 Path</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-title">[02] REQUEST EXECUTION PIPELINE (src/api.rs :: handle_all)</div>
+          <span class="stamp" id="sim-outcome-badge">HTTP 204 NO CONTENT</span>
+        </div>
+        <div class="dossier-body">
+          <div class="pipeline-steps" id="sim-pipeline">
+            <!-- Populated by JS -->
+          </div>
+
+          <div class="ste-box">
+            <div class="ste-box-title">
+              <span>DATA-FLOW EXPLANATION</span>
+              <span>DETERMINISTIC ENVELOPE</span>
+            </div>
+            <ul class="ste-sentences" id="sim-ste-explanation"></ul>
+          </div>
+
+          <div class="meta-label" style="margin-bottom: 6px;">DETERMINISTIC WIRE RESPONSE PAYLOAD</div>
+          <div class="code-console" id="sim-console"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- VIEW 03: LAYER BOUNDARIES -->
+  <section id="view-layers" class="view-section">
+    <div class="panel">
+      <div class="panel-header">
+        <div class="panel-title">DOMAIN BOUNDARIES &amp; MECHANICAL DEPENDENCY LAYER TABLE (L0–L5)</div>
+        <span class="stamp" style="background: var(--yellow);">ENFORCED BY: scripts/harness/check_structure.py</span>
+      </div>
+      <div class="dossier-body">
+        <p style="font-size: 12.5px; font-weight: 600; color: var(--ink); margin-bottom: 16px;">
+          Click any module block below to inspect its allowed references (<span style="background: var(--blue); color: #fff; padding: 1px 6px;">BLUE = ALLOWED</span>) and forbidden references (<span style="background: var(--red-soft); color: var(--red); padding: 1px 6px; text-decoration: line-through;">RED = FORBIDDEN</span>).
+        </p>
+        <div class="layer-stack" id="layer-stack">
+          <div class="layer-row">
+            <div>
+              <div class="layer-id">LAYER 5 // TESTS &amp; HARNESS</div>
+              <div class="layer-purpose">Contract suites, CI sensors, docs</div>
+            </div>
+            <div class="module-chips">
+              <button class="mod-chip" data-mod="tests">tests/* &amp; scripts/harness/*</button>
+            </div>
+            <div class="layer-rule-note">May import any library module. No module may import Layer 5.</div>
+          </div>
+
+          <div class="layer-row">
+            <div>
+              <div class="layer-id">LAYER 4 // ENTRY POINTS</div>
+              <div class="layer-purpose">Six clap CLI binaries</div>
+            </div>
+            <div class="module-chips">
+              <button class="mod-chip" data-mod="bins">src/bin/* (vesperd, vesper-proxy, *ctl)</button>
+            </div>
+            <div class="layer-rule-note">May import any library layer (L0–L3). Enforced by code review.</div>
+          </div>
+
+          <div class="layer-row">
+            <div>
+              <div class="layer-id">LAYER 3 // RUNTIME ADAPTERS</div>
+              <div class="layer-purpose">Socket relay and System VM artifacts</div>
+            </div>
+            <div class="module-chips">
+              <button class="mod-chip" data-mod="proxy">proxy</button>
+              <button class="mod-chip" data-mod="systemvm">systemvm (+ image_lock)</button>
+            </div>
+            <div class="layer-rule-note">May reference <code>buildinfo</code> and <code>platform</code> only. Must NOT import <code>api</code>.</div>
+          </div>
+
+          <div class="layer-row">
+            <div>
+              <div class="layer-id">LAYER 2 // CONTROL PLANE</div>
+              <div class="layer-purpose">HTTP dispatch, VM state, route matrices</div>
+            </div>
+            <div class="module-chips">
+              <button class="mod-chip selected" data-mod="api">api</button>
+              <button class="mod-chip" data-mod="api_matrix">api_matrix</button>
+              <button class="mod-chip" data-mod="api_behavior_matrix">api_behavior_matrix</button>
+              <button class="mod-chip" data-mod="api_families">api/* (actions, boot_source, ...)</button>
+            </div>
+            <div class="layer-rule-note"><code>api</code> references L0, L1, and <code>api_matrix</code>. <code>api/*</code> references <code>super</code> only.</div>
+          </div>
+
+          <div class="layer-row">
+            <div>
+              <div class="layer-id">LAYER 1 // PLATFORM POLICY</div>
+              <div class="layer-purpose">Host capability and entitlement rules</div>
+            </div>
+            <div class="module-chips">
+              <button class="mod-chip" data-mod="platform">platform</button>
+            </div>
+            <div class="layer-rule-note">References nothing local in the crate. Mechanically enforced.</div>
+          </div>
+
+          <div class="layer-row">
+            <div>
+              <div class="layer-id">LAYER 0 // LEAF MODULES</div>
+              <div class="layer-purpose">Pinned contracts, locks, build info</div>
+            </div>
+            <div class="module-chips">
+              <button class="mod-chip" data-mod="spec">spec</button>
+              <button class="mod-chip" data-mod="baseline">baseline</button>
+              <button class="mod-chip" data-mod="compat">compat</button>
+              <button class="mod-chip" data-mod="buildinfo">buildinfo</button>
+            </div>
+            <div class="layer-rule-note">Leaf layer. References nothing local in the crate. Mechanically enforced.</div>
+          </div>
+        </div>
+
+        <div class="ste-box" style="margin-top: 18px;" id="layer-ste-box">
+          <div class="ste-box-title">
+            <span id="layer-ste-title">MODULE: api (LAYER 2 // CONTROL PLANE)</span>
+            <span>DEPENDENCY SPECIFICATION</span>
+          </div>
+          <ul class="ste-sentences" id="layer-ste-list"></ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- VIEW 04: FULL REFERENCE TABLE -->
+  <section id="view-ste100" class="view-section">
+    <div class="search-bar">
+      <input type="text" id="ste-search" class="search-input" placeholder="FILTER INDEX BY COMPONENT, BINARY, MODULE, OR ARTIFACT (e.g. vesperd, vsock, matrix, Swift)..." />
+    </div>
+    <div class="ste-table-wrap">
+      <table class="ste-table">
+        <thead>
+          <tr>
+            <th style="width: 180px;">COMPONENT</th>
+            <th style="width: 140px;">LAYER / TYPE</th>
+            <th style="width: 220px;">SOURCE &amp; ENTRY POINT</th>
+            <th>TECHNICAL DESCRIPTION</th>
+            <th style="width: 230px;">OWNED DATA &amp; INVARIANT</th>
+          </tr>
+        </thead>
+        <tbody id="ste-table-body">
+          <!-- Populated by JS -->
+        </tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<script>
+  const COMPONENTS = {
+    client: {
+      name: "Firecracker API Client",
+      category: "External Actor",
+      status: "VERIFIED",
+      path: "Unix Socket -> run/vesperd.sock (or /tmp/vesperd.sock)",
+      owns: "Client request payloads",
+      invariant: "Invariant 1a: vesperd is the only binary that serves the control-plane API.",
+      ste: [
+        "The Firecracker API client sends HTTP requests over a local Unix domain socket.",
+        "This client configures the virtual machine before boot and controls the virtual machine after boot.",
+        "It receives either a success response or a deterministic ErrorEnvelope with the baseline revision."
+      ]
+    },
+    docker_client: {
+      name: "Unix Socket Client (Docker UX Intended)",
+      category: "External Actor",
+      status: "VERIFIED / INTENDED UX",
+      path: "Unix Socket -> run/docker.sock (or /tmp/vesper/docker.sock)",
+      owns: "Raw byte streams",
+      invariant: "Invariant 1a: vesper-proxy is the only other host-visible socket and only relays bytes.",
+      ste: [
+        "A Unix-socket client connects to the listener socket on vesper-proxy.",
+        "During local development, make dev-up routes this socket to vesperd as a second path.",
+        "The Docker Desktop user experience is a design goal and does not exist in code yet."
+      ]
+    },
+    vesperd: {
+      name: "vesperd",
+      category: "Binary & Control Plane (L2 / L4)",
+      status: "VERIFIED",
+      path: "src/bin/vesperd.rs -> src/api.rs ( + src/api/* )",
+      owns: "In-memory AppState (RwLock), socket file (0o660), log/metrics files",
+      invariant: "Invariant 3: Every error from handle_all is an ErrorEnvelope with the pinned baseline revision.",
+      ste: [
+        "The vesperd daemon serves the Firecracker HTTP control plane over a Unix socket on macOS.",
+        "At startup, vesperd validates the entitlements file when you give the --entitlements-file flag.",
+        "Next, vesperd loads the baseline lock, the OpenAPI routes, and the surface stub matrix.",
+        "The daemon stores virtual machine state in memory inside AppState behind read-write locks.",
+        "For each request, handle_all checks the route semantics guard before it runs the route handler.",
+        "Every error response from handle_all contains an ErrorEnvelope with the pinned Firecracker revision."
+      ]
+    },
+    vesper_proxy: {
+      name: "vesper-proxy",
+      category: "Binary & Runtime Adapter (L3 / L4)",
+      status: "VERIFIED",
+      path: "src/bin/vesper-proxy.rs -> src/proxy.rs",
+      owns: "None (stateless byte relay)",
+      invariant: "Invariant 1a: vesper-proxy only relays bytes and adds the vsock CONNECT preface.",
+      ste: [
+        "The vesper-proxy daemon listens on a host Unix socket and forwards bytes to an upstream target.",
+        "It parses the upstream address once at startup as a unix, tcp, or vsock target.",
+        "The daemon starts one asynchronous task for each client connection within the dial timeout.",
+        "For a vsock target, vesper-proxy connects to <cid>.sock and sends a CONNECT <port> line."
+      ]
+    },
+    upstream_sock: {
+      name: "Upstream Target Socket",
+      category: "Runtime Endpoint",
+      status: "VERIFIED (UNIX/TCP) / TD-004 (VSOCK)",
+      path: "unix:// | tcp:// | vsock://<cid>:<port> (/tmp/vesper/vsock/<cid>.sock)",
+      owns: "Upstream socket endpoint",
+      invariant: "Known limit TD-004: Nothing in this repository creates the host vsock bridge socket yet.",
+      ste: [
+        "The upstream socket receives forwarded byte streams from vesper-proxy.",
+        "In make dev-up, the upstream target points to the vesperd Unix socket.",
+        "For vsock targets, vesper-proxy expects a host bridge socket at <vsock_socket_dir>/<cid>.sock.",
+        "No component in the repository creates the vsock bridge socket today (tracked as TD-004)."
+      ]
+    },
+    entitlements: {
+      name: "vesperd.entitlements & platform",
+      category: "Platform Policy (L1)",
+      status: "VERIFIED",
+      path: "packaging/macos/vesperd.entitlements -> src/platform.rs",
+      owns: "macOS security entitlement keys",
+      invariant: "Invariant 9: When started with --entitlements-file, vesperd requires com.apple.security.virtualization.",
+      ste: [
+        "The entitlement plist files define the macOS security permissions for Vesper binaries.",
+        "The platform module checks that the plist file contains the com.apple.security.virtualization key.",
+        "If you pass --entitlements-file and the key is missing, vesperd refuses to start."
+      ]
+    },
+    baselinectl: {
+      name: "baselinectl",
+      category: "Governance Binary (L0 / L2 / L4)",
+      status: "VERIFIED",
+      path: "src/bin/baselinectl.rs -> src/baseline.rs, src/api_matrix.rs, src/api_behavior_matrix.rs",
+      owns: "docs/generated/*.json, artifacts/parity-metadata.json",
+      invariant: "Invariant 5: Generated surface stub and behavior matrices must be complete and fresh.",
+      ste: [
+        "The baselinectl tool generates and validates parity metadata and API route matrices.",
+        "It reads the baseline lock file, the OpenAPI specification, and the capture registries.",
+        "In validate mode, baselinectl compares the on-disk matrix with a freshly generated matrix.",
+        "If the on-disk file is stale, baselinectl stops with an error and prints the regenerate command."
+      ]
+    },
+    contractgen: {
+      name: "contractgen",
+      category: "Governance Binary (L0 / L4)",
+      status: "VERIFIED",
+      path: "src/bin/contractgen.rs -> src/spec.rs",
+      owns: "testdata/contracts/firecracker-routes.golden.json",
+      invariant: "Invariant 4: The golden route list equals contractgen's serialization of the pinned swagger.",
+      ste: [
+        "The contractgen tool extracts all HTTP methods and paths from the pinned OpenAPI file.",
+        "It sorts the routes by path and method and removes duplicate entries.",
+        "In generate mode, contractgen writes the canonical route list to the golden JSON file.",
+        "In check mode, contractgen verifies that the golden file matches the OpenAPI routes byte for byte."
+      ]
+    },
+    compatexctl: {
+      name: "compatexctl",
+      category: "Governance Binary (L0 / L4)",
+      status: "VERIFIED",
+      path: "src/bin/compatexctl.rs -> src/compat.rs",
+      owns: "None (validates docs/specs/compat-exceptions.yaml)",
+      invariant: "Invariant 6: Compat exceptions carry required fields, and none is open past expiry.",
+      ste: [
+        "The compatexctl tool validates the compatibility exception registry before release.",
+        "It checks that every exception entry has an identifier, an owner, an issue number, and a target release.",
+        "The tool fails if any open exception has an expiration date earlier than today."
+      ]
+    },
+    systemvmctl: {
+      name: "systemvmctl",
+      category: "System VM Binary (L3 / L4)",
+      status: "VERIFIED",
+      path: "src/bin/systemvmctl.rs -> src/systemvm.rs (+ src/systemvm/image_lock.rs)",
+      owns: "build/systemvm/*.json, run/systemvm/*",
+      invariant: "systemvm.rs: verify-image requires artifacts to match pinned SHA-256 digests and expected_image_id.",
+      ste: [
+        "The systemvmctl tool manages System VM boot artifacts, launch configurations, and boot smoke tests.",
+        "In verify-image mode, it checks the SHA-256 digests of the kernel, initramfs, and boot media.",
+        "In launch-config mode, it writes the JSON configuration for vesper-vmlauncher.",
+        "In boot-smoke mode, it runs the launcher repeatedly and records boot duration metrics."
+      ]
+    },
+    vmlauncher: {
+      name: "vesper-vmlauncher",
+      category: "Swift Helper Binary (ADR 0001)",
+      status: "VERIFIED",
+      path: "launcher/Sources/vesper-vmlauncher/main.swift",
+      owns: "run/systemvm/console.log",
+      invariant: "Signed with com.apple.security.virtualization; stops VM when ready_pattern appears.",
+      ste: [
+        "The vesper-vmlauncher binary is a Swift helper that uses Apple Virtualization.framework.",
+        "It reads one launch configuration file and attaches NAT networking and a virtio serial console.",
+        "The launcher boots the Linux kernel and watches the console output for the ready pattern.",
+        "When the login prompt appears, the launcher stops the virtual machine and exits with code zero."
+      ]
+    },
+    swagger_spec: {
+      name: "firecracker.yaml (OpenAPI Spec)",
+      category: "Normative Artifact (L0 spec)",
+      status: "VERIFIED",
+      path: "third_party/firecracker/firecracker.yaml -> read by src/spec.rs",
+      owns: "Pinned upstream route table and info.version",
+      invariant: "Invariant 4 & 7: Loaded once by spec::load_routes and spec::load_info_version.",
+      ste: [
+        "This file is the vendored Firecracker OpenAPI specification at the pinned baseline revision.",
+        "The spec module reads this YAML file to extract the route table and API version string.",
+        "Both vesperd and the governance tools use this file as the single source of route definitions."
+      ]
+    },
+    baseline_lock: {
+      name: "design-v0.baselines.lock.yaml",
+      category: "Normative Artifact (L0 baseline)",
+      status: "VERIFIED",
+      path: "docs/specs/design-v0.baselines.lock.yaml -> read by src/baseline.rs",
+      owns: "Pinned upstream git revisions and required parity metadata keys",
+      invariant: "Invariant 3: vesperd refuses to start if lock.baselines['firecracker'].revision is blank.",
+      ste: [
+        "The baseline lock file records the pinned upstream Firecracker Git revision.",
+        "It also lists the metadata keys that every parity report must include.",
+        "The vesperd daemon stamps this Firecracker revision onto every ErrorEnvelope response."
+      ]
+    },
+    matrices: {
+      name: "Surface Stub & Behavior Matrices",
+      category: "Generated Artifacts (L2)",
+      status: "VERIFIED",
+      path: "docs/generated/firecracker-api-*.json",
+      owns: "Per-route lifecycle semantics (Any, PB, PO, PB/RT) and expected outcomes",
+      invariant: "Invariant 5: Validated at vesperd startup and in CI via baselinectl.",
+      ste: [
+        "The surface stub matrix defines the lifecycle semantics for every pinned Firecracker route.",
+        "It classifies each route as PreBoot, PostBoot, Any, or PreBootRuntime.",
+        "At startup, vesperd loads this matrix to enforce state-machine gating before each handler runs.",
+        "The behavior matrix records expected status codes and error cases from upstream captures."
+      ]
+    },
+    golden_routes: {
+      name: "firecracker-routes.golden.json",
+      category: "Contract Artifact (L0)",
+      status: "VERIFIED",
+      path: "testdata/contracts/firecracker-routes.golden.json",
+      owns: "Serialized list of 37 pinned (method, path) operations",
+      invariant: "Invariant 4: Checked in CI by make contract-check and tests/contract_golden.rs.",
+      ste: [
+        "This golden JSON file contains the sorted list of all routes from the Firecracker OpenAPI specification.",
+        "Continuous integration tests compare this file against the OpenAPI specification and the dispatch table."
+      ]
+    },
+    compat_reg: {
+      name: "compat-exceptions.yaml",
+      category: "Governance Artifact (L0)",
+      status: "VERIFIED",
+      path: "docs/specs/compat-exceptions.yaml",
+      owns: "Approved temporary parity deviations",
+      invariant: "Invariant 6: Validated by compatexctl; no open exception may pass its expiry date.",
+      ste: [
+        "The compatibility exception registry tracks approved differences between Vesper and upstream Firecracker.",
+        "Each entry records an owner, an issue link, a target release, and an expiration date."
+      ]
+    },
+    image_lock: {
+      name: "systemvm-image.lock.yaml",
+      category: "System VM Artifact Lock (L3)",
+      status: "VERIFIED",
+      path: "docs/specs/systemvm-image.lock.yaml -> read by src/systemvm/image_lock.rs",
+      owns: "Pinned Alpine virt ISO URL, SHA-256 digests, cmdline, ready_pattern, expected_image_id",
+      invariant: "Schema version 2; all SHA-256 digests and expected_image_id must match unpacked files.",
+      ste: [
+        "The System VM image lock pins the Alpine Linux ISO URL and all artifact SHA-256 digests.",
+        "It specifies the kernel unpack method, the kernel command line, and the console ready pattern.",
+        "The make systemvm-fetch command reads this lock file to download and unpack the boot files."
+      ]
+    },
+    sysvm: {
+      name: "Linux System VM (Guest)",
+      category: "Guest Virtual Machine",
+      status: "BOOT SMOKE VERIFIED / BACKEND A INTENDED",
+      path: "Booted by vesper-vmlauncher on Apple Virtualization.framework",
+      owns: "run/systemvm/console.log, run/systemvm/boot-report.json",
+      invariant: "Known limit TD-005: Boots to login: prompt with NAT attached; nothing runs inside the guest yet.",
+      ste: [
+        "The Linux System VM is an Alpine Linux guest that boots on Apple Virtualization.framework.",
+        "Today, make systemvm-boot-smoke boots this guest to its login prompt and records boot timings.",
+        "In the intended Backend A design, this guest will run containerd and stock Firecracker with nested KVM.",
+        "No guest agent, containerd service, or Firecracker process runs inside the guest today."
+      ]
+    }
+  };
+
+  function renderDossier(id) {
+    const item = COMPONENTS[id];
+    if (!item) return;
+
+    const isIntended = item.status.includes("INTENDED");
+    const statusClass = isIntended ? "tag-intended" : "tag-verified";
+
+    document.getElementById('dossier-content').innerHTML = `
+      <div class="dossier-header">
+        <div class="dossier-tags">
+          <span class="tag ${statusClass}">${item.status}</span>
+          <span class="tag tag-amber">${item.category}</span>
+        </div>
+        <div class="dossier-name">${item.name}</div>
+        <div class="dossier-path">${item.path}</div>
+      </div>
+
+      <div class="ste-box">
+        <div class="ste-box-title">
+          <span>COMPONENT SPECIFICATION</span>
+        </div>
+        <ul class="ste-sentences">
+          ${item.ste.map(s => `<li>${s}</li>`).join('')}
+        </ul>
+      </div>
+
+      <div class="meta-grid">
+        <div class="meta-item">
+          <div class="meta-label">■ OWNS DATA / SIDE EFFECTS</div>
+          <div class="meta-val">${item.owns}</div>
+        </div>
+        <div class="meta-item">
+          <div class="meta-label">▲ ARCHITECTURAL INVARIANT / LIMIT</div>
+          <div class="meta-val">${item.invariant}</div>
+        </div>
+      </div>
+    `;
+  }
+
+  const nodes = document.querySelectorAll('.arch-node');
+  nodes.forEach(node => {
+    node.addEventListener('click', () => {
+      nodes.forEach(n => n.classList.remove('selected'));
+      node.classList.add('selected');
+      renderDossier(node.getAttribute('data-id'));
+    });
+  });
+
+  const filterBtns = document.querySelectorAll('.filter-btn');
+  const edges = document.querySelectorAll('.arch-edge');
+  const edgeLabels = document.querySelectorAll('.edge-label');
+
+  filterBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      filterBtns.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const flow = btn.getAttribute('data-flow');
+
+      nodes.forEach(n => {
+        const flows = (n.getAttribute('data-flows') || '').split(',');
+        if (flow === 'all' || flows.includes(flow)) {
+          n.classList.remove('dimmed');
+        } else {
+          n.classList.add('dimmed');
+        }
+      });
+
+      edges.forEach(e => {
+        const flows = (e.getAttribute('data-flows') || '').split(',');
+        if (flow === 'all' || flows.includes(flow)) {
+          e.classList.remove('dimmed');
+          e.classList.add('active-flow');
+        } else {
+          e.classList.add('dimmed');
+          e.classList.remove('active-flow');
+        }
+      });
+
+      edgeLabels.forEach(l => {
+        const flows = (l.getAttribute('data-flows') || '').split(',');
+        if (flow === 'all' || flows.includes(flow)) {
+          l.classList.remove('dimmed');
+        } else {
+          l.classList.add('dimmed');
+        }
+      });
+    });
+  });
+
+  let currentVmState = 'PreBoot';
+  let currentRouteKey = 'boot_source';
+
+  const SIM_ROUTES = {
+    boot_source: {
+      method: 'PUT',
+      path: '/boot-source',
+      semantics: 'PreBoot',
+      bypassGuard: false,
+      evaluate(state) {
+        if (state !== 'PreBoot') {
+          return {
+            httpStatus: '400 BAD REQUEST',
+            ok: false,
+            guardStatus: 'fail',
+            guardNote: 'Rejected: PreBoot route called after boot',
+            handlerStatus: 'skip',
+            handlerNote: 'Not reached',
+            ste: [
+              "The client sends PUT /boot-source over the Unix socket to vesperd.",
+              "The handle_all function matches the path against the pinned RouteTemplate list.",
+              "Next, validate_state_guard checks the surface stub matrix and finds PreBoot semantics.",
+              "Because the virtual machine is not in the PreBoot state, the guard rejects the request.",
+              "The daemon returns HTTP 400 InvalidState inside a deterministic ErrorEnvelope."
+            ],
+            payload: {
+              fault_message: "this action is not supported after the microVM has booted",
+              code: "InvalidState",
+              path: "/boot-source",
+              method: "PUT",
+              baseline_firecracker_revision: "f08926b7314f23f061c3d9d2f42c9826c2a8bd05"
+            }
+          };
+        }
+        return {
+          httpStatus: '204 NO CONTENT',
+          ok: true,
+          guardStatus: 'pass',
+          guardNote: 'Allowed: VM is in PreBoot state',
+          handlerStatus: 'pass',
+          handlerNote: 'Opens kernel/initrd host files & stores BootSourceConfig',
+          ste: [
+            "The client sends PUT /boot-source while the virtual machine is in the PreBoot state.",
+            "The validate_state_guard function checks the surface stub matrix and allows the request.",
+            "The boot_source handler opens the kernel and initrd files on the host to validate them.",
+            "Then the handler saves the boot source configuration inside AppState and returns HTTP 204."
+          ],
+          payload: "// HTTP/1.1 204 No Content\n// AppState.boot_source updated under RwLock"
+        };
+      }
+    },
+    actions_start: {
+      method: 'PUT',
+      path: '/actions',
+      semantics: 'Bypass (Custom State Rule)',
+      bypassGuard: true,
+      evaluate(state) {
+        if (state !== 'PreBoot') {
+          return {
+            httpStatus: '400 BAD REQUEST',
+            ok: false,
+            guardStatus: 'bypass',
+            guardNote: 'Bypassed: PUT /actions runs custom state rules',
+            handlerStatus: 'fail',
+            handlerNote: 'Rejected: InstanceStart requires PreBoot state',
+            ste: [
+              "The client sends PUT /actions with InstanceStart to start the microVM.",
+              "The handle_all dispatcher bypasses validate_state_guard for PUT /actions.",
+              "The actions handler checks AppState.vm_state directly and sees that the VM already booted.",
+              "The handler returns HTTP 400 InvalidState with the pinned Firecracker baseline revision."
+            ],
+            payload: {
+              fault_message: "this action is not supported after the microVM has booted",
+              code: "InvalidState",
+              path: "/actions",
+              method: "PUT",
+              baseline_firecracker_revision: "f08926b7314f23f061c3d9d2f42c9826c2a8bd05"
+            }
+          };
+        }
+        return {
+          httpStatus: '204 NO CONTENT (State -> Running)',
+          ok: true,
+          guardStatus: 'bypass',
+          guardNote: 'Bypassed: PUT /actions runs custom state rules',
+          handlerStatus: 'pass',
+          handlerNote: 'Validates boot-source & root drive, transitions VM to Running',
+          ste: [
+            "The client sends PUT /actions with InstanceStart while the VM is in the PreBoot state.",
+            "The handle_all dispatcher routes the request directly to the actions handler.",
+            "The handler verifies that a boot source exists and transitions vm_state to Running.",
+            "The daemon returns HTTP 204 No Content."
+          ],
+          payload: "// HTTP/1.1 204 No Content\n// Transition: AppState.vm_state = PreBoot -> Running"
+        };
+      }
+    },
+    patch_vm_pause: {
+      method: 'PATCH',
+      path: '/vm (Paused)',
+      semantics: 'Bypass (Custom State Rule)',
+      bypassGuard: true,
+      evaluate(state) {
+        if (state === 'Running') {
+          return {
+            httpStatus: '204 NO CONTENT (State -> Paused)',
+            ok: true,
+            guardStatus: 'bypass',
+            guardNote: 'Bypassed: PATCH /vm runs custom state rules',
+            handlerStatus: 'pass',
+            handlerNote: 'Transitions vm_state from Running to Paused',
+            ste: [
+              "The client sends PATCH /vm with state Paused while the virtual machine is Running.",
+              "The handle_all dispatcher bypasses validate_state_guard because the guard does not distinguish Running from Paused.",
+              "The handle_patch_vm handler changes AppState.vm_state from Running to Paused and returns HTTP 204."
+            ],
+            payload: "// HTTP/1.1 204 No Content\n// Transition: AppState.vm_state = Running -> Paused"
+          };
+        }
+        const msg = state === 'PreBoot'
+          ? "this action is not supported before the microVM has booted"
+          : "operation PATCH /vm is not allowed while instance state is Paused";
+        return {
+          httpStatus: '400 BAD REQUEST',
+          ok: false,
+          guardStatus: 'bypass',
+          guardNote: 'Bypassed: PATCH /vm runs custom state rules',
+          handlerStatus: 'fail',
+          handlerNote: `Rejected in ${state} state`,
+          ste: [
+            "The client sends PATCH /vm with state Paused.",
+            "The handle_patch_vm handler requires the Running state before it can pause the virtual machine.",
+            "Because the virtual machine is not Running, the handler returns HTTP 400 InvalidState."
+          ],
+          payload: {
+            fault_message: msg,
+            code: "InvalidState",
+            path: "/vm",
+            method: "PATCH",
+            baseline_firecracker_revision: "f08926b7314f23f061c3d9d2f42c9826c2a8bd05"
+          }
+        };
+      }
+    },
+    patch_vm_resume: {
+      method: 'PATCH',
+      path: '/vm (Resumed)',
+      semantics: 'Bypass (Custom State Rule)',
+      bypassGuard: true,
+      evaluate(state) {
+        if (state === 'Paused') {
+          return {
+            httpStatus: '204 NO CONTENT (State -> Running)',
+            ok: true,
+            guardStatus: 'bypass',
+            guardNote: 'Bypassed: PATCH /vm runs custom state rules',
+            handlerStatus: 'pass',
+            handlerNote: 'Transitions vm_state from Paused to Running',
+            ste: [
+              "The client sends PATCH /vm with state Resumed while the virtual machine is Paused.",
+              "The handle_patch_vm handler transitions AppState.vm_state from Paused to Running and returns HTTP 204."
+            ],
+            payload: "// HTTP/1.1 204 No Content\n// Transition: AppState.vm_state = Paused -> Running"
+          };
+        }
+        const msg = state === 'PreBoot'
+          ? "this action is not supported before the microVM has booted"
+          : "operation PATCH /vm is not allowed while instance state is Running";
+        return {
+          httpStatus: '400 BAD REQUEST',
+          ok: false,
+          guardStatus: 'bypass',
+          guardNote: 'Bypassed: PATCH /vm runs custom state rules',
+          handlerStatus: 'fail',
+          handlerNote: `Rejected in ${state} state`,
+          ste: [
+            "The client sends PATCH /vm with state Resumed.",
+            "The handle_patch_vm handler requires the Paused state before it can resume the virtual machine.",
+            "Because the virtual machine is not Paused, the handler returns HTTP 400 InvalidState."
+          ],
+          payload: {
+            fault_message: msg,
+            code: "InvalidState",
+            path: "/vm",
+            method: "PATCH",
+            baseline_firecracker_revision: "f08926b7314f23f061c3d9d2f42c9826c2a8bd05"
+          }
+        };
+      }
+    },
+    snapshot_create: {
+      method: 'PUT',
+      path: '/snapshot/create',
+      semantics: 'PostBoot',
+      bypassGuard: false,
+      evaluate(state) {
+        if (state === 'PreBoot') {
+          return {
+            httpStatus: '400 BAD REQUEST',
+            ok: false,
+            guardStatus: 'fail',
+            guardNote: 'Rejected by validate_state_guard (PostBoot semantics)',
+            handlerStatus: 'skip',
+            handlerNote: 'Not reached',
+            ste: [
+              "The client sends PUT /snapshot/create while the virtual machine is in the PreBoot state.",
+              "The validate_state_guard function checks the surface stub matrix and sees PostBoot semantics.",
+              "The guard rejects the request before the handler runs and returns HTTP 400 InvalidState."
+            ],
+            payload: {
+              fault_message: "this action is not supported before the microVM has booted",
+              code: "InvalidState",
+              path: "/snapshot/create",
+              method: "PUT",
+              baseline_firecracker_revision: "f08926b7314f23f061c3d9d2f42c9826c2a8bd05"
+            }
+          };
+        }
+        if (state === 'Running') {
+          return {
+            httpStatus: '400 BAD REQUEST',
+            ok: false,
+            guardStatus: 'pass',
+            guardNote: 'Passed guard (VM is PostBoot)',
+            handlerStatus: 'fail',
+            handlerNote: 'Handler requires Paused state for snapshot creation',
+            ste: [
+              "The client sends PUT /snapshot/create while the virtual machine is Running.",
+              "The validate_state_guard function passes because the guard does not distinguish Running from Paused.",
+              "Next, handle_put_snapshot_create_stub checks if the VM is Paused and rejects the Running state."
+            ],
+            payload: {
+              fault_message: "save/restore is only supported while the microVM is paused",
+              code: "InvalidState",
+              path: "/snapshot/create",
+              method: "PUT",
+              baseline_firecracker_revision: "f08926b7314f23f061c3d9d2f42c9826c2a8bd05"
+            }
+          };
+        }
+        return {
+          httpStatus: '204 NO CONTENT',
+          ok: true,
+          guardStatus: 'pass',
+          guardNote: 'Passed guard (VM is PostBoot)',
+          handlerStatus: 'pass',
+          handlerNote: 'Validates payload in Paused state (no disk snapshot written)',
+          ste: [
+            "The client sends PUT /snapshot/create while the virtual machine is Paused.",
+            "The validate_state_guard function allows the PostBoot route.",
+            "The snapshot handler verifies that the virtual machine is Paused and returns HTTP 204."
+          ],
+          payload: "// HTTP/1.1 204 No Content\n// Snapshot stub succeeded in Paused state"
+        };
+      }
+    },
+    mmds_get: {
+      method: 'GET',
+      path: '/mmds',
+      semantics: 'Any',
+      bypassGuard: false,
+      evaluate(state) {
+        return {
+          httpStatus: '200 OK',
+          ok: true,
+          guardStatus: 'pass',
+          guardNote: `Allowed in ${state}: RouteSemantics is Any`,
+          handlerStatus: 'pass',
+          handlerNote: 'Returns schemaless JSON from AppState.mmds_data_store',
+          ste: [
+            "The client sends GET /mmds to read the MicroVM Metadata Service data store.",
+            "The validate_state_guard function finds Any semantics in the surface stub matrix and allows the request.",
+            "The handler reads the JSON value from AppState and returns HTTP 200 OK."
+          ],
+          payload: {
+            "latest": {
+              "meta-data": {
+                "instance-id": "i-vesper-macos-01"
+              }
+            }
+          }
+        };
+      }
+    },
+    unknown_route: {
+      method: 'GET',
+      path: '/non-existent-route',
+      semantics: 'None (Unmatched)',
+      bypassGuard: false,
+      evaluate() {
+        return {
+          httpStatus: '404 NOT FOUND',
+          ok: false,
+          guardStatus: 'skip',
+          guardNote: 'Not reached (no template match)',
+          handlerStatus: 'skip',
+          handlerNote: 'Not reached',
+          ste: [
+            "The client sends a request for a path that does not exist in the pinned OpenAPI file.",
+            "The handle_all function cleans the path and checks all private RouteTemplate matchers.",
+            "No template matches the request, so vesperd returns HTTP 404 NotFound with an ErrorEnvelope."
+          ],
+          payload: {
+            fault_message: "route not found",
+            code: "NotFound",
+            path: "/non-existent-route",
+            method: "GET",
+            baseline_firecracker_revision: "f08926b7314f23f061c3d9d2f42c9826c2a8bd05"
+          }
+        };
+      }
+    }
+  };
+
+  function renderSimulator() {
+    const route = SIM_ROUTES[currentRouteKey];
+    const result = route.evaluate(currentVmState);
+
+    const badge = document.getElementById('sim-outcome-badge');
+    badge.textContent = result.httpStatus;
+    badge.style.background = result.ok ? 'var(--yellow)' : 'var(--red)';
+    badge.style.color = result.ok ? 'var(--ink)' : 'var(--paper-card)';
+
+    const matchedTemplate = currentRouteKey !== 'unknown_route';
+
+    document.getElementById('sim-pipeline').innerHTML = `
+      <div class="pipe-step pass">
+        <div class="pipe-step-num">STEP 01 // LISTENER</div>
+        <div class="pipe-step-title">UnixListener &amp; Router</div>
+        <div class="pipe-step-detail">Accepts connection on Unix socket and forwards to axum fallback <code>handle_all</code>.</div>
+      </div>
+      <div class="pipe-step ${matchedTemplate ? 'pass' : 'fail'}">
+        <div class="pipe-step-num">STEP 02 // MATCHER</div>
+        <div class="pipe-step-title">RouteTemplate Match</div>
+        <div class="pipe-step-detail">${matchedTemplate ? `Matched <code>${route.method} ${route.path}</code>` : 'No match in pinned swagger routes -> 404'}</div>
+      </div>
+      <div class="pipe-step ${result.guardStatus}">
+        <div class="pipe-step-num">STEP 03 // STATE GUARD</div>
+        <div class="pipe-step-title">validate_state_guard</div>
+        <div class="pipe-step-detail">${result.guardNote}</div>
+      </div>
+      <div class="pipe-step ${result.handlerStatus}">
+        <div class="pipe-step-num">STEP 04 // HANDLER</div>
+        <div class="pipe-step-title">Concrete Route Handler</div>
+        <div class="pipe-step-detail">${result.handlerNote}</div>
+      </div>
+      <div class="pipe-step ${result.ok ? 'pass' : 'fail'}">
+        <div class="pipe-step-num">STEP 05 // RESPONSE</div>
+        <div class="pipe-step-title">${result.ok ? 'Success Response' : 'ErrorEnvelope'}</div>
+        <div class="pipe-step-detail">${result.ok ? 'Returns status and updates RwLock state' : 'Stamps baseline_firecracker_revision'}</div>
+      </div>
+    `;
+
+    document.getElementById('sim-ste-explanation').innerHTML =
+      result.ste.map(s => `<li>${s}</li>`).join('');
+
+    document.getElementById('sim-console').textContent =
+      typeof result.payload === 'string'
+        ? result.payload
+        : JSON.stringify(result.payload, null, 2);
+  }
+
+  document.querySelectorAll('.state-card').forEach(card => {
+    card.addEventListener('click', () => {
+      document.querySelectorAll('.state-card').forEach(c => c.classList.remove('active'));
+      card.classList.add('active');
+      currentVmState = card.getAttribute('data-vmstate');
+      renderSimulator();
+    });
+  });
+
+  document.querySelectorAll('.route-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.route-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      currentRouteKey = btn.getAttribute('data-route');
+      renderSimulator();
+    });
+  });
+
+  const LAYER_DEPS = {
+    tests: {
+      title: "tests/* & scripts/harness/* (LAYER 5 // TESTS & HARNESS)",
+      allowed: ["bins", "proxy", "systemvm", "api", "api_matrix", "api_behavior_matrix", "api_families", "platform", "spec", "baseline", "compat", "buildinfo"],
+      ste: [
+        "Layer 5 contains integration tests, structure sensors, and documentation checks.",
+        "Modules in Layer 5 can import any library module to verify contracts and behavior.",
+        "No library module or binary can import Layer 5."
+      ]
+    },
+    bins: {
+      title: "src/bin/* (LAYER 4 // ENTRY POINTS)",
+      allowed: ["proxy", "systemvm", "api", "api_matrix", "api_behavior_matrix", "platform", "spec", "baseline", "compat", "buildinfo"],
+      ste: [
+        "Layer 4 contains the six command-line binaries in src/bin/*.rs.",
+        "Each binary parses flags with clap and calls public functions in Layers 0 through 3.",
+        "No library module can import a binary entry point."
+      ]
+    },
+    proxy: {
+      title: "proxy (LAYER 3 // RUNTIME ADAPTERS)",
+      allowed: ["platform", "buildinfo"],
+      ste: [
+        "The proxy module implements the Unix socket listener and upstream byte relay.",
+        "It can reference only platform and buildinfo.",
+        "It must never import control-plane modules such as api or api_matrix."
+      ]
+    },
+    systemvm: {
+      title: "systemvm & systemvm/image_lock (LAYER 3 // RUNTIME ADAPTERS)",
+      allowed: ["platform", "buildinfo"],
+      ste: [
+        "The systemvm module verifies boot images, builds manifests, and runs boot smoke checks.",
+        "It can reference only platform and buildinfo.",
+        "It must never import api or any control-plane matrix module."
+      ]
+    },
+    api: {
+      title: "api (LAYER 2 // CONTROL PLANE)",
+      allowed: ["api_matrix", "api_families", "platform", "spec", "baseline", "compat", "buildinfo"],
+      ste: [
+        "The api module implements the Firecracker HTTP router, state machine, and deterministic errors.",
+        "It can reference Layer 0 leaf modules, Layer 1 platform, and Layer 2 api_matrix.",
+        "It must never import Layer 3 runtime modules such as proxy or systemvm."
+      ]
+    },
+    api_matrix: {
+      title: "api_matrix (LAYER 2 // CONTROL PLANE MATRICES)",
+      allowed: ["api", "spec", "baseline", "compat", "buildinfo"],
+      ste: [
+        "The api_matrix module generates and validates the surface stub matrix.",
+        "It references spec, baseline, and api::RouteSpec.",
+        "Tech debt item TD-020 plans to move RouteSpec into spec to remove the cycle with api."
+      ]
+    },
+    api_behavior_matrix: {
+      title: "api_behavior_matrix (LAYER 2 // CONTROL PLANE MATRICES)",
+      allowed: ["api", "api_matrix", "spec", "baseline", "compat", "buildinfo"],
+      ste: [
+        "The api_behavior_matrix module generates and validates the per-route behavior matrix.",
+        "It can reference api, api_matrix, baseline, and spec.",
+        "It must never import proxy or systemvm."
+      ]
+    },
+    api_families: {
+      title: "api/* (LAYER 2 // EXTRACTED ROUTE FAMILIES)",
+      allowed: ["api"],
+      ste: [
+        "The extracted route-family modules handle actions, boot_source, logger_metrics, and machine_config.",
+        "Each child module under src/api/ can reference super (src/api.rs) only.",
+        "The structure checker forbids direct crate:: imports inside src/api/*."
+      ]
+    },
+    platform: {
+      title: "platform (LAYER 1 // PLATFORM POLICY)",
+      allowed: [],
+      ste: [
+        "The platform module validates macOS entitlement plist files.",
+        "It is a Layer 1 module and cannot import any other module in the vesper crate."
+      ]
+    },
+    spec: {
+      title: "spec (LAYER 0 // LEAF MODULE)",
+      allowed: [],
+      ste: [
+        "The spec module loads routes and version strings from the vendored Firecracker OpenAPI file.",
+        "It is a Layer 0 leaf module and cannot import any local crate module."
+      ]
+    },
+    baseline: {
+      title: "baseline (LAYER 0 // LEAF MODULE)",
+      allowed: [],
+      ste: [
+        "The baseline module loads the baseline lock file and validates parity metadata.",
+        "It is a Layer 0 leaf module and cannot import any local crate module."
+      ]
+    },
+    compat: {
+      title: "compat (LAYER 0 // LEAF MODULE)",
+      allowed: [],
+      ste: [
+        "The compat module loads and validates the compatibility exception registry.",
+        "It is a Layer 0 leaf module and cannot import any local crate module."
+      ]
+    },
+    buildinfo: {
+      title: "buildinfo (LAYER 0 // LEAF MODULE)",
+      allowed: [],
+      ste: [
+        "The buildinfo module exposes compile-time version, Git commit, and build date constants.",
+        "It is a Layer 0 leaf module and cannot import any local crate module."
+      ]
+    }
+  };
+
+  const modChips = document.querySelectorAll('.mod-chip');
+  function updateLayerView(modKey) {
+    const info = LAYER_DEPS[modKey];
+    if (!info) return;
+    modChips.forEach(chip => {
+      const k = chip.getAttribute('data-mod');
+      chip.classList.remove('selected', 'allowed-ref', 'forbidden-ref');
+      if (k === modKey) {
+        chip.classList.add('selected');
+      } else if (info.allowed.includes(k)) {
+        chip.classList.add('allowed-ref');
+      } else {
+        chip.classList.add('forbidden-ref');
+      }
+    });
+    document.getElementById('layer-ste-title').textContent = info.title;
+    document.getElementById('layer-ste-list').innerHTML =
+      info.ste.map(s => `<li>${s}</li>`).join('');
+  }
+
+  modChips.forEach(chip => {
+    chip.addEventListener('click', () => {
+      updateLayerView(chip.getAttribute('data-mod'));
+    });
+  });
+
+  function renderSteTable(filterText = '') {
+    const q = filterText.trim().toLowerCase();
+    const tbody = document.getElementById('ste-table-body');
+    const rows = Object.values(COMPONENTS).filter(item => {
+      if (!q) return true;
+      return (
+        item.name.toLowerCase().includes(q) ||
+        item.category.toLowerCase().includes(q) ||
+        item.path.toLowerCase().includes(q) ||
+        item.ste.join(' ').toLowerCase().includes(q)
+      );
+    });
+
+    tbody.innerHTML = rows.map(item => `
+      <tr>
+        <td>
+          <div style="font-weight: 700; color: var(--ink);">${item.name}</div>
+          <span class="tag ${item.status.includes('INTENDED') ? 'tag-intended' : 'tag-verified'}" style="margin-top: 6px; display: inline-block;">${item.status}</span>
+        </td>
+        <td style="font-size: 11.5px; font-weight: 700; color: var(--blue);">${item.category}</td>
+        <td style="font-size: 11.5px; font-weight: 600; color: var(--red);">${item.path}</td>
+        <td>
+          <ul class="ste-sentences">
+            ${item.ste.map(s => `<li>${s}</li>`).join('')}
+          </ul>
+        </td>
+        <td style="font-size: 11px; color: var(--ink);">
+          <strong>■ OWNS:</strong> ${item.owns}<br><br>
+          <strong>▲ RULE:</strong> ${item.invariant}
+        </td>
+      </tr>
+    `).join('');
+  }
+
+  document.getElementById('ste-search').addEventListener('input', (e) => {
+    renderSteTable(e.target.value);
+  });
+
+  const navTabs = document.querySelectorAll('.nav-tab');
+  const sections = document.querySelectorAll('.view-section');
+  navTabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      navTabs.forEach(t => t.classList.remove('active'));
+      sections.forEach(s => s.classList.remove('active'));
+      tab.classList.add('active');
+      document.getElementById(tab.getAttribute('data-tab')).classList.add('active');
+    });
+  });
+
+  renderDossier('vesperd');
+  renderSimulator();
+  updateLayerView('api');
+  renderSteTable();
+</script>
+</body>
+</html>
