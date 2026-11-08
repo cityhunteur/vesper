@@ -286,6 +286,19 @@ NAME WORDS…`, `start`, `state`, `kill`, `delete`, `try CTR-ARGS…`, `leftover
 task RUNNING with a pid, start-twice and delete-while-running rejected, unknown task rejected, three concurrent
 tasks with distinct VMM pids, kill and delete of each, no leftovers) into `run/systemvm/shim-report.json`.
 
+## Block-first rootfs preparation (GH #24)
+
+The shim validates every bundle before mounting (`shim/internal/bundle`: config, process, cwd, root, mounts;
+errors carry a reason and a hint) and prepares the root drive block-first: the overlay mount's lower-layer
+chain is the cache key, `/var/lib/vesper/rootfs-cache/<key>.ext4` is built once per chain with a `.sha256`
+sidecar and verified on every reuse, and each task gets a private copy as `<bundle>/rootfs.ext4`. A bundle whose
+rootfs is a plain directory (no snapshot mounts) is the documented fallback: built per task, never cached. The
+record `<bundle>/vesper-rootfs.json` (`strategy`, `cached`, `key`, `lower`, `sha256`, `bytes`, `build_ms`,
+`fallback`) is what `vesper-ctr meta NAME` prints; `vesper-ctr cache` lists the cache. `make systemvm-bundle-suite`
+runs the GH #24 checklist (15 steps: a two-layer image built from the trivial one boots and reads its second
+layer, two tasks from the chain share key and digest with `cached=true`, one drive per chain, the layered
+chain reuses the base snapshot) into `run/systemvm/bundle-report.json`. Limits: TD-035.
+
 ## MicroVM vsock transport (GH #23, in progress)
 
 `vesper-microvm launch ID --vsock` attaches a Firecracker vsock device (guest CID 3) whose host side is the

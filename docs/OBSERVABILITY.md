@@ -59,7 +59,9 @@ The durable signals this project relies on are artifacts rather than live teleme
   response, both performance runs, compat exception summary) and `systemvmctl control fcparity api <id> GET /`
   for a live microVM's state; `run/systemvm/shim-report.json` from `make systemvm-shim-suite`, `systemvmctl
   control ctr state <name>` and `ctr -n vesper task ls` in the guest; the shim logs through containerd's shim log
-  FIFO (`ctr` prints them with `--debug`), and each task's console is `/var/log/vesper-microvm-<task>.log`.
+  FIFO (`ctr` prints them with `--debug`), and each task's console is `/var/log/vesper-microvm-<task>.log`; `run/systemvm/bundle-report.json` from
+  `make systemvm-bundle-suite`, `systemvmctl control ctr meta <task>` (the task's `vesper-rootfs.json`: strategy,
+  cached, key, layers, digest, build time) and `systemvmctl control ctr cache` (cached root drives).
 - `build/systemvm/image-manifest.json` (SHA-256 digests, stable `image_id`) and `build/systemvm/launch-config.json`.
 - `artifacts/parity-metadata.json` from `baselinectl --mode generate`.
 - JSON and Markdown reports from the Python sensors (`--json-out`, `--markdown-out`), uploaded by the `harness-*`

@@ -16,17 +16,28 @@ the guest overlay. Runtime name `io.containerd.vesper.v2`.
   address is reused. `Stop` (containerd's `delete` after a dead shim) runs `vesper-microvm cleanup <id>`,
   unmounts `<bundle>/rootfs`, removes `rootfs.ext4` and reports exit 137. `Info` returns the runtime name and
   version.
-- `internal/backend`: `Backend` interface (`Prepare(ctx, bundle) (image, error)`, `Launch(ctx, id, image, cmdB64)
-  (pid, error)`, `Stop`, `Cleanup`, `LogPath(id)`, `Alive(id)`); `MicroVM` (`NewMicroVM()`) shells out to
-  `mke2fs -q -F -t ext4 -d <bundle>/rootfs -L vesper-task -E root_owner=0:0 <bundle>/rootfs.ext4 <size>K`
-  (used KiB + 20 % + 4 MiB, at least 16 MiB) and `/usr/local/bin/vesper-microvm launch|stop|cleanup|status`;
+- `internal/bundle`: `Validate(bundle, mounts) (*specs.Spec, error)` rejects, before any mount, a relative or
+  symlinked bundle, a missing or invalid `config.json`, a spec without `ociVersion` or `process.args`, a
+  relative `cwd`, an unexpected `root.path`, incomplete mounts, or no mounts with an empty `rootfs/`; errors are
+  `*ValidationError{Bundle, Reason, Hint}`. `Inspect(mounts) Layers{Kind, Lower, Upper, Key}`: `overlay` (lower
+  chain, sha256 key), `mounts` (identity key) or `directory` (no key). `Meta` (`task, bundle, image, cache,
+  cached, sha256, bytes, built_at, build_ms, strategy, layers, fallback`) with `WriteMeta` (atomic, one line as
+  `vesper-rootfs.json`) and `ReadMeta`.
+- `internal/backend`: `Backend` interface (`Prepare(ctx, task, bundle, mounts) (image, bundle.Meta, error)`, `Launch(ctx, id, image, cmdB64)
+  (pid, error)`, `Stop`, `Cleanup`, `LogPath(id)`, `Alive(id)`); `MicroVM` (`NewMicroVM()`): `Prepare` is block-first: with a layer key it
+  builds `/var/lib/vesper/rootfs-cache/<key>.ext4` once (`mke2fs -q -F -t ext4 -d <bundle>/rootfs -L vesper-task
+  -E root_owner=0:0`, used KiB + 20 % + 4 MiB, at least 16 MiB; temp file and `.sha256` sidecar renamed into
+  place), verifies the digest on every reuse and copies a private `<bundle>/rootfs.ext4`; without a key
+  (directory rootfs) it builds directly per task (`fallback: true`, `strategy: direct`); failures are
+  `*PrepareError{Step, Err, Hint}`; the `Meta` record is written to the bundle. It shells out to
+  `/usr/local/bin/vesper-microvm launch|stop|cleanup|status`;
   `Launch` returns pid 0 when the workload exited before `LAUNCHED` carried a pid. `EncodeCommand(args, env,
   cwd)` builds `cd CWD || exit 126; export K=V; …; exec ARGS` with every word single-quoted, base64-encoded;
   `RootfsImageName = "rootfs.ext4"`.
 - `internal/task`: `Service` (ttrpc `TTRPCTaskService`; `NewService(ctx, publisher, shutdown, backend)`;
   `RegisterTTRPC`). One task per shim. `Create`: rejects a second task (`AlreadyExists`), terminal
   (`NotImplemented`), checkpoints (`NotImplemented`), a bundle without `config.json` or `process.args`
-  (`InvalidArgument`); mounts `Rootfs` onto `<bundle>/rootfs`, builds the image, unmounts, records stdio paths,
+  (`bundle.Validate` → `InvalidArgument` with the diagnosis); mounts `Rootfs` onto `<bundle>/rootfs`, prepares the drive (`FailedPrecondition` with the step and hint on failure), unmounts, records stdio paths,
   publishes `/tasks/create`, returns the shim pid. `Start` (exec id → `NotImplemented`; not created →
   `FailedPrecondition`) launches, marks running, starts the watcher, publishes `/tasks/start`. `Kill`: created →
   exits 137 immediately; running → `backend.Stop`; stopped → `NotFound`. `Delete`: running →
@@ -44,9 +55,12 @@ the guest overlay. Runtime name `io.containerd.vesper.v2`.
 - `MarkExited` is idempotent, so a kill racing the natural exit records one status.
 - Every `Create` that fails leaves no mount behind; every `Delete` leaves no jail, cgroup, image or VMM.
 - The image must contain `/bin/sh`; terminal, stdin, exec and resize are not supported in this slice (P3.2).
+- One cached drive per layer chain; a task never boots a drive whose digest differs from its sidecar.
+- The shim runs with the framework's reaper and subreaper disabled; it waits on its own children itself.
 
 ## Verification
 
     cd shim && go vet ./... && go test ./...        # make shim-test
     make shim-build                                  # build/shim/containerd-shim-vesper-v2 (linux/arm64, static)
     make systemvm-up && make systemvm-shim-suite     # GH #22 checklist through ctr (21 steps)
+    make systemvm-bundle-suite                       # GH #24 checklist: block-first cache, layered image, dedup (15 steps)

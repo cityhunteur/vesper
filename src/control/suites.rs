@@ -7,6 +7,9 @@ use std::path::Path;
 use std::thread;
 use std::time::{Duration, Instant};
 
+mod bundle;
+pub use bundle::run_bundle_suite;
+
 /// Result of one checklist step of the GH #13 control suite.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SuiteStep {
