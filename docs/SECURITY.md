@@ -83,3 +83,12 @@ Plus runtime evidence when the change affects real transport or VM lifecycle.
 - [`process/baseline-governance.md`](process/baseline-governance.md)
 - [`process/compat-exceptions.md`](process/compat-exceptions.md)
 - [`RELIABILITY.md`](RELIABILITY.md)
+
+## Published ports (GH #28, ADR 0005)
+
+`vesper-proxy --publish-ports` (on by `make docker-up`) is the first host-visible TCP surface Vesper opens: one
+listener on `127.0.0.1:<host port>` per TCP `-p` binding of a running container, closed when the container
+stops or the proxy exits. Listeners are loopback only; a binding to any other host ip is recorded as
+`unsupported` and not opened. Every connection travels the bridge to the guest gateway `vesper-port-relay`, which
+only connects to guest loopback ports, so nothing in the guest becomes reachable that dockerd did not publish.
+The live set is `run/vesper/ports.json`. Widening to non-loopback addresses is a human decision.

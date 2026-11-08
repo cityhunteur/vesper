@@ -118,3 +118,10 @@ The design spec remains the normative source for hard targets. For local issue w
 ## Escalation rule
 
 If a change cannot be made legible with the current artifacts, stop and extend the harness before shipping more code.
+
+## Bridge client death (fixed 2026-11-08)
+
+`vesper-vmlauncher` relays bridge bytes with raw `write()`; until WOR-34 a client (vesper-proxy) that died while
+the guest was still sending made the relay take SIGPIPE and the whole VM went with it. The launcher now ignores
+SIGPIPE and sets `SO_NOSIGPIPE` on bridge clients; `make ports-suite` keeps a step that restarts the proxy under
+a live event stream and checks the launcher pid survives.

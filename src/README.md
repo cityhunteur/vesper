@@ -102,6 +102,18 @@ Public symbols by file:
   run_server(config, shutdown)`.
 - `spec.rs`: `Route { method, path }`, `load_routes(path)`,
   `load_info_version(path)`.
+- `ports.rs`: `PortsConfig { docker_socket, bridge_path, relay_port, status_path, bind_ip }` (`Default`:
+  `run/vesper/docker.sock`, `run/systemvm/vsock/3.sock`, 2400, `run/vesper/ports.json`, 127.0.0.1);
+  `parse_bindings(inspect) -> Vec<Binding>` (`NetworkSettings.Ports`, IPv6 twins of a `0.0.0.0` binding
+  dropped, sorted by host port); `parse_event(event) -> Option<(action, id, name)>` (container events only,
+  `action` before `:`); `plan_binding(bind_ip, &Binding) -> Result<SocketAddr, String>` (TCP only; `0.0.0.0`,
+  `::` and empty map to `bind_ip`; a loopback host ip is honoured; anything else is an error);
+  `docker_get(socket, path) -> (status, body)` (minimal HTTP/1.1, Content-Length or chunked);
+  `dial_gateway(bridge, relay_port, host_port)` (writes `CONNECT <relay>\nPORT <n>\n`, no reply expected);
+  `Publisher::new(config).run()` (reconcile `/containers/json`, then follow `/events?filters={type:[container]}`;
+  `start`/`unpause` publish, `die`/`stop`/`kill`/`destroy`/`pause` release; reconnects after 2 s);
+  `Publisher::status() -> Status { path, gateway, updated_at, mappings[] }` with `Mapping { container, name,
+  proto, host, host_port, container_port, target, state (listening|conflict|unsupported), error }`.
 - `control.rs` (client), `control/suites.rs` (checklists, re-exported) and `control/suites/{bundle,restart}.rs`
   (the GH #24 and #25 checklists, `super::` helpers only):
   `ControlEndpoint { bridge_path, port, io_timeout }` with

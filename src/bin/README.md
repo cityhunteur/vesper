@@ -24,7 +24,9 @@ errors to stderr and exits with code 1 on failure.
   `vesper::api_matrix::load_surface_stub_matrix`,
   `vesper::api::AppState::new_with_matrix`, and `AppState::router`.
   `shutdown_signal` resolves on Ctrl-C or SIGTERM.
-- `vesper-proxy.rs:main` (binary `vesper-proxy`, `#[tokio::main]`). Flags:
+- `vesper-proxy.rs:main` (binary `vesper-proxy`, `#[tokio::main]`). `--publish-ports` adds the GH #28
+  publisher (`--relay-port` default 2400, `--ports-status` default `run/vesper/ports.json`); it needs a vsock
+  upstream, whose bridge socket is the gateway path, and exits 2 otherwise. Flags:
   `--listen` (default `/tmp/vesper/docker.sock`), `--upstream`
   (default `vsock://3:2375`), `--vsock-socket-dir`
   (default `/tmp/vesper/vsock`), `--dial-timeout-seconds` (default 5),

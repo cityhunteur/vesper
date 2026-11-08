@@ -64,7 +64,9 @@ The durable signals this project relies on are artifacts rather than live teleme
   cached, key, layers, digest, build time) and `systemvmctl control ctr cache` (cached root drives); `run/systemvm/restart-report.json` from
   `make systemvm-restart-suite` and `systemvmctl control ctr state-file <task>` (the task's `vesper-task.json`:
   phase, VMM pid, exit, shim pid, last update); `run/systemvm/docker-conformance-report.json` from
-  `make docker-conformance` (each step's dockerd response or error text).
+  `make docker-conformance` (each step's dockerd response or error text); `run/vesper/ports.json` (the live
+  published-port mappings with state and error) and `ports:` lines in `run/vesper/vesper-proxy.log`;
+  `run/systemvm/ports-report.json` from `make ports-suite`.
 - `build/systemvm/image-manifest.json` (SHA-256 digests, stable `image_id`) and `build/systemvm/launch-config.json`.
 - `artifacts/parity-metadata.json` from `baselinectl --mode generate`.
 - JSON and Markdown reports from the Python sensors (`--json-out`, `--markdown-out`), uploaded by the `harness-*`

@@ -18,6 +18,16 @@ struct Args {
     /// Fail at startup unless the upstream socket (unix path or vsock bridge) exists.
     #[arg(long)]
     validate_upstream: bool,
+    /// Also publish containers' `-p` ports on the host loopback, forwarding through the vsock bridge to the
+    /// System VM's port relay (GH #28).
+    #[arg(long)]
+    publish_ports: bool,
+    /// Guest vsock port of `vesper-port-relay`.
+    #[arg(long, default_value_t = 2400)]
+    relay_port: u32,
+    /// Status file listing the current port mappings and their state.
+    #[arg(long, default_value = "run/vesper/ports.json")]
+    ports_status: String,
 }
 
 #[tokio::main]
@@ -39,6 +49,33 @@ async fn main() {
         }
     };
 
+    let publisher = if args.publish_ports {
+        let bridge = vesper::proxy::parse_target(&args.upstream)
+            .and_then(|t| vesper::proxy::upstream_socket_path(&t, &args.vsock_socket_dir))
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| {
+                eprintln!("vesper-proxy failed: --publish-ports needs a vsock upstream (the bridge socket is the gateway path)");
+                std::process::exit(2);
+            });
+        let config = vesper::ports::PortsConfig {
+            docker_socket: std::path::PathBuf::from(&args.listen),
+            bridge_path: std::path::PathBuf::from(bridge),
+            relay_port: args.relay_port,
+            status_path: std::path::PathBuf::from(&args.ports_status),
+            ..vesper::ports::PortsConfig::default()
+        };
+        Some(tokio::spawn(async move {
+            // Give the ingress socket a moment to exist before the first Docker API call.
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            if let Err(err) = vesper::ports::Publisher::new(config).run().await {
+                eprintln!("ports: publisher stopped: {err}");
+            }
+        }))
+    } else {
+        None
+    };
+
     let result = vesper::proxy::run_server(
         vesper::proxy::ServerConfig {
             listen_path: args.listen.clone(),
@@ -52,6 +89,9 @@ async fn main() {
     )
     .await;
 
+    if let Some(task) = publisher {
+        task.abort();
+    }
     if let Err(err) = result {
         eprintln!("vesper-proxy failed: {err}");
         std::process::exit(1);
