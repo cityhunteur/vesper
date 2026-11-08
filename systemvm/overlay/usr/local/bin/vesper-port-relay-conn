@@ -1,0 +1,11 @@
+#!/bin/sh
+# One port-relay connection (spawned by socat EXEC from vesper-port-relay): the first line is
+# "PORT <n>"; the rest of the stream is forwarded to the published port on the guest loopback,
+# where dockerd's own mapping reaches the container. Only ports dockerd published answer there.
+read -r line
+port=${line#PORT }
+case "$port" in
+  ''|*[!0-9]*) exit 1 ;;
+esac
+[ "$port" -ge 1 ] && [ "$port" -le 65535 ] || exit 1
+exec /usr/bin/socat STDIO "TCP:127.0.0.1:$port"

@@ -28,12 +28,15 @@ if [ -f "${PID_FILE}" ] && kill -0 "$(cat "${PID_FILE}")" 2>/dev/null; then
 fi
 
 cargo build -q --bin vesper-proxy
+# Published ports (GH #28): host loopback -> vesper-proxy -> bridge -> guest vesper-port-relay (vsock 2400).
+PORT_ARGS=(--publish-ports --relay-port "${VESPER_PORT_RELAY:-2400}" --ports-status "${RUN_DIR}/ports.json")
 : > "${LOG_FILE}"
 nohup "${ROOT_DIR}/target/debug/vesper-proxy" \
   --listen "${SOCKET}" \
   --upstream "vsock://${CID}:${PORT}" \
   --vsock-socket-dir "${BRIDGE_DIR}" \
   --validate-upstream \
+  "${PORT_ARGS[@]}" \
   < /dev/null >> "${LOG_FILE}" 2>&1 &
 PID=$!
 echo "${PID}" > "${PID_FILE}"
@@ -45,5 +48,5 @@ for _ in $(seq 1 20); do
   sleep 0.5
 done
 [ -S "${SOCKET}" ] || { echo "docker-up: ${SOCKET} did not appear" >&2; exit 1; }
-echo "docker-up: vesper-proxy pid ${PID}; DOCKER_HOST=unix://${SOCKET}"
+echo "docker-up: vesper-proxy pid ${PID}; DOCKER_HOST=unix://${SOCKET}; published ports via the guest relay (status ${RUN_DIR}/ports.json)"
 ls -l "${SOCKET}"

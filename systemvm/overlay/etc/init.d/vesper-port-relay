@@ -1,0 +1,15 @@
+#!/sbin/openrc-run
+# System VM gateway for published container ports (GH #28): vesper-proxy connects through the
+# launcher's bridge to this vsock port, sends "PORT <n>", and is forwarded to the guest loopback port
+# that dockerd published. No container or host port is reachable without this explicit hop.
+description="Vesper published-port relay (vsock)"
+supervisor=supervise-daemon
+relay_port="${VESPER_PORT_RELAY:-2400}"
+command=/usr/bin/socat
+command_args="VSOCK-LISTEN:${relay_port},reuseaddr,fork EXEC:/usr/local/bin/vesper-port-relay-conn"
+respawn_delay=1
+respawn_max=0
+
+depend() {
+  need localmount vesper-packages vesper-services
+}

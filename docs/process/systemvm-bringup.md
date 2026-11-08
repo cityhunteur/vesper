@@ -186,6 +186,18 @@ On 2026-11-06 (M3): 7/7, the container printed `vesper-container-ok`.
 The packaged canonical path from the issue, `/var/run/vesper/docker.sock`, is Intended: it needs root and no
 packaging exists yet.
 
+### Published ports (GH #28, ADR 0005)
+
+`make docker-up` starts `vesper-proxy` with `--publish-ports`: the publisher follows container events on the
+Docker API, reconciles running containers at start, listens on `127.0.0.1:<host port>` for every TCP `-p`
+binding and forwards each connection through the bridge (`CONNECT 2400`, then `PORT <n>`) to the guest's
+`vesper-port-relay`, a supervised `socat VSOCK-LISTEN:2400,fork EXEC:vesper-port-relay-conn` that connects to
+the guest loopback port dockerd published. `run/vesper/ports.json` lists the path, the gateway and every
+mapping (`listening`, `conflict` when the macOS port is taken, `unsupported` for UDP or a non-loopback host
+ip) and the proxy log names binds and releases. `make ports-suite` runs the GH #28 checklist (11 steps) into
+`run/systemvm/ports-report.json`. The launcher ignores SIGPIPE since this slice: a proxy dying with a live
+bridge stream used to take the VM down.
+
 ### Docker API conformance (GH #27)
 
 `make docker-conformance` (`scripts/systemvm/docker-conformance.sh`) runs 22 checks from macOS through the

@@ -6,6 +6,7 @@ pub mod buildinfo;
 pub mod compat;
 pub mod control;
 pub mod platform;
+pub mod ports;
 pub mod proxy;
 pub mod spec;
 pub mod systemvm;

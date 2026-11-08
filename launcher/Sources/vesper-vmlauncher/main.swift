@@ -391,7 +391,11 @@ final class Launcher: NSObject, VZVirtualMachineDelegate {
         source.setEventHandler { [weak self] in
             guard let self = self else { return }
             let client = accept(fd, nil, nil)
-            if client >= 0 { self.handleBridgeClient(client, device) }
+            if client >= 0 {
+                var one: Int32 = 1
+                setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))
+                self.handleBridgeClient(client, device)
+            }
         }
         source.resume()
         bridgeSource = source
@@ -461,6 +465,9 @@ final class Launcher: NSObject, VZVirtualMachineDelegate {
     }
 
     func installSignalHandler() {
+        // A bridge client (vesper-proxy) that dies while the guest is still sending makes the relay's
+        // write() fail with EPIPE; without this the default SIGPIPE action would kill the VM with it.
+        signal(SIGPIPE, SIG_IGN)
         signal(SIGTERM, SIG_IGN)
         let source = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
         source.setEventHandler { [weak self] in
