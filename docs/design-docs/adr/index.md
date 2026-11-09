@@ -1,7 +1,7 @@
 ---
 status: verified
 owner: cityhunteur
-last_reviewed: 2026-11-06
+last_reviewed: 2026-11-09
 ---
 
 # Architecture decision records
@@ -19,6 +19,7 @@ new ADR, and the old ADR then links forward to it. The repository had no ADR ser
 | [0003](0003-systemvm-control-channel.md) | Control channel: launcher-served vsock bridge and a socat-backed guest agent | accepted | 2026-11-06 | none |
 | [0004](0004-containerd-shim-in-go.md) | containerd shim v2 in Go, cross-built on the host and shipped in the System VM overlay | accepted | 2026-11-06 | none |
 | [0005](0005-published-ports-via-vsock-gateway.md) | Published container ports reach localhost through vesper-proxy and a vsock gateway in the System VM | accepted | 2026-11-08 | none |
+| [0006](0006-guest-exec-via-runc-delegation.md) | Guest container execution through runc, driven over vsock | proposed | 2026-11-09 | none |
 
 ## Candidates
 

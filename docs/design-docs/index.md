@@ -1,7 +1,7 @@
 ---
 status: verified
 owner: cityhunteur
-last_reviewed: 2026-11-06
+last_reviewed: 2026-11-09
 ---
 
 # Design documents
@@ -20,6 +20,7 @@ they live; the normative ones stay under `docs/specs/`.
 | [Core beliefs](core-beliefs.md) | Engineering principles for the whole repository | verified | all | harness sensors and docs | n/a | 2026-11-05 | n/a |
 | [harness-engineering.md](../process/harness-engineering.md) | How guides, sensors, bundles and the tracker protocol fit together | verified | process | `scripts/harness/`, `harness/`, `.symphony/templates/`, `WORKFLOW.md` | none | 2026-11-05 | n/a |
 | [systemvm-bringup.md](../process/systemvm-bringup.md) | Pinned System VM image, overlay and packages, launch config, launcher, boot smoke and the Phase 0 vsock bridge | verified | runtime | `src/systemvm.rs`, `src/systemvm/`, `launcher/`, `systemvm/overlay/`, `src/proxy.rs`, `scripts/systemvm/`, `scripts/macos/build-vmlauncher.sh` | [0001](adr/0001-systemvm-launcher-swift-helper.md), [0002](adr/0002-systemvm-overlay-via-initramfs.md), [0003](adr/0003-systemvm-control-channel.md) | 2026-11-06 | [WOR-27 plan](../exec-plans/completed/2026-11-06-WOR-27-systemvm-image-pipeline.md), [WOR-25 plan](../exec-plans/completed/2026-11-06-WOR-25-systemvm-control-channel.md) |
+| [WOR-32 guest-exec brainstorm](2026-11-09-wor-32-guest-exec-brainstorm.md) | Concepts brief: runc-delegation vs custom agent for exec/PTY/stdio, adversarial review and split verdict | draft | runtime | [ADR 0006](adr/0006-guest-exec-via-runc-delegation.md); `shim/`, `systemvm/overlay/` | 2026-11-09 brainstorm | [WOR-32 plan](../exec-plans/active/2026-11-08-WOR-32-exec-stdio.md) |
 | [ADR index](adr/index.md) | Architecture decision records and candidates | verified | all | n/a | n/a | n/a | n/a |
 | [Design doc template](TEMPLATE.md) | Starting point for new designs | n/a | n/a | n/a | n/a | n/a | n/a |
 
