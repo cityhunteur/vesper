@@ -1,0 +1,104 @@
+#!/bin/sh
+# Private microVM control protocol (ADR 0006); socat supplies the connected stdin/stdout.
+set -eu
+export PATH=/bin:/usr/bin
+fail() { printf 'ERROR {"stage":"%s","message":"%s"}\n' "$1" "$2"; exit 1; }
+IFS=' ' read -r op port size tty || exit 1
+case "$port" in ''|*[!0-9]*) fail request invalid-port ;; esac
+[ "$port" -ge 1028 ] && [ "$port" -le 65528 ] && [ "$((port % 4))" = 0 ] || fail request invalid-port
+dir=/run/sessions/p$port
+terminate() {
+  [ -f "$dir/pid" ] || return 0
+  if [ "$port" = 1028 ]; then
+    /usr/bin/runc --root /run/runc kill --all workload KILL 2>/dev/ttyS0 || true
+  else
+    kill -KILL "$(cat "$dir/pid")" 2>/dev/null || true
+  fi
+}
+case "$op" in
+  ABORT)
+    if mkdir "$dir" 2>/dev/null; then
+      touch "$dir/abort"
+      echo 137 > "$dir/status"
+      echo OK
+      exit
+    fi
+    touch "$dir/abort"
+    terminate
+    # Cover an abort racing runc's atomic pid publication.
+    (for _ in $(seq 1 300); do
+      [ ! -f "$dir/status" ] || break
+      if [ -f "$dir/pid" ]; then terminate; break; fi
+      sleep 0.1
+    done) </dev/null >/dev/ttyS0 2>&1 &
+    echo OK
+    exit ;;
+  SIGNAL)
+    case "$size" in ''|*[!0-9]*) fail signal invalid-signal ;; esac
+    [ "$size" -le 64 ] || fail signal invalid-signal
+    [ -f "$dir/pid" ] && [ ! -f "$dir/status" ] || fail signal session-not-running
+    case "$tty" in 0) all='' ;; 1) all=--all ;; *) fail signal invalid-all ;; esac
+    if [ "$port" = 1028 ]; then
+      /usr/bin/runc --root /run/runc kill $all workload "$size" 2>/dev/ttyS0 || fail signal runc-kill-failed
+    else
+      kill -"$size" "$(cat "$dir/pid")" || fail signal exec-kill-failed
+    fi
+    echo OK
+    exit ;;
+  RESIZE)
+    /usr/bin/vesper-console resize "$dir" "$size" "$tty" 2>/dev/ttyS0 || fail resize resize-failed
+    echo OK
+    exit ;;
+  RUN|EXEC) ;;
+  *) fail request unknown-operation ;;
+esac
+case "$size" in ''|*[!0-9]*) fail request invalid-size ;; esac
+[ "$size" -gt 0 ] && [ "$size" -le 1048576 ] || fail request invalid-size
+case "$tty" in 0|1) ;; *) fail request invalid-terminal ;; esac
+mkdir "$dir" || fail start duplicate-session
+relays=''; runner=''
+trap '[ -f "$dir/status" ] || { touch "$dir/abort"; terminate; [ -n "$runner" ] || echo 137 > "$dir/status"; }; kill $relays 2>/dev/null || true' EXIT
+head -c "$size" > "$dir/config.json"
+[ "$(wc -c < "$dir/config.json")" = "$size" ] || fail start truncated-config
+mkfifo "$dir/in" "$dir/out" "$dir/err"
+socat -u VSOCK-LISTEN:$port,reuseaddr OPEN:$dir/in,wronly > /dev/null 2>/dev/ttyS0 & relays="$relays $!"
+socat -u OPEN:$dir/out,rdonly VSOCK-LISTEN:$((port+1)),reuseaddr > /dev/null 2>/dev/ttyS0 & relays="$relays $!"
+socat -u OPEN:$dir/err,rdonly VSOCK-LISTEN:$((port+2)),reuseaddr > /dev/null 2>/dev/ttyS0 & relays="$relays $!"
+echo "READY $port"
+(
+  set +e
+  [ ! -f "$dir/abort" ] || { echo 137 > "$dir/status"; exit 0; }
+  echo "VESPER-RUNC-INVOKE p$port $op" > /dev/ttyS0
+  if [ "$tty" = 1 ]; then
+    /usr/bin/vesper-console "$op" "$dir"
+  elif [ "$op" = RUN ]; then
+    /usr/bin/runc --root /run/runc --log "$dir/runc.log" --log-format json run --pid-file "$dir/pid" --bundle "$dir" workload
+  else
+    /usr/bin/runc --root /run/runc --log "$dir/runc.log" --log-format json exec --pid-file "$dir/pid" --process "$dir/config.json" workload
+  fi
+  rc=$?
+  echo "$rc" > "$dir/status"
+  echo "VESPER-WORKLOAD-EXIT $rc p$port" > /dev/ttyS0
+) < "$dir/in" > "$dir/out" 2> "$dir/err" &
+runner=$!
+# An unsuccessful runtime must still publish its status (the subshell disables errexit).
+for _ in $(seq 1 300); do
+  [ -f "$dir/pid" ] && break
+  if [ -f "$dir/status" ]; then
+    [ -s "$dir/runc.log" ] || fail runtime runtime-did-not-start
+    cat "$dir/runc.log" > /dev/ttyS0
+    printf 'ERROR '
+    tail -n 1 "$dir/runc.log"
+    exit 1
+  fi
+  sleep 0.1
+done
+[ -f "$dir/pid" ] || fail start runtime-timeout
+[ ! -f "$dir/abort" ] || { terminate; fail start aborted; }
+echo "STARTED $(cat "$dir/pid")"
+wait "$runner"
+# Drain both output bridges before reporting exit; stdin may remain open for a detached task.
+set -- $relays
+wait "$2" || true
+wait "$3" || true
+echo "EXIT $(cat "$dir/status")"

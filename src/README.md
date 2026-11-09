@@ -119,8 +119,8 @@ Public symbols by file:
   `start`/`unpause` publish, `die`/`stop`/`kill`/`destroy`/`pause` release; reconnects after 2 s);
   `Publisher::status() -> Status { path, gateway, updated_at, mappings[] }` with `Mapping { container, name,
   proto, host, host_port, container_port, target, state (listening|conflict|unsupported), error }`.
-- `control.rs` (client), `control/suites.rs` (checklists, re-exported) and `control/suites/{bundle,restart}.rs`
-  (the GH #24 and #25 checklists, `super::` helpers only):
+- `control.rs` (client), `control/suites.rs` (checklists, re-exported) and `control/suites/{bundle,restart,exec}.rs`
+  (the GH #24, #25 and #23 checklists, `super::` helpers only):
   `ControlEndpoint { bridge_path, port, io_timeout }` with
   `new(bridge, port)` (10 s timeouts), `Handshake { protocol_version,
   hostname, connect_ms }`, `Session` with `ping`, `version`, `echo(payload)`,
@@ -132,7 +132,7 @@ Public symbols by file:
   payload_bytes)`, `run_services_suite(&endpoint, &[service], recovery_timeout)`,
   `run_microvm_suite(&endpoint, id)`, `run_rootfs_suite(&endpoint, id)`,
   `run_workload_suite(&endpoint)`, `run_parity_suite(&endpoint, id, perf_cycles)`, `run_shim_suite(&endpoint)`,
-  `run_bundle_suite(&endpoint)`, `run_restart_suite(&endpoint)`,
+  `run_bundle_suite(&endpoint)`, `run_restart_suite(&endpoint)`, `run_exec_suite(&endpoint)`,
   `write_report(path, &report)`; constants
   `AGENT_PROTOCOL_VERSION` (1), `DEFAULT_AGENT_PORT` (1024).
 - `systemvm.rs` (manifest, launch config, boot smoke),

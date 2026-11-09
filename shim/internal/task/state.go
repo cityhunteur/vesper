@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cityhunteur/vesper/shim/internal/backend"
 	"github.com/containerd/errdefs"
 )
 
@@ -35,24 +36,30 @@ func (p Phase) String() string {
 
 // Task is one container task; the shim serves exactly one.
 type Task struct {
-	mu         sync.Mutex
-	ID         string
-	Bundle     string
-	Image      string
-	CmdB64     string
-	Stdout     string
-	Stderr     string
-	Stdin      string
-	Terminal   bool
-	phase      Phase
-	pid        int
-	exitStatus uint32
-	exitedAt   time.Time
-	exited     chan struct{}
+	opMu        sync.Mutex
+	mu          sync.Mutex
+	ID          string
+	Bundle      string
+	Image       string
+	Config      []byte
+	Port        uint32
+	Session     *backend.Session
+	stdinClosed bool
+	exiting     bool
+	watchDone   chan struct{}
+	Stdout      string
+	Stderr      string
+	Stdin       string
+	Terminal    bool
+	phase       Phase
+	pid         int
+	exitStatus  uint32
+	exitedAt    time.Time
+	exited      chan struct{}
 }
 
 func newTask(id, bundle string) *Task {
-	return &Task{ID: id, Bundle: bundle, phase: PhaseCreated, exited: make(chan struct{})}
+	return &Task{ID: id, Bundle: bundle, phase: PhaseCreated, exited: make(chan struct{}), watchDone: make(chan struct{})}
 }
 
 func (t *Task) Phase() Phase {

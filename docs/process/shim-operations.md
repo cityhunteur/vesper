@@ -1,7 +1,7 @@
 ---
 status: verified
 owner: cityhunteur
-last_reviewed: 2026-11-08
+last_reviewed: 2026-11-09
 ---
 
 # Operating the Vesper containerd runtime
@@ -25,9 +25,10 @@ IMAGE ID CMD` (from the host: `systemvmctl control ctr run NAME WORDS…`). Dock
 
 | Check | Command | Expect |
 |---|---|---|
-| Whole runtime contract | `make ctr-conformance` | `ctr conformance passed (55 steps, …)` and `run/systemvm/ctr-conformance-report.json` |
+| Whole runtime contract | `make ctr-conformance` | `ctr conformance passed (74 steps, …)` and `run/systemvm/ctr-conformance-report.json` |
 | Task lifecycle only | `make systemvm-shim-suite` | 21 steps incl. `task_metrics` |
-| Root drive cache | `make systemvm-bundle-suite` | 15 steps |
+| Exec, streams and terminals | `make systemvm-exec-suite` | 19 steps, including signals and resize |
+| Root drive cache | `make systemvm-bundle-suite` | 16 steps |
 | Restart behaviour | `make systemvm-restart-suite` | 18 steps |
 | Committed capture still valid | `make ctr-conformance-check` | `ctr conformance report valid` (also run by the `ctr Conformance` workflow) |
 
@@ -35,7 +36,7 @@ IMAGE ID CMD` (from the host: `systemvmctl control ctr run NAME WORDS…`). Dock
 
 | Symptom | Where to look | Likely cause and recovery |
 |---|---|---|
-| `ctr run` fails with `launch microVM: … no pid` or `LAUNCHED … pid=` | `systemvmctl control microvm log <id> 60` | The workload exited at once (missing shell or command in the image); the console log shows `VESPER-WORKLOAD-EXIT <code>`. The image must contain `/bin/sh` (TD-034). |
+| `ctr run` fails with `guest session pN: … ERROR {…}` | `systemvmctl control microvm log <id> 100` | runc rejected the config or could not execute argv. The structured error names the failure; the console contains its diagnostics. `/bin/sh` is needed only when the requested command uses it. |
 | `ctr run` fails with `InvalidArgument: bundle …` | the error text | Bundle validation: the reason and hint name the field (`process.args`, `cwd`, mounts). Fix the container spec. |
 | `ctr run` fails with `FailedPrecondition: rootfs: …` | the error text, `systemvmctl control ctr cache` | Root drive build or copy failed: free space in `/var/lib/vesper/rootfs-cache` or the bundle, or `mke2fs` missing. `rm -rf /var/lib/vesper/rootfs-cache` in the guest resets the cache. |
 | Task shows `RUNNING` but the microVM is gone | `systemvmctl control microvm status <id>`, `ctr state-file <id>` | Kill the shim (`systemvmctl control ctr kill-shim <id>`): containerd runs the shim's `delete`, which reconciles from `vesper-task.json` and cleans the jail. |
@@ -56,5 +57,5 @@ IMAGE ID CMD` (from the host: `systemvmctl control ctr run NAME WORDS…`). Dock
 
 ## Known limits
 
-Exec, TTY and stdin on the Vesper runtime (WOR-32, TD-034); rootfs cache growth (TD-035); the suites run on
-developer hardware only, CI validates the committed capture (TD-005).
+Rootfs cache growth (TD-035), at most 16,125 exec sessions per task (TD-041) and unresolved runc
+pause/snapshot compatibility (TD-042). Hardware suites run on developer machines; CI validates their capture (TD-005).

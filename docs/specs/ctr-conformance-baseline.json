@@ -1,9 +1,9 @@
 {
  "schema_version": 1,
- "generated_at": "2026-11-08T17:40:26Z",
+ "generated_at": "2026-11-09T18:30:00Z",
  "host": {
   "description": "macOS 27.0.1 / Apple M3 Pro",
-  "commit": "822d907"
+  "commit": "5d05e74-dirty"
  },
  "baseline": {
   "firecracker": {
@@ -67,17 +67,17 @@
     {
      "name": "start_detached",
      "ok": true,
-     "detail": "STARTED det pid=7343"
+     "detail": "STARTED det pid=3706"
     },
     {
      "name": "state_running",
      "ok": true,
-     "detail": "STATE det RUNNING pid=7343"
+     "detail": "STATE det RUNNING pid=3706"
     },
     {
      "name": "task_metrics",
      "ok": true,
-     "detail": "ctr task metrics -> METRICS det memory_bytes=74203136 cpu_usec=1349169 pids=3"
+     "detail": "ctr task metrics -> METRICS det memory_bytes=112136192 cpu_usec=1680152 pids=3"
     },
     {
      "name": "invalid_start_running",
@@ -87,7 +87,7 @@
     {
      "name": "invalid_delete_running",
      "ok": true,
-     "detail": "rc 1: time=\"2026-11-08T17:40:03Z\" level=error msg=\"unable to delete det\" error=\"task must be stopped before deletion: running: failed precondition\" ctr: task must be stopped before deletion: running: failed precondition"
+     "detail": "rc 1: time=\"2026-11-09T18:28:52Z\" level=error msg=\"unable to delete det\" error=\"task must be stopped before deletion: running: failed precondition\" ctr: task must be stopped before deletion: running: failed precondition"
     },
     {
      "name": "kill_detached",
@@ -107,22 +107,22 @@
     {
      "name": "start_ca",
      "ok": true,
-     "detail": "STARTED ca pid=7610"
+     "detail": "STARTED ca pid=3972"
     },
     {
      "name": "start_cb",
      "ok": true,
-     "detail": "STARTED cb pid=7696"
+     "detail": "STARTED cb pid=4078"
     },
     {
      "name": "start_cc",
      "ok": true,
-     "detail": "STARTED cc pid=7842"
+     "detail": "STARTED cc pid=4182"
     },
     {
      "name": "three_tasks_running",
      "ok": true,
-     "detail": "ca, cb, cc RUNNING with pids {\"7842\", \"7610\", \"7696\"}"
+     "detail": "ca, cb, cc RUNNING with pids {\"4078\", \"3972\", \"4182\"}"
     },
     {
      "name": "kill_ca",
@@ -187,27 +187,27 @@
     {
      "name": "start_la",
      "ok": true,
-     "detail": "STARTED la pid=8762"
+     "detail": "STARTED la pid=4974"
     },
     {
      "name": "meta_la_recorded",
      "ok": true,
-     "detail": "strategy block-first, overlay, 2 lower layers, cached=true, build_ms=17"
+     "detail": "strategy block-first, overlay, 2 lower layers, cached=true, build_ms=19"
     },
     {
      "name": "start_lb_same_chain",
      "ok": true,
-     "detail": "STARTED lb pid=8843"
+     "detail": "STARTED lb pid=5074"
     },
     {
      "name": "meta_lb_cache_hit",
      "ok": true,
-     "detail": "cached=true, same key and sha256 as la, build_ms=18"
+     "detail": "cached=true, same key and sha256 as la, build_ms=16"
     },
     {
      "name": "cache_one_drive_per_chain",
      "ok": true,
-     "detail": "2 cached drive(s): 153183014b083f885fa6717928d0a2edaccb6c27e805e757588e2482b45ab6f2 bytes=16777216 sha256=1c96f9554b5b6a70; 1ca8dac6b4200a598b9d6d2d6956817c012d549fe949180513f1a2ebe1583563 bytes=16777216 sha256=3b6d1c4ce9a83317"
+     "detail": "2 cached drive(s): 153183014b083f885fa6717928d0a2edaccb6c27e805e757588e2482b45ab6f2 bytes=16777216 sha256=637768d9dfb87b54; 1ca8dac6b4200a598b9d6d2d6956817c012d549fe949180513f1a2ebe1583563 bytes=16777216 sha256=a8dd996b9119b255"
     },
     {
      "name": "layer_dedup_shared_base",
@@ -257,7 +257,7 @@
     {
      "name": "start_rs1",
      "ok": true,
-     "detail": "STARTED rs1 pid=9734"
+     "detail": "STARTED rs1 pid=5697"
     },
     {
      "name": "state_file_running",
@@ -267,12 +267,12 @@
     {
      "name": "containerd_killed_and_respawned",
      "ok": true,
-     "detail": "containerd pid 6636 SIGKILLed; containerd respawned and healthy"
+     "detail": "containerd pid 2389 SIGKILLed; containerd respawned and healthy"
     },
     {
      "name": "task_survives_restart",
      "ok": true,
-     "detail": "after restart: STATE rs1 RUNNING pid=9734 (same VMM pid)"
+     "detail": "after restart: STATE rs1 RUNNING pid=5697 (same VMM pid)"
     },
     {
      "name": "kill_after_restart",
@@ -287,12 +287,12 @@
     {
      "name": "start_rs2",
      "ok": true,
-     "detail": "STARTED rs2 pid=10147"
+     "detail": "STARTED rs2 pid=6098"
     },
     {
      "name": "kill_shim_rs2",
      "ok": true,
-     "detail": "KILLED-SHIM rs2 10126"
+     "detail": "KILLED-SHIM rs2 6057"
     },
     {
      "name": "task_gone_after_shim_crash",
@@ -317,7 +317,7 @@
     {
      "name": "containerd_killed_during_inflight",
      "ok": true,
-     "detail": "containerd pid 9782 SIGKILLed; containerd respawned and healthy"
+     "detail": "containerd pid 5825 SIGKILLed; containerd respawned and healthy"
     },
     {
      "name": "inflight_fails_gracefully",
@@ -335,6 +335,106 @@
      "detail": "CLEAN"
     }
    ]
+  },
+  "exec": {
+   "passed": true,
+   "steps": [
+    {
+     "name": "handshake",
+     "ok": true,
+     "detail": "connected"
+    },
+    {
+     "name": "import",
+     "ok": true,
+     "detail": "IMPORTED docker.io/vesper/trivial:guest"
+    },
+    {
+     "name": "stdin_stdout_stderr_exit7",
+     "ok": true,
+     "detail": "RC 7 | OUT stdin-roundtrip | ERR stderr-only"
+    },
+    {
+     "name": "interactive_shell",
+     "ok": true,
+     "detail": "RC 7 | OUT echo interactive-ok; exit 7 | OUT echo interactive-ok; exit 7 | OUT ~ # echo interactive-ok; exit 7 | OUT interactive-ok"
+    },
+    {
+     "name": "run_tty_resize_exit7",
+     "ok": true,
+     "detail": "RC 7 | OUT /dev/pts/0 | OUT BEFORE | OUT 24 80 | OUT AFTER | OUT 37 101"
+    },
+    {
+     "name": "start_exec_host",
+     "ok": true,
+     "detail": "STARTED ex-host pid=7649"
+    },
+    {
+     "name": "exec_no_shell_exit7",
+     "ok": true,
+     "detail": "RC 7 | OUT exec-output | OUT exec-stderr"
+    },
+    {
+     "name": "exec_tty_resize_exit7",
+     "ok": true,
+     "detail": "RC 7 | OUT /dev/pts/0 | OUT BEFORE | OUT 24 80 | OUT AFTER | OUT 37 101"
+    },
+    {
+     "name": "exec_signal_kill137",
+     "ok": true,
+     "detail": "RC 137 | OUT exec-signal-ready"
+    },
+    {
+     "name": "exec_runtime_error_is_structured",
+     "ok": true,
+     "detail": "RC 1 | OUT exec failed: unable to start container process: exec: \"/no-such-vesper-program\": stat /no-such-vesper-program: no such file or directory | OUT ctr: guest session p1044: guest start p1044: ERROR {\"level\":\"error\",\"msg\":\"exec failed: unable to start container process: exec: \\\"/no-such-vesper-program\\\": stat /no-such-vesper-program: no such file or directory\",\"time\":\"2026-11-09T18:29:39Z\"} (console: /var/log/vesper-microvm-ex-host.log): failed precondition"
+    },
+    {
+     "name": "kill_exec_host",
+     "ok": true,
+     "detail": "KILLED ex-host"
+    },
+    {
+     "name": "delete_exec_host",
+     "ok": true,
+     "detail": "DELETED ex-host"
+    },
+    {
+     "name": "signal_TERM_plain_exit143",
+     "ok": true,
+     "detail": "RC 143"
+    },
+    {
+     "name": "signal_TERM_trap_exit0",
+     "ok": true,
+     "detail": "RC 0 | OUT signal-ready | OUT TERM-caught"
+    },
+    {
+     "name": "signal_KILL_plain_exit137",
+     "ok": true,
+     "detail": "RC 137"
+    },
+    {
+     "name": "init_reaps_orphan",
+     "ok": true,
+     "detail": "RC 7 | OUT orphan-started"
+    },
+    {
+     "name": "tty_init_reaps_orphan",
+     "ok": true,
+     "detail": "RC 7 | OUT orphan-started"
+    },
+    {
+     "name": "init_exit_terminates_exec",
+     "ok": true,
+     "detail": "RC 7 | OUT init-ready"
+    },
+    {
+     "name": "no_leftovers",
+     "ok": true,
+     "detail": "CLEAN"
+    }
+   ]
   }
  },
  "checklist": {
@@ -342,13 +442,22 @@
   "ctr kill and ctr metrics return expected data": true,
   "ctr kill tears the task down": true,
   "restart resilience": true,
-  "block-first rootfs": true
+  "block-first rootfs": true,
+  "non-terminal exec": true,
+  "separate stdin stdout stderr": true,
+  "interactive terminal": true,
+  "terminal resize": true,
+  "exec terminal resize": true,
+  "SIGTERM reaches workload": true,
+  "SIGKILL reaches exec": true,
+  "init exit terminates exec": true
  },
  "open_gaps": [
-  "ctr exec attaches to running container (guest agent, WOR-32)",
-  "CI boots the System VM (TD-005)"
+  "CI boots the System VM (TD-005)",
+  "runc pause and snapshot compatibility (ADR 0006)",
+  "reclaim guest exec ports after 16125 sessions per task (WOR-32)"
  ],
- "steps_total": 55,
+ "steps_total": 74,
  "steps_failed": 0,
  "passed": true
 }

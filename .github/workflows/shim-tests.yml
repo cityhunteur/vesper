@@ -39,5 +39,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: containerd-shim-vesper-v2-${{ github.sha }}
-          path: build/shim/containerd-shim-vesper-v2
+          path: |
+            build/shim/containerd-shim-vesper-v2
+            build/shim/vesper-console
           if-no-files-found: error

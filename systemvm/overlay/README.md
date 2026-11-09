@@ -34,6 +34,28 @@ OpenRC starts. See ADR 0002.
 - `usr/local/bin/vesper-arch`: `status` (`NATIVE <uname -m> binfmt_misc=enabled|absent`, then `INTERP <name> <enabled|disabled> flags= interpreter= version=` per `/proc/sys/fs/binfmt_misc/qemu-*`), `mode ARCH` (`linux/` prefix and `amd64`/`arm64` aliases accepted; `MODE <arch> native|emulated:<interp>|unsupported (no binfmt_misc interpreter for …; supported: …)`, exit 1 when unsupported).
 - `usr/local/bin/vesper-agent`: one process per connection; greets `VESPER-AGENT 1 <hostname>` and answers `PING`, `VERSION`, `ECHO <n>` (reads and returns `n` bytes), `HEALTH` (JSON: `packages_ready`, `services_ready`, OpenRC states of `containerd`, `docker`, `vesper-agent`, `containerd_ok` from `ctr --connect-timeout 2s version`, `docker_ok` and `docker_version` from `docker version`, `kvm` when `/dev/kvm` exists, which it does only when the launcher enabled nested virtualization), `KILL <containerd|docker>` (SIGKILL to the daemon, replies `KILL <name> <pid>`), `MICROVM <args…>` (runs `vesper-microvm <args>`, replies `MICROVM <rc> <count>` then the output lines), `ROOTFS <args…>` (same shape for `vesper-rootfs`), `WORKLOAD <args…>` (same shape for `vesper-workload`), `FCPARITY <args…>` (same shape for `vesper-fcparity`), `CTR <args…>` (same shape for `vesper-ctr`), `SHARE <args…>` (same shape for `vesper-share`), `ARCH <args…>` (same shape for `vesper-arch`), `LOGS <messages|containerd|docker> <n>` (`LOGS <count>` then the lines), `DROP` (closes), `SHUTDOWN` (`BYE` then `poweroff`), `QUIT`; unknown commands get `ERR unknown command`, unknown services or logs `ERR unknown service|log`.
 
+## MicroVM execution (ADR 0006)
+
+`vesper-microvm prepare` copies runc, socat, tini-static, `vesper-console` and their shared libraries
+into the microVM initramfs. Package-lock and ISO verification cover their inputs.
+`runtime.sha256` records copied bytes; the guest verifies it before execution.
+A content stamp rebuilds an old initramfs when its scripts or runtime binaries change.
+`vesper-microvm-init` holds the guest init separately from the manager script.
+
+`launch ID --rootfs PATH --runc-smoke` runs a fixed hello-world through runc and records kernel config
+and available memory on the serial console. `--guest-exec` instead enables the private session service,
+adds vsock and runs `tini-static` with socat on port 1025.
+`vesper-guest-session` writes OCI configs verbatim, opens three socat stream relays and invokes runc.
+It supports start, exec, signal, abort and terminal resize control requests.
+`vesper-console` receives the terminal master through the existing containerd libraries.
+It uses a guest-local Unix socket for resize; no descriptor crosses the VM boundary.
+See [shim/README.md](../../shim/README.md) for the protocol and lifecycle contract.
+
+`vesper-ctr run-stdio|run-tty|interactive|exec|exec-tty|exec-signal|signal-test|run-orphan|exit-with-exec`
+provides the GH #23 hardware probes. `vesper-ptyrun` gives ctr a terminal, initially 24×80,
+then resizes it to the supplied dimensions after three seconds.
+The terminal proof binary comes from `shim/` and is installed by `build-overlay.sh`.
+
 ## Invariants
 
 - Every file in this tree lands at the same path under `/` in the guest; the builder sets owner root, mode from the repository (executable bit preserved) and mtime 0, so the archive is deterministic.

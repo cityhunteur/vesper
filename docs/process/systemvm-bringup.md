@@ -1,7 +1,7 @@
 ---
 status: verified
 owner: cityhunteur
-last_reviewed: 2026-11-06
+last_reviewed: 2026-11-09
 ---
 
 # System VM Build and Boot Pipeline (Phase 1)
@@ -340,19 +340,15 @@ binary vs pinned commit, TD-029) and CE-0003 (no Linux baseline on the same host
 
 ## containerd shim v2 (GH #22, ADR 0004)
 
-`containerd-shim-vesper-v2` (Go module `shim/`, cross-built static for linux/arm64 by `make shim-build` and
-shipped by `make systemvm-overlay` to `/usr/bin` in the guest) registers the runtime `io.containerd.vesper.v2`.
-`ctr -n vesper run --runtime io.containerd.vesper.v2 IMAGE ID CMD…` makes containerd start one shim per task;
-`Create` mounts the snapshot onto `<bundle>/rootfs`, builds `<bundle>/rootfs.ext4` with `mke2fs -d`, and encodes
-the OCI process (`cwd`, `env`, `args`) as the base64 shell command; `Start` runs `vesper-microvm launch ID --rootfs
-… --cmd …` and tails `/var/log/vesper-microvm-ID.log`, copying the lines between the workload markers to the task's
-stdout and taking the exit status from `VESPER-WORKLOAD-EXIT <n>` (137 when the VMM disappears); `Kill` is
-`vesper-microvm stop`; `Delete` is `vesper-microvm cleanup`, image removal and shim shutdown. Exec, terminal,
-stdin, pause, checkpoint and stats return `NotImplemented` (P3.2). The guest driver `vesper-ctr` (`import`, `run
-NAME WORDS…`, `start`, `state`, `kill`, `delete`, `try CTR-ARGS…`, `leftovers`) wraps `ctr`, and
-`make systemvm-shim-suite` runs the GH #22 checklist (21 steps: `ctr run --rm` exit code and output, a detached
-task RUNNING with a pid, start-twice and delete-while-running rejected, unknown task rejected, three concurrent
-tasks with distinct VMM pids, kill and delete of each, no leftovers) into `run/systemvm/shim-report.json`.
+`containerd-shim-vesper-v2` (Go module `shim/`) is built static for Linux arm64 and installed by the overlay.
+It registers `io.containerd.vesper.v2`. `Create` validates the OCI bundle and prepares a private ext4 drive.
+`Start` boots a jailed microVM with `--guest-exec`, sends a generated OCI config over vsock and connects
+independent stdin, stdout and stderr streams. runc executes argv inside the mounted rootfs.
+The console remains available for boot and runtime diagnostics.
+
+The shim supports init and exec lifecycle, terminal resize, stdin EOF, signals and exit status (ADR 0006).
+`make systemvm-shim-suite` checks the original 21 lifecycle cases; `make systemvm-exec-suite` adds 19 exec cases.
+See [shim/README.md](../../shim/README.md) for interfaces, protocol and limits.
 
 ## Block-first rootfs preparation (GH #24)
 
@@ -381,7 +377,7 @@ delete it; SIGKILL a shim and see the task gone, the microVM EXITED and the jail
 
 ## ctr conformance (GH #26)
 
-`make ctr-conformance` runs the shim, bundle and restart suites on a booted System VM and assembles
+`make ctr-conformance` runs the shim, bundle, restart and exec suites on a booted System VM and assembles
 `run/systemvm/ctr-conformance-report.json` (`scripts/systemvm/ctr_conformance_report.py`: baseline lock revisions,
 `baselinectl` metadata, every step per suite, the GH #26 checklist mapping and the open gaps). `CTR_FLAGS=--publish`
 copies a passing report to `docs/specs/ctr-conformance-baseline.json`, which the `ctr Conformance` workflow
@@ -393,8 +389,10 @@ cgroup v2 files so `ctr task metrics` answers. Operations are in [shim-operation
 `vesper-microvm launch ID --vsock` attaches a Firecracker vsock device (guest CID 3) whose host side is the
 Unix socket `/srv/jailer/firecracker/ID/root/v.sock`; a connection sends `CONNECT <port>\n` and gets `OK <port>`,
 the same preface as the launcher bridge. The initramfs carries the guest transport modules and the init loads
-them (`VESPER-VSOCK-OK`); `status ID` shows `vsock=present`. The guest agent that will serve exec, PTY and
-stdio sessions over this transport is the open unit of WOR-32 (see the active ExecPlan).
+them (`VESPER-VSOCK-OK`); `status ID` shows `vsock=present`. `vesper-microvm --guest-exec` now uses this transport for runc sessions (ADR 0006).
+The shim sends OCI configs separately from the ext4 drive and connects three stream ports.
+`make systemvm-exec-suite` checks stdin, separated output, terminal resize, exec and signals.
+The [shim contract](../../shim/README.md) describes lifecycle and protocol details.
 
 ## Proxy bridge convention
 
@@ -408,3 +406,12 @@ reaches a guest port while the VM is up.
 Configuration lives on `vesper-proxy`: `--upstream` (default `vsock://3:2375`), `--vsock-socket-dir` (default
 `/tmp/vesper/vsock`) and `--dial-timeout-seconds` (default 5); the preface is written after the dial succeeds within
 that timeout. `make dev-up` does not use the bridge: it points the proxy at a Unix upstream.
+
+## runc sessions inside microVMs (GH #23, ADR 0006)
+
+The current shim replaces the kernel-command-line and console-log execution path with private runc sessions.
+Legacy `vesper-workload --cmd` probes still use their original console path.
+The new shim supports terminal tasks, stdin EOF, separated stdout/stderr, exec, signal delivery and resize.
+`vesper-microvm launch ID --rootfs PATH --runc-smoke` provides the prerequisite proof.
+`make systemvm-exec-suite` writes `run/systemvm/exec-report.json`.
+Pause, snapshot and checkpoint compatibility with runc remain unresolved and unsupported by the shim.

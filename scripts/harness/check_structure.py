@@ -26,6 +26,7 @@ RULES: Dict[str, Set[str]] = {
     "src/control.rs": set(),
     "src/control/suites.rs": set(),
     "src/control/suites/bundle.rs": set(),
+    "src/control/suites/exec.rs": set(),
     "src/control/suites/restart.rs": set(),
     "src/proxy.rs": {"buildinfo", "platform"},
     "src/ports.rs": set(),

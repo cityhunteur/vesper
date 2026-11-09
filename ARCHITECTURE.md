@@ -97,7 +97,7 @@ allowlist and the line budgets (TD-015).
 | 2. Control plane: `api` | State machine, dispatch, deterministic errors | `api` | `api_matrix`, `baseline`, `buildinfo`, `compat`, `platform`, `spec` | mechanical |
 | 2. Control plane: matrices | Generated route matrices | `api_matrix`, `api_behavior_matrix` | `api`, `baseline`, `spec`; `api_behavior_matrix` also `api_matrix` | mechanical |
 | 2. Control plane: families | Extracted route-family handlers | `api/*` | `super` only (no `crate::` references) | mechanical |
-| 3. Runtime adapters | Socket proxying, published ports, System VM artifacts, guest control channel | `proxy`, `ports`, `systemvm` (+ `systemvm/image_lock`, `systemvm/packages`, `super` only), `control` (+ `control/suites`, `control/suites/{bundle,restart}`, `super` only) | `buildinfo`, `platform` (`control`: nothing local) | mechanical |
+| 3. Runtime adapters | Socket proxying, published ports, System VM artifacts, guest control channel | `proxy`, `ports`, `systemvm` (+ `systemvm/image_lock`, `systemvm/packages`, `super` only), `control` (+ `control/suites`, `control/suites/{bundle,restart,exec}`, `super` only) | `buildinfo`, `platform` (`control`: nothing local) | mechanical |
 | 4. Entry points | `clap` binaries | `src/bin/*` | any library layer | review |
 | 5. Tests and harness | Contract tests, sensors (CI scripts that detect drift), docs, Symphony templates | `tests/`, `src/api/tests.rs`, `scripts/harness/`, `harness/`, `.github/workflows/`, `docs/`, `.symphony/templates/` | may import the library; nothing imports them | review |
 

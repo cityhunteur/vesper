@@ -189,9 +189,107 @@ leftovers() {
   if [ -z "$what" ]; then echo CLEAN; else echo "DIRTY$what"; return 1; fi
 }
 
+
+run_stdio() {
+  name=${1:?}; r=$(ref)
+  out=/tmp/exec-$name.out; err=/tmp/exec-$name.err
+  printf 'stdin-roundtrip\n' | ctr_ run --rm --runtime "$RT" "$r" "$name" /bin/sh -c 'cat; echo stderr-only >&2; exit 7' > "$out" 2> "$err"
+  rc=$?
+  echo "RC $rc"
+  sed 's/^/OUT /' "$out"
+  sed 's/^/ERR /' "$err"
+}
+
+exec_() {
+  name=${1:?}; id=${2:?}
+  out=$(ctr_ task exec --exec-id "$id" "$name" /bin/busybox sh -c 'echo exec-output; echo exec-stderr >&2; exit 7' 2>&1); rc=$?
+  emit "$rc" "$out"
+}
+
+signal_test() {
+  name=${1:?}; signal=${2:?}; trap_mode=${3:-plain}
+  command='exec sleep 300'
+  if [ "$trap_mode" = trap ]; then command="trap 'echo TERM-caught; exit 0' TERM; echo signal-ready; while :; do sleep 0.1; done"; fi
+  inflight_start "$name" "$command" >/dev/null
+  ready=0
+  for _ in $(seq 1 200); do
+    # The durable running transition is written after runc publishes its pid.
+    if grep -q '"phase":"running"' "$BUNDLES/$name/vesper-task.json" 2>/dev/null; then ready=1; break; fi
+    sleep 0.1
+  done
+  [ "$ready" = 1 ] || { echo 'ERR task did not start'; return 1; }
+  if [ "$trap_mode" = trap ]; then
+    for _ in $(seq 1 100); do grep -q signal-ready "/tmp/inflight-$name.out" && break; sleep 0.1; done
+    grep -q signal-ready "/tmp/inflight-$name.out" || { echo 'ERR trap not ready'; return 1; }
+  fi
+  ctr_ task kill -s "$signal" "$name" || return 1
+  inflight_result "$name" 30
+}
+
+run_tty() {
+  name=${1:?}; mode=${2:-run}; r=$(ref)
+  if [ "$mode" = exec ]; then
+    out=$(vesper-ptyrun 37 101 ctr -n "$NS" task exec --tty --exec-id tty-exec "$name" /bin/busybox sh -c 'tty; echo BEFORE; stty size; sleep 5; echo AFTER; stty size; exit 7' 2>&1)
+  else
+    out=$(vesper-ptyrun 37 101 ctr -n "$NS" run --rm --tty --runtime "$RT" "$r" "$name" /bin/busybox sh -c 'tty; echo BEFORE; stty size; sleep 2; echo AFTER; stty size; exit 7' 2>&1)
+  fi
+  rc=$?
+  emit "$rc" "$out"
+}
+
+interactive() {
+  name=${1:?}; r=$(ref)
+  out=$(printf 'echo interactive-ok; exit 7\n' | vesper-ptyrun 37 101 ctr -n "$NS" run --rm --tty --runtime "$RT" "$r" "$name" /bin/sh 2>&1)
+  rc=$?
+  emit "$rc" "$out"
+}
+
+run_orphan() {
+  name=${1:?}; mode=${2:-plain}; r=$(ref)
+  if [ "$mode" = tty ]; then
+    out=$(vesper-ptyrun 37 101 ctr -n "$NS" run --rm --tty --runtime "$RT" "$r" "$name" /bin/sh -c 'sleep 300 & echo orphan-started; exit 7' 2>&1); rc=$?
+    emit "$rc" "$out"
+  else
+    run_image "$r" "$name" 'sleep 300 & echo orphan-started; exit 7'
+  fi
+}
+
+exit_with_exec() {
+  name=${1:?}
+  inflight_start "$name" 'echo init-ready; sleep 3; exit 7' >/dev/null
+  for _ in $(seq 1 100); do grep -q init-ready "/tmp/inflight-$name.out" && break; sleep 0.1; done
+  ctr_ task exec --detach --exec-id orphan-exec "$name" /bin/busybox sleep 300 || return 1
+  inflight_result "$name" 20
+}
+
+exec_signal() {
+  name=${1:?}
+  rm -f /tmp/vesper-exec-signal.rc
+  (ctr_ task exec --exec-id signal-exec "$name" /bin/busybox sh -c 'echo exec-signal-ready; exec /bin/busybox sleep 300' >/tmp/vesper-exec-signal.out 2>&1; echo $? >/tmp/vesper-exec-signal.rc) </dev/null >/dev/null 2>&1 &
+  ready=0
+  for _ in $(seq 1 100); do
+    if grep -q exec-signal-ready /tmp/vesper-exec-signal.out; then ready=1; break; fi
+    sleep 0.1
+  done
+  [ "$ready" = 1 ] || { echo 'ERR exec not running'; return 1; }
+  ctr_ task kill --exec-id signal-exec -s KILL "$name" || return 1
+  for _ in $(seq 1 100); do [ -f /tmp/vesper-exec-signal.rc ] && break; sleep 0.1; done
+  [ -f /tmp/vesper-exec-signal.rc ] || { echo 'ERR exec did not exit'; return 1; }
+  emit "$(cat /tmp/vesper-exec-signal.rc)" "$(cat /tmp/vesper-exec-signal.out)"
+}
+
 cmd=${1:-}; shift 2>/dev/null
 case "$cmd" in
   import) import ;;
+  run-orphan) run_orphan "$@" ;;
+  exit-with-exec) exit_with_exec "$@" ;;
+  exec-signal) exec_signal "$@" ;;
+  interactive) interactive "$@" ;;
+  run-tty) run_tty "$@" ;;
+  exec-tty) run_tty "$1" exec ;;
+  run-stdio) run_stdio "$@" ;;
+  exec) exec_ "$@" ;;
+  signal-test) signal_test "$@" ;;
   run) run "$@" ;;
   start) start "$@" ;;
   state) state "$@" ;;
