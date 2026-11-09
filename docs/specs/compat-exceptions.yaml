@@ -46,6 +46,8 @@ exceptions:
     expiry_date: "2027-03-31"
     target_release: parity-ga
     status: open
+    approved_by: cityhunteur
+    approved_on: "2026-11-09"
     description: >-
       Guest exec (WOR-32, ADR 0006) overrides the workload's requested in-guest security posture rather
       than honoring it: shim/internal/bundle/guest.go always grants the full Linux capability set across
