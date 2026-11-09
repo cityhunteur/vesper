@@ -6,19 +6,20 @@ last_reviewed: 2026-11-09
 
 # Symphony milestones
 
-### 2026-11-09 — WOR-32 — runc guest execution implemented and verified; PR #145 awaits landing
+### 2026-11-09 — WOR-32 — runc guest execution implemented, reviewed and merged (PR #145)
 - GitHub issue: #23 (mirror #72)
-- PR: [#145](https://github.com/cityhunteur/vesper/pull/145)
-- Commit: `74e6544` (implementation; all nine source CI checks green)
+- PR: [#145](https://github.com/cityhunteur/vesper/pull/145) merged
+- Commit: `47ad201` (squash merge; all CI green, incl. validate-compat-exceptions and the parity-baseline cross-check). Implementation `74e6544`; review fixes `cf18596`
 - Phase: 3
 - Parity unit: init and exec lifecycle, independent stdio, interactive terminals and resize, signal exits 0/7/137/143 through runc inside the microVM
-- Result: keep, pending review and merge
+- Review: a post-implementation review raised four findings, all resolved in `cf18596` — the workload's requested in-guest security posture is deliberately overridden (full capabilities, no-new-privileges off, LSM labels dropped) because the microVM is the isolation boundary, now tracked as compat exception CE-0004 (open, awaiting human approval before GA); a latent `watchDone` hang guarded; the `OpenSession` ordering comment corrected; two known limits recorded (exec `SIGNAL` ignores `all`; kill/exit race)
+- Result: keep, merged
 - Verification bundle: `.symphony/runs/WOR-32/current/`; raw evidence in `run/WOR-32/`; committed [ctr capture](../specs/ctr-conformance-baseline.json) records the clean source SHA and baseline revisions
 - Council summary: two independent reviewers plus primary review; resource, abort, orphan, event-order and shutdown findings fixed and rechecked
 - Harness update: `make systemvm-exec-suite` (19/19); ctr conformance now 74/74; source-stamped captures; reliability summary quoting fixed
 - Runtime evidence: complete pinned kernel config and runc hello-world; legacy microVM/rootfs/workload/control and fresh services suites passed; 50/50 boots with maximum 2846 ms against 5000 ms, services and Docker smoke green, zero leaked resources
-- Remaining risks: port reclamation after 16,125 execs per task (TD-041); pause/snapshot semantics (TD-042); dedicated performance measurement and CI hardware (TD-033, TD-005)
-- Truthful project state after this milestone: the implementation branch meets the GH #23 checks; main still awaits PR #145. The already-closed tracker state predates this implementation.
+- Remaining risks: CE-0004 (security-posture override) is open and unapproved, needing a human's acceptance before GA; port reclamation after 16,125 execs per task (TD-041); pause/snapshot semantics (TD-042); dedicated performance measurement and CI hardware (TD-033, TD-005)
+- Truthful project state after this milestone: Phase 3 guest execution is implemented, reviewed and on main at `47ad201`. The WOR-32 trackers (Linear Done, GH #23/#72 closed) were already closed before this implementation and were updated with evidence comments only, not reopened. CE-0004 remains an open GA-parity governance item.
 
 ### 2026-11-08 — WOR-26 — compat exceptions CE-0001..CE-0003 approved as pre-GA deviations, GH #21 complete, Phase 2 epic closed
 - GitHub issue: #21 (mirror #63); epic #4 (WOR-14)
