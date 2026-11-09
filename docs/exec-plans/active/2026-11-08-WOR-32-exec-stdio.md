@@ -47,8 +47,12 @@ TERM` behave as with runc, proven by a `make systemvm-exec-suite` checklist.
   workload and control suites passed. Rust, Go, race, shell protocol, contract, matrix and docs checks passed.
 - [x] (2026-11-09, local hardware) Fresh-boot services suite passed all nine checks. The earlier
   post-conformance failure was the bounded startup-log window, not failure to recover a service.
-- [ ] Capture conformance against the committed source SHA, run 50-cycle reliability and collect the verification bundle.
-- [ ] PR(s) merged, CI green, GH #23 checklist and WOR-32 updated, milestone entry; plan moved to completed.
+- [x] (2026-11-09) Clean-source conformance captured at `74e6544`: 74/74; all nine source CI checks green.
+- [x] (2026-11-09, M3 Pro) Reliability: 50/50 boots, maximum 2846 ms against 5000 ms; control, services,
+  Docker smoke and leak checks passed. No leaked launchers, proxies, sockets or pid files.
+- [x] (2026-11-09) Evidence bundle collected at `.symphony/runs/WOR-32/current/`; publish it with the issue evidence update.
+- [ ] PR #145 reviewed and merged; move this plan to completed after landing. GitHub #23/#72 and
+  WOR-32 were already closed before this implementation; add evidence comments without advancing their state.
 
 ## Surprises & Discoveries
 
@@ -68,6 +72,9 @@ TERM` behave as with runc, proven by a `make systemvm-exec-suite` checklist.
   inside Delete could close ttrpc before its reply. Containerd already calls Shutdown after Delete;
   the implementation now follows that order and tests it.
 
+- Observation: the reliability script's summary used invalid Python quoting, although the JSON report passed.
+  Replace that print expression with `str.format` and validate it against the captured 50-boot report.
+
 ## Decision Log
 
 - Decision (2026-11-09): implement ADR 0006 at the owner's request. Supersede the custom Go spawning agent
@@ -81,7 +88,8 @@ TERM` behave as with runc, proven by a `make systemvm-exec-suite` checklist.
 
 ## Outcomes & Retrospective
 
-The implementation passed the 74-step conformance capture and legacy runtime probes. Remote CI and landing are pending.
+Implementation commit `74e6544` passed all nine CI checks and the clean-source 74-step conformance capture.
+The 50-boot reliability report passed with zero failures or leaks. PR #145 awaits review and merge.
 TD-041 records bounded exec-port allocation. TD-042 records unresolved pause/snapshot compatibility.
 TD-034 is resolved for the shim; the legacy `vesper-workload --cmd` diagnostic path remains unchanged.
 

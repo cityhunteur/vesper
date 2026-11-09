@@ -49,7 +49,7 @@ say "leak snapshot before: $(snapshot "${RUN_DIR}/leak-before.json")"
 
 say "boot stress: ${CYCLES} cycles"
 if bash scripts/systemvm/boot-smoke.sh "${CYCLES}" 60 >> "${LOG}" 2>&1; then
-  say "boot stress passed: $(python3 -c 'import json;d=json.load(open("run/systemvm/boot-report.json"));print(f"{d[\"successful\"]}/{d[\"iterations\"]} max_boot_ms={d[\"max_boot_ms\"]} threshold={d.get(\"max_boot_allowed_ms\")}")')"
+  say "boot stress passed: $(python3 -c 'import json;d=json.load(open("run/systemvm/boot-report.json"));print("{}/{} max_boot_ms={} threshold={}".format(d["successful"], d["iterations"], d["max_boot_ms"], d.get("max_boot_allowed_ms")))')"
 else
   fail "boot stress (see run/systemvm/boot.log and run/systemvm/console.log)"
 fi
