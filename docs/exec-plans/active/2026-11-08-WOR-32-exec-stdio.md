@@ -75,6 +75,17 @@ TERM` behave as with runc, proven by a `make systemvm-exec-suite` checklist.
 - Observation: the reliability script's summary used invalid Python quoting, although the JSON report passed.
   Replace that print expression with `str.format` and validate it against the captured 50-boot report.
 
+Known limits (review 2026-11-09):
+
+- The workload's requested in-guest security posture is overridden, not honored: the full capability set is
+  always granted and no-new-privileges / LSM labels are cleared. Tracked as compat exception CE-0004 (needs
+  human approval before GA); the microVM is the isolation boundary (ADR 0006).
+- `SIGNAL` to an exec session targets the single exec pid and ignores the `all` flag (only an init `kill`
+  uses `runc kill --all`), so a signal does not reach an exec's descendant processes.
+- Killing a process in the narrow window after the guest writes its exit status but before the shim watcher
+  records the exit can surface a transient "session-not-running" error rather than a no-op; containerd
+  tolerates a kill that races a natural exit.
+
 ## Decision Log
 
 - Decision (2026-11-09): implement ADR 0006 at the owner's request. Supersede the custom Go spawning agent

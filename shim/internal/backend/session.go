@@ -74,7 +74,9 @@ func dialPort(ctx context.Context, path string, port uint32) (*net.UnixConn, err
 	}
 }
 
-// OpenSession starts runc only after all streams are connected, so short-lived output is retained.
+// OpenSession connects the control channel, then the three stdio streams. The guest launches runc at
+// READY (before these stream dials), so the stdio bridges buffer early output; a process that writes
+// more than the pipe buffer and exits before the host connects can block the guest writer until then.
 func (m *MicroVM) OpenSession(ctx context.Context, id string, port uint32, config []byte, isExec bool, paths IO) (_ *Session, err error) {
 	if len(config) == 0 || len(config) > 1048576 {
 		return nil, fmt.Errorf("guest config must be 1..1048576 bytes")

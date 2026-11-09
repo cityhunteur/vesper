@@ -40,6 +40,10 @@ func GuestProcess(p *specs.Process) (*specs.Process, error) {
 	if out.Terminal && out.ConsoleSize == nil {
 		out.ConsoleSize = &specs.Box{Height: 24, Width: 80}
 	}
+	// The microVM is the isolation boundary (ADR 0006), so a workload's requested in-guest security
+	// posture is deliberately overridden, not honored: AppArmor/SELinux labels are dropped,
+	// no-new-privileges is cleared, and the full capability set is granted below even when the spec
+	// asked for a narrower one. This deviation from containerd/runc semantics is tracked as CE-0004.
 	out.ApparmorProfile, out.SelinuxLabel = "", ""
 	out.NoNewPrivileges = false
 	// The pinned 6.12 kernel supports capabilities through CAP_CHECKPOINT_RESTORE.

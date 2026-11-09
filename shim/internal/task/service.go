@@ -191,6 +191,9 @@ func (s *Service) Start(ctx context.Context, r *taskAPI.StartRequest) (*taskAPI.
 	}
 	if err := t.MarkRunning(pid); err != nil {
 		session.Close()
+		// No watcher is started below, so this session's watchDone never closes. Clear the field
+		// so the init watcher's child-wait (keyed on Session != nil) does not block on it forever.
+		t.Session = nil
 		return nil, errgrpc.ToGRPC(err)
 	}
 	if r.ExecID == "" {
