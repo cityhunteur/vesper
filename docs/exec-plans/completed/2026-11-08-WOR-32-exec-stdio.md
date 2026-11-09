@@ -81,8 +81,8 @@ TERM` behave as with runc, proven by a `make systemvm-exec-suite` checklist.
 Known limits (review 2026-11-09):
 
 - The workload's requested in-guest security posture is overridden, not honored: the full capability set is
-  always granted and no-new-privileges / LSM labels are cleared. Tracked as compat exception CE-0004 (needs
-  human approval before GA); the microVM is the isolation boundary (ADR 0006).
+  always granted and no-new-privileges / LSM labels are cleared. Tracked as compat exception CE-0004,
+  approved by cityhunteur on 2026-11-09 as a pre-GA deviation; the microVM is the isolation boundary (ADR 0006).
 - `SIGNAL` to an exec session targets the single exec pid and ignores the `all` flag (only an init `kill`
   uses `runc kill --all`), so a signal does not reach an exec's descendant processes.
 - Killing a process in the narrow window after the guest writes its exit status but before the shim watcher
@@ -106,14 +106,12 @@ Implementation commit `74e6544` passed all nine CI checks and the clean-source 7
 The 50-boot reliability report passed with zero failures or leaks. PR #145 merged as `47ad201` with CI green.
 A post-implementation review raised four findings, all resolved in `cf18596`: the workload's requested
 in-guest security posture is deliberately overridden (full capabilities, no-new-privileges off, LSM labels
-dropped) because the microVM is the isolation boundary — now tracked as compat exception CE-0004, open and
-awaiting human approval before GA; a latent `watchDone` hang on the `MarkRunning`-after-session path was
+dropped) because the microVM is the isolation boundary — now tracked as compat exception CE-0004, approved by cityhunteur on 2026-11-09 as a pre-GA deviation; a latent `watchDone` hang on the `MarkRunning`-after-session path was
 guarded; the `OpenSession` ordering comment was corrected; and two known limits (exec `SIGNAL` ignores the
 `all` flag, and a kill/exit race) were recorded.
 TD-041 records bounded exec-port allocation. TD-042 records unresolved pause/snapshot compatibility.
 TD-034 is resolved for the shim; the legacy `vesper-workload --cmd` diagnostic path remains unchanged.
-Remaining gate: CE-0004 needs a human's acceptance as a pre-GA deviation (the WOR-32 trackers are already
-closed; this is a GA-parity governance item, not a reopen).
+CE-0004 was approved by cityhunteur on 2026-11-09 as a pre-GA deviation; no WOR-32 gate remains (the trackers were already closed).
 
 ## Context and Orientation
 

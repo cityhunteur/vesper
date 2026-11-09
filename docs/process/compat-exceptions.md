@@ -40,9 +40,9 @@ capture and the registry disagree about which ids are open.
 A fourth open exception, CE-0004 (WOR-32 / GH #23, owned by cityhunteur, expiry 2027-03-31, target `parity-ga`),
 records that guest exec deliberately overrides a workload's requested in-guest security posture: it always grants
 the full capability set, forces no-new-privileges off and drops AppArmor/SELinux labels, because the microVM is
-the isolation boundary (ADR 0006). Unlike CE-0001..CE-0003 it is not yet approved (`approved_by`/`approved_on`
-are unset), so it needs a human's acceptance before GA. It is also listed in the parity baseline capture so the
-`Parity Baseline` workflow's registry cross-check stays green.
+the isolation boundary (ADR 0006). It was approved by cityhunteur on 2026-11-09 (`approved_by`/`approved_on`),
+so `compatexctl` now counts four approved open exceptions. It is also listed in the parity baseline capture so
+the `Parity Baseline` workflow's registry cross-check stays green.
 
 ## Policy checks
 
