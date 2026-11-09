@@ -51,8 +51,11 @@ TERM` behave as with runc, proven by a `make systemvm-exec-suite` checklist.
 - [x] (2026-11-09, M3 Pro) Reliability: 50/50 boots, maximum 2846 ms against 5000 ms; control, services,
   Docker smoke and leak checks passed. No leaked launchers, proxies, sockets or pid files.
 - [x] (2026-11-09) Evidence bundle collected at `.symphony/runs/WOR-32/current/`; publish it with the issue evidence update.
-- [ ] PR #145 reviewed and merged; move this plan to completed after landing. GitHub #23/#72 and
-  WOR-32 were already closed before this implementation; add evidence comments without advancing their state.
+- [x] (2026-11-09) PR #145 reviewed and merged as `47ad201`, all CI green. A post-implementation review
+  (four findings) was resolved in `cf18596`: CE-0004 registered for the security-posture override, a latent
+  watchDone hang guarded, the OpenSession ordering comment corrected, and two known limits recorded.
+  GitHub #23/#72 and WOR-32 were already closed before this implementation; evidence comments were added
+  without advancing their state. Plan moved to completed.
 
 ## Surprises & Discoveries
 
@@ -100,9 +103,17 @@ Known limits (review 2026-11-09):
 ## Outcomes & Retrospective
 
 Implementation commit `74e6544` passed all nine CI checks and the clean-source 74-step conformance capture.
-The 50-boot reliability report passed with zero failures or leaks. PR #145 awaits review and merge.
+The 50-boot reliability report passed with zero failures or leaks. PR #145 merged as `47ad201` with CI green.
+A post-implementation review raised four findings, all resolved in `cf18596`: the workload's requested
+in-guest security posture is deliberately overridden (full capabilities, no-new-privileges off, LSM labels
+dropped) because the microVM is the isolation boundary — now tracked as compat exception CE-0004, open and
+awaiting human approval before GA; a latent `watchDone` hang on the `MarkRunning`-after-session path was
+guarded; the `OpenSession` ordering comment was corrected; and two known limits (exec `SIGNAL` ignores the
+`all` flag, and a kill/exit race) were recorded.
 TD-041 records bounded exec-port allocation. TD-042 records unresolved pause/snapshot compatibility.
 TD-034 is resolved for the shim; the legacy `vesper-workload --cmd` diagnostic path remains unchanged.
+Remaining gate: CE-0004 needs a human's acceptance as a pre-GA deviation (the WOR-32 trackers are already
+closed; this is a GA-parity governance item, not a reopen).
 
 ## Context and Orientation
 

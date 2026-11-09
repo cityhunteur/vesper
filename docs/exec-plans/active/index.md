@@ -5,4 +5,3 @@ Plans currently in progress. Add a row when you create a plan, and move the row 
 
 | Plan | Goal | Started | Owner |
 |---|---|---|---|
-| [2026-11-08-WOR-32-exec-stdio.md](2026-11-08-WOR-32-exec-stdio.md) | Exec, PTY, stdio and signals through runc in the microVM (GH #23, ADR 0006); transport landed, design reset to runc-delegation | 2026-11-08 | cityhunteur |
