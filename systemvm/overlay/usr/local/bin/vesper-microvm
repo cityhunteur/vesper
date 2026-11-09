@@ -40,12 +40,22 @@ prepare() {
     tail -c "+$((off + 1))" "$k" | head -c "$size" | gunzip -c > "$MVM/Image.tmp" || { echo "ERR kernel unpack failed"; return 1; }
     mv "$MVM/Image.tmp" "$MVM/Image"
   fi
-  if [ ! -f "$MVM/initrd.gz" ]; then
+  # Runtime bytes inherit the package-lock and ISO digests verified by build-overlay.sh.
+  libs=$(for bin in /usr/bin/runc /usr/bin/socat; do ldd "$bin" || exit 1; done 2>&1) || { echo "ERR runtime library closure: $libs"; return 1; }
+  runtime_files="/sbin/tini-static /usr/bin/vesper-console /bin/busybox /lib/ld-musl-aarch64.so.1 /usr/bin/runc /usr/bin/socat $(printf '%s\n' "$libs" | awk '{for(i=1;i<=NF;i++) if ($i ~ /^\//) print $i}' | sort -u)"
+  stamp=$(sha256sum /usr/local/bin/vesper-microvm /usr/local/bin/vesper-microvm-init /usr/local/bin/vesper-guest-session $runtime_files | sha256sum | cut -d ' ' -f 1)
+  if [ ! -f "$MVM/initrd.gz" ] || [ "$(cat "$MVM/initrd.sha256" 2>/dev/null)" != "$stamp" ]; then
     rm -rf "$MVM/initroot"
     mkdir -p "$MVM/initroot/bin" "$MVM/initroot/lib" "$MVM/initroot/dev" "$MVM/initroot/proc" "$MVM/initroot/sys"
     cp /bin/busybox "$MVM/initroot/bin/busybox"
     cp /lib/ld-musl-aarch64.so.1 "$MVM/initroot/lib/ld-musl-aarch64.so.1"
     ln -s busybox "$MVM/initroot/bin/sh"
+    for src in $runtime_files; do
+      [ -f "$src" ] || { echo "ERR runtime member $src missing"; return 1; }
+      mkdir -p "$MVM/initroot$(dirname "$src")"
+      cp -L "$src" "$MVM/initroot$src" || return 1
+    done
+    for src in $runtime_files; do sha256sum "$MVM/initroot$src"; done | sed "s|$MVM/initroot/||" > "$MVM/initroot/runtime.sha256"
     # Kernel modules for a root drive (virtio-mmio transport, virtio-blk, ext4 and its deps) from the modloop.
     kver=$(uname -r)
     mdir="$MVM/initroot/lib/modules/$kver"
@@ -60,67 +70,33 @@ prepare() {
       [ -f "/lib/modules/$kver/$f" ] && cp "/lib/modules/$kver/$f" "$mdir/$f"
     done
     mkdir -p "$MVM/initroot/newroot"
-    cat > "$MVM/initroot/init" <<'INIT'
-#!/bin/sh
-/bin/busybox mount -t proc proc /proc 2>/dev/null
-/bin/busybox mount -t sysfs sysfs /sys 2>/dev/null
-echo "VESPER-MICROVM-OK"
-if /bin/busybox grep -q vesper_exit=1 /proc/cmdline; then
-  /bin/busybox poweroff -f
-fi
-if /bin/busybox grep -q vesper_vsock=1 /proc/cmdline; then
-  /bin/busybox modprobe -a virtio_mmio vsock vmw_vsock_virtio_transport_common vmw_vsock_virtio_transport 2>&1 \
-    && echo "VESPER-VSOCK-OK" || echo "VESPER-VSOCK-FAILED"
-fi
-if /bin/busybox grep -q vesper_rootfs=1 /proc/cmdline; then
-  /bin/busybox modprobe -a virtio_mmio virtio_blk crc32c_generic libcrc32c ext4 2>&1
-  /bin/busybox mount -t devtmpfs devtmpfs /dev 2>/dev/null
-  for i in 1 2 3 4 5 6 7 8 9 10; do [ -b /dev/vda ] && break; /bin/busybox sleep 0.5; done
-  if /bin/busybox mount -t ext4 /dev/vda /newroot; then
-    src=$(/bin/busybox sed -n 's/.*"image_id":"\([^"]*\)".*/\1/p' /newroot/etc/vesper-provenance.json 2>/dev/null)
-    echo "VESPER-ROOTFS-OK ${src:-no-provenance}"
-    cmd64=$(/bin/busybox sed -n 's/.*vesper_cmd=\([A-Za-z0-9+/=]*\).*/\1/p' /proc/cmdline)
-    if [ -n "$cmd64" ]; then
-      cmd=$(echo "$cmd64" | /bin/busybox base64 -d)
-      /bin/busybox mkdir -p /newroot/proc /newroot/dev /newroot/tmp
-      /bin/busybox mount -t proc proc /newroot/proc 2>/dev/null
-      /bin/busybox mount -t devtmpfs devtmpfs /newroot/dev 2>/dev/null
-      echo "VESPER-WORKLOAD-START"
-      /bin/busybox chroot /newroot /bin/sh -c "$cmd"
-      rc=$?
-      echo "VESPER-WORKLOAD-EXIT $rc"
-      /bin/busybox poweroff -f
-    fi
-    if [ -x /newroot/sbin/init ]; then
-      exec /bin/busybox switch_root /newroot /sbin/init
-    fi
-    /bin/busybox chroot /newroot /bin/busybox echo "VESPER-ROOTFS-EXEC-OK" || echo "VESPER-ROOTFS-EXEC-FAILED"
-  else
-    echo "VESPER-ROOTFS-MOUNT-FAILED"
-  fi
-fi
-exec /bin/busybox sleep 86400
-INIT
+    cp "/media/vda/boot/config-$kver" "$MVM/initroot/kernel.config" || return 1
+    cp /usr/local/bin/vesper-microvm-init "$MVM/initroot/init"
+    cp /usr/local/bin/vesper-guest-session "$MVM/initroot/bin/vesper-guest-session"
     chmod +x "$MVM/initroot/init"
-    (cd "$MVM/initroot" && find . | cpio -o -H newc 2>/dev/null | gzip -c > "$MVM/initrd.gz") || { echo "ERR initramfs build failed"; return 1; }
+    (cd "$MVM/initroot" && find . | cpio -o -H newc 2>/dev/null | gzip -c > "$MVM/initrd.gz.tmp") || { echo "ERR initramfs build failed"; return 1; }
+    mv "$MVM/initrd.gz.tmp" "$MVM/initrd.gz"
+    echo "$stamp" > "$MVM/initrd.sha256"
   fi
   echo "PREPARED kernel=$(stat -c %s "$MVM/Image") initrd=$(stat -c %s "$MVM/initrd.gz") firecracker=$("$FC_DIR/firecracker" --version 2>/dev/null | head -1)"
 }
 
 launch() {
   id=$1; shift
-  mode=""; rootfs=""; cmd64=""; vsock=0
+  mode=""; rootfs=""; cmd64=""; vsock=0; runc_smoke=0; guestexec=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --exit) mode=--exit ;;
       --vsock) vsock=1 ;;
+      --guest-exec) guestexec=1; vsock=1 ;;
+      --runc-smoke) runc_smoke=1 ;;
       --rootfs) rootfs=$2; shift ;;
       --cmd) cmd64=$2; shift ;;
       *) echo "ERR unknown launch option $1"; return 2 ;;
     esac
     shift
   done
-  [ -f "$MVM/Image" ] && [ -f "$MVM/initrd.gz" ] || prepare >/dev/null || return 1
+  prep=$(prepare) || { echo "$prep"; return 1; }
   if [ -n "$rootfs" ] && [ ! -f "$rootfs" ]; then echo "ERR rootfs $rootfs missing"; return 1; fi
   if [ -n "$(fcpid "$id")" ]; then echo "ERR $id already running"; return 1; fi
   root="$JAIL/firecracker/$id/root"
@@ -130,6 +106,14 @@ launch() {
   cp "$MVM/initrd.gz" "$root/initrd.gz"
   extra=""
   [ "$mode" = "--exit" ] && extra=" vesper_exit=1"
+  if [ "$runc_smoke" = 1 ]; then
+    [ -n "$rootfs" ] && [ -z "$cmd64" ] && [ -z "$mode" ] || { echo "ERR --runc-smoke needs --rootfs and excludes --cmd/--exit"; return 2; }
+    extra="$extra vesper_runc_smoke=1"
+  fi
+  if [ "$guestexec" = 1 ]; then
+    [ -n "$rootfs" ] && [ -z "$cmd64" ] && [ -z "$mode" ] && [ "$runc_smoke" = 0 ] || { echo "ERR --guest-exec needs --rootfs and excludes --cmd/--exit/--runc-smoke"; return 2; }
+    extra="$extra vesper_guest_exec=1"
+  fi
   drives="[]"
   if [ -n "$cmd64" ]; then
     [ -n "$rootfs" ] || { echo "ERR --cmd needs --rootfs"; return 2; }

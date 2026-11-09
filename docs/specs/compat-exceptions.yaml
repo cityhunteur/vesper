@@ -40,3 +40,18 @@ exceptions:
       baseline on the same host class exists, so the design-v0 "within 20% of Linux" targets cannot be
       evaluated yet. Resolve by capturing a Linux baseline on comparable hardware and pinning a dedicated
       microVM kernel.
+  - id: CE-0004
+    owner: cityhunteur
+    issue: 23
+    expiry_date: "2027-03-31"
+    target_release: parity-ga
+    status: open
+    description: >-
+      Guest exec (WOR-32, ADR 0006) overrides the workload's requested in-guest security posture rather
+      than honoring it: shim/internal/bundle/guest.go always grants the full Linux capability set across
+      all five sets (including ambient), forces NoNewPrivileges to false, and drops AppArmor/SELinux
+      labels, regardless of what the OCI process spec asked for. This deviates from containerd/runc, which
+      honor a requested reduced capability set or no-new-privileges. The deviation is intentional because
+      the microVM, not the in-guest container, is the isolation boundary (no new namespaces, no second
+      seccomp profile). Resolve by either honoring a more restrictive requested posture or confirming the
+      full-capability model at the parity-GA security review. Needs human approval before GA (unapproved).

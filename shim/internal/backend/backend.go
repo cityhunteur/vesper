@@ -4,7 +4,6 @@ package backend
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -37,13 +36,17 @@ type Backend interface {
 	// chain was built before, else by building it from the mounted bundle rootfs. The record describes
 	// what happened.
 	Prepare(ctx context.Context, task, bundleDir string, mounts []mount.Mount) (image string, meta bundle.Meta, err error)
-	// Launch boots the microVM with the image and the encoded command; returns the VMM pid.
-	Launch(ctx context.Context, id, image, cmdB64 string) (pid int, err error)
+	// Launch boots the microVM and its private guest control listener; returns the VMM pid.
+	Launch(ctx context.Context, id, image string) (pid int, err error)
+	OpenSession(ctx context.Context, id string, port uint32, config []byte, isExec bool, paths IO) (*Session, error)
+	Abort(ctx context.Context, id string, port uint32) error
+	Resize(ctx context.Context, id string, port, rows, cols uint32) error
+	Signal(ctx context.Context, id string, port, signal uint32, all bool) error
 	// Stop terminates the microVM (SIGTERM, then SIGKILL after a grace period).
 	Stop(ctx context.Context, id string) error
 	// Cleanup removes the jail, the cgroup and any process; it is safe to call repeatedly.
 	Cleanup(ctx context.Context, id string) error
-	// LogPath is the microVM console log that carries the workload markers.
+	// LogPath is the microVM boot and runtime diagnostic log.
 	LogPath(id string) string
 	// Alive reports whether the VMM process still runs.
 	Alive(id string) bool
@@ -207,8 +210,8 @@ func copyFile(src, dst string) error {
 	return os.Rename(tmp, dst)
 }
 
-func (m *MicroVM) Launch(ctx context.Context, id, image, cmdB64 string) (int, error) {
-	out, err := exec.CommandContext(ctx, microvmBin, "launch", id, "--rootfs", image, "--cmd", cmdB64).CombinedOutput()
+func (m *MicroVM) Launch(ctx context.Context, id, image string) (int, error) {
+	out, err := exec.CommandContext(ctx, microvmBin, "launch", id, "--rootfs", image, "--guest-exec").CombinedOutput()
 	first := strings.SplitN(strings.TrimSpace(string(out)), "\n", 2)[0]
 	if err != nil || !strings.HasPrefix(first, "LAUNCHED ") {
 		return 0, fmt.Errorf("vesper-microvm launch %s: %v: %s", id, err, first)
@@ -247,34 +250,6 @@ func (m *MicroVM) LogPath(id string) string {
 func (m *MicroVM) Alive(id string) bool {
 	out, err := exec.Command(microvmBin, "status", id).Output()
 	return err == nil && strings.HasPrefix(string(out), "RUNNING ")
-}
-
-// EncodeCommand turns an OCI process (args, env, cwd) into the base64 shell command the microVM init
-// runs inside the rootfs: `cd CWD; export ENV…; exec ARGS` with every word shell-quoted.
-func EncodeCommand(args, env []string, cwd string) (string, error) {
-	if len(args) == 0 {
-		return "", fmt.Errorf("process has no args")
-	}
-	var b strings.Builder
-	if cwd != "" && cwd != "/" {
-		b.WriteString("cd " + quote(cwd) + " || exit 126; ")
-	}
-	for _, kv := range env {
-		k, v, ok := strings.Cut(kv, "=")
-		if !ok || k == "" {
-			continue
-		}
-		b.WriteString("export " + k + "=" + quote(v) + "; ")
-	}
-	b.WriteString("exec")
-	for _, a := range args {
-		b.WriteString(" " + quote(a))
-	}
-	return base64.StdEncoding.EncodeToString([]byte(b.String())), nil
-}
-
-func quote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 func diskUsageKiB(root string) (int64, error) {

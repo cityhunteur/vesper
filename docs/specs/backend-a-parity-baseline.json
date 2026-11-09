@@ -51,12 +51,13 @@
   }
  ],
  "compat_exceptions": {
-  "open": 3,
+  "open": 4,
   "closed": 0,
   "open_ids": [
    "CE-0001",
    "CE-0002",
-   "CE-0003"
+   "CE-0003",
+   "CE-0004"
   ],
   "entries": [
    {
@@ -76,6 +77,13 @@
    {
     "id": "CE-0003",
     "issue": "21",
+    "expiry_date": "2027-03-31",
+    "target_release": "parity-ga",
+    "status": "open"
+   },
+   {
+    "id": "CE-0004",
+    "issue": "23",
     "expiry_date": "2027-03-31",
     "target_release": "parity-ga",
     "status": "open"

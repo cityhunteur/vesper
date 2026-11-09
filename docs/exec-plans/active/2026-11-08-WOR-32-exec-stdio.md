@@ -24,58 +24,85 @@ TERM` behave as with runc, proven by a `make systemvm-exec-suite` checklist.
 - [x] (2026-11-09) Design reset to runc-delegation (ADR 0006), after an adversarial brainstorm (two swarms,
   six lenses). The custom Go guest agent is withdrawn. the guest-exec brainstorm note records the full analysis and the
   split verdict (`docs/design-docs/2026-11-09-wor-32-guest-exec-brainstorm.md`).
-- [ ] Prerequisite: runc-enablement in the microVM. `vesper-microvm prepare` copies runc, libseccomp and the
-  terminal receiver (and optionally tini-static) plus their library closures into the initramfs, digest-pinned
-  like the existing busybox/module copy loop; the init mounts cgroup2 and devpts, populates /dev and makes the
-  new root a private mount. Capture `zcat /proc/config.gz` as kernel evidence. Proven by a trivial `runc run`
-  of a hello-world inside the microVM.
-- [ ] Slice 1 (non-interactive exec, model-deliverable): the shim generates a bare host-namespaced
-  config.json (no new namespaces, no second seccomp, full caps, `root.path` at the mounted ext4) in
-  `shim/internal/backend`/`bundle` and sends it over the vsock start frame; the guest writes it verbatim.
-  Each of stdin, stdout, stderr rides its own vsock port bridged by socat; the shim maps its FIFOs to ports
-  with no framing. runc supervises; exit via `runc wait`, signals via `runc kill`. The shim session code
-  replaces the console-log follower for the running path; the console log stays for boot diagnostics with a
-  retained `VESPER-WORKLOAD-EXIT <n>` breadcrumb. Covers `ctr run` (non-tty), `ctr exec` (non-tty), piped
-  stdin with separated stderr, exit fidelity, signals, and fixes TD-034.
-- [ ] Slice 2 (interactive terminal + resize): the terminal-master receiver (open decision: runc upstream
-  `recvtty` vendored, or hand-written) receives the master over `--console-socket` via `SCM_RIGHTS`, relays
-  it over vsock and applies `TIOCSWINSZ` on resize; the shim implements `Exec`/`Start(execID)`/`Kill(execID)`/
-  `ResizePty`/`CloseIO`/`Wait(execID)`/`State(execID)`. Verify the console-socket path and runc overhead at
-  256 MiB on hardware before committing the estimate.
-- [ ] Observability: one correlation id across shim session, guest container and vsock port; a structured
-  error surfaced instead of a bare EOF when runc fails (against TD-007, TD-026).
-- [ ] Proof: `vesper-ctr run-stdio|run-tty|exec|exec-tty|signal-test`, `control::run_exec_suite`,
-  `make systemvm-exec-suite`: TTY session reports `/dev/pts/*` and the requested size; piped stdin read back
-  on stdout with stderr separated; exec exit code 7 with output; `SIGTERM` trapped (exit 0 with marker);
-  `SIGKILL` → 137; all of 137/143/0/7 proven through the chain.
-- [ ] PR(s) merged, CI green, GH #23 checklist and WOR-32 updated, milestone entry; plan moved to completed.
+- [x] (2026-11-09, local hardware) runc prerequisite: initramfs runtime closure, cgroup2/devpts/devices,
+  private mounts and digest verification. A 256 MiB microVM printed `VESPER-RUNC-HELLO` and exit 0.
+  The smoke test initially reported 163020 KiB available. The pinned kernel lacks `/proc/config.gz`;
+  use its matching ISO config as evidence.
+- [x] (2026-11-09, local hardware) Non-terminal sessions: OCI configs remain outside the rootfs cache,
+  three socat stream ports carry stdin/stdout/stderr, and runc returns workload status.
+  Exec works after `/bin/sh` is removed. Existing shim lifecycle checks passed (21 steps).
+- [x] (2026-11-09, local hardware) Terminal receiver: `vesper-console` reuses pinned containerd console
+  libraries. Interactive input, init and exec terminal resize from 24×80 to 37×101, and exit 7 were observed.
+- [x] (2026-11-09, local hardware) Signals: init TERM → 143, trapped TERM → 0 with marker and KILL → 137.
+  The exec signal proof initially used `ctr -s 0`, which ctr rejects before the shim; use a readiness marker.
+- [x] (2026-11-09) Observability: session `p<base-port>` links stream ports, the guest directory and console
+  invocation/exit markers. Startup failures return `ERROR <JSON>` with runc diagnostics.
+- [x] (2026-11-09) Council review: two independent reviewers traced protocol, resources, lifecycle and events.
+  Fixed output FIFO shutdown, failed-start abort, child reaping, init-last exit events, pre-start CloseIO,
+  signal-zero phase checks and a bounded abort watchdog. Hardware regressions cover orphan cleanup.
+- [x] (2026-11-09, local hardware) `make ctr-conformance CTR_FLAGS=--publish`: 74/74 checks passed,
+  including 19 exec checks. The committed capture contains the baseline lock revisions.
+- [x] (2026-11-09, local hardware) Prerequisite captured the complete pinned kernel configuration, runc
+  hello-world and exit 0, with 160304 KiB available in a 256 MiB microVM. Legacy microVM, rootfs,
+  workload and control suites passed. Rust, Go, race, shell protocol, contract, matrix and docs checks passed.
+- [x] (2026-11-09, local hardware) Fresh-boot services suite passed all nine checks. The earlier
+  post-conformance failure was the bounded startup-log window, not failure to recover a service.
+- [x] (2026-11-09) Clean-source conformance captured at `74e6544`: 74/74; all nine source CI checks green.
+- [x] (2026-11-09, M3 Pro) Reliability: 50/50 boots, maximum 2846 ms against 5000 ms; control, services,
+  Docker smoke and leak checks passed. No leaked launchers, proxies, sockets or pid files.
+- [x] (2026-11-09) Evidence bundle collected at `.symphony/runs/WOR-32/current/`; publish it with the issue evidence update.
+- [ ] PR #145 reviewed and merged; move this plan to completed after landing. GitHub #23/#72 and
+  WOR-32 were already closed before this implementation; add evidence comments without advancing their state.
 
 ## Surprises & Discoveries
 
-- Observation: `systemvmctl control microvm` needs `--` before guest options (`-- launch ID --vsock`), as clap
-  otherwise claims them.
-- Observation (brainstorm): socat cannot carry the terminal master descriptor (an `SCM_RIGHTS` hand-off),
-  cannot separate stdout from stderr, and has no channel for resize or signals. The per-stream-port design and
-  a terminal-master receiver inside the guest are the consequences. runc and socat are pinned for the System
-  VM, not the microVM, so they are new initramfs members.
-- Constraint: the model is blocked from writing a socket-driven process-spawning/PTY agent. runc-delegation
-  removes the spawn/chroot/signal code from model-authored source; the slice-1 guest surface (static shell
-  init + socat bridges) is plausibly model-writable; the slice-2 terminal receiver is the blocked class unless
-  `recvtty` is vendored. The split is deliberate so progress is not gated on the blocked piece.
+- Observation: host clap needs `--` before forwarded guest flags.
+- Observation: runc has no `wait` command. Foreground run/exec return status; terminal sessions require
+  detached execution to use `--console-socket`, so the local terminal helper also reaps their status.
+- Observation: runc 1.3.4 rejects exec with an empty namespace list (`ns paths are empty`). Joining the
+  existing `/proc/1/ns/net` resolves it without creating a namespace. Hardware exec then returned 7.
+- Observation: runc needs a regular `/dev/console` mount target. The workload receives a separate tmpfs
+  device tree and shared devpts rather than a recursive bind of the whole guest `/dev`.
+- Observation: the kernel lacks `/proc/config.gz` and a configs module. The matching config is on the pinned
+  ISO at `boot/config-6.12.115-0-virt`; the smoke path emits it instead.
+- Observation: ctr rejects signal 0 in its own parser. The shim still handles the RPC, tested by phase checks;
+  the exec signal hardware probe waits for application output before sending KILL.
+
+- Observation: a broad conformance run exposed a pre-existing Delete/Shutdown race. Calling shutdown
+  inside Delete could close ttrpc before its reply. Containerd already calls Shutdown after Delete;
+  the implementation now follows that order and tests it.
+
+- Observation: the reliability script's summary used invalid Python quoting, although the JSON report passed.
+  Replace that print expression with `str.format` and validate it against the captured 50-boot report.
+
+Known limits (review 2026-11-09):
+
+- The workload's requested in-guest security posture is overridden, not honored: the full capability set is
+  always granted and no-new-privileges / LSM labels are cleared. Tracked as compat exception CE-0004 (needs
+  human approval before GA); the microVM is the isolation boundary (ADR 0006).
+- `SIGNAL` to an exec session targets the single exec pid and ignores the `all` flag (only an init `kill`
+  uses `runc kill --all`), so a signal does not reach an exec's descendant processes.
+- Killing a process in the narrow window after the guest writes its exit status but before the shim watcher
+  records the exit can surface a transient "session-not-running" error rather than a no-op; containerd
+  tolerates a kill that races a natural exit.
 
 ## Decision Log
 
-- Decision (2026-11-09, superseding the entries below): drive execution with runc as a bare supervisor per
-  ADR 0006; withdraw the custom Go guest agent; generate config.json host-side; one vsock port per stream;
-  stage as prerequisite → non-interactive exec → interactive terminal.
-- Reversed (2026-11-08): a custom vsock-connected Go guest agent with a `type/length/payload` framed protocol
-  and pinned vsock/pty Go libraries. Superseded by ADR 0006; the framed multiplexer and the library pins are
-  dropped in favour of per-stream ports and runc.
+- Decision (2026-11-09): implement ADR 0006 at the owner's request. Supersede the custom Go spawning agent
+  with host-generated OCI configs, runc and three independent socat streams.
+- Decision (2026-11-09): use the already pinned `containerd/go-runc` receiver and `containerd/console` poller
+  in a Unix-socket-only terminal helper. No new dependency or vendored receiver is needed.
+- Decision (2026-11-09): use tini-static as microVM PID 1. Remove `runc run --keep`; destroy a terminal init's
+  runc container before draining output. These steps prevent live execs or inherited terminals from delaying init exit.
+- Decision (2026-11-09): explicitly join the existing guest network namespace to avoid runc's empty-list bug.
+- Reversed (2026-11-08): the custom vsock Go agent and multiplexed framing. ADR 0006 replaces that design.
 
 ## Outcomes & Retrospective
 
-Transport landed. The design is reset to runc-delegation after adversarial review. Next unit is the
-runc-enablement prerequisite, then non-interactive exec.
+Implementation commit `74e6544` passed all nine CI checks and the clean-source 74-step conformance capture.
+The 50-boot reliability report passed with zero failures or leaks. PR #145 awaits review and merge.
+TD-041 records bounded exec-port allocation. TD-042 records unresolved pause/snapshot compatibility.
+TD-034 is resolved for the shim; the legacy `vesper-workload --cmd` diagnostic path remains unchanged.
 
 ## Context and Orientation
 
@@ -88,10 +115,22 @@ ADR 0006 is the governing decision; `docs/design-docs/2026-11-09-wor-32-guest-ex
 
 1. runc-enablement prerequisite (kernel evidence, initramfs members, init mounts, trivial `runc run`).
 2. Slice 1: host-side config.json, per-stream socat bridges, shim session code, exit/signal mapping.
-3. Slice 2: terminal-master receiver (recvtty or hand-written) and resize; exec-session methods.
+3. Slice 2: terminal-master receiver using pinned containerd libraries and resize; exec-session methods.
 4. Observability wiring; proof driver and suite; docs and landing.
 
 ## Concrete Steps
+
+    make shim-test shim-build
+    make systemvm-overlay
+    make systemvm-up
+    make systemvm-exec-suite
+    make ctr-conformance CTR_FLAGS=--publish
+    python3 harness/check_docs.py
+
+The runtime suite reports 19 steps, including init and exec terminals, input, separated streams,
+structured errors, signal exits and cleanup of descendants. Before booting a rebuilt overlay,
+stop the old System VM with `make systemvm-down`; preserve any evidence first.
+
 
     make systemvm-up
     cargo run --bin systemvmctl -- control microvm -- launch vs1 --vsock
@@ -111,6 +150,14 @@ through the chain. config.json generation keeps the cached ext4 byte-identical (
 
 ## Artifacts and Notes
 
+The capture `docs/specs/ctr-conformance-baseline.json` includes 21 shim, 16 bundle, 18 restart and 19 exec checks.
+Raw command logs, the full kernel config and failed-run diagnostics are preserved in `run/WOR-32/systemvm/`.
+The council report is in `run/WOR-32/council/review.md` and is copied into the verification bundle.
+A services probe after conformance found only one startup in the last 200 containerd log lines.
+The services recovered in that run; a fresh-boot services run passed all nine checks.
+`run_services_suite` reads only the last 200 log lines, so run this sensor on a fresh boot after long conformance runs.
+
+
     LAUNCHED vs1 pid=2834 boot_ms=1510
     RUNNING vs1 pid=2834 vsock=present
     VESPER-VSOCK-OK
@@ -120,6 +167,6 @@ through the chain. config.json generation keeps the cached ext4 byte-identical (
 
 Guest kernel modules from the pinned modloop; Firecracker v1.16.0 vsock device; runc 1.3.4-r1, socat and
 tini-static (pinned in the System VM lock, to be added as microVM initramfs members with their closures);
-libseccomp for runc. Open decision: terminal-master receiver (runc upstream `recvtty` vendored vs
-hand-written), to be settled at slice 2 with hardware verification. Pause/snapshot interaction with runc state
+libseccomp for runc. The terminal receiver uses the existing pinned `containerd/go-runc` and
+`containerd/console` libraries. Pause/snapshot interaction with runc state
 is deferred (ADR 0006).

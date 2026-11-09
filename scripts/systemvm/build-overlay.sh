@@ -32,6 +32,7 @@ done < <(cargo run -q --bin systemvmctl -- archive-list --lock "${PACKAGES_LOCK}
 # The containerd shim v2 runtime (Go, static linux/arm64) goes where the OpenRC containerd PATH finds it (GH #22).
 bash "${ROOT_DIR}/scripts/systemvm/build-shim.sh" >/dev/null
 APK_ARGS+=(--file "${ROOT_DIR}/build/shim/containerd-shim-vesper-v2:/usr/bin/containerd-shim-vesper-v2:0755")
+APK_ARGS+=(--file "${ROOT_DIR}/build/shim/vesper-console:/usr/bin/vesper-console:0755")
 # The baseline lock rides along so guest-built artifacts can embed the pinned revisions (GH #19 provenance).
 APK_ARGS+=(--file "${ROOT_DIR}/docs/specs/design-v0.baselines.lock.yaml:/var/lib/vesper/baselines.lock.yaml:0644")
 

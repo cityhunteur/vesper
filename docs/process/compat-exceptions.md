@@ -37,6 +37,13 @@ GH #21 criterion "tracked as approved pre-GA compat exceptions" and closed WOR-2
 They are summarised in `docs/specs/backend-a-parity-baseline.json`; the `Parity Baseline` workflow fails if the
 capture and the registry disagree about which ids are open.
 
+A fourth open exception, CE-0004 (WOR-32 / GH #23, owned by cityhunteur, expiry 2027-03-31, target `parity-ga`),
+records that guest exec deliberately overrides a workload's requested in-guest security posture: it always grants
+the full capability set, forces no-new-privileges off and drops AppArmor/SELinux labels, because the microVM is
+the isolation boundary (ADR 0006). Unlike CE-0001..CE-0003 it is not yet approved (`approved_by`/`approved_on`
+are unset), so it needs a human's acceptance before GA. It is also listed in the parity baseline capture so the
+`Parity Baseline` workflow's registry cross-check stays green.
+
 ## Policy checks
 
 - New exceptions without required fields are rejected.

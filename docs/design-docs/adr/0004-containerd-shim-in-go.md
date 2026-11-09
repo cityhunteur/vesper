@@ -51,6 +51,12 @@ on macOS.
 - Limits that follow from this slice: the image must contain `/bin/sh`; no terminal, stdin, exec or resize
   (P3.2); the bundle rootfs is converted on every `Create` with no cache (P3.3); the host sees only the VMM pid.
 
+## Later execution changes
+
+[ADR 0006](0006-guest-exec-via-runc-delegation.md) replaces the Phase 3.1 command-line and console-log
+execution path with runc sessions over vsock. It resolves the shell, terminal, stdin, exec and resize limits below.
+The block-first cache also replaces the original per-create conversion (GH #24).
+
 ## Implementation and migration impact
 
 `shim/` (module, `cmd/containerd-shim-vesper-v2`, `internal/{manager,backend,task}`),

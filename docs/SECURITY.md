@@ -1,7 +1,7 @@
 ---
 status: verified
 owner: cityhunteur
-last_reviewed: 2026-11-06
+last_reviewed: 2026-11-09
 ---
 
 # Vesper Security Review Map
@@ -100,3 +100,13 @@ A host directory enters the System VM only when named in `VESPER_SHARES` (or `sy
 visible to every container that bind-mounts them; `PATH:ro` makes the share read-only at the virtio-fs level,
 which no container can override. Guest writes land on the host as the sharing user. Sharing `$HOME` or wider
 trees is a human decision.
+
+## Private microVM sessions (ADR 0006)
+
+The shim connects to each jailed Firecracker `v.sock` inside the System VM.
+MicroVM vsock port 1025 accepts bounded session control requests; separate ports carry stdin, stdout and stderr.
+The guest writes configs from the trusted shim verbatim and invokes the pinned runc binary.
+Workloads share the microVM's namespaces and receive full guest capabilities. The microVM is their isolation boundary.
+The terminal receiver uses only guest-local Unix sockets and the existing pinned containerd libraries.
+No new host-visible socket, share or entitlement is required.
+Pause, snapshot and checkpoint parity must account for runc state before those operations can be claimed.

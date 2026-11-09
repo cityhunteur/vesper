@@ -229,6 +229,11 @@ enum ControlAction {
     Ctr {
         args: Vec<String>,
     },
+    /// Run the GH #23 checklist (runc exec, streams, terminal resize and signals).
+    ExecSuite {
+        #[arg(long, default_value = "run/systemvm/exec-report.json")]
+        report: String,
+    },
     /// Run the GH #22 checklist (ctr task lifecycle through the Vesper shim v2) and write a JSON report.
     ShimSuite {
         #[arg(long, default_value = "run/systemvm/shim-report.json")]
@@ -452,6 +457,23 @@ fn run_control(endpoint: vesper::control::ControlEndpoint, action: ControlAction
             if rc != 0 {
                 return Err(format!("vesper-ctr exited with {rc}"));
             }
+        }
+        ControlAction::ExecSuite { report } => {
+            let result = control::run_exec_suite(&endpoint);
+            control::write_report(&report, &result)?;
+            for step in &result.steps {
+                println!(
+                    "{} {}: {} ({} ms)",
+                    if step.ok { "ok  " } else { "FAIL" },
+                    step.name,
+                    step.detail.chars().take(220).collect::<String>(),
+                    step.elapsed_ms
+                );
+            }
+            if !result.passed {
+                return Err(format!("exec suite failed (report: {report})"));
+            }
+            println!("exec suite passed (report: {report})");
         }
         ControlAction::ShimSuite { report } => {
             let result = control::run_shim_suite(&endpoint);

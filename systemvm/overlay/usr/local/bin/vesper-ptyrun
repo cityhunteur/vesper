@@ -1,0 +1,3 @@
+#!/bin/sh
+# Hardware proof driver: ctr gets a terminal and a delayed SIGWINCH.
+exec /usr/bin/vesper-console proof-pty "$@"

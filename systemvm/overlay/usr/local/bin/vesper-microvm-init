@@ -1,0 +1,84 @@
+#!/bin/sh
+/bin/busybox mount -t proc proc /proc 2>/dev/null
+/bin/busybox mount -t sysfs sysfs /sys 2>/dev/null
+/bin/busybox --install -s /bin
+export PATH=/bin:/usr/bin:/sbin:/usr/sbin
+mount -t devtmpfs devtmpfs /dev 2>/dev/null
+mkdir -p /dev/pts /run /sys/fs/cgroup
+mount -t devpts devpts /dev/pts -o newinstance,ptmxmode=0666,mode=0620
+ln -sf pts/ptmx /dev/ptmx
+mount -t cgroup2 cgroup2 /sys/fs/cgroup
+mount --make-rprivate /
+sha256sum -c /runtime.sha256 >/dev/null || { echo VESPER-RUNTIME-DIGEST-FAILED; poweroff -f; }
+echo "VESPER-MICROVM-OK"
+if /bin/busybox grep -q vesper_exit=1 /proc/cmdline; then
+  /bin/busybox poweroff -f
+fi
+if /bin/busybox grep -q vesper_vsock=1 /proc/cmdline; then
+  /bin/busybox modprobe -a virtio_mmio vsock vmw_vsock_virtio_transport_common vmw_vsock_virtio_transport 2>&1 \
+    && echo "VESPER-VSOCK-OK" || echo "VESPER-VSOCK-FAILED"
+fi
+if /bin/busybox grep -q vesper_rootfs=1 /proc/cmdline; then
+  /bin/busybox modprobe -a virtio_mmio virtio_blk crc32c_generic libcrc32c ext4 2>&1
+  /bin/busybox mount -t devtmpfs devtmpfs /dev 2>/dev/null
+  for i in 1 2 3 4 5 6 7 8 9 10; do [ -b /dev/vda ] && break; /bin/busybox sleep 0.5; done
+  if /bin/busybox mount -t ext4 /dev/vda /newroot; then
+    src=$(/bin/busybox sed -n 's/.*"image_id":"\([^"]*\)".*/\1/p' /newroot/etc/vesper-provenance.json 2>/dev/null)
+    echo "VESPER-ROOTFS-OK ${src:-no-provenance}"
+    if grep -q vesper_guest_exec=1 /proc/cmdline; then
+      mkdir -p /run/sessions /newroot/proc /newroot/sys /newroot/dev
+      mount --rbind /proc /newroot/proc
+      mount --rbind /sys /newroot/sys
+      mount -t tmpfs tmpfs /newroot/dev
+      for node in null zero full random urandom tty; do cp -a "/dev/$node" "/newroot/dev/$node"; done
+      mkdir -p /newroot/dev/pts /newroot/dev/shm
+      mount --bind /dev/pts /newroot/dev/pts
+      ln -s pts/ptmx /newroot/dev/ptmx
+      : > /newroot/dev/console
+      echo VESPER-EXEC-READY
+      exec /sbin/tini-static -- /usr/bin/socat VSOCK-LISTEN:1025,reuseaddr,fork EXEC:/bin/vesper-guest-session
+    fi
+    if grep -q vesper_runc_smoke=1 /proc/cmdline; then
+      echo VESPER-KERNEL-CONFIG-BEGIN
+      if [ -f /proc/config.gz ]; then zcat /proc/config.gz; else cat /kernel.config; fi
+      echo VESPER-KERNEL-CONFIG-END
+      mkdir -p /run/smoke /newroot/proc /newroot/sys /newroot/dev
+      mount --rbind /proc /newroot/proc
+      mount --rbind /sys /newroot/sys
+      mount -t tmpfs tmpfs /newroot/dev
+      for node in null zero full random urandom tty; do cp -a "/dev/$node" "/newroot/dev/$node"; done
+      mkdir -p /newroot/dev/pts /newroot/dev/shm
+      mount --bind /dev/pts /newroot/dev/pts
+      ln -s pts/ptmx /newroot/dev/ptmx
+      : > /newroot/dev/console
+      cat > /run/smoke/config.json <<'JSON'
+{"ociVersion":"1.2.0","root":{"path":"/newroot"},"process":{"terminal":false,"user":{"uid":0,"gid":0},"args":["/bin/busybox","echo","VESPER-RUNC-HELLO"],"env":["PATH=/bin:/usr/bin"],"cwd":"/"},"linux":{"namespaces":[]}}
+JSON
+      echo 'VESPER-RUNC-INVOKE smoke /usr/bin/runc --root /run/runc run --bundle /run/smoke smoke'
+      /usr/bin/runc --root /run/runc run --bundle /run/smoke smoke
+      rc=$?
+      echo "VESPER-WORKLOAD-EXIT $rc"
+      echo "VESPER-RUNC-MEMORY $(grep MemAvailable /proc/meminfo)"
+      poweroff -f
+    fi
+    cmd64=$(/bin/busybox sed -n 's/.*vesper_cmd=\([A-Za-z0-9+/=]*\).*/\1/p' /proc/cmdline)
+    if [ -n "$cmd64" ]; then
+      cmd=$(echo "$cmd64" | /bin/busybox base64 -d)
+      /bin/busybox mkdir -p /newroot/proc /newroot/dev /newroot/tmp
+      /bin/busybox mount -t proc proc /newroot/proc 2>/dev/null
+      /bin/busybox mount -t devtmpfs devtmpfs /newroot/dev 2>/dev/null
+      echo "VESPER-WORKLOAD-START"
+      /bin/busybox chroot /newroot /bin/sh -c "$cmd"
+      rc=$?
+      echo "VESPER-WORKLOAD-EXIT $rc"
+      /bin/busybox poweroff -f
+    fi
+    if [ -x /newroot/sbin/init ]; then
+      exec /bin/busybox switch_root /newroot /sbin/init
+    fi
+    /bin/busybox chroot /newroot /bin/busybox echo "VESPER-ROOTFS-EXEC-OK" || echo "VESPER-ROOTFS-EXEC-FAILED"
+  else
+    echo "VESPER-ROOTFS-MOUNT-FAILED"
+  fi
+fi
+exec /bin/busybox sleep 86400

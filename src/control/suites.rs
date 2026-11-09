@@ -8,6 +8,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 mod bundle;
+mod exec;
+pub use exec::run_exec_suite;
 mod restart;
 pub use bundle::run_bundle_suite;
 pub use restart::run_restart_suite;

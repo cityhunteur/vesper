@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 owner: cityhunteur
 last_reviewed: 2026-11-09
 ---
@@ -62,8 +62,8 @@ What becomes easier:
 
 - runc owns the kernel-facing code the model cannot write: clone, namespace setup, pivot_root, exec and the
   seccomp install.
-- Exit status and signals map cleanly onto `runc wait` and `runc kill`, better than the console-log marker
-  scrape, and runc execs argv directly, which fixes TD-034 (the `/bin/sh` dependency).
+- Foreground `runc run` and `exec` return exit status; `runc kill` forwards init signals.
+  runc launches argv directly, which fixes TD-034 (the `/bin/sh` dependency).
 - For non-interactive exec the model-authored surface is a static shell init plus host-side Go, with no
   compiled network-driven spawner, so that subset is deliverable without human-authored blocked code.
 
@@ -74,12 +74,10 @@ What becomes harder, and the open items:
   and devpts and populate /dev. This is a prerequisite slice, proven by a trivial `runc run` in the microVM.
   runc is already a pinned package, so this is not a new dependency, but making it Vesper's workload runtime
   is a security-sensitive change that this ADR records.
-- **The terminal path does not reach zero blocked code.** A guest process must still receive the terminal
-  master over `--console-socket` via `SCM_RIGHTS`, relay its bytes over vsock, and apply resize with
-  `TIOCSWINSZ`. This is the blocked class, narrowed but not removed. The receiver choice is an open decision
-  for the terminal slice: adopt runc's upstream `recvtty` (a contrib demo, terminal-only, not in the package
-  index, so vendored-and-extended) or hand-write it (blocked for the model). This is to be decided when the
-  terminal slice is reached and verified on hardware.
+- **The terminal path needs a receiver.** A guest process receives the terminal master over
+  `--console-socket` through `SCM_RIGHTS`, relays its bytes and applies resize with `TIOCSWINSZ`.
+  `vesper-console` uses the already pinned containerd console libraries for these operations.
+  The implementation decisions below record how this settles the original receiver choice.
 - **Debuggability regresses** against TD-007 (no structured logging) and TD-026 (which wants the socat
   pattern retired at this phase). Required mitigations: keep a ttyS0 breadcrumb (the runc invocation line,
   runc stderr on failure, a `VESPER-WORKLOAD-EXIT <n>` marker); stamp one correlation id across shim session,
@@ -103,15 +101,47 @@ In order:
    `shim/internal/bundle`; per-stream socat bridges; the shim session code (vsock client over the existing
    `CONNECT <port>` preface, exit mapping) replacing the console-log follower in `shim/internal/task` for the
    running path; the console log stays for boot diagnostics. This is model-deliverable, to be verified.
-3. **Interactive terminal and resize (slice 2).** The terminal-master receiver (`recvtty` or hand-written)
+3. **Interactive terminal and resize (slice 2).** The terminal-master receiver (`vesper-console`)
    and `ResizePty`, plus the `Exec`/`Start(execID)`/`Kill(execID)`/`Wait(execID)`/`State(execID)` methods.
 
 The WOR-32 ExecPlan is rewritten to this staged design and its Decision Log entry for the custom agent is
 reversed. ADR 0004 (shim in Go) stands; this ADR revises only the per-task execution and stdio path it
 described as P3.2 limits.
 
+## Implementation decisions (9 November 2026)
+
+The owner requested implementation of this ADR. The implementation uses the existing pinned
+`containerd/go-runc` console receiver and `containerd/console` terminal functions in `vesper-console`.
+This avoids vendoring `recvtty` or adding dependencies. The helper has no vsock listener.
+The shell control script receives configs; socat bridges each stream separately.
+
+runc 1.3.4 has no `wait` command. Non-terminal sessions use foreground `run` and `exec`.
+Terminal sessions use detached `create/start` or `exec` with `--console-socket`.
+The helper acts as a subreaper, records the primary process status and reaps adopted children.
+It uses the existing console poller to drain buffered output without waiting for descendant EOF.
+Init exit destroys the container's cgroup members before the shim reports its exit.
+`tini-static`, already pinned, is the microVM's PID 1 supervisor and reaps remaining orphans.
+
+An empty namespace list makes this runc version reject `exec` with `ns paths are empty`.
+The generated config therefore joins `/proc/1/ns/net`, the existing microVM network namespace.
+This creates no namespace. A separate tmpfs supplies workload devices, devpts and a regular
+`/dev/console` target that runc can bind to its terminal slave.
+
+The pinned kernel disables `/proc/config.gz` and provides no `configs` module.
+The prerequisite records the matching `boot/config-6.12.115-0-virt` from the digest-verified ISO instead.
+Runtime binaries and their library closures inherit the verified package and ISO pins.
+`prepare` records their file digests, refreshes a stale initramfs and checks those digests at guest boot.
+
+Session `p<base-port>` names the control request, guest directory and invocation/exit breadcrumbs.
+The microVM id also names the task, jail and console log.
+Malformed requests and runc startup failures return structured errors; the console retains detailed failures.
+The initial terminal size is the OCI console size, or 24×80 when absent.
+Pause and snapshot parity remain deferred. Port reuse is a follow-up after 16,125 execs per task.
+
 ## References
 
+- [runc foreground exit status](https://github.com/opencontainers/runc/blob/v1.3.4/run.go),
+  [console-socket contract](https://github.com/opencontainers/runc/blob/v1.3.4/utils_linux.go).
 - GH #23 / WOR-32; [2026-11-09 guest-exec brainstorm](../2026-11-09-wor-32-guest-exec-brainstorm.md) (two swarms, six lenses).
 - ADR 0003 (control channel, socat agent), ADR 0004 (shim in Go), ADR 0005 (ports via vsock gateway).
 - design-v0 "Phase 3"; TD-005, TD-007, TD-026, TD-033, TD-034, TD-035.
