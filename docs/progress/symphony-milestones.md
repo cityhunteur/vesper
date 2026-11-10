@@ -1,10 +1,24 @@
 ---
 status: verified
 owner: cityhunteur
-last_reviewed: 2026-11-09
+last_reviewed: 2026-11-10
 ---
 
 # Symphony milestones
+
+### 2026-11-10 — GH-150 — inotify events for host edits on virtio-fs shares (TD-038 narrowed)
+- GitHub issue: #150 (item 3 of #29)
+- PR: #149 (plan and prototype), #151 (guest sink), #152 (launcher watcher), plus the Milestone 3 PR (suite steps and measurements)
+- Commit: `e8aadc3` (#149), `1356881` (#151), `3aa5f85` (#152); squash merges, CI green incl. System VM Image with both self-tests
+- Phase: 4
+- Parity unit: a host edit in a watched read-write share reaches containers as inotify `IN_MODIFY`; the launcher watches shares with FSEvents and the guest replays each path as an mtime-preserving touch (`vesper-share notify`, guest vsock port 2401)
+- Result: keep
+- Verification bundle: `.symphony/runs/GH-150/current/`; raw evidence in `run/GH-150/` and `run/TD-038/`
+- Council summary: skipped; CI green
+- Harness update: `make share-notify-selftest`, `make share-watch-selftest` (both in the System VM Image workflow), `vesper-vmlauncher --watch-dry-run`, `binds-suite` 10 → 19 steps, `make systemvm-up-shares` boots a third `:nowatch` share
+- Runtime evidence: `binds-suite` 19/19 six runs in a row after a stream-order flake in an older step was fixed; 12 to 24 ms over 30 edits; chokidar, watchexec, inotifywait and Go fsnotify react; 2,000-file burst delivered to chokidar in about 1 s; reconnect after the sink handler was killed; docker-conformance, ports and shim suites pass with watching on
+- Remaining risks: not exact inotify parity (no `IN_CREATE`/`IN_DELETE`/`IN_CLOSE_WRITE`, share-root deletes and read-only shares silent, `inotifywait -r` does not follow host-created directories), all in TD-038; physical external and network volumes untested; developer-hardware evidence only (TD-005)
+- Truthful project state after this milestone: Phase 4's last gap is narrowed, not closed. GH #29 item 3 is still unticked and needs a human decision on whether the residuals are acceptable; Phase 5 has not started.
 
 ### 2026-11-09 — WOR-32 — runc guest execution implemented, reviewed and merged (PR #145)
 - GitHub issue: #23 (mirror #72)

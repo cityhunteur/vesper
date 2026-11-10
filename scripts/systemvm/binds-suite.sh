@@ -10,17 +10,18 @@ SOCKET="${DOCKER_SOCKET:-${ROOT_DIR}/run/vesper/docker.sock}"
 REPORT="${ROOT_DIR}/run/systemvm/binds-report.json"
 SHARE="${BINDS_SHARE:-${ROOT_DIR}/run/WOR-39/share}"
 SHARE_RO="${BINDS_SHARE_RO:-${ROOT_DIR}/run/WOR-39/share-ro}"
+SHARE_NW="${BINDS_SHARE_NW:-${ROOT_DIR}/run/WOR-39/share-nowatch}"
 IMAGE="${BINDS_IMAGE:-alpine:3.22}"
 DOCKER="${DOCKER_BIN:-docker}"
 CTL=(cargo run -q --bin systemvmctl -- control)
 export DOCKER_HOST="unix://${SOCKET}"
-cd "${ROOT_DIR}"; mkdir -p "$(dirname "${REPORT}")" "${SHARE}" "${SHARE_RO}"
+cd "${ROOT_DIR}"; mkdir -p "$(dirname "${REPORT}")" "${SHARE}" "${SHARE_RO}" "${SHARE_NW}"
 steps=()
 record() { local d; d="$(printf '%s' "$3" | tr '\n' ' ' | cut -c1-300 | sed 's/\\/\\\\/g; s/"/\\"/g')"; steps+=("{\"name\":\"$1\",\"ok\":$2,\"detail\":\"${d}\"}"); if [ "$2" = true ]; then echo "ok   $1: ${d:0:150}"; else echo "FAIL $1: ${d:0:200}"; fi; }
 run() { "${DOCKER}" run --rm "$@"; }
 [ -S "${SOCKET}" ] || { echo "binds-suite: ${SOCKET} missing; run 'make docker-up'" >&2; exit 2; }
 "${DOCKER}" image inspect "${IMAGE}" >/dev/null 2>&1 || "${DOCKER}" pull -q "${IMAGE}" >/dev/null 2>&1 || { echo "binds-suite: cannot pull ${IMAGE}" >&2; exit 2; }
-rm -f "${SHARE}"/*; echo "from-host" > "${SHARE}/hello.txt"; echo "read-only content" > "${SHARE_RO}/ro.txt"; "${DOCKER}" rm -f binds-inot >/dev/null 2>&1
+rm -f "${SHARE}"/* "${SHARE}"/sub/*; mkdir -p "${SHARE}/sub"; echo "quiet" > "${SHARE_NW}/nw.txt"; echo "from-host" > "${SHARE}/hello.txt"; echo "read-only content" > "${SHARE_RO}/ro.txt"; "${DOCKER}" rm -f binds-inot >/dev/null 2>&1
 
 out="$("${CTL[@]}" share list 2>&1)"
 if echo "${out}" | grep -q "SHARE share0 ${SHARE} mode=rw" && echo "${out}" | grep -q "SHARE share1 ${SHARE_RO} mode=ro"; then record shares_mounted_at_host_paths true "${out}"; else record shares_mounted_at_host_paths false "${out}"; fi
@@ -35,7 +36,7 @@ run -v "${SHARE}:/data" "${IMAGE}" sh -c 'echo from-container > /data/c.txt && c
 h="$(stat -f '%u:%g %Lp' "${SHARE}/c.txt" 2>&1)"; c="$(cat "${SHARE}/c.txt" 2>&1)"; g="$(run -v "${SHARE}:/data" "${IMAGE}" stat -c '%u:%g %a' /data/c.txt 2>&1)"
 if [ "${c}" = "from-container" ] && [ "${h}" = "${host_owner} 640" ] && [ "${g}" = "0:0 640" ]; then record container_write_owned_by_host_user true "container wrote c.txt, chmod 640 kept, chown 1000:1000 ignored; host sees ${h}, guest sees ${g}"; else record container_write_owned_by_host_user false "host ${h} content ${c}; guest ${g}"; fi
 
-out="$(run -v "${SHARE_RO}:/ro" "${IMAGE}" sh -c 'cat /ro/ro.txt && echo x > /ro/y.txt' 2>&1 | tail -1)"
+out="$(run -v "${SHARE_RO}:/ro" "${IMAGE}" sh -c 'cat /ro/ro.txt && echo x > /ro/y.txt' 2>&1 | tr '\n' ' ')"
 case "${out}" in *"Read-only file system"*) record readonly_share_enforced true "${out}" ;; *) record readonly_share_enforced false "${out}" ;; esac
 out="$(run -v "${SHARE}:/data:ro" "${IMAGE}" sh -c 'echo x > /data/z.txt' 2>&1 | tail -1)"
 case "${out}" in *"Read-only file system"*) record docker_ro_flag_enforced true "${out}" ;; *) record docker_ro_flag_enforced false "${out}" ;; esac
@@ -49,7 +50,7 @@ now_ms() { python3 -c 'import time; print(int(time.time()*1000))'; }
 events() { "${DOCKER}" exec binds-inot cat /tmp/ev.log 2>&1 | tr '\t' ' ' | tr '\n' ';'; }
 # wait_event NAME: polls up to ~2 s for an event naming NAME; prints the elapsed ms, or nothing on timeout.
 wait_event() { local t0; t0="$(now_ms)"; for _ in $(seq 1 20); do case "$(events)" in *" $1;"*) echo $(( $(now_ms) - t0 )); return 0 ;; esac; sleep 0.1; done; return 1; }
-"${DOCKER}" run -d --name binds-inot -v "${SHARE}:/data" -v "${SHARE_RO}:/ro" "${IMAGE}" sh -c 'inotifyd - /data:cwnd /ro:cwnd > /tmp/ev.log 2>&1 & sleep 120' >/dev/null 2>&1; sleep 1
+"${DOCKER}" run -d --name binds-inot -v "${SHARE}:/data" -v "${SHARE_RO}:/ro" -v "${SHARE_NW}:/nw" "${IMAGE}" sh -c 'inotifyd - /data:cwnd /data/sub:cwnd /ro:cwnd /nw:cwnd > /tmp/ev.log 2>&1 & sleep 120' >/dev/null 2>&1; sleep 1
 "${DOCKER}" exec binds-inot sh -c 'echo b > /data/from-guest.txt' >/dev/null 2>&1; sleep 1
 ev="$(events)"
 case "${ev}" in *from-guest.txt*) record inotify_guest_writes_seen true "events: ${ev}" ;; *) record inotify_guest_writes_seen false "events: ${ev}" ;; esac
@@ -65,7 +66,27 @@ n="$(events | tr ';' '\n' | grep -c ' hello.txt$')"
 [ "${n}" -ge 1 ] && [ "${n}" -le 2 ] && record inotify_no_echo_storm true "one host edit produced ${n} event(s) for hello.txt in 5 s; the replay's own FSEvents echo is dropped" || record inotify_no_echo_storm false "one host edit produced ${n} events for hello.txt in 5 s"
 echo "ro-edit" >> "${SHARE_RO}/ro.txt"; sleep 2
 case "$(events)" in *ro.txt*) record inotify_ro_share_host_edits_not_propagated false "unexpected: a read-only share produced inotify events: $(events)" ;; *) record inotify_ro_share_host_edits_not_propagated true "host edits on a read-only share produce no inotify events (the guest cannot touch files there; documented residual, TD-038)" ;; esac
+# What a watcher sees for host deletes and renames, a burst, and a share that opted out (GH #150, TD-038).
+count_ev() { events | tr ';' '\n' | grep -c -- "$1"; }
+# wait_more PATTERN BASE: polls up to ~2 s until more than BASE events match PATTERN.
+wait_more() { for _ in $(seq 1 20); do [ "$(count_ev "$1")" -gt "$2" ] && return 0; sleep 0.1; done; return 1; }
+echo d > "${SHARE}/sub/d.txt"; wait_event d.txt >/dev/null; sleep 1
+base="$(count_ev '^c /data sub$')"; /bin/rm -f "${SHARE}/sub/d.txt"
+wait_more '^c /data sub$' "${base}" && record inotify_host_delete_seen_on_parent true "host delete of sub/d.txt reached the container as a change of the directory sub (IN_MODIFY on the parent, not IN_DELETE)" || record inotify_host_delete_seen_on_parent false "no event for the parent directory within 2 s; events: $(events | cut -c1-200)"
+echo e > "${SHARE}/sub/e.txt"; wait_event e.txt >/dev/null; sleep 1
+base="$(count_ev '^c /data sub$')"; mv "${SHARE}/sub/e.txt" "${SHARE}/sub/f.txt"
+wait_more '^c /data sub$' "${base}" && wait_more ' f.txt$' 0 && record inotify_host_rename_seen true "host rename sub/e.txt -> sub/f.txt reached the container as a change of sub and an event for f.txt (no IN_MOVED_FROM/TO)" || record inotify_host_rename_seen false "events: $(events | cut -c1-200)"
+base="$(count_ev ' from-host.txt$')"; /bin/rm -f "${SHARE}/from-host.txt"; sleep 2
+[ "$(count_ev ' from-host.txt$')" = "${base}" ] && record inotify_share_root_delete_not_propagated true "a host delete directly in the share's root directory produces no event (the guest cannot touch a share root; documented residual, TD-038)" || record inotify_share_root_delete_not_propagated false "unexpected events: $(events | cut -c1-200)"
+python3 -c 'import sys
+for i in range(500): open(f"{sys.argv[1]}/burst-{i}.txt", "w").write("x\n")' "${SHARE}/sub"
+t0="$(now_ms)"; n=0; for _ in $(seq 1 50); do n="$(events | tr ';' '\n' | grep -o 'burst-[0-9]*\.txt' | sort -u | wc -l | tr -d ' ')"; [ "${n}" -ge 500 ] && break; sleep 0.2; done
+health="$("${CTL[@]}" health 2>&1 | grep -c '"docker_ok":true')"
+[ "${n}" = 500 ] && [ "${health}" = 1 ] && record inotify_burst_delivered true "500 files created on the host in one burst: events for all 500 within $(( $(now_ms) - t0 )) ms (polled); System VM healthy" || record inotify_burst_delivered false "events for ${n} of 500 files after $(( $(now_ms) - t0 )) ms; healthy=${health}"
+echo "nw-edit" >> "${SHARE_NW}/nw.txt"; sleep 2
+case "$(events)" in *nw.txt*) record inotify_nowatch_share_silent false "unexpected: a :nowatch share produced inotify events" ;; *) if "${CTL[@]}" share list 2>&1 | grep -q " ${SHARE_NW} mode=rw"; then record inotify_nowatch_share_silent true "host edits on the read-write share mounted with :nowatch produce no inotify events (opt-out honoured)"; else record inotify_nowatch_share_silent false "the :nowatch share ${SHARE_NW} is not mounted; boot with 'make systemvm-up-shares'"; fi ;; esac
 "${DOCKER}" rm -f binds-inot >/dev/null 2>&1
+rm -f "${SHARE}"/sub/*; rmdir "${SHARE}/sub" 2>/dev/null
 
 out="$(run -v /tmp/vesper-not-shared:/x "${IMAGE}" sh -c 'ls -A /x | wc -l' 2>&1)"
 [ "${out}" = "0" ] && [ ! -e /tmp/vesper-not-shared ] && record unshared_path_is_guest_local true "-v /tmp/vesper-not-shared is a guest-local empty directory; only configured shares map host paths (path policy)" || record unshared_path_is_guest_local false "${out}; host dir exists: $([ -e /tmp/vesper-not-shared ] && echo yes || echo no)"
