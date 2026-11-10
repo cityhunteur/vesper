@@ -8,7 +8,8 @@ processes under `<repo>/run/`, recording pid and log files. `dev-down.sh`
 stops them via those pid files. Both are wrapped by the Makefile targets
 `dev-up` and `dev-down`. `build-vmlauncher.sh` builds the Swift
 Virtualization.framework helper in `launcher/` and ad-hoc signs it with the
-virtualization entitlement (`make vmlauncher-build`).
+virtualization entitlement (`make vmlauncher-build`). `share-watch-selftest.sh` checks the launcher's share
+watcher without a VM (`make share-watch-selftest`).
 
 ## Interface
 
@@ -20,7 +21,8 @@ virtualization entitlement (`make vmlauncher-build`).
 - `dev-up.sh` stdout: `vesperd PID: <pid>` and `vesper-proxy PID: <pid>`. `dev-down.sh` stdout: `services stopped`.
 - Exit codes: `dev-up.sh` returns `0` on success and propagates failures from `cargo build`, `mkdir`, `pushd`, or `cat` via `set -e`; backgrounded binaries (`&`) do not affect its exit status even if they exit immediately. `dev-down.sh` returns `0` in practice because `kill` failures are suppressed with `|| true`; an unreadable pid file aborts under `set -e` because `cat` is unguarded.
 - `build-vmlauncher.sh` accepts no arguments. It exits 2 on a non-Darwin host; runs `swift build -c release --package-path ${ROOT_DIR}/launcher`; copies the product from `swift build --show-bin-path` to `${ROOT_DIR}/build/vmlauncher/vesper-vmlauncher`; runs `codesign --force --sign - --entitlements ${ROOT_DIR}/packaging/macos/vesper-vmlauncher.entitlements` on it; exits 1 unless `codesign --display --entitlements -` then lists `com.apple.security.virtualization`; prints `built and signed <path>`.
-- Makefile entry points: `make dev-up`, `make dev-down`, `make vmlauncher-build`.
+- `share-watch-selftest.sh` accepts no arguments (`VMLAUNCHER` overrides the binary, default `build/vmlauncher/vesper-vmlauncher`; exits 2 when it is missing). It starts `vesper-vmlauncher --watch-dry-run <temp dir>`, edits files and compares the printed paths: 11 checks (greeting, append, replay echo dropped, create, atomic save, delete sends the parent, create in the share root sent, delete in the share root not sent, path outside the share not sent, new directory and its file sent, configured path prefix used although FSEvents reports the resolved one). Prints `ok`/`FAIL` lines; exits 1 on any failure. Also a step of the System VM Image workflow's macOS job.
+- Makefile entry points: `make dev-up`, `make dev-down`, `make vmlauncher-build`, `make share-watch-selftest`.
 
 ## Invariants
 

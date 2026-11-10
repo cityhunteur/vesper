@@ -298,7 +298,8 @@ leaves no microVM (`make systemvm-restart-suite`); exec, terminal and stdin are 
 with dockerd's errors intact and no bypass of the ingress, and `make ports-suite` proves `-p` ports on
 localhost through the bridge and the guest port relay (ADR 0005). `make binds-suite` proves host directories
 named in `VESPER_SHARES` reach containers over virtio-fs at their host paths, read-only when asked, with
-ownership mapped to the sharing user and no inotify for host edits (TD-038). `make dns-suite` proves dockerd's
+ownership mapped to the sharing user, and inotify events for host edits on watched read-write shares (the
+launcher's FSEvents watcher feeds the guest's `vesper-share notify` sink, GH #150; residuals in TD-038). `make dns-suite` proves dockerd's
 embedded DNS, aliases and external forwarding for a compose stack driven from macOS; `make workflow-suite` covers
 compose, build, `logs -f`, interactive `exec -it` and signals, and `--platform linux/amd64` now runs through `binfmt_misc` and the pinned `qemu-x86_64` in the
 System VM (`make crossarch-suite`, `vesper-arch mode` for native/emulated/unsupported). MicroVMs have no network

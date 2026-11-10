@@ -6,7 +6,8 @@
 boots one System VM launch config (ADR
 [0001](../docs/design-docs/adr/0001-systemvm-launcher-swift-helper.md)). It is
 a Swift Package (`Package.swift`, tools version 5.9, macOS 13+, Swift language
-mode 5) with a single executable target in `Sources/vesper-vmlauncher/main.swift`.
+mode 5) with a single executable target in `Sources/vesper-vmlauncher/` (`main.swift`, and `ShareWatcher.swift`
+for host-edit notifications on virtio-fs shares, GH #150).
 Policy lives in Rust (`src/systemvm.rs`) and in the launch config; the helper
 only maps the config onto `VZVirtualMachineConfiguration`, watches the
 console, drives the optional console probe the config describes, serves the
@@ -15,7 +16,7 @@ optional vsock bridge socket the config names, and reports.
 ## Interface
 
 - Build and sign: `make vmlauncher-build` (`scripts/macos/build-vmlauncher.sh`), output `build/vmlauncher/vesper-vmlauncher` ad-hoc signed with `packaging/macos/vesper-vmlauncher.entitlements`.
-- CLI: `vesper-vmlauncher [--config PATH] [--ready-pattern TEXT] [--timeout-seconds N] [--keep-running] [--skip-probe]`, or `vesper-vmlauncher --host-capabilities` (prints one JSON line `{api_available, nested_virtualization_supported, virtualization_supported, macos, chip, model}` and exits 0; needs no config).
+- CLI: `vesper-vmlauncher [--config PATH] [--ready-pattern TEXT] [--timeout-seconds N] [--keep-running] [--skip-probe]`, `vesper-vmlauncher --watch-dry-run DIR [--watch-dry-run DIR ...]` (no VM and no config: watches each DIR as a share, prints `WATCHING <n>` and then every path the guest would be asked to replay, one per line, until terminated; exits 3 when a DIR is not a directory), or `vesper-vmlauncher --host-capabilities` (prints one JSON line `{api_available, nested_virtualization_supported, virtualization_supported, macos, chip, model}` and exits 0; needs no config).
   - `--config` default `build/systemvm/launch-config.json`; decoded as `LaunchConfig { kernel_path, rootfs_path?, initrd_path?, boot_media_path?, kernel_cmdline, ready_pattern?, max_boot_ms?, probe?: { login_user, shell_prompt, commands[], success_pattern, shutdown_command }, network_mode, cpu_count, memory_mib, console_log_path }` (the JSON written by `systemvmctl launch-config`). `max_boot_ms` is ignored here; `systemvmctl boot-smoke` enforces it.
   - `nested_virtualization` in the config (`auto` default, `require`, `off`): `auto` and `require` set `VZGenericPlatformConfiguration.isNestedVirtualizationEnabled` when macOS 15+ reports support; `require` exits 3 with a diagnostic otherwise; any other value exits 3. A `platform` status line reports `"nested_virtualization":"enabled|unsupported|off"` before start.
   - `--ready-pattern` overrides `ready_pattern` from the config; the fallback is `login:`.
@@ -30,7 +31,8 @@ optional vsock bridge socket the config names, and reports.
 ## Invariants
 
 - The VM always has one `VZVirtioSocketDeviceConfiguration`; the bridge is served only when the config names a path.
-- `shared_directories` (optional, GH #29): each `{tag, host_path, read_only}` becomes a `VZVirtioFileSystemDeviceConfiguration` with a `VZSingleDirectoryShare`; an invalid tag or a `host_path` that is not a directory exits 3 before the VM is created.
+- Share watcher (GH #150): when any `shared_directories` entry has `watch: true`, the launcher starts one FSEvents stream (file events, no-defer, 50 ms latency) over those host paths after the VM starts, prints a `share-watch` status line (`"watched":N,"port":2401`), connects to guest vsock port 2401 (`vesper-share notify`) through the VM's socket device and writes one guest path per line. Rules (`ShareReplayFilter`): a path outside the watched shares or containing a newline is ignored; a path that no longer exists is replaced by its parent directory; a share's root directory is never sent; a path whose `(mtime ns, size)` was already sent is dropped, which ends the echo of the guest's own replay; the reported resolved path (`realpath`) is mapped back to the configured `host_path`; on `MustScanSubDirs` or dropped events it walks the reported directory (at most 50,000 entries) and sends what changed in the last 60 s. Unsent paths are kept (at most 20,000, oldest dropped) while the sink is unreachable; a failed write or connect is retried every 2 s; stderr gets `share-watch: connected to guest port 2401 (connection N)` and write failures. A `share-watch-summary` status line with `forwarded= sent= echoes= ignored= dropped= connects=` precedes `terminating` and `stopped`. The watcher never writes to a share and sends no file contents.
+- `shared_directories` (optional, GH #29): each `{tag, host_path, read_only, watch?}` becomes a `VZVirtioFileSystemDeviceConfiguration` with a `VZSingleDirectoryShare`; an invalid tag or a `host_path` that is not a directory exits 3 before the VM is created.
 - Block devices are attached in order: `boot_media_path` read-only first, then `rootfs_path` writable, so a kernel command line can address them as `/dev/vda` and `/dev/vdb`.
 - `network_mode` must be `nat` (one `VZVirtioNetworkDeviceConfiguration` with `VZNATNetworkDeviceAttachment`) or `none`; anything else exits 3 before the VM is created.
 - `cpu_count` and `memory_mib` are clamped to the framework's allowed ranges; the config is `validate()`d before start.

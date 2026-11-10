@@ -41,8 +41,18 @@ Linear mirror: **Unknown**; the GitHub-to-Linear sync creates it, or create it b
   (`run/GH-150/m1-runtime.txt`): through the agent and through port 2401 a touched file gave the watching
   container `IN_MODIFY` with the host mtime unchanged to the nanosecond; the share root, a read-only share, a
   missing path, `/etc/hostname` and a `..` path were skipped or rejected.
-- [ ] Milestone 2: host watcher in the launcher, enabled from the launch config.
-- [ ] Milestone 3: `make binds-suite` steps, runtime evidence, verification bundle.
+- [x] (2026-11-10) Milestone 2: host watcher. `launcher/Sources/vesper-vmlauncher/ShareWatcher.swift`
+  (`ShareReplayFilter`, `ShareWatcher`), `--watch-dry-run`, `watch` in `SharedDirectory` (Rust and Swift),
+  `PATH:nowatch`. Because host edits now produce events, the `binds-suite` step that asserted the limitation was
+  replaced in the same change (five `inotify_*` steps; 14/14). Proof on an M3 Pro: `make share-watch-selftest`
+  (11 checks), `cargo test systemvm` (14), `run/GH-150/m2-watchers.txt` (inotifywait, chokidar and watchexec
+  react with no prototype bridge), `m2-latency.txt` (30 edits, 12 to 24 ms), `m2-burst-reconnect.txt` (2,000
+  creates in a new directory: chokidar 2,000 in about 1 s; reconnect after the sink's handler was killed),
+  `m2-summary-nowatch.txt`; `make docker-conformance`, `make ports-suite` and `make systemvm-shim-suite` pass
+  with watching on.
+- [x] (2026-11-10) Milestone 3, partly: the core `binds-suite` steps landed with Milestone 2 (see above).
+- [ ] Milestone 3, rest: suite steps for the burst, `:nowatch`, deletes and renames; the unknowns (Go `fsnotify`,
+  external volume, `git status` cost of the ctime change); verification bundle under `.symphony/runs/GH-150/`.
 - [ ] Milestone 4: docs, TD-038 narrowed to the residuals below, GH #29 item 3 and GH #150 updated, milestone
   entry, plan moved to completed.
 
@@ -89,6 +99,17 @@ Linear mirror: **Unknown**; the GitHub-to-Linear sync creates it, or create it b
   System VM stayed healthy; the prototype drained the burst in about 22 s through `docker exec`, which is not
   the production path.
   Evidence: `run/TD-038/m0-burst.txt`.
+
+- Observation: `URL.resolvingSymlinksInPath()` strips `/private` from a path, FSEvents does not, so a share
+  under `/var` or `/tmp` matched nothing until the watcher used `realpath(3)`.
+  Evidence: the first `make share-watch-selftest` run failed six checks; it passes with `realpath`.
+- Observation: a container write to a share gives a watcher one extra `IN_MODIFY`: the write reaches the host,
+  FSEvents reports it, and the guest replays it once. The replay's own echo is dropped.
+  Evidence: `inotify_guest_writes_seen` in `run/GH-150/binds-report.json` (`n c w c`); `m2-burst-reconnect.txt`.
+- Observation: two of the reconnect test attempts took the sink's supervisor down by mistake (a `pkill -f`
+  pattern that also matched `supervise-daemon`, then a restart from inside a container's cgroup). They are test
+  errors, kept in `m2-burst-reconnect.txt` with corrections. With only the handler killed, the watcher logged
+  the failed write, reconnected (`connection 2`) and later edits arrived.
 
 ## Decision Log
 

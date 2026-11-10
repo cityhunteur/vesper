@@ -102,9 +102,10 @@ Public symbols by file:
   run_server(config, shutdown)`.
 - `spec.rs`: `Route { method, path }`, `load_routes(path)`,
   `load_info_version(path)`.
-- `systemvm.rs:SharedDirectory { tag, host_path, read_only }` and `LaunchConfig.shared_directories`
-  (serde default, omitted when empty); `shared_directories_from_specs(&[String])` turns `PATH` or `PATH:ro`
-  into tags `share0`, `share1`, … and rejects relative paths or non-directories.
+- `systemvm.rs:SharedDirectory { tag, host_path, read_only, watch }` and `LaunchConfig.shared_directories`
+  (serde default, omitted when empty); `shared_directories_from_specs(&[String])` turns `PATH[:ro][:nowatch]`
+  into tags `share0`, `share1`, … and rejects relative paths or non-directories. `watch` (GH #150, serde
+  default false) is true for a read-write share unless the spec ends in `:nowatch`; never for `:ro`.
 - `control.rs:Session::share(args)` runs `vesper-share` in the guest (same shape as the other guest tools);
   `Session::arch(args)` runs `vesper-arch`.
 - `ports.rs`: `PortsConfig { docker_socket, bridge_path, relay_port, status_path, bind_ip }` (`Default`:

@@ -50,7 +50,7 @@ enum Commands {
         /// Console text that marks a healthy boot (default "login:").
         #[arg(long)]
         ready_pattern: Option<String>,
-        /// Host directory to share into the System VM over virtio-fs as `PATH` or `PATH:ro` (repeatable);
+        /// Host directory to share into the System VM over virtio-fs as `PATH`, `PATH:ro` or `PATH:nowatch` (repeatable);
         /// the guest mounts it at the same absolute path (GH #29).
         #[arg(long = "share")]
         shares: Vec<String>,
