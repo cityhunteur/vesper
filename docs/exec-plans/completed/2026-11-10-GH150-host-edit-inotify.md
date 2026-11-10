@@ -23,7 +23,7 @@ The parity unit is Docker UX parity for bind mounts (design-v0, Phase 4). It is 
 no route in the pinned baseline (`083c4cf69281178acc910f7f857f88e69c51d3b5` in
 `docs/specs/design-v0.baselines.lock.yaml`) changes.
 
-Tracker: GitHub #150 carries this work. GitHub #29 stays closed with item 3 unchecked until this plan is done.
+Tracker: GitHub #150 carries this work. GitHub #29 stays closed with item 3 unchecked; ticking it is a human decision.
 Linear mirror: **Unknown**; the GitHub-to-Linear sync creates it, or create it by hand if none appears.
 
 ## Progress
@@ -51,10 +51,15 @@ Linear mirror: **Unknown**; the GitHub-to-Linear sync creates it, or create it b
   `m2-summary-nowatch.txt`; `make docker-conformance`, `make ports-suite` and `make systemvm-shim-suite` pass
   with watching on.
 - [x] (2026-11-10) Milestone 3, partly: the core `binds-suite` steps landed with Milestone 2 (see above).
-- [ ] Milestone 3, rest: suite steps for the burst, `:nowatch`, deletes and renames; the unknowns (Go `fsnotify`,
-  external volume, `git status` cost of the ctime change); verification bundle under `.symphony/runs/GH-150/`.
-- [ ] Milestone 4: docs, TD-038 narrowed to the residuals below, GH #29 item 3 and GH #150 updated, milestone
-  entry, plan moved to completed.
+- [x] (2026-11-10) Milestone 3, rest. `binds-suite` gained `inotify_host_delete_seen_on_parent`,
+  `inotify_host_rename_seen`, `inotify_share_root_delete_not_propagated`, `inotify_burst_delivered` (500 files) and
+  `inotify_nowatch_share_silent`; `make systemvm-up-shares` boots a third, `:nowatch` share; 19/19, six runs in a
+  row once a stream-order flake in the older `readonly_share_enforced` step (stdout and stderr could swap; it
+  failed one earlier run) was fixed.
+  Unknowns measured (`run/GH-150/m3-unknowns.txt`): Go `fsnotify`, the `git status` cost of the ctime change, and
+  disk images of three file systems. Bundle in `.symphony/runs/GH-150/current/`.
+- [x] (2026-11-10) Milestone 4: owning docs, TD-038 narrowed, parity row for #29, milestone entry, GH #150
+  updated, plan moved to completed. GH #29 item 3 is deliberately not ticked: that is a human decision.
 
 ## Surprises & Discoveries
 
@@ -111,6 +116,17 @@ Linear mirror: **Unknown**; the GitHub-to-Linear sync creates it, or create it b
   errors, kept in `m2-burst-reconnect.txt` with corrections. With only the handler killed, the watcher logged
   the failed write, reconnected (`connection 2`) and later edits arrived.
 
+- Observation: Go `fsnotify` reports `WRITE` for a file on host create, append and atomic save, and `WRITE` for
+  the directory on rename and delete; it never reports `CREATE`, `REMOVE` or `RENAME` for host changes.
+  Evidence: `run/GH-150/m3-unknowns.txt`.
+- Observation: the ctime change had no measurable `git status` cost. On a 2,000-file repository created inside
+  a share, the first `git status` took 41 ms watched and 40 ms on the `:nowatch` share, later ones 12 ms, also
+  after a checkout that rewrote all 2,000 files.
+  Evidence: `run/GH-150/m3-unknowns.txt`.
+- Observation: the watcher's dry-run self-test passes on APFS, case-sensitive APFS and exFAT disk images. No
+  physical external disk or network volume was available, so those stay untested.
+  Evidence: `run/GH-150/m3-unknowns.txt`.
+
 ## Decision Log
 
 - Decision: option A, a host watcher plus guest replay.
@@ -138,7 +154,20 @@ Linear mirror: **Unknown**; the GitHub-to-Linear sync creates it, or create it b
 
 ## Outcomes & Retrospective
 
-Not started.
+Reached: a host edit in a watched read-write share produces an inotify event in a container, measured at 12 to
+24 ms, with host contents and mtimes untouched. chokidar, `watchexec`, `inotifywait` and Go `fsnotify` react
+without polling. `make binds-suite` proves it (19 steps); two self-tests run in CI without a VM. Merged as PRs
+#149 (plan), #151 (guest sink), #152 (launcher watcher) and the Milestone 3 PR.
+
+Not reached, and recorded in TD-038: exact inotify parity. Host creates, deletes and renames are visible only as
+`IN_MODIFY` (on the file or its parent directory), there is no `IN_CLOSE_WRITE`, deletes in a share's root
+directory and all edits on read-only shares are silent, and `IN_CREATE`-driven recursive watchers do not follow
+directories created on the host. Whether GH #29 item 3 is met with these differences is left to a human.
+
+What went well: the prototype milestone fixed the replay operation and the loop-breaking rule before any
+product code, and both held unchanged. What cost time: the `/private` prefix difference between Foundation and
+FSEvents, and two reconnect test attempts that killed the sink's supervisor by mistake. Left untested: a
+physical external disk and a network volume; shares inside microVM tasks remain out of scope.
 
 ## Context and Orientation
 

@@ -204,11 +204,11 @@ bridge stream used to take the VM down.
 `shared_directories` to the launch config; the launcher attaches one virtio-fs device per entry (tags
 `share0`, `share1`, …) and `up.sh` asks the guest (`vesper-share mount TAG PATH ro|rw` through the agent) to mount
 each tag at the same absolute path, so `docker run -v /abs/path:/x` from macOS binds the host directory. No
-share is configured by default. Semantics, recorded by `make binds-suite` (14 steps, `run/systemvm/binds-report.json`):
+share is configured by default. Semantics, recorded by `make binds-suite` (19 steps, `run/systemvm/binds-report.json`):
 host files appear owned by uid 0 in the guest, guest writes appear on the host owned by the sharing user, `chmod`
 round-trips, `chown` is ignored, read-only is enforced by the share flag and by `:ro`, host edits are visible on
 the next access, inotify fires for guest writes and, on watched read-write shares, for host edits (below), and a
-`-v` path outside the configured shares is a guest-local directory. `make systemvm-up-shares` boots with the two suite shares.
+`-v` path outside the configured shares is a guest-local directory. `make systemvm-up-shares` boots with the three suite shares (read-write watched, read-only, read-write `:nowatch`).
 
 Host edits and inotify (GH #150). virtio-fs tells the guest kernel nothing about host-side edits, so the launcher
 watches every read-write share with FSEvents (`"watch": true` in the launch config; `PATH:nowatch` opts a share
@@ -221,7 +221,8 @@ shows `"status":"share-watch"` at start, `share-watch: connected to guest port 2
 directory; there is no `IN_CLOSE_WRITE`; deletes directly in a share's root directory and all edits on
 read-only shares produce nothing; and a watcher that adds watches only on `IN_CREATE` (`inotifywait -r`) does
 not follow a directory created on the host after it started. Watchers that rescan a directory when it changes
-(chokidar) see `change`, `add` and `unlink`. If the sink is unreachable the launcher keeps up to 20,000 paths
+(chokidar) see `change`, `add` and `unlink`; Go `fsnotify` reports `WRITE` for the file on create, append and
+save and `WRITE` for the directory on rename and delete, never `CREATE`, `REMOVE` or `RENAME`. If the sink is unreachable the launcher keeps up to 20,000 paths
 and reconnects every 2 s; files stay current on access throughout. `make share-notify-selftest` checks the
 sink's path policy and `make share-watch-selftest` the watcher's decisions, both without a VM;
 `systemvmctl control share touch PATH` replays one path by hand.

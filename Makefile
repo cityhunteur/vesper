@@ -128,10 +128,10 @@ docker-conformance:
 ports-suite:
 	bash scripts/systemvm/ports-suite.sh
 
-# Regenerate the launch config with the two bind-mount test shares and boot (GH #29).
+# Regenerate the launch config with the three bind-mount test shares (rw watched, ro, rw :nowatch) and boot (GH #29, GH #150).
 systemvm-up-shares:
-	mkdir -p run/WOR-39/share run/WOR-39/share-ro
-	VESPER_SHARES="$(CURDIR)/run/WOR-39/share $(CURDIR)/run/WOR-39/share-ro:ro" bash scripts/systemvm/generate-launch-config.sh
+	mkdir -p run/WOR-39/share run/WOR-39/share-ro run/WOR-39/share-nowatch
+	VESPER_SHARES="$(CURDIR)/run/WOR-39/share $(CURDIR)/run/WOR-39/share-ro:ro $(CURDIR)/run/WOR-39/share-nowatch:nowatch" bash scripts/systemvm/generate-launch-config.sh
 	bash scripts/systemvm/up.sh
 
 binds-suite:

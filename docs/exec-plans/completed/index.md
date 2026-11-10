@@ -4,6 +4,7 @@ Finished plans. Keep them: their Decision Logs and retrospectives explain why th
 
 | Plan | Outcome | Completed |
 |---|---|---|
+| [2026-11-10-GH150-host-edit-inotify.md](2026-11-10-GH150-host-edit-inotify.md) | Host edits on watched read-write virtio-fs shares reach containers as inotify `IN_MODIFY` in about 20 ms: launcher FSEvents watcher plus guest replay sink; `make binds-suite` 19/19; residual differences from native inotify recorded in TD-038 (GH #150; GH #29 item 3 left for a human decision) | 2026-11-10 |
 | [2026-11-08-WOR-32-exec-stdio.md](2026-11-08-WOR-32-exec-stdio.md) | Exec, PTY resize, separated stdio and signals through runc in the microVM (ADR 0006): host-generated OCI configs over per-stream vsock, terminal receiver on pinned containerd libs, 74/74 conformance; security-posture override tracked as CE-0004 (GH #23 merged PR #145) | 2026-11-09 |
 | [2026-11-08-WOR-35-ctr-conformance.md](2026-11-08-WOR-35-ctr-conformance.md) | ctr conformance: shim Stats from the microVM cgroup, 55-step report with baseline revisions, CI validation workflow, operator runbook; ctr exec open for WOR-32 (GH #26 closed) | 2026-11-08 |
 | [2026-11-08-WOR-55-cross-arch.md](2026-11-08-WOR-55-cross-arch.md) | linux/amd64 containers via binfmt_misc + pinned qemu-x86_64, execution-mode metadata, unsupported-arch diagnosis, 9 checks; workflow suite's amd64 step required (GH #39 closed) | 2026-11-08 |
