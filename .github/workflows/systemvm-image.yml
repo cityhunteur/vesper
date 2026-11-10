@@ -61,6 +61,9 @@ jobs:
       - name: Reliability report assembler self-test
         run: python3 -I scripts/systemvm/reliability_report.py --self-test
 
+      - name: Share notification sink self-test
+        run: make share-notify-selftest
+
       - name: Cache pinned guest packages
         uses: actions/cache@v4
         with:

@@ -32,8 +32,9 @@ Vesper’s security model is part of its parity contract. Treat this file as the
   use `run/` instead, and packaged builds must pass explicit paths.
 - Host-visible sockets with the System VM running (`make systemvm-up && make docker-up`), all under `run/` and
   owner-only: `run/vesper/docker.sock` (the Docker ingress, served by `vesper-proxy`) and `run/systemvm/vsock/3.sock`
-  (the launcher's vsock bridge, which reaches any guest vsock port; TD-027). Inside the guest only two vsock ports
-  listen: 1024 (`vesper-agent`) and 2375 (relay to `/var/run/docker.sock`). `containerd.sock` and `docker.sock`
+  (the launcher's vsock bridge, which reaches any guest vsock port; TD-027). Inside the guest four vsock ports
+  listen: 1024 (`vesper-agent`), 2375 (relay to `/var/run/docker.sock`), 2400 (published-port relay, guest
+  loopback only) and 2401 (share notification sink, below). `containerd.sock` and `docker.sock`
   themselves never leave the guest, and a `CONNECT` to a guest port without a listener is refused.
   `make docker-smoke` checks the socket list and the refusal (`no_raw_host_sockets`, `raw_guest_port_denied`).
 
@@ -100,6 +101,16 @@ A host directory enters the System VM only when named in `VESPER_SHARES` (or `sy
 visible to every container that bind-mounts them; `PATH:ro` makes the share read-only at the virtio-fs level,
 which no container can override. Guest writes land on the host as the sharing user. Sharing `$HOME` or wider
 trees is a human decision.
+
+The share notification sink (GH #150, `vesper-share notify` on guest vsock port 2401) lets the host name paths
+whose mtime the guest then sets to its own current value, so that containers get inotify events for host edits.
+It resolves each path and acts only inside a read-write virtio-fs mount; it rejects relative paths, `..`
+components, paths outside the shares and symlinks that leave a share; it skips share roots and read-only shares;
+it never creates a file and never changes contents or mtimes (the host ctime changes). The check and the touch
+are not atomic: a container that can write to a share could swap in a symlink between them, and the worst
+outcome is that one guest file outside the share has its mtime rewritten to the same value.
+`make share-notify-selftest` checks the policy. The port is reachable from the host only through the launcher
+bridge (TD-027).
 
 ## Private microVM sessions (ADR 0006)
 

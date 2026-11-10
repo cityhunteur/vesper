@@ -1,0 +1,16 @@
+#!/sbin/openrc-run
+# Sink for host-side edit notifications on virtio-fs shares (GH #150): the launcher's FSEvents watcher
+# connects to this vsock port and writes one absolute path per line; vesper-share replays each as a
+# metadata-only touch so containers watching the bind mount get inotify events. It only touches paths
+# inside read-write virtio-fs mounts, never creates files and never changes contents or mtimes.
+description="Vesper share notification sink (vsock)"
+supervisor=supervise-daemon
+notify_port="${VESPER_SHARE_NOTIFY_PORT:-2401}"
+command=/usr/bin/socat
+command_args="VSOCK-LISTEN:${notify_port},reuseaddr,fork EXEC:'/usr/local/bin/vesper-share notify'"
+respawn_delay=1
+respawn_max=0
+
+depend() {
+  need localmount vesper-packages
+}

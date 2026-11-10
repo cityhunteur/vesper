@@ -210,6 +210,12 @@ round-trips, `chown` is ignored, read-only is enforced by the share flag and by 
 the next access, inotify fires for guest writes but not for host edits (TD-038), and a `-v` path outside the
 configured shares is a guest-local directory. `make systemvm-up-shares` boots with the two suite shares.
 
+GH #150 is closing the inotify gap in steps. The guest half exists: `vesper-share touch PATH...` (through the
+agent: `systemvmctl control share touch PATH`) and the stream form `vesper-share notify` on guest vsock port 2401
+replay a host edit as an mtime-preserving touch, which gives containers `IN_MODIFY`. Nothing on the host drives
+it yet, so host edits still produce no events until the launcher's watcher lands (TD-038 stays open).
+`make share-notify-selftest` checks the sink's path policy without a VM.
+
 ### DNS and network defaults (GH #30)
 
 Containers on the default bridge inherit the System VM's resolver, which DHCP sets to the NAT gateway
