@@ -35,7 +35,12 @@ Linear mirror: **Unknown**; the GitHub-to-Linear sync creates it, or create it b
 - [x] (2026-11-10) Milestone 0 (prototype) run on an M3 Pro, macOS 27.0, at `19045c4`; raw evidence in
   `run/TD-038/`; results in Surprises & Discoveries. The prototype tools are not promoted. Not measured: Go
   `fsnotify`, shares on external or network volumes, and the effect of the ctime change on host tools.
-- [ ] Milestone 1: guest notification sink (`vesper-share notify`) and its vsock service.
+- [x] (2026-11-10) Milestone 1: guest sink. `vesper-share touch PATH...` and `vesper-share notify` (stdin stream),
+  the `vesper-share-notify` OpenRC service on guest vsock port 2401, `probe` reports `notify=`. Proof:
+  `make share-notify-selftest` (19 checks, also in the System VM Image workflow) and a booted VM
+  (`run/GH-150/m1-runtime.txt`): through the agent and through port 2401 a touched file gave the watching
+  container `IN_MODIFY` with the host mtime unchanged to the nanosecond; the share root, a read-only share, a
+  missing path, `/etc/hostname` and a `..` path were skipped or rejected.
 - [ ] Milestone 2: host watcher in the launcher, enabled from the launch config.
 - [ ] Milestone 3: `make binds-suite` steps, runtime evidence, verification bundle.
 - [ ] Milestone 4: docs, TD-038 narrowed to the residuals below, GH #29 item 3 and GH #150 updated, milestone
@@ -150,7 +155,7 @@ Milestone 0 was a prototype and is finished; its tools (an FSEvents printer, a P
 through `docker exec`) stay in `run/TD-038/` as evidence and are not promoted. Its results are in Surprises &
 Discoveries and fix the replay operation, the loop-breaking rule and the residuals.
 
-Milestone 1 adds the guest sink. `vesper-share notify` reads one absolute path per line on stdin
+Milestone 1 adds the guest sink. `vesper-share notify` reads one absolute path per line on stdin (the wire carries no mtime)
 and, for each, checks that the path lies under a mounted virtio-fs share from `/proc/mounts`, contains no `..`
 component and exists, then sets the path's mtime to its own current value (`touch -c -m -r P P`) without following a final
 symlink and without creating files. A path that is a share's root directory is counted and skipped. It answers nothing per line and prints a counter summary on EOF. A new OpenRC service beside

@@ -5,7 +5,18 @@
 #        vesper-share list                     one line per mount: SHARE TAG PATH mode=<ro|rw>
 #        vesper-share umount PATH              UNMOUNTED PATH or ERR
 #        vesper-share probe TAG PATH           modules, tag presence and mount state as key=value words
+#        vesper-share touch PATH...            replay a host-side edit (GH #150): sets each path's mtime to its own
+#                                              current value so the guest kernel emits inotify IN_MODIFY; one line
+#                                              per path: TOUCHED|SKIPPED|MISSING|REJECTED|ERR <path> [reason]
+#        vesper-share notify                   the same for one absolute path per stdin line (the host watcher's
+#                                              stream); greets VESPER-SHARE-NOTIFY 1, prints
+#                                              NOTIFY touched= skipped= missing= rejected= errors= on EOF
+# A path is touched only when its resolved location lies inside a read-write virtio-fs mount. File contents and
+# mtimes never change; nothing is created. VESPER_SHARE_MOUNTS overrides /proc/mounts (self-test only).
 set -u
+MOUNTS=${VESPER_SHARE_MOUNTS:-/proc/mounts}
+NL='
+'
 
 tags() { cat /sys/fs/virtiofs/*/tag 2>/dev/null; }
 
@@ -39,7 +50,62 @@ probe() {
   mod=$(grep -q '^virtiofs ' /proc/modules && echo loaded || echo absent)
   present=$(tags | grep -qx "$tag" && echo yes || echo no)
   mounted=$(grep -q " $path virtiofs " /proc/mounts && echo yes || echo no)
-  echo "PROBE module=$mod tag_present=$present mounted=$mounted sysfs=$(ls -d /sys/fs/virtiofs 2>/dev/null | wc -l | tr -d ' ') inotifyd=$(command -v inotifyd >/dev/null && echo yes || echo no)"
+  echo "PROBE module=$mod tag_present=$present mounted=$mounted sysfs=$(ls -d /sys/fs/virtiofs 2>/dev/null | wc -l | tr -d ' ') inotifyd=$(command -v inotifyd >/dev/null && echo yes || echo no) notify=$(rc-service vesper-share-notify status >/dev/null 2>&1 && echo started || echo stopped)"
+}
+
+# virtio-fs mounts as "<ro|rw> <path>" lines, with the octal escapes of /proc/mounts (\040 for a space) decoded.
+load_shares() {
+  SHARES=$(awk '$3=="virtiofs" {m=($4 ~ /^ro(,|$)/)?"ro":"rw"; print m, $2}' "$MOUNTS" 2>/dev/null | while IFS= read -r l; do printf '%b\n' "$l"; done)
+}
+
+# Prints "<mode> <share>" for the mount that contains $1 ("root" as mode when $1 is the mount point itself).
+share_of() {
+  _ifs=$IFS; IFS=$NL
+  for l in $SHARES; do
+    m=${l%% *}; s=${l#* }
+    if [ "$1" = "$s" ]; then IFS=$_ifs; echo "root $s"; return 0; fi
+    case "$1" in "$s"/*) IFS=$_ifs; echo "$m $s"; return 0 ;; esac
+  done
+  IFS=$_ifs; return 1
+}
+
+# Sets RESULT to TOUCHED, SKIPPED, MISSING, REJECTED or ERR and REASON to a short word for one path.
+touch_one() {
+  p=$1; REASON=""
+  case "$p" in /*) ;; *) RESULT=REJECTED; REASON=not-absolute; return ;; esac
+  case "$p/" in */../*) RESULT=REJECTED; REASON=dotdot; return ;; esac
+  rp=$(realpath "$p" 2>/dev/null) || { RESULT=MISSING; return; }
+  [ -e "$rp" ] || { RESULT=MISSING; return; }
+  hit=$(share_of "$rp") || { load_shares; hit=$(share_of "$rp"); } || { RESULT=REJECTED; REASON=outside-shares; return; }
+  case "${hit%% *}" in
+    root) RESULT=SKIPPED; REASON=share-root; return ;;
+    ro) RESULT=SKIPPED; REASON=read-only-share; return ;;
+  esac
+  if touch -c -m -r "$rp" "$rp" 2>/dev/null; then RESULT=TOUCHED; else RESULT=ERR; REASON=touch-failed; fi
+}
+
+touch_() {
+  [ $# -gt 0 ] || { echo "ERR usage: vesper-share touch PATH..."; return 2; }
+  load_shares; rc=0
+  for p in "$@"; do
+    touch_one "$p"; echo "$RESULT $p${REASON:+ $REASON}"
+    case "$RESULT" in REJECTED|ERR) rc=1 ;; esac
+  done
+  return $rc
+}
+
+notify() {
+  load_shares; touched=0; skipped=0; missing=0; rejected=0; errors=0
+  echo "VESPER-SHARE-NOTIFY 1"
+  while IFS= read -r p; do
+    [ -n "$p" ] || continue
+    touch_one "$p"
+    case "$RESULT" in
+      TOUCHED) touched=$((touched+1)) ;; SKIPPED) skipped=$((skipped+1)) ;; MISSING) missing=$((missing+1)) ;;
+      REJECTED) rejected=$((rejected+1)) ;; *) errors=$((errors+1)) ;;
+    esac
+  done
+  echo "NOTIFY touched=$touched skipped=$skipped missing=$missing rejected=$rejected errors=$errors"
 }
 
 cmd=${1:-}; shift 2>/dev/null
@@ -48,5 +114,7 @@ case "$cmd" in
   list) list ;;
   umount) umount_ "$@" ;;
   probe) probe "$@" ;;
-  *) echo "ERR usage: vesper-share mount TAG PATH [ro|rw]|list|umount PATH|probe TAG PATH"; exit 2 ;;
+  touch) touch_ "$@" ;;
+  notify) notify ;;
+  *) echo "ERR usage: vesper-share mount TAG PATH [ro|rw]|list|umount PATH|probe TAG PATH|touch PATH...|notify"; exit 2 ;;
 esac
