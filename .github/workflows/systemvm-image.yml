@@ -122,6 +122,9 @@ jobs:
           build/vmlauncher/vesper-vmlauncher --help
           if build/vmlauncher/vesper-vmlauncher --config /nonexistent.json; then exit 1; fi
 
+      - name: Share watcher self-test (FSEvents dry run, no VM)
+        run: make share-watch-selftest
+
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 

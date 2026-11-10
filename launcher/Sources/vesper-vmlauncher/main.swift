@@ -33,6 +33,8 @@ struct SharedDirectory: Decodable {
     let tag: String
     let host_path: String
     let read_only: Bool?
+    /// Watch the host directory and replay edits in the guest as inotify events (GH #150).
+    let watch: Bool?
 }
 
 struct LaunchConfig: Decodable {
@@ -62,6 +64,7 @@ struct Options {
     var keepRunning = false
     var skipProbe = false
     var hostCapabilities = false
+    var watchDryRun: [String] = []
 }
 
 /// Host facts for backend selection (GH #17): nested virtualisation needs macOS 15 and an M3 or later.
@@ -90,12 +93,15 @@ func usage() -> String {
     """
     usage: vesper-vmlauncher [--config PATH] [--ready-pattern TEXT] [--timeout-seconds N] [--keep-running] [--skip-probe]
            vesper-vmlauncher --host-capabilities
+           vesper-vmlauncher --watch-dry-run DIR [--watch-dry-run DIR ...]
       --config PATH          launch config JSON (default build/systemvm/launch-config.json)
       --ready-pattern TEXT   console text that marks a healthy boot (default: ready_pattern from the config, else "login:")
       --timeout-seconds N    give up after N seconds (default 60)
       --keep-running         do not stop the VM after the ready pattern; wait for guest shutdown
       --skip-probe           ignore the config's probe: stop right after the ready pattern
       --host-capabilities    print host facts (nested virtualization support, macOS, chip) as JSON and exit
+      --watch-dry-run DIR    no VM: watch DIR as a share and print the paths the guest would be asked to
+                             replay, one per line after "WATCHING <n>", until terminated
     """
 }
 
@@ -129,6 +135,9 @@ func parseOptions() -> Options {
             options.skipProbe = true
         case "--host-capabilities":
             options.hostCapabilities = true
+        case "--watch-dry-run":
+            guard !args.isEmpty else { fail(3, "--watch-dry-run needs a directory") }
+            options.watchDryRun.append(args.removeFirst())
         case "--help", "-h":
             print(usage())
             exit(0)
@@ -286,6 +295,7 @@ final class Launcher: NSObject, VZVirtualMachineDelegate {
     var bridgeSource: DispatchSourceRead?
     var bridgeFd: Int32 = -1
     var signalSource: DispatchSourceSignal?
+    var shareWatcher: ShareWatcher?
 
     init(options: Options, config: LaunchConfig) {
         self.options = options
@@ -491,6 +501,25 @@ final class Launcher: NSObject, VZVirtualMachineDelegate {
         }
     }
 
+    // MARK: share watcher (GH #150)
+
+    func startShareWatcher() {
+        let watched = (config.shared_directories ?? []).filter { $0.watch ?? false }.map { $0.host_path }
+        guard !watched.isEmpty else { return }
+        guard let device = machine.socketDevices.first as? VZVirtioSocketDevice else {
+            fail(3, "VM has no virtio socket device")
+        }
+        let watcher = ShareWatcher(paths: watched, device: device)
+        watcher.start()
+        shareWatcher = watcher
+        report(status: "share-watch", extra: "\"watched\":\(watched.count),\"port\":\(ShareWatcher.defaultPort)")
+    }
+
+    func reportShareWatch() {
+        guard let watcher = shareWatcher else { return }
+        report(status: "share-watch-summary", extra: "\"counters\":\"\(watcher.summary())\"")
+    }
+
     func installSignalHandler() {
         // A bridge client (vesper-proxy) that dies while the guest is still sending makes the relay's
         // write() fail with EPIPE; without this the default SIGPIPE action would kill the VM with it.
@@ -499,6 +528,7 @@ final class Launcher: NSObject, VZVirtualMachineDelegate {
         let source = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
         source.setEventHandler { [weak self] in
             guard let self = self else { exit(0) }
+            self.reportShareWatch()
             self.report(status: "terminating")
             self.stopAndExit(self.ready ? 0 : 1)
         }
@@ -559,6 +589,7 @@ final class Launcher: NSObject, VZVirtualMachineDelegate {
             if let bridge = self.config.vsock_bridge_path, !bridge.isEmpty {
                 self.startBridge(bridge)
             }
+            self.startShareWatcher()
         }
         dispatchMain()
     }
@@ -570,6 +601,7 @@ final class Launcher: NSObject, VZVirtualMachineDelegate {
             unlink(path)
             bridgeFd = -1
         }
+        reportShareWatch()
         let ok = ready && (probe == nil || probeDone)
         report(status: ok ? "stopped" : (ready ? "stopped-before-probe" : "stopped-before-ready"))
         exit(ok ? 0 : 1)
@@ -587,6 +619,18 @@ let options = parseOptions()
 if options.hostCapabilities {
     print(hostCapabilitiesJSON())
     exit(0)
+}
+if !options.watchDryRun.isEmpty {
+    for path in options.watchDryRun {
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue else {
+            fail(3, "--watch-dry-run \(path) is not a directory")
+        }
+    }
+    setvbuf(stdout, nil, _IOLBF, 0)
+    let watcher = ShareWatcher(paths: options.watchDryRun, device: nil)
+    watcher.start()
+    dispatchMain()
 }
 let config = loadConfig(options.configPath)
 guard VZVirtualMachine.isSupported else {

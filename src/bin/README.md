@@ -24,7 +24,7 @@ errors to stderr and exits with code 1 on failure.
   `vesper::api_matrix::load_surface_stub_matrix`,
   `vesper::api::AppState::new_with_matrix`, and `AppState::router`.
   `shutdown_signal` resolves on Ctrl-C or SIGTERM.
-- `systemvmctl launch-config --share PATH[:ro]` (repeatable) adds `shared_directories` to the written config;
+- `systemvmctl launch-config --share PATH[:ro][:nowatch]` (repeatable; read-write shares get `watch: true` unless `:nowatch`, GH #150) adds `shared_directories` to the written config;
   `systemvmctl control share <args…>` runs `vesper-share` in the guest; `control arch status|mode ARCH` runs
   `vesper-arch` (execution mode per architecture).
 - `vesper-proxy.rs:main` (binary `vesper-proxy`, `#[tokio::main]`). `--publish-ports` adds the GH #28

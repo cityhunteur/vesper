@@ -43,11 +43,28 @@ case "${out}" in *"Read-only file system"*) record docker_ro_flag_enforced true 
 stamp="prompt-$(date +%s%N)"; echo "${stamp}" > "${SHARE}/p.txt"; out="$(run -v "${SHARE}:/data" "${IMAGE}" cat /data/p.txt 2>&1)"
 [ "${out}" = "${stamp}" ] && record host_edit_visible_promptly true "host wrote p.txt and the next container read saw it" || record host_edit_visible_promptly false "expected ${stamp}, got ${out}"
 
-"${DOCKER}" run -d --name binds-inot -v "${SHARE}:/data" "${IMAGE}" sh -c 'inotifyd - /data:cwnd > /tmp/ev.log 2>&1 & sleep 120' >/dev/null 2>&1; sleep 1
-"${DOCKER}" exec binds-inot sh -c 'echo b > /data/from-guest.txt' >/dev/null 2>&1; echo "host-edit" >> "${SHARE}/hello.txt"; echo "new" > "${SHARE}/from-host.txt"; sleep 2
-ev="$("${DOCKER}" exec binds-inot cat /tmp/ev.log 2>&1 | tr '\t' ' ' | tr '\n' ';')"
+# inotify (GH #150): guest writes fire natively; host edits reach containers because the launcher watches each
+# read-write share and the guest replays every changed path as an mtime-preserving touch (IN_MODIFY).
+now_ms() { python3 -c 'import time; print(int(time.time()*1000))'; }
+events() { "${DOCKER}" exec binds-inot cat /tmp/ev.log 2>&1 | tr '\t' ' ' | tr '\n' ';'; }
+# wait_event NAME: polls up to ~2 s for an event naming NAME; prints the elapsed ms, or nothing on timeout.
+wait_event() { local t0; t0="$(now_ms)"; for _ in $(seq 1 20); do case "$(events)" in *" $1;"*) echo $(( $(now_ms) - t0 )); return 0 ;; esac; sleep 0.1; done; return 1; }
+"${DOCKER}" run -d --name binds-inot -v "${SHARE}:/data" -v "${SHARE_RO}:/ro" "${IMAGE}" sh -c 'inotifyd - /data:cwnd /ro:cwnd > /tmp/ev.log 2>&1 & sleep 120' >/dev/null 2>&1; sleep 1
+"${DOCKER}" exec binds-inot sh -c 'echo b > /data/from-guest.txt' >/dev/null 2>&1; sleep 1
+ev="$(events)"
 case "${ev}" in *from-guest.txt*) record inotify_guest_writes_seen true "events: ${ev}" ;; *) record inotify_guest_writes_seen false "events: ${ev}" ;; esac
-case "${ev}" in *from-host.txt*|*hello.txt*) record inotify_host_edits_not_propagated false "unexpected: host edits produced inotify events: ${ev}" ;; *) record inotify_host_edits_not_propagated true "host edits produce no inotify events in the guest (virtio-fs limitation, TD-038); contents and mtime are visible, so watchers must poll" ;; esac
+hint="no event within 2 s; is the share watched (launch config \"watch\": true, launcher status share-watch) and is vesper-share-notify started?"
+echo "host-edit" >> "${SHARE}/hello.txt"; mtime_at_write="$(stat -f '%Fm' "${SHARE}/hello.txt")"
+if ms="$(wait_event hello.txt)"; then [ "${ms}" -le 1000 ] && record inotify_host_edit_propagated true "host append to hello.txt reached the container as an inotify event after ${ms} ms (polled)" || record inotify_host_edit_propagated false "event after ${ms} ms, bound 1000 ms"; else record inotify_host_edit_propagated false "${hint} events: $(events)"; fi
+echo "new" > "${SHARE}/from-host.txt"
+if ms="$(wait_event from-host.txt)"; then [ "${ms}" -le 1000 ] && record inotify_host_create_propagated true "host create of from-host.txt reached the container as an inotify event (IN_MODIFY, not IN_CREATE) after ${ms} ms (polled)" || record inotify_host_create_propagated false "event after ${ms} ms, bound 1000 ms"; else record inotify_host_create_propagated false "${hint} events: $(events)"; fi
+sleep 5
+mtime_after="$(stat -f '%Fm' "${SHARE}/hello.txt")"; content="$(tail -1 "${SHARE}/hello.txt")"
+[ "${mtime_after}" = "${mtime_at_write}" ] && [ "${content}" = "host-edit" ] && record inotify_host_mtime_preserved true "the replay left hello.txt's contents and mtime (${mtime_after}) unchanged; only the host ctime moves" || record inotify_host_mtime_preserved false "mtime ${mtime_at_write} -> ${mtime_after}, last line ${content}"
+n="$(events | tr ';' '\n' | grep -c ' hello.txt$')"
+[ "${n}" -ge 1 ] && [ "${n}" -le 2 ] && record inotify_no_echo_storm true "one host edit produced ${n} event(s) for hello.txt in 5 s; the replay's own FSEvents echo is dropped" || record inotify_no_echo_storm false "one host edit produced ${n} events for hello.txt in 5 s"
+echo "ro-edit" >> "${SHARE_RO}/ro.txt"; sleep 2
+case "$(events)" in *ro.txt*) record inotify_ro_share_host_edits_not_propagated false "unexpected: a read-only share produced inotify events: $(events)" ;; *) record inotify_ro_share_host_edits_not_propagated true "host edits on a read-only share produce no inotify events (the guest cannot touch files there; documented residual, TD-038)" ;; esac
 "${DOCKER}" rm -f binds-inot >/dev/null 2>&1
 
 out="$(run -v /tmp/vesper-not-shared:/x "${IMAGE}" sh -c 'ls -A /x | wc -l' 2>&1)"

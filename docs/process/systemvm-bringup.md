@@ -200,21 +200,31 @@ bridge stream used to take the VM down.
 
 ### Bind mounts over virtio-fs (GH #29)
 
-`VESPER_SHARES="/abs/path /other:ro" make systemvm-launch-config` (or `systemvmctl launch-config --share`) adds
+`VESPER_SHARES="/abs/path /other:ro /third:nowatch" make systemvm-launch-config` (or `systemvmctl launch-config --share`) adds
 `shared_directories` to the launch config; the launcher attaches one virtio-fs device per entry (tags
 `share0`, `share1`, …) and `up.sh` asks the guest (`vesper-share mount TAG PATH ro|rw` through the agent) to mount
 each tag at the same absolute path, so `docker run -v /abs/path:/x` from macOS binds the host directory. No
-share is configured by default. Semantics, recorded by `make binds-suite` (10 steps, `run/systemvm/binds-report.json`):
+share is configured by default. Semantics, recorded by `make binds-suite` (14 steps, `run/systemvm/binds-report.json`):
 host files appear owned by uid 0 in the guest, guest writes appear on the host owned by the sharing user, `chmod`
 round-trips, `chown` is ignored, read-only is enforced by the share flag and by `:ro`, host edits are visible on
-the next access, inotify fires for guest writes but not for host edits (TD-038), and a `-v` path outside the
-configured shares is a guest-local directory. `make systemvm-up-shares` boots with the two suite shares.
+the next access, inotify fires for guest writes and, on watched read-write shares, for host edits (below), and a
+`-v` path outside the configured shares is a guest-local directory. `make systemvm-up-shares` boots with the two suite shares.
 
-GH #150 is closing the inotify gap in steps. The guest half exists: `vesper-share touch PATH...` (through the
-agent: `systemvmctl control share touch PATH`) and the stream form `vesper-share notify` on guest vsock port 2401
-replay a host edit as an mtime-preserving touch, which gives containers `IN_MODIFY`. Nothing on the host drives
-it yet, so host edits still produce no events until the launcher's watcher lands (TD-038 stays open).
-`make share-notify-selftest` checks the sink's path policy without a VM.
+Host edits and inotify (GH #150). virtio-fs tells the guest kernel nothing about host-side edits, so the launcher
+watches every read-write share with FSEvents (`"watch": true` in the launch config; `PATH:nowatch` opts a share
+out) and writes each changed path to the guest's sink, `vesper-share notify` on guest vsock port 2401. The sink
+sets the path's mtime to its own current value, which makes the guest kernel emit `IN_MODIFY` for containers
+watching the bind mount. Contents and mtimes on the host do not change; the host ctime does. The launcher log
+shows `"status":"share-watch"` at start, `share-watch: connected to guest port 2401` once the sink answers, and
+`share-watch-summary` with counters at shutdown. What a container sees differs from a native Linux file system
+(TD-038): a host create is `IN_MODIFY`, not `IN_CREATE`; a host delete or rename is `IN_MODIFY` on the parent
+directory; there is no `IN_CLOSE_WRITE`; deletes directly in a share's root directory and all edits on
+read-only shares produce nothing; and a watcher that adds watches only on `IN_CREATE` (`inotifywait -r`) does
+not follow a directory created on the host after it started. Watchers that rescan a directory when it changes
+(chokidar) see `change`, `add` and `unlink`. If the sink is unreachable the launcher keeps up to 20,000 paths
+and reconnects every 2 s; files stay current on access throughout. `make share-notify-selftest` checks the
+sink's path policy and `make share-watch-selftest` the watcher's decisions, both without a VM;
+`systemvmctl control share touch PATH` replays one path by hand.
 
 ### DNS and network defaults (GH #30)
 

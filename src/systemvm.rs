@@ -63,23 +63,34 @@ pub struct SharedDirectory {
     pub host_path: String,
     #[serde(default)]
     pub read_only: bool,
+    /// The launcher watches the host directory and asks the guest to replay edits as inotify events
+    /// (GH #150). Never set for a read-only share: the guest cannot touch files there.
+    #[serde(default)]
+    pub watch: bool,
 }
 
-/// Builds the share list from `PATH[:ro]` specs; tags are `share0`, `share1`, … (virtio-fs tags are short).
+/// Builds the share list from `PATH[:ro][:nowatch]` specs; tags are `share0`, `share1`, … (virtio-fs tags
+/// are short). A read-write share is watched for host edits unless the spec ends in `:nowatch`.
 pub fn shared_directories_from_specs(specs: &[String]) -> Result<Vec<SharedDirectory>, String> {
     let mut out = Vec::new();
     for (i, spec) in specs.iter().enumerate() {
-        let (path, ro) = match spec.strip_suffix(":ro") {
-            Some(p) => (p, true),
-            None => (spec.as_str(), false),
-        };
+        let (mut path, mut ro, mut nowatch) = (spec.as_str(), false, false);
+        loop {
+            if let Some(p) = path.strip_suffix(":ro").filter(|_| !ro) {
+                (path, ro) = (p, true);
+            } else if let Some(p) = path.strip_suffix(":nowatch").filter(|_| !nowatch) {
+                (path, nowatch) = (p, true);
+            } else {
+                break;
+            }
+        }
         if path.is_empty() || !path.starts_with('/') {
             return Err(format!("share {spec:?}: the host path must be absolute"));
         }
         if !Path::new(path).is_dir() {
             return Err(format!("share {spec:?}: {path} is not a directory"));
         }
-        out.push(SharedDirectory { tag: format!("share{i}"), host_path: path.trim_end_matches('/').to_string(), read_only: ro });
+        out.push(SharedDirectory { tag: format!("share{i}"), host_path: path.trim_end_matches('/').to_string(), read_only: ro, watch: !ro && !nowatch });
     }
     Ok(out)
 }
@@ -552,6 +563,23 @@ fn ensure_parent(path: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn share_specs_set_read_only_and_watch() {
+        let dir = std::env::temp_dir().to_string_lossy().trim_end_matches('/').to_string();
+        let specs: Vec<String> =
+            ["", ":ro", ":nowatch", ":ro:nowatch", ":nowatch:ro"].iter().map(|suffix| format!("{dir}{suffix}")).collect();
+        let shares = shared_directories_from_specs(&specs).expect("specs parse");
+        let flags: Vec<(bool, bool)> = shares.iter().map(|s| (s.read_only, s.watch)).collect();
+        // A read-write share is watched by default; `:nowatch` opts out; a read-only share is never watched.
+        assert_eq!(flags, vec![(false, true), (true, false), (false, false), (true, false), (true, false)]);
+        assert!(shares.iter().all(|s| s.host_path == dir));
+        assert_eq!(shares[4].tag, "share4");
+        assert!(shared_directories_from_specs(&["relative:nowatch".to_string()]).is_err());
+        // Configs written before the field existed still load, unwatched.
+        let old: SharedDirectory = serde_json::from_str(r#"{"tag":"share0","host_path":"/x"}"#).expect("old config");
+        assert!(!old.watch && !old.read_only);
+    }
     use tempfile::tempdir;
 
     #[test]

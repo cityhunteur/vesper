@@ -110,7 +110,9 @@ it never creates a file and never changes contents or mtimes (the host ctime cha
 are not atomic: a container that can write to a share could swap in a symlink between them, and the worst
 outcome is that one guest file outside the share has its mtime rewritten to the same value.
 `make share-notify-selftest` checks the policy. The port is reachable from the host only through the launcher
-bridge (TD-027).
+bridge (TD-027). The host half is the launcher's share watcher: it reads FSEvents for shares marked `watch` in
+the launch config (read-write shares unless `PATH:nowatch`), sends path names only, never file contents, never
+writes to a share itself, opens no host socket and needs no entitlement beyond the launcher's existing one.
 
 ## Private microVM sessions (ADR 0006)
 
