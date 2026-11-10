@@ -226,12 +226,6 @@ and reconnects every 2 s; files stay current on access throughout. `make share-n
 sink's path policy and `make share-watch-selftest` the watcher's decisions, both without a VM;
 `systemvmctl control share touch PATH` replays one path by hand.
 
-GH #150 is closing the inotify gap in steps. The guest half exists: `vesper-share touch PATH...` (through the
-agent: `systemvmctl control share touch PATH`) and the stream form `vesper-share notify` on guest vsock port 2401
-replay a host edit as an mtime-preserving touch, which gives containers `IN_MODIFY`. Nothing on the host drives
-it yet, so host edits still produce no events until the launcher's watcher lands (TD-038 stays open).
-`make share-notify-selftest` checks the sink's path policy without a VM.
-
 ### DNS and network defaults (GH #30)
 
 Containers on the default bridge inherit the System VM's resolver, which DHCP sets to the NAT gateway
