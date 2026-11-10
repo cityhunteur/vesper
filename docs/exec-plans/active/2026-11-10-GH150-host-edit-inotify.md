@@ -1,11 +1,8 @@
-# Deliver inotify events to containers for host-side edits on virtio-fs shares (GH #29 item 3 / TD-038)
+# Deliver inotify events to containers for host-side edits on virtio-fs shares (GH #150 / GH #29 item 3 / TD-038)
 
 This ExecPlan is a living document. The sections Progress, Surprises & Discoveries, Decision Log, and
 Outcomes & Retrospective must be kept up to date as work proceeds. It is maintained in accordance with
 docs/PLANS.md.
-
-**Status: draft, awaiting a human decision.** No implementation step may start until the four decisions in
-"Decisions needed from a human" are recorded in the Decision Log.
 
 ## Purpose / Big Picture
 
@@ -26,22 +23,23 @@ The parity unit is Docker UX parity for bind mounts (design-v0, Phase 4). It is 
 no route in the pinned baseline (`083c4cf69281178acc910f7f857f88e69c51d3b5` in
 `docs/specs/design-v0.baselines.lock.yaml`) changes.
 
-Tracker: GitHub #29 is closed with item 3 unchecked. Linear ticket: **Unknown**. Create one (or reopen #29)
-before the first implementation commit so every commit has an issue link.
+Tracker: GitHub #150 carries this work. GitHub #29 stays closed with item 3 unchecked until this plan is done.
+Linear mirror: **Unknown**; the GitHub-to-Linear sync creates it, or create it by hand if none appears.
 
 ## Progress
 
 - [x] (2026-11-10) Read the WOR-39 plan, `vesper-share`, `vesper-agent`, the launcher and `binds-suite.sh`; drafted
   this plan.
-- [ ] Human records the four decisions below in the Decision Log.
-- [ ] Tracker: create the Linear ticket or reopen GH #29; rename this file if the issue id changes.
-- [ ] Milestone 0 (prototype): measure which guest operation produces which inotify events, on read-write and
-  read-only shares, and whether it echoes back to the host.
+- [x] (2026-11-10) The four decisions recorded in the Decision Log (cityhunteur: the recommended option for each).
+- [x] (2026-11-10) Tracker: GitHub #150 created; this file renamed from `…-GH29-…` to `…-GH150-…`.
+- [x] (2026-11-10) Milestone 0 (prototype) run on an M3 Pro, macOS 27.0, at `19045c4`; raw evidence in
+  `run/TD-038/`; results in Surprises & Discoveries. The prototype tools are not promoted. Not measured: Go
+  `fsnotify`, shares on external or network volumes, and the effect of the ctime change on host tools.
 - [ ] Milestone 1: guest notification sink (`vesper-share notify`) and its vsock service.
 - [ ] Milestone 2: host watcher in the launcher, enabled from the launch config.
 - [ ] Milestone 3: `make binds-suite` steps, runtime evidence, verification bundle.
-- [ ] Milestone 4: docs, TD-038 resolved or narrowed, GH #29 item 3 ticked, milestone entry, plan moved to
-  completed.
+- [ ] Milestone 4: docs, TD-038 narrowed to the residuals below, GH #29 item 3 and GH #150 updated, milestone
+  entry, plan moved to completed.
 
 ## Surprises & Discoveries
 
@@ -52,13 +50,65 @@ before the first implementation commit so every commit has an issue link.
   `docker run -v` only.
   Consequence: this plan covers Docker bind mounts in the System VM. Shares inside microVM tasks are out of
   scope and stay **Unknown**; resolve by a separate design if Phase 3 tasks need host directories.
+- Observation: setting a file's mtime from the guest produces `IN_MODIFY`, not only `IN_ATTRIB`. `touch -c -m -r P P`
+  (set the mtime to the value the file already has) gives a watcher on the directory a real modify event;
+  `chmod` to the current mode gives `IN_ATTRIB`; `stat` and `cat` give nothing.
+  Evidence: `run/TD-038/m0-masks.txt` (busybox `inotifyd`: `c` for touch, `e` for chmod).
+- Observation: `touch -r P P` keeps the host mtime to the nanosecond; `touch -d @<seconds>` truncates it
+  (`…125.667200135` became `…125.000000000`). Either one changes the host ctime.
+  Evidence: `run/TD-038/m0-ns.txt`; ctime values in `run/TD-038/m0-masks.txt`.
+- Observation: every guest replay comes back to the host as an FSEvents event, and FSEvents flags are
+  cumulative per file (a replay shows `InodeMetaMod|Modified`), so flags cannot tell a replay from an edit.
+  Dropping events whose `(mtime_ns, size)` was already forwarded stops the loop: 5 s idle after edits produced
+  no events.
+  Evidence: `run/TD-038/m0-fsevents.raw`, `run/TD-038/m0-watchers-bridge.txt` (`drop` lines).
+- Observation: with the prototype bridge, real watchers react without polling. `inotifywait -m -r` reports
+  `MODIFY` for appends, atomic saves (temp file renamed over the target) and creates. chokidar 3 reports `change`,
+  `add` and, after the parent directory is replayed, `unlink` for host renames and deletes. `watchexec` reruns
+  its command. With no bridge all three stay silent.
+  Evidence: `run/TD-038/m0-watchers-baseline.txt`, `run/TD-038/m0-watchers-bridge.txt`.
+- Observation: latency from a host write to the `inotifywait` line read back on the host was 13 to 23 ms over
+  30 edits (p50 19 to 20 ms), the same for FSEvents latency settings of 50 ms and 200 ms with the no-defer flag.
+  Evidence: `run/TD-038/m0-latency.txt`.
+- Observation: residuals that no guest operation removed. (1) The share's root directory rejects `touch` and
+  `chmod` from the guest (`Operation not permitted`), so a delete or rename directly in the share root cannot be
+  signalled; subdirectories work. (2) A host create arrives as `IN_MODIFY`, never `IN_CREATE`, and a host delete
+  only as `IN_MODIFY` on the parent directory. Watchers that rescan a directory on change (chokidar) recover;
+  watchers that add watches only on `IN_CREATE` (`inotifywait -r`) never watch a directory created on the host
+  after they started: 2,000 files written into a new host directory gave chokidar 2,000 `add` events and
+  `inotifywait` none. (3) No `IN_CLOSE_WRITE` is produced. (4) A watch on a single file does not follow an
+  atomic save. (5) Read-only shares reject both operations (`Read-only file system`).
+  Evidence: `run/TD-038/m0-masks.txt`, `run/TD-038/m0-burst.txt`.
+- Observation: a burst of 2,000 host creates made FSEvents report `MustScanSubDirs` once and the bridge
+  forwarded 1,769 file paths, yet chokidar still saw all 2,000 because the directory replay made it rescan. The
+  System VM stayed healthy; the prototype drained the burst in about 22 s through `docker exec`, which is not
+  the production path.
+  Evidence: `run/TD-038/m0-burst.txt`.
 
 ## Decision Log
 
-- Decision: pending. See "Decisions needed from a human".
-  Rationale: the approach adds a host-side watcher and a guest write path into shared host directories; the
-  WOR-39 plan deliberately left this as "a design of its own".
-  Date/Author: 2026-11-10, agent (draft).
+- Decision: option A, a host watcher plus guest replay.
+  Rationale: low latency and no idle cost; polling grows with tree size; keeping the limitation is not parity.
+  Date/Author: 2026-11-10, cityhunteur (agent recommendation accepted).
+- Decision: the host watcher lives in `vesper-vmlauncher` (Swift).
+  Rationale: FSEvents is native there, the launcher owns the shares and the vsock device, no new dependency
+  and no new host-visible socket.
+  Date/Author: 2026-11-10, cityhunteur.
+- Decision: watching is on by default for read-write shares, with a per-share opt-out `PATH:nowatch`.
+  Rationale: parity by default. Milestone 0 measured a host ctime change and no mtime or content change; the
+  effect of the ctime change on host tools is not yet measured.
+  Date/Author: 2026-11-10, cityhunteur.
+- Decision: read-only shares get no host-edit events; this is a documented residual.
+  Rationale: the alternative weakens the guarantee that no container can override `:ro`.
+  Date/Author: 2026-11-10, cityhunteur.
+- Decision: the replay operation is "set the mtime to the file's own current mtime" (`touch -c -m -r P P`, or
+  `utimensat` with the stat value), never an mtime sent by the host and never `touch -d @<seconds>`.
+  Rationale: it yields `IN_MODIFY`, keeps the host mtime exact, and needs no timestamp on the wire.
+  Date/Author: 2026-11-10, agent, from Milestone 0.
+- Decision: the watcher breaks the echo loop by remembering `(mtime_ns, size)` per forwarded path, not by
+  FSEvents flags; for a path that no longer exists it replays the parent directory.
+  Rationale: flags are cumulative; the stat key held in every Milestone 0 run.
+  Date/Author: 2026-11-10, agent, from Milestone 0.
 
 ## Outcomes & Retrospective
 
@@ -94,48 +144,16 @@ ADR 0001 (`docs/design-docs/adr/0001-systemvm-launcher-swift-helper.md`), the co
 `docs/exec-plans/completed/2026-11-08-WOR-39-bind-mounts.md`, and the README of `launcher/`, `systemvm/overlay/`
 and `scripts/systemvm/`.
 
-## Decisions needed from a human
-
-1. **Approach.** Recommended: option A.
-   - A. Host watcher plus guest replay. The host watches each share with FSEvents and sends changed paths to
-     the guest; the guest performs a metadata-only operation on each path (set the mtime to the value it
-     already has), which makes the guest kernel emit an inotify event. Low latency, no cost when idle. Cost: a
-     new host component, a new guest listener, and guest-initiated metadata writes into shared directories.
-   - B. Guest-only polling. A guest daemon walks each share, compares mtimes and replays as in A. No host
-     component, but CPU and latency grow with tree size (`node_modules`), and it still writes metadata.
-   - C. Keep the limitation. Document polling settings for common dev servers and close TD-038 as "won't fix
-     before GA" through a compat exception. No code, no parity.
-2. **Where the host watcher lives.** Recommended: in `vesper-vmlauncher` (Swift). FSEvents is native there, the
-   launcher already knows the shares and owns the vsock device, and nothing new is exposed on the host. The
-   alternative, a Rust watcher in `vesper-proxy` or a new binary, needs a file-watching crate, which is a new
-   runtime dependency and so needs approval under AGENTS.md.
-3. **Default.** Recommended: on for read-write shares, off for read-only shares, with a per-share opt-out
-   (`PATH:nowatch`). The replay changes ctime on the host file, which a few host tools observe; Milestone 0
-   measures this. If the measured side effect is not acceptable, make it opt-in (`PATH:watch`) instead.
-4. **Read-only shares.** A metadata write fails on a read-only mount, so option A cannot replay there. Either
-   accept "no host-edit events on `:ro` shares" as a documented residual (recommended), or allow the share to be
-   read-write at the virtio-fs level and read-only only at the guest mount, which weakens the guarantee in
-   `docs/SECURITY.md` that no container can override `:ro`. The second choice is a security decision.
-
 ## Plan of Work
 
-The text below assumes the recommended choices. Revise it when the decisions land.
+Milestone 0 was a prototype and is finished; its tools (an FSEvents printer, a Python bridge that replayed
+through `docker exec`) stay in `run/TD-038/` as evidence and are not promoted. Its results are in Surprises &
+Discoveries and fix the replay operation, the loop-breaking rule and the residuals.
 
-Milestone 0 is a prototype and is discarded after its results are written into Surprises & Discoveries. With
-`make systemvm-up-shares` and a container running `inotifyd` on the share, run by hand in the guest each
-candidate operation on a file the host has just edited: `touch -c -m -d @<mtime>`, `chmod` to the current mode,
-and a plain `stat`. Record for each the inotify mask the container sees (`IN_ATTRIB`, `IN_MODIFY`, none),
-whether the host then sees its own FSEvents event for that operation (an echo, which would loop), whether host
-ctime changes, and what happens for a file the host created, renamed or deleted (touching the parent directory
-is the candidate there). Repeat on the read-only share. Also check which events common watchers act on:
-`inotifywait`, Node `chokidar`, Go `fsnotify`. This milestone decides the operation and whether `IN_ATTRIB`
-alone is enough to call the checklist item met. If no operation yields an event that a real dev server acts
-on, stop and return to decision 1.
-
-Milestone 1 adds the guest sink. `vesper-share notify` reads lines `<mtime-seconds> <absolute-path>` on stdin
+Milestone 1 adds the guest sink. `vesper-share notify` reads one absolute path per line on stdin
 and, for each, checks that the path lies under a mounted virtio-fs share from `/proc/mounts`, contains no `..`
-component and exists, then applies the chosen operation without following a final symlink and without creating
-files. It answers nothing per line and prints a counter summary on EOF. A new OpenRC service beside
+component and exists, then sets the path's mtime to its own current value (`touch -c -m -r P P`) without following a final
+symlink and without creating files. A path that is a share's root directory is counted and skipped. It answers nothing per line and prints a counter summary on EOF. A new OpenRC service beside
 `vesper-agent` runs it under `socat VSOCK-LISTEN:<port>,fork`, on a dedicated port so that a long-lived stream
 does not occupy the agent. `vesper-share probe` reports whether the sink is present. Unit-level proof: a guest
 script that feeds accepted and rejected paths and asserts the counters.
@@ -143,25 +161,27 @@ script that feeds accepted and rejected paths and asserts the counters.
 Milestone 2 adds the host watcher. `SharedDirectory` gains `watch: bool` in `src/systemvm.rs` and in the
 launcher's `LaunchConfig`; `shared_directories_from_specs` parses the opt-out suffix; `systemvmctl launch-config`
 and `scripts/systemvm/generate-launch-config.sh` pass it through. In `main.swift`, after the guest is ready, the
-launcher starts one FSEvents stream for the watched shares (file-level events, a coalescing latency chosen in
-Milestone 0), connects to the sink port through `VZVirtioSocketDevice`, and writes one line per changed path. It
-drops events whose mtime it has already forwarded, which breaks the echo loop; bounds its queue and, on
-overflow, sends the affected directory instead of each file; and reconnects with backoff when the sink
+launcher starts one FSEvents stream for the watched shares (file-level events, no-defer, 50 ms coalescing latency), connects to the sink port through `VZVirtioSocketDevice`, and writes one line per changed path. It
+drops events whose `(mtime_ns, size)` it has already forwarded, which breaks the echo loop; for a path that no
+longer exists it sends the parent directory; on `MustScanSubDirs` or a full queue it sends the affected
+directories instead of each file; and reconnects with backoff when the sink
 restarts. It logs counts, never file contents. If `main.swift` would grow past the structure sensor's budget,
 put the watcher in a second Swift source file.
 
 Milestone 3 changes `scripts/systemvm/binds-suite.sh`. The step `inotify_host_edits_not_propagated` becomes
 `inotify_host_edit_propagated` (append to an existing file) and `inotify_host_create_propagated` (new file), each
-with a latency bound taken from Milestone 0. New steps: `inotify_no_echo_storm` (one host edit yields a bounded
+with a 1 s bound (Milestone 0 measured about 20 ms; the bound leaves room for a loaded host). New steps: `inotify_no_echo_storm` (one host edit yields a bounded
 number of events over five seconds), `inotify_burst_coalesced` (writing 2,000 files on the host neither stalls
-the VM nor loses the final state), `inotify_ro_share_behaviour` (records the decision 4 outcome),
-`inotify_nowatch_share_silent`, and `inotify_delete_rename_behaviour` (records what a watcher sees). Docker
+the VM nor loses the final state), `inotify_ro_share_behaviour` (records that a read-only share yields no events),
+`inotify_nowatch_share_silent`, `inotify_host_mtime_preserved` (host mtime identical to the nanosecond before
+and after the replay), and `inotify_delete_rename_behaviour` (records what a watcher sees in a subdirectory and
+in the share root). Docker
 conformance, ports and shim suites must still pass with watching enabled.
 
 Milestone 4 updates the owning docs in the same change set as the behaviour: `docs/process/systemvm-bringup.md`,
 `docs/SECURITY.md` (the guest now writes metadata into shares on the host's instruction; path validation
 rules), `docs/RELIABILITY.md` (watcher failure is degraded, not fatal), the three READMEs, the parity matrix row
-for #29, TD-038 (resolved, or narrowed to the residuals found), GH #29 item 3 and the milestone log.
+for #29, TD-038 (narrowed to the residuals found), GH #29 item 3, GH #150 and the milestone log.
 
 ## Concrete Steps
 
@@ -188,14 +208,14 @@ Expected new lines in `run/systemvm/binds-report.json` after the change:
 ## Validation and Acceptance
 
 The work is accepted when all of these hold on developer hardware, with artifacts under `run/` and a
-verification bundle under `.symphony/runs/<issue>/current/`:
+verification bundle under `.symphony/runs/GH-150/current/`:
 
 - A host append and a host create inside a watched read-write share each produce an inotify event in a
-  container watching the directory, inside the latency bound fixed in Milestone 0. The steps fail on `main`
+  container watching the directory, within 1 s. The steps fail on `main`
   before the change.
-- At least one real watcher library from Milestone 0 reloads on a host edit without polling.
+- chokidar reports `change` for a host edit and `add` for a host create without polling.
 - One host edit does not produce an unbounded event stream, and host file contents are never changed by the
-  replay.
+  replay; host mtimes are unchanged to the nanosecond.
 - A path outside the mounted shares, a path with `..`, and a symlink that leaves the share are rejected by the
   sink; a test shows each.
 - Killing the sink or the watcher leaves the VM, Docker and existing shares working; the watcher reconnects.
@@ -204,8 +224,10 @@ verification bundle under `.symphony/runs/<issue>/current/`:
 - `cargo test`, the sibling suites, both docs sensors and CI for the pushed SHA are green, and the issue
   records local and remote results.
 
-Any behaviour that stays different from Docker Desktop (events on `:ro` shares, deletes and renames, `IN_ATTRIB`
-instead of `IN_MODIFY`) is written into TD-038 as a narrowed entry rather than hidden behind a ticked box.
+The residuals from Milestone 0 (no events on `:ro` shares, no `IN_CREATE`, `IN_DELETE` or `IN_CLOSE_WRITE`,
+deletes in the share root, directories created on the host for watchers that depend on `IN_CREATE`) are
+written into TD-038 as a narrowed entry rather than hidden behind a ticked box. Whether GH #29 item 3 can be
+ticked with those residuals is a human decision at Milestone 4.
 
 ## Idempotence and Recovery
 
@@ -221,20 +243,28 @@ Current behaviour, from `run/WOR-39/systemvm/binds-report.json`:
 
     ok   inotify_host_edits_not_propagated: host edits produce no inotify events in the guest (TD-038)
 
+Milestone 0, with the prototype bridge (`run/TD-038/m0-watchers-bridge.txt`, `m0-latency.txt`):
+
+    host append f.txt        inotifywait: MODIFY /data/f.txt   chokidar: change /data/f.txt
+    host create sub/b.txt    inotifywait: MODIFY /data/sub/b.txt   chokidar: add /data/sub/b.txt
+    host delete sub/c.txt    inotifywait: MODIFY,ISDIR /data/sub   chokidar: unlink /data/sub/c.txt
+    host delete root-new.txt (share root)   no event in any watcher
+    edits=30 seen=30 min=13ms p50=19ms p95=21ms max=22ms
+
 Unknowns, each with its resolution:
 
-- Which guest operation yields which inotify mask on Virtualization.framework virtio-fs, and whether it echoes
-  to the host: **Unknown**; Milestone 0 measures it.
-- Whether `IN_ATTRIB` is enough for common dev servers: **Unknown**; Milestone 0 tests named watchers.
-- Whether deletes and renames can be signalled at all: **Unknown**; Milestone 0, recorded as a residual if not.
+- Whether Go `fsnotify`-based tools act on these events: **Unknown**; add one to the Milestone 3 suite.
+- Whether the host ctime change disturbs host tools (backup, `git` index refresh): **Unknown**; check `git
+  status` cost on a watched repository in Milestone 3 and record it.
 - FSEvents behaviour for shares on external or network volumes: **Unknown**; test one external volume in
   Milestone 3 or record it as unsupported.
+- Whether any guest operation can signal a change in a share's root directory: **Unknown**; none found. Record
+  as a residual unless Milestone 1 finds one.
 
 ## Interfaces and Dependencies
 
 Host: FSEvents through CoreServices, already available to the Swift launcher; no new package. Guest: busybox
 `touch` or `chmod` and `socat`, both already in the image; one new OpenRC service and one new vsock port
-(guest-side only). Launch config: `shared_directories[].watch` (boolean, default per decision 3). Agent protocol
+(guest-side only). Launch config: `shared_directories[].watch` (boolean; true for read-write shares unless `PATH:nowatch`). Agent protocol
 version stays 1; the sink is a separate port, not a new agent command. No new Rust crate, no new Go module, no
-entitlement change. If decision 2 selects a Rust watcher instead, the file-watching crate needs human approval
-first.
+entitlement change.
