@@ -8,6 +8,7 @@ on:
       - systemvm/**
       - scripts/systemvm/**
       - scripts/macos/build-vmlauncher.sh
+      - scripts/macos/share-watch-selftest.sh
       - launcher/**
       - packaging/macos/vesper-vmlauncher.entitlements
       - src/systemvm.rs
@@ -18,8 +19,11 @@ on:
     branches: [main]
     paths:
       - docs/specs/systemvm-image.lock.yaml
+      - docs/specs/systemvm-packages.lock.yaml
+      - systemvm/**
       - scripts/systemvm/**
       - scripts/macos/build-vmlauncher.sh
+      - scripts/macos/share-watch-selftest.sh
       - launcher/**
       - packaging/macos/vesper-vmlauncher.entitlements
       - src/systemvm.rs

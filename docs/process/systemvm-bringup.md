@@ -1,7 +1,7 @@
 ---
 status: verified
 owner: cityhunteur
-last_reviewed: 2026-11-09
+last_reviewed: 2026-11-11
 ---
 
 # System VM Build and Boot Pipeline (Phase 1)
@@ -204,7 +204,7 @@ bridge stream used to take the VM down.
 `shared_directories` to the launch config; the launcher attaches one virtio-fs device per entry (tags
 `share0`, `share1`, …) and `up.sh` asks the guest (`vesper-share mount TAG PATH ro|rw` through the agent) to mount
 each tag at the same absolute path, so `docker run -v /abs/path:/x` from macOS binds the host directory. No
-share is configured by default. Semantics, recorded by `make binds-suite` (19 steps, `run/systemvm/binds-report.json`):
+share is configured by default. Semantics, recorded by `make binds-suite` (20 steps, `run/systemvm/binds-report.json`; developer hardware only, never in CI):
 host files appear owned by uid 0 in the guest, guest writes appear on the host owned by the sharing user, `chmod`
 round-trips, `chown` is ignored, read-only is enforced by the share flag and by `:ro`, host edits are visible on
 the next access, inotify fires for guest writes and, on watched read-write shares, for host edits (below), and a
@@ -213,19 +213,50 @@ the next access, inotify fires for guest writes and, on watched read-write share
 Host edits and inotify (GH #150). virtio-fs tells the guest kernel nothing about host-side edits, so the launcher
 watches every read-write share with FSEvents (`"watch": true` in the launch config; `PATH:nowatch` opts a share
 out) and writes each changed path to the guest's sink, `vesper-share notify` on guest vsock port 2401. The sink
-sets the path's mtime to its own current value, which makes the guest kernel emit `IN_MODIFY` for containers
-watching the bind mount. Contents and mtimes on the host do not change; the host ctime does. The launcher log
-shows `"status":"share-watch"` at start, `share-watch: connected to guest port 2401` once the sink answers, and
-`share-watch-summary` with counters at shutdown. What a container sees differs from a native Linux file system
-(TD-038): a host create is `IN_MODIFY`, not `IN_CREATE`; a host delete or rename is `IN_MODIFY` on the parent
-directory; there is no `IN_CLOSE_WRITE`; deletes directly in a share's root directory and all edits on
-read-only shares produce nothing; and a watcher that adds watches only on `IN_CREATE` (`inotifywait -r`) does
+replays each path in three steps: an atime-only set (`touch -c -a -r P P`), whose reply refreshes the guest's
+cached attributes; an mtime-only set (`touch -c -m -r P P`), which makes the guest kernel emit `IN_MODIFY` for
+containers watching the bind mount; and, only if the file's size changed between the two, `touch -c -m P`
+(reason `raced`). The replay never changes contents. It leaves the host mtime equal to the last host write,
+except that a host write landing between the two sets gets the time of the replay (never older than the write),
+and a same-size overwrite inside that window (about a millisecond) is not detected and can keep the previous
+write's mtime. The replay sets the host atime to the guest's cached atime, which can move it backwards, and
+changes the ctime ([SECURITY.md](../SECURITY.md)).
+
+The watcher never waits for the guest. Writes to the sink are non-blocking, in batches of 1,000 lines; when the
+sink is not reading, the watcher tries again every 50 ms. It keeps up to 100,000 unsent lines; beyond that it
+drops the oldest lines not yet on the wire and forgets them, so a later edit of the same path is sent again. A
+failed connect or write is retried every 2 s. When FSEvents reports dropped events, the watcher walks the
+reported directory (at most 50,000 entries) and sends what was modified in the last 60 s. Files stay current on
+access throughout, and SIGTERM and guest shutdown do not wait for the sink.
+
+Launcher output for the watcher:
+
+- Status line `"status":"share-watch"` (`"watched":N,"port":2401`) once the FSEvents stream runs, or
+  `"status":"share-watch-failed"` when the stream cannot start; the VM runs either way.
+- stderr `share-watch: connected to guest port 2401 (connection N)` each time the sink answers,
+  `share-watch: write to guest port 2401 failed (…); reconnecting` when it goes away, and
+  `share-watch: FSEvents dropped events under <path>; rescan found <n> recently changed path(s)` for each rescan.
+- Status line `"status":"share-watch-summary"` before `terminating` or `stopped`, with the counters
+  `forwarded= sent= echoes= ignored= dropped= connects= stalls= rescans= queued=`
+  ([RELIABILITY.md](../RELIABILITY.md#share-watcher-gh-150) explains each).
+
+What a container sees differs from a native Linux file system. TD-038 holds the complete list; the main points:
+a host create is `IN_MODIFY`, not `IN_CREATE`; a host delete or rename is `IN_MODIFY` on the parent
+directory; there is no `IN_CLOSE_WRITE` and no `IN_ATTRIB` for a host `chmod`; deletes, renames away and
+directory deletes directly in a share's root directory, and all edits on read-only shares, produce nothing; a
+container's own write to a watched share gives one extra `IN_MODIFY`; a watch on a single file does not follow
+a host atomic save; and a watcher that adds watches only on `IN_CREATE` (`inotifywait -r`) does
 not follow a directory created on the host after it started. Watchers that rescan a directory when it changes
 (chokidar) see `change`, `add` and `unlink`; Go `fsnotify` reports `WRITE` for the file on create, append and
-save and `WRITE` for the directory on rename and delete, never `CREATE`, `REMOVE` or `RENAME`. If the sink is unreachable the launcher keeps up to 20,000 paths
-and reconnects every 2 s; files stay current on access throughout. `make share-notify-selftest` checks the
-sink's path policy and `make share-watch-selftest` the watcher's decisions, both without a VM;
-`systemvmctl control share touch PATH` replays one path by hand.
+save and `WRITE` for the directory on rename and delete, never `CREATE`, `REMOVE` or `RENAME`. Bind mounts, and
+so these events, do not reach tasks that the containerd shim runs in microVMs.
+
+Checks without a VM: `make share-notify-selftest` (the sink's path policy, 20 checks, Linux CI) and
+`make share-watch-selftest` (the watcher's decisions, delivery, reconnect, the queue limit and exit under a
+stalled sink, 20 checks, macOS CI). `vesper-vmlauncher --watch-dry-run DIR` prints the paths the watcher would
+send; with `--watch-sink-socket PATH` it sends them to a Unix stream socket as it would to the guest (self-test
+only), and `VESPER_SHARE_WATCH_PENDING_LIMIT` lowers the queue limit (minimum 2,000). In both modes SIGTERM
+prints `SUMMARY <counters>`. `systemvmctl control share touch PATH` replays one path by hand.
 
 ### DNS and network defaults (GH #30)
 

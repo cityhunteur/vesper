@@ -65,6 +65,7 @@ struct Options {
     var skipProbe = false
     var hostCapabilities = false
     var watchDryRun: [String] = []
+    var watchSinkSocket: String? = nil
 }
 
 /// Host facts for backend selection (GH #17): nested virtualisation needs macOS 15 and an M3 or later.
@@ -93,7 +94,7 @@ func usage() -> String {
     """
     usage: vesper-vmlauncher [--config PATH] [--ready-pattern TEXT] [--timeout-seconds N] [--keep-running] [--skip-probe]
            vesper-vmlauncher --host-capabilities
-           vesper-vmlauncher --watch-dry-run DIR [--watch-dry-run DIR ...]
+           vesper-vmlauncher --watch-dry-run DIR [--watch-dry-run DIR ...] [--watch-sink-socket PATH]
       --config PATH          launch config JSON (default build/systemvm/launch-config.json)
       --ready-pattern TEXT   console text that marks a healthy boot (default: ready_pattern from the config, else "login:")
       --timeout-seconds N    give up after N seconds (default 60)
@@ -101,7 +102,10 @@ func usage() -> String {
       --skip-probe           ignore the config's probe: stop right after the ready pattern
       --host-capabilities    print host facts (nested virtualization support, macOS, chip) as JSON and exit
       --watch-dry-run DIR    no VM: watch DIR as a share and print the paths the guest would be asked to
-                             replay, one per line after "WATCHING <n>", until terminated
+                             replay, one per line after "WATCHING <n>", until terminated; SIGTERM
+                             prints "SUMMARY <counters>" and exits
+      --watch-sink-socket PATH  with --watch-dry-run: send the paths to the Unix stream socket PATH, as the
+                             launcher sends them to the guest, instead of printing them (self-test)
     """
 }
 
@@ -138,6 +142,9 @@ func parseOptions() -> Options {
         case "--watch-dry-run":
             guard !args.isEmpty else { fail(3, "--watch-dry-run needs a directory") }
             options.watchDryRun.append(args.removeFirst())
+        case "--watch-sink-socket":
+            guard !args.isEmpty else { fail(3, "--watch-sink-socket needs a path") }
+            options.watchSinkSocket = args.removeFirst()
         case "--help", "-h":
             print(usage())
             exit(0)
@@ -509,9 +516,14 @@ final class Launcher: NSObject, VZVirtualMachineDelegate {
         guard let device = machine.socketDevices.first as? VZVirtioSocketDevice else {
             fail(3, "VM has no virtio socket device")
         }
-        let watcher = ShareWatcher(paths: watched, device: device)
-        watcher.start()
+        let watcher = ShareWatcher(
+            paths: watched, connector: ShareSink.vsock(device: device, port: ShareWatcher.defaultPort))
+        // Kept even when the stream failed: the watcher must outlive its FSEvents context.
         shareWatcher = watcher
+        guard watcher.start() else {
+            report(status: "share-watch-failed", extra: "\"watched\":\(watched.count)")
+            return
+        }
         report(status: "share-watch", extra: "\"watched\":\(watched.count),\"port\":\(ShareWatcher.defaultPort)")
     }
 
@@ -628,8 +640,24 @@ if !options.watchDryRun.isEmpty {
         }
     }
     setvbuf(stdout, nil, _IOLBF, 0)
-    let watcher = ShareWatcher(paths: options.watchDryRun, device: nil)
-    watcher.start()
+    signal(SIGPIPE, SIG_IGN)
+    let watcher: ShareWatcher
+    if let socketPath = options.watchSinkSocket {
+        watcher = ShareWatcher(
+            paths: options.watchDryRun, connector: ShareSink.unixSocket(path: socketPath),
+            sinkName: "socket \(socketPath)", announce: true)
+    } else {
+        watcher = ShareWatcher(paths: options.watchDryRun, connector: nil, announce: true)
+    }
+    guard watcher.start() else { fail(4, "share watcher did not start") }
+    // The same order as the VM path: report the counters, then leave. It must not wait for the sink.
+    signal(SIGTERM, SIG_IGN)
+    let terminate = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+    terminate.setEventHandler {
+        print("SUMMARY \(watcher.summary())")
+        exit(0)
+    }
+    terminate.resume()
     dispatchMain()
 }
 let config = loadConfig(options.configPath)

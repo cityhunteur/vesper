@@ -33,7 +33,7 @@ and `systemvmctl` keep governance honest. Backend A runs Firecracker microVMs in
 | Changing API or parity behaviour | [design-v0.md](docs/specs/design-v0.md), [parity matrix](docs/specs/firecracker-feature-parity.md), [product specs](docs/product-specs/index.md) |
 | Touching baseline, compat or generated matrices | [baseline governance](docs/process/baseline-governance.md), [compat exceptions](docs/process/compat-exceptions.md) |
 | Touching the proxy or System VM | [systemvm-bringup.md](docs/process/systemvm-bringup.md), [ADR 0001](docs/design-docs/adr/0001-systemvm-launcher-swift-helper.md), [RELIABILITY.md](docs/RELIABILITY.md), [SECURITY.md](docs/SECURITY.md) |
-| Making or questioning a design decision | [Core beliefs](docs/design-docs/core-beliefs.md), [design docs](docs/design-docs/index.md), [ADRs](docs/design-docs/adr/index.md) |
+| Making or questioning a design decision | [Core beliefs](docs/design-docs/core-beliefs.md), [design docs](docs/design-docs/index.md), [ADRs](docs/design-docs/adr/index.md), [decision log](docs/design-docs/decision-log.md) |
 | Starting multi-step or risky work | [PLANS.md](docs/PLANS.md), [active plans](docs/exec-plans/active/index.md) |
 | Building and running locally | [DEVELOPMENT.md](docs/DEVELOPMENT.md) |
 | Writing or running tests | [TESTING.md](docs/TESTING.md) |
@@ -81,7 +81,7 @@ These rules are not negotiable. Each one says how it is enforced; detail is in [
 - **Commit and push each completed unit** with an issue-linked message, watch CI to completion, then update the issue
   with commit SHA, local and remote verification, and remaining gaps. Local green is not remote green.
 - **Code and durable artifacts beat tracker state.** If Linear, GitHub or docs disagree with the code, restore truth first.
-- **Keep knowledge in the repo.** Decisions become ADRs, designs, specs or plans. Chat and memory do not count.
+- **Keep knowledge in the repo.** Decisions become ADRs, specs, plans or [decision-log](docs/design-docs/decision-log.md) lines; chat does not count.
 - **Don't guess.** Mark gaps **Unknown** with a way to resolve them, and log missing tools or guardrails in the tech-debt tracker.
 - **Don't grow `src/api.rs`** when a modular extraction under `src/api/` is practical.
 

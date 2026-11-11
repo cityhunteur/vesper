@@ -1,7 +1,7 @@
 ---
 status: verified
 owner: cityhunteur
-last_reviewed: 2026-11-09
+last_reviewed: 2026-11-11
 ---
 
 # Vesper Security Review Map
@@ -103,16 +103,42 @@ which no container can override. Guest writes land on the host as the sharing us
 trees is a human decision.
 
 The share notification sink (GH #150, `vesper-share notify` on guest vsock port 2401) lets the host name paths
-whose mtime the guest then sets to its own current value, so that containers get inotify events for host edits.
-It resolves each path and acts only inside a read-write virtio-fs mount; it rejects relative paths, `..`
-components, paths outside the shares and symlinks that leave a share; it skips share roots and read-only shares;
-it never creates a file and never changes contents or mtimes (the host ctime changes). The check and the touch
-are not atomic: a container that can write to a share could swap in a symlink between them, and the worst
-outcome is that one guest file outside the share has its mtime rewritten to the same value.
-`make share-notify-selftest` checks the policy. The port is reachable from the host only through the launcher
-bridge (TD-027). The host half is the launcher's share watcher: it reads FSEvents for shares marked `watch` in
+that the guest then replays, so that containers get inotify events for host edits. It resolves each path with
+`realpath` and acts only inside a read-write virtio-fs mount; it rejects relative paths, `..` components, paths
+outside the shares and symlinks that leave a share; it skips share roots and read-only shares; it compares
+mount points literally, also when they contain `*`, `?` or `[`; it never creates a file and never changes
+contents. `make share-notify-selftest` checks the policy.
+
+The replay of one path is three steps. First an atime-only set (`touch -c -a -r P P`), whose reply refreshes the
+attributes the guest has cached for the file. Then an mtime-only set (`touch -c -m -r P P`), which makes the
+guest kernel emit `IN_MODIFY`. Then, only if the file's size changed between the two, `touch -c -m P` (mtime
+set to now, reported with reason `raced`). The effect on host timestamps is:
+
+- mtime: the replay leaves it equal to the last host write, with two exceptions. When a host write lands between
+  the two sets, the mtime becomes the time of the replay, which is never older than that write. A same-size
+  overwrite inside that window (about a millisecond) is not detected and can keep the previous write's mtime.
+- atime: the replay sets it to the guest's cached atime, which can move it backwards.
+- ctime: every replay changes it.
+
+The first step exists because a single-step replay moved host mtimes backwards by about a second when one file
+was edited twice within the guest's attribute cache lifetime (found by the council rework of 2026-11-11;
+[decision log](design-docs/decision-log.md) D-005).
+
+Two sequences in the sink are not atomic. The path check and the touch: a container that can write to a share
+could swap in a symlink between them, and the worst outcome is that one guest file outside the share has its
+atime and mtime rewritten; its contents do not change. The read of the mtime and the write that sets it: this is
+the window behind the two mtime exceptions above.
+
+The sink's `socat` listener runs at most four handlers at a time (`max-children=4`); the launcher holds one
+connection. The port is reachable from the host only through the launcher bridge (TD-027); whoever reaches it
+can make any path inside a read-write share emit `IN_MODIFY` and nothing more.
+
+The host half is the launcher's share watcher: it reads FSEvents for shares marked `watch` in
 the launch config (read-write shares unless `PATH:nowatch`), sends path names only, never file contents, never
-writes to a share itself, opens no host socket and needs no entitlement beyond the launcher's existing one.
+writes to a share itself, opens no host socket and needs no entitlement beyond the launcher's existing one. It
+never blocks shutdown: its writes to the sink are non-blocking and the exit report reads counters published
+under a lock, so SIGTERM and a guest shutdown do not wait for a sink that has stopped reading
+([RELIABILITY.md](RELIABILITY.md#share-watcher-gh-150)).
 
 ## Private microVM sessions (ADR 0006)
 

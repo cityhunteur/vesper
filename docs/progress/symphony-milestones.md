@@ -1,20 +1,36 @@
 ---
 status: verified
 owner: cityhunteur
-last_reviewed: 2026-11-10
+last_reviewed: 2026-11-11
 ---
 
 # Symphony milestones
 
+### 2026-11-11 — GH-150 — council rework (shutdown hang and host mtime rollback fixed)
+- GitHub issue: #150 (item 3 of #29); Linear mirror WOR-107
+- PR: pending
+- Commit: pending
+- Phase: 4
+- Parity unit: the same as the 2026-11-10 entry, made safe: the launcher's share watcher never waits for the guest, and the guest replay no longer moves host mtimes backwards
+- Result: keep
+- Verification bundle: `.symphony/runs/GH-150/current/` (the four verdicts are in `council/`); raw evidence in `run/GH-150/m5-stalled-sink.txt` and `run/GH-150/m5-suites.txt` (local, not tracked)
+- Council summary: four judges reviewed `19045c4..30cf8f0` on 2026-11-10/11. Parity, regression and release: approve-with-gaps. Runtime: reject, because shutdown could hang on a sink that stops reading and no runtime evidence covered back-pressure or shutdown. This entry is the rework
+- Defects found: (1) the watcher wrote to the sink with a blocking `write` and the exit report waited for the watcher's queue, so a guest that stopped reading port 2401 held up SIGTERM until the launcher was killed; (2) the single-step replay (`touch -c -m -r P P`) read the mtime from the guest's attribute cache and wrote it back, which moved the host mtime backwards by 0.6 to 1.4 s when one file was edited twice within about a second. Both were on main at `30cf8f0`
+- Fixes: non-blocking writes in batches of 1,000 lines with a retry every 50 ms, an exit report read from counters published under a lock, a queue of 100,000 lines whose dropped lines are forgotten so that a later edit is sent again, one reconnect attempt per 2 s, a `share-watch-failed` status line, and a log line and counter for each rescan; a three-step replay (atime-only set, mtime-only set, mtime set to now when the size changed in between); `max-children=4` on the sink's listener and literal matching of mount points that contain `*`, `?` or `[`. The claim "host mtimes are never changed" is withdrawn (decision log D-005, D-006; the guarantee is in `docs/SECURITY.md`)
+- Harness update: `binds-suite` 19 → 20 steps (`inotify_host_rapid_edits_mtime_preserved`; `inotify_share_root_delete_not_propagated` now counts every event); `make share-watch-selftest` 11 → 20 checks through the new `vesper-vmlauncher --watch-sink-socket` (burst of 3,000 files, reconnect, exit under a stalled sink, queue limit); `make share-notify-selftest` 19 → 20 checks (`glob_share_name_literal`); the System VM Image workflow now also runs when `scripts/macos/share-watch-selftest.sh` changes and, on push, when `systemvm/**` or the packages lock change
+- Runtime evidence: with the guest sink handler stopped and a 30,000-file host burst, the launcher exited 0.18 s after SIGTERM (`queued=26149 stalls=621 rescans=5`) and 8.05 s after a guest shutdown with status `stopped` (`m5-stalled-sink.txt`). The new suite step failed on the `30cf8f0` code (the host mtime went back 0.6 to 1.4 s in each round) and passes now. With the blocking write restored, the self-test check `stalled_sink_sigterm_exits` reports `hung`. On the rework tree `make binds-suite` passed 20/20 five times in a row, and `make docker-conformance`, `make ports-suite`, `make systemvm-shim-suite` and `cargo test` passed (`m5-suites.txt`)
+- Remaining risks: the residuals in TD-038, now listed in full, including the two mtime exceptions, the atime and ctime changes and the loss of the lines in flight when the sink handler dies; `make binds-suite` runs only on developer hardware (TD-005); no test covers the launch-config `watch` field between Rust and Swift and no CI job runs the vsock path end to end (TD-044); `src/systemvm.rs` is over the structure budget (TD-043)
+- Truthful project state after this milestone: GH #29 item 3 was ticked on 2026-11-11 as a qualified tick (modify-style events only, on watched read-write shares only; the owner accepted the TD-038 residuals on 2026-11-10, decision log D-003). TD-038 stays open. GH #150 closes when this rework is merged with green CI. Phase 5 has not started
+
 ### 2026-11-10 — GH-150 — inotify events for host edits on virtio-fs shares (TD-038 narrowed)
 - GitHub issue: #150 (item 3 of #29)
-- PR: #149 (plan and prototype), #151 (guest sink), #152 (launcher watcher), plus the Milestone 3 PR (suite steps and measurements)
-- Commit: `e8aadc3` (#149), `1356881` (#151), `3aa5f85` (#152); squash merges, CI green incl. System VM Image with both self-tests
+- PR: #149 (plan and prototype), #151 (guest sink), #152 (launcher watcher), #153 (suite steps and measurements)
+- Commit: `e8aadc3` (#149), `1356881` (#151), `3aa5f85` (#152), `30cf8f0` (#153); squash merges, CI green incl. System VM Image with both self-tests
 - Phase: 4
 - Parity unit: a host edit in a watched read-write share reaches containers as inotify `IN_MODIFY`; the launcher watches shares with FSEvents and the guest replays each path as an mtime-preserving touch (`vesper-share notify`, guest vsock port 2401)
 - Result: keep
 - Verification bundle: `.symphony/runs/GH-150/current/`; raw evidence in `run/GH-150/` and `run/TD-038/`
-- Council summary: skipped; CI green
+- Council summary: not run before the merge (CI green). A four-judge council reviewed the unit on 2026-11-10/11 and the runtime judge rejected it; see the 2026-11-11 entry above
 - Harness update: `make share-notify-selftest`, `make share-watch-selftest` (both in the System VM Image workflow), `vesper-vmlauncher --watch-dry-run`, `binds-suite` 10 → 19 steps, `make systemvm-up-shares` boots a third `:nowatch` share
 - Runtime evidence: `binds-suite` 19/19 six runs in a row after a stream-order flake in an older step was fixed; 12 to 24 ms over 30 edits; chokidar, watchexec, inotifywait and Go fsnotify react; 2,000-file burst delivered to chokidar in about 1 s; reconnect after the sink handler was killed; docker-conformance, ports and shim suites pass with watching on
 - Remaining risks: not exact inotify parity (no `IN_CREATE`/`IN_DELETE`/`IN_CLOSE_WRITE`, share-root deletes and read-only shares silent, `inotifywait -r` does not follow host-created directories), all in TD-038; physical external and network volumes untested; developer-hardware evidence only (TD-005)

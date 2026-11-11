@@ -23,8 +23,9 @@ The parity unit is Docker UX parity for bind mounts (design-v0, Phase 4). It is 
 no route in the pinned baseline (`083c4cf69281178acc910f7f857f88e69c51d3b5` in
 `docs/specs/design-v0.baselines.lock.yaml`) changes.
 
-Tracker: GitHub #150 carries this work. GitHub #29 stays closed with item 3 unchecked; ticking it is a human decision.
-Linear mirror: **Unknown**; the GitHub-to-Linear sync creates it, or create it by hand if none appears.
+Tracker: GitHub #150 carries this work. GitHub #29 stays closed; its item 3 was ticked on 2026-11-11 as a
+qualified tick with the residuals in TD-038 (see "Council rework" under Outcomes & Retrospective).
+Linear mirror: WOR-107 (linkback comment on GitHub #150).
 
 ## Progress
 
@@ -60,6 +61,13 @@ Linear mirror: **Unknown**; the GitHub-to-Linear sync creates it, or create it b
   disk images of three file systems. Bundle in `.symphony/runs/GH-150/current/`.
 - [x] (2026-11-10) Milestone 4: owning docs, TD-038 narrowed, parity row for #29, milestone entry, GH #150
   updated, plan moved to completed. GH #29 item 3 is deliberately not ticked: that is a human decision.
+  `docs/RELIABILITY.md`, which the Milestone 4 text lists, was not updated in this step.
+- [x] (2026-11-11) Council rework. Four judges reviewed `19045c4..30cf8f0`; the runtime judge rejected. Fixed in
+  the launcher (`ShareWatcher.swift`, `main.swift`), the sink (`vesper-share`, `vesper-share-notify`) and the
+  tests: `binds-suite` 20 steps, `make share-watch-selftest` 20 checks, `make share-notify-selftest` 20 checks.
+  Evidence: `run/GH-150/m5-stalled-sink.txt`, `run/GH-150/m5-suites.txt`. Docs corrected, `docs/RELIABILITY.md`
+  now covers the watcher, TD-038 lists every residual, and TD-043 and TD-044 were added. Details under
+  "Council rework" in Outcomes & Retrospective.
 
 ## Surprises & Discoveries
 
@@ -151,13 +159,38 @@ Linear mirror: **Unknown**; the GitHub-to-Linear sync creates it, or create it b
   FSEvents flags; for a path that no longer exists it replays the parent directory.
   Rationale: flags are cumulative; the stat key held in every Milestone 0 run.
   Date/Author: 2026-11-10, agent, from Milestone 0.
+- Decision: rework after the council's reject. The watcher never waits for the guest: writes to the sink are
+  non-blocking and the exit report reads published counters.
+  Rationale: a guest that stopped reading port 2401 could hold up SIGTERM until the launcher was killed
+  (decision log D-006).
+  Date/Author: 2026-11-11, maintainer agent.
+- Decision: the replay becomes three steps (atime-only set, mtime-only set, mtime set to now when the size
+  changed in between), and the mtime guarantee is reworded. This replaces the 2026-11-10 decision on the replay
+  operation and its rationale "keeps the host mtime exact". The guarantee is now: the replay leaves the host
+  mtime equal to the last host write, except that a host write between the two sets gets the time of the replay
+  and a same-size overwrite inside that window can keep the previous write's mtime.
+  Rationale: the new suite step `inotify_host_rapid_edits_mtime_preserved` showed the single-step replay moving
+  host mtimes backwards by about a second, because the guest read the mtime from its attribute cache
+  (decision log D-005).
+  Date/Author: 2026-11-11, maintainer agent.
+- Decision (recorded late): the burst step was delivered as `inotify_burst_delivered` with 500 files, not the
+  planned `inotify_burst_coalesced` with 2,000 files.
+  Rationale: none was recorded when Milestone 3 landed. The 2,000-file burst was measured by hand in Milestone 2
+  (`run/GH-150/m2-burst-reconnect.txt`); since the rework the watcher self-test sends a 3,000-file burst to a
+  stand-in sink.
+  Date/Author: 2026-11-11, maintainer agent.
+- Decision: reconnect is covered by the watcher self-test (`sink_reconnects`, `sink_delivers_after_reconnect`,
+  `sink_resends_unsent_edit`), not by a `binds-suite` step.
+  Rationale: the self-test runs in CI on `macos-15` without a VM; `binds-suite` runs only on developer hardware.
+  Against the real guest, reconnect is shown only by the manual run in `m2-burst-reconnect.txt`.
+  Date/Author: 2026-11-11, maintainer agent.
 
 ## Outcomes & Retrospective
 
 Reached: a host edit in a watched read-write share produces an inotify event in a container, measured at 12 to
 24 ms, with host contents and mtimes untouched. chokidar, `watchexec`, `inotifywait` and Go `fsnotify` react
 without polling. `make binds-suite` proves it (19 steps); two self-tests run in CI without a VM. Merged as PRs
-#149 (plan), #151 (guest sink), #152 (launcher watcher) and the Milestone 3 PR.
+#149 (plan), #151 (guest sink), #152 (launcher watcher) and #153 (`30cf8f0`, suite steps and measurements).
 
 Not reached, and recorded in TD-038: exact inotify parity. Host creates, deletes and renames are visible only as
 `IN_MODIFY` (on the file or its parent directory), there is no `IN_CLOSE_WRITE`, deletes in a share's root
@@ -168,6 +201,35 @@ What went well: the prototype milestone fixed the replay operation and the loop-
 product code, and both held unchanged. What cost time: the `/private` prefix difference between Foundation and
 FSEvents, and two reconnect test attempts that killed the sink's supervisor by mistake. Left untested: a
 physical external disk and a network volume; shares inside microVM tasks remain out of scope.
+
+### Council rework (2026-11-11)
+
+A four-judge council reviewed the merged work on 2026-11-10/11. The parity, regression and release judges
+approved with gaps; the runtime judge rejected. This section replaces two statements above: that host mtimes
+are untouched, and that GH #29 item 3 awaits a decision.
+
+Two defects were on main at `30cf8f0`. First, the watcher wrote to the sink with a blocking `write` and the
+exit report waited for the watcher's queue, so a guest that stopped reading port 2401 could hold up SIGTERM
+until the launcher was killed. Second, the single-step replay read the mtime from the guest's attribute cache
+and wrote it back: when one file was edited twice within about a second, the host mtime went back by 0.6 to
+1.4 s.
+
+The rework made the watcher non-blocking (batches of 1,000 lines, a retry every 50 ms, a queue of 100,000
+lines, counters published under a lock) and the replay three steps. `binds-suite` gained
+`inotify_host_rapid_edits_mtime_preserved`, which failed on the `30cf8f0` code and passes now (20 steps). The
+watcher self-test grew from 11 to 20 checks through `--watch-sink-socket`, including an exit under a stalled
+sink, and the sink self-test from 19 to 20. On a booted VM with the sink handler stopped and a 30,000-file
+burst, the launcher exited 0.18 s after SIGTERM and 8.05 s after a guest shutdown
+(`run/GH-150/m5-stalled-sink.txt`; suite runs in `run/GH-150/m5-suites.txt`).
+
+The repository owner accepted the TD-038 residuals on 2026-11-10, and GH #29 item 3 was ticked on 2026-11-11
+as a qualified tick: modify-style events only, on watched read-write shares only. TD-038 stays open and now
+lists every residual. New debt: TD-043 (`src/systemvm.rs` over the structure budget) and TD-044 (no test of the
+`watch` field between Rust and Swift, no CI run of the vsock path).
+
+Lesson: CI and the suite passed both defects. Neither had a step with a sink that stops reading or a file
+edited faster than the guest's attribute cache expires; runtime-sensitive units now get the council before
+their issue closes (decision log D-004).
 
 ## Context and Orientation
 
@@ -207,8 +269,10 @@ Discoveries and fix the replay operation, the loop-breaking rule and the residua
 
 Milestone 1 adds the guest sink. `vesper-share notify` reads one absolute path per line on stdin (the wire carries no mtime)
 and, for each, checks that the path lies under a mounted virtio-fs share from `/proc/mounts`, contains no `..`
-component and exists, then sets the path's mtime to its own current value (`touch -c -m -r P P`) without following a final
-symlink and without creating files. A path that is a share's root directory is counted and skipped. It answers nothing per line and prints a counter summary on EOF. A new OpenRC service beside
+component and exists, then resolves the path with `realpath` and sets the target's mtime to its own current
+value (`touch -c -m -r P P`) without creating files; a target outside the shares is rejected. (Corrected on
+2026-11-11: this text said the sink does not follow a final symlink. Since the council rework the replay is
+three steps; see the Decision Log.) A path that is a share's root directory is counted and skipped. It answers nothing per line and prints a counter summary on EOF. A new OpenRC service beside
 `vesper-agent` runs it under `socat VSOCK-LISTEN:<port>,fork`, on a dedicated port so that a long-lived stream
 does not occupy the agent. `vesper-share probe` reports whether the sink is present. Unit-level proof: a guest
 script that feeds accepted and rejected paths and asserts the counters.
@@ -218,9 +282,10 @@ launcher's `LaunchConfig`; `shared_directories_from_specs` parses the opt-out su
 and `scripts/systemvm/generate-launch-config.sh` pass it through. In `main.swift`, after the guest is ready, the
 launcher starts one FSEvents stream for the watched shares (file-level events, no-defer, 50 ms coalescing latency), connects to the sink port through `VZVirtioSocketDevice`, and writes one line per changed path. It
 drops events whose `(mtime_ns, size)` it has already forwarded, which breaks the echo loop; for a path that no
-longer exists it sends the parent directory; on `MustScanSubDirs` or a full queue it sends the affected
-directories instead of each file; and reconnects with backoff when the sink
-restarts. It logs counts, never file contents. If `main.swift` would grow past the structure sensor's budget,
+longer exists it sends the parent directory; on `MustScanSubDirs` or dropped events it walks the reported
+directory and sends each entry modified in the last 60 s (at most 50,000 entries visited); when the queue is
+full it drops the oldest lines; and it reconnects every 2 s when the sink
+restarts. (Corrected on 2026-11-11: this text said it sends the affected directories instead of each file.) It logs counts, never file contents. If `main.swift` would grow past the structure sensor's budget,
 put the watcher in a second Swift source file.
 
 Milestone 3 changes `scripts/systemvm/binds-suite.sh`. The step `inotify_host_edits_not_propagated` becomes

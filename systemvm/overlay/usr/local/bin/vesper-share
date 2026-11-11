@@ -5,14 +5,18 @@
 #        vesper-share list                     one line per mount: SHARE TAG PATH mode=<ro|rw>
 #        vesper-share umount PATH              UNMOUNTED PATH or ERR
 #        vesper-share probe TAG PATH           modules, tag presence and mount state as key=value words
-#        vesper-share touch PATH...            replay a host-side edit (GH #150): sets each path's mtime to its own
-#                                              current value so the guest kernel emits inotify IN_MODIFY; one line
-#                                              per path: TOUCHED|SKIPPED|MISSING|REJECTED|ERR <path> [reason]
+#        vesper-share touch PATH...            replay a host-side edit (GH #150): refreshes the guest's cached
+#                                              attributes with an atime-only set, then writes each path's mtime
+#                                              back so the guest kernel emits inotify IN_MODIFY; one line per
+#                                              path: TOUCHED|SKIPPED|MISSING|REJECTED|ERR <path> [reason]
+#                                              (TOUCHED <path> raced: a host write landed between the two sets
+#                                              and the mtime was set to now)
 #        vesper-share notify                   the same for one absolute path per stdin line (the host watcher's
 #                                              stream); greets VESPER-SHARE-NOTIFY 1, prints
 #                                              NOTIFY touched= skipped= missing= rejected= errors= on EOF
-# A path is touched only when its resolved location lies inside a read-write virtio-fs mount. File contents and
-# mtimes never change; nothing is created. VESPER_SHARE_MOUNTS overrides /proc/mounts (self-test only).
+# A path is touched only when its resolved location lies inside a read-write virtio-fs mount. File contents
+# never change and nothing is created. The mtime stays that of the last host write, with two exceptions, and
+# the atime and ctime change; see docs/SECURITY.md. VESPER_SHARE_MOUNTS overrides /proc/mounts (self-test only).
 set -u
 MOUNTS=${VESPER_SHARE_MOUNTS:-/proc/mounts}
 NL='
@@ -61,12 +65,14 @@ load_shares() {
 # Prints "<mode> <share>" for the mount that contains $1 ("root" as mode when $1 is the mount point itself).
 share_of() {
   _ifs=$IFS; IFS=$NL
+  set -f  # a mount point may contain *, ? or [: split on newlines only, never expand
   for l in $SHARES; do
     m=${l%% *}; s=${l#* }
-    if [ "$1" = "$s" ]; then IFS=$_ifs; echo "root $s"; return 0; fi
-    case "$1" in "$s"/*) IFS=$_ifs; echo "$m $s"; return 0 ;; esac
+    if [ "$1" = "$s" ]; then IFS=$_ifs; set +f; echo "root $s"; return 0; fi
+    # Quoted, so the mount point is compared literally and only the trailing * is a pattern.
+    case "$1" in "$s"/*) IFS=$_ifs; set +f; echo "$m $s"; return 0 ;; esac
   done
-  IFS=$_ifs; return 1
+  IFS=$_ifs; set +f; return 1
 }
 
 # Sets RESULT to TOUCHED, SKIPPED, MISSING, REJECTED or ERR and REASON to a short word for one path.
@@ -81,8 +87,18 @@ touch_one() {
     root) RESULT=SKIPPED; REASON=share-root; return ;;
     ro) RESULT=SKIPPED; REASON=read-only-share; return ;;
   esac
-  if touch -c -m -r "$rp" "$rp" 2>/dev/null; then RESULT=TOUCHED; else RESULT=ERR; REASON=touch-failed; fi
+  # The guest caches a file's attributes for about a second and learns nothing of host edits, so a plain
+  # `touch -r` could write a stale mtime back and move the host's mtime backwards. An atime-only set comes
+  # first: its reply carries the file's current attributes, so the mtime read next is the host's.
+  touch -c -a -r "$rp" "$rp" 2>/dev/null || { RESULT=ERR; REASON=touch-failed; return; }
+  s1=$(size_of "$rp")
+  if touch -c -m -r "$rp" "$rp" 2>/dev/null; then RESULT=TOUCHED; else RESULT=ERR; REASON=touch-failed; return; fi
+  # A host write that landed between the two sets has had its mtime overwritten with the older one. The
+  # second reply shows it as a size change; then set the mtime to now, which is never older than the write.
+  [ "$(size_of "$rp")" = "$s1" ] || { touch -c -m "$rp" 2>/dev/null; RESULT=TOUCHED; REASON=raced; }
 }
+
+size_of() { stat -c %s "$1" 2>/dev/null || stat -f %z "$1" 2>/dev/null; }
 
 touch_() {
   [ $# -gt 0 ] || { echo "ERR usage: vesper-share touch PATH..."; return 2; }

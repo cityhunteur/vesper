@@ -6,11 +6,11 @@ set -u
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TOOL="${ROOT_DIR}/systemvm/overlay/usr/local/bin/vesper-share"
 T="$(realpath "$(mktemp -d)")"; trap '/bin/rm -rf "${T:?}"' EXIT
-mkdir -p "$T/rw/sub" "$T/ro" "$T/with space" "$T/outside"
+mkdir -p "$T/rw/sub" "$T/ro" "$T/with space" "$T/outside" "$T/g*b" "$T/gxb"; echo g > "$T/g*b/g.txt"; echo x > "$T/gxb/x.txt"
 echo a > "$T/rw/sub/a.txt"; echo r > "$T/ro/r.txt"; echo s > "$T/with space/s.txt"; echo o > "$T/outside/o.txt"
 ln -s "$T/outside/o.txt" "$T/rw/escape"; ln -s "$T/rw/sub/a.txt" "$T/rw/inside-link"
 { echo "share0 $T/rw virtiofs rw,relatime 0 0"; echo "share1 $T/ro virtiofs ro,relatime 0 0"
-  echo "share2 $T/with\\040space virtiofs rw,relatime 0 0"; echo "/dev/vda / ext4 rw 0 0"; } > "$T/mounts"
+  echo "share2 $T/with\\040space virtiofs rw,relatime 0 0"; echo "share3 $T/g*b virtiofs rw,relatime 0 0"; echo "/dev/vda / ext4 rw 0 0"; } > "$T/mounts"
 export VESPER_SHARE_MOUNTS="$T/mounts"
 fails=0
 check() { if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1: got '$2' want '$3'"; fails=$((fails+1)); fi; }
@@ -33,6 +33,7 @@ check symlink_leaving_share_rejected "$(one "$T/rw/escape")" "REJECTED T/rw/esca
 check dotdot_rejected "$(one "$T/rw/../outside/o.txt")" "REJECTED T/rw/../outside/o.txt dotdot"
 check relative_rejected "$(one "rw/sub/a.txt")" "REJECTED rw/sub/a.txt not-absolute"
 check prefix_sibling_rejected "$(mkdir -p "$T/rw2" && echo x > "$T/rw2/x" && one "$T/rw2/x")" "REJECTED T/rw2/x outside-shares"
+check glob_share_name_literal "$(one "$T/g*b/g.txt") / $(one "$T/gxb/x.txt")" "TOUCHED T/g*b/g.txt / REJECTED T/gxb/x.txt outside-shares"
 sh "$TOOL" touch "$T/rw/sub/a.txt" >/dev/null; check touch_rc_ok "$?" "0"
 sh "$TOOL" touch "$T/outside/o.txt" >/dev/null; check touch_rc_rejected "$?" "1"
 out="$(printf '%s\n' "$T/rw/sub/a.txt" "$T/rw" "$T/ro/r.txt" "$T/rw/gone.txt" "$T/outside/o.txt" "" "$T/rw/escape" "$T/with space/s.txt" | sh "$TOOL" notify | tr '\n' '|')"
