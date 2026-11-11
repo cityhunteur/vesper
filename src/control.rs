@@ -262,6 +262,11 @@ impl Session {
         self.guest_tool("SHARE", args)
     }
 
+    /// Runs `vesper-data <args>` in the guest (the persistent data disk, GH #164); returns its exit code and lines.
+    pub fn data(&mut self, args: &[&str]) -> Result<(i32, Vec<String>), String> {
+        self.guest_tool("DATA", args)
+    }
+
     /// Runs `vesper-arch <args>` in the guest (execution-mode metadata); returns its exit code and output lines.
     pub fn arch(&mut self, args: &[&str]) -> Result<(i32, Vec<String>), String> {
         self.guest_tool("ARCH", args)

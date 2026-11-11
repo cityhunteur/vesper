@@ -57,6 +57,9 @@ enum Commands {
         /// Nested virtualization policy: auto, require or off.
         #[arg(long)]
         nested: Option<String>,
+        /// Persistent data disk image on macOS (absolute path), attached writable (GH #164).
+        #[arg(long)]
+        data_disk: Option<String>,
         #[arg(long, default_value = "run/systemvm/console.log")]
         console_log: String,
         #[arg(long, default_value = "build/systemvm/launch-config.json")]
@@ -223,6 +226,10 @@ enum ControlAction {
     },
     /// Run `vesper-share <args>` in the guest (mount TAG PATH [ro]|list|umount PATH|probe TAG PATH).
     Share {
+        args: Vec<String>,
+    },
+    /// Run `vesper-data <args>` in the guest (mount|status|stop of the persistent data disk, GH #164).
+    Data {
         args: Vec<String>,
     },
     /// Run `vesper-ctr <args>` in the guest (import|run NAME CMD...|start|state|kill|delete|try CTR-ARGS...|leftovers).
@@ -434,6 +441,17 @@ fn run_control(endpoint: vesper::control::ControlEndpoint, action: ControlAction
             }
             if rc != 0 {
                 return Err(format!("vesper-arch exited with {rc}"));
+            }
+        }
+        ControlAction::Data { args } => {
+            let mut session = control::connect(&endpoint)?;
+            let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+            let (rc, lines) = session.data(&refs)?;
+            for line in &lines {
+                println!("{line}");
+            }
+            if rc != 0 {
+                return Err(format!("vesper-data exited with {rc}"));
             }
         }
         ControlAction::Share { args } => {
@@ -652,6 +670,7 @@ fn run() -> Result<(), String> {
             console_log,
             out,
             shares,
+            data_disk,
         } => {
             let mut config = if from_lock {
                 let lock = vesper::systemvm::load_image_lock(&lock)?;
@@ -673,6 +692,9 @@ fn run() -> Result<(), String> {
                 })?
             };
             config.shared_directories = vesper::systemvm::shared_directories_from_specs(&shares)?;
+            if let Some(path) = data_disk.as_deref() {
+                vesper::systemvm::attach_data_disk(&mut config, path)?;
+            }
             vesper::systemvm::write_launch_config(&out, &config)?;
             println!("wrote launch config: {out} ({} shared director{})", config.shared_directories.len(), if config.shared_directories.len() == 1 { "y" } else { "ies" });
             Ok(())

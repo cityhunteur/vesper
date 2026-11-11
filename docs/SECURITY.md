@@ -140,6 +140,19 @@ never blocks shutdown: its writes to the sink are non-blocking and the exit repo
 under a lock, so SIGTERM and a guest shutdown do not wait for a sink that has stopped reading
 ([RELIABILITY.md](RELIABILITY.md#share-watcher-gh-150)).
 
+## System VM data disk (GH #164)
+
+The System VM keeps its state on a raw disk image on macOS, by default `run/systemvm/data.img`
+(`VESPER_DATA_DISK`). `scripts/systemvm/generate-launch-config.sh` creates it sparse with mode 0600, so only the
+owner can read it: it holds container images, containerd and dockerd state, named volumes and microVM root
+drives, any of which can contain secrets. The launcher attaches it as a writable virtio block device; it is a
+file, not a socket, needs no entitlement beyond the launcher's existing one, and makes nothing new visible on the
+host. Another user who can read the file can read every container's data, so do not widen its mode or put it on
+a shared volume. The guest formats only a disk in which `blkid` finds nothing, and refuses any other filesystem or label
+(`systemvm/overlay/usr/local/bin/vesper-data`), so an image with a filesystem named by mistake in `VESPER_DATA_DISK`
+is not erased; a file with no recognisable filesystem or partition table is formatted.
+Deleting the image with the System VM stopped erases all container state; nothing else holds a copy.
+
 ## Private microVM sessions (ADR 0006)
 
 The shim connects to each jailed Firecracker `v.sock` inside the System VM.

@@ -1,7 +1,7 @@
 ---
 status: verified
 owner: cityhunteur
-last_reviewed: 2026-11-06
+last_reviewed: 2026-11-11
 ---
 
 # Architecture
@@ -78,7 +78,7 @@ flowchart LR
 | `compatexctl` | Compat exception registry validation | [src/bin/compatexctl.rs](src/bin/compatexctl.rs) | None | [src/compat.rs](src/compat.rs) |
 | `contractgen` | Golden route contract generate/check | [src/bin/contractgen.rs](src/bin/contractgen.rs) | `testdata/contracts/firecracker-routes.golden.json` | [src/spec.rs](src/spec.rs) |
 | `systemvmctl` | System VM image lock verification, manifest, launch config, boot smoke (repeated launcher runs with timing) | [src/bin/systemvmctl.rs](src/bin/systemvmctl.rs) | `build/systemvm/*.json`, `run/systemvm/*` | [src/systemvm.rs](src/systemvm.rs) |
-| `vesper-vmlauncher` | Boot one launch config on Virtualization.framework (NAT, virtio console, virtio socket), run the config's console probe, serve the vsock bridge socket, report ready, probe, running and stop status (contract: [launcher/README.md](launcher/README.md); decision: [ADR 0001](docs/design-docs/adr/0001-systemvm-launcher-swift-helper.md)) | [launcher/Sources/vesper-vmlauncher/main.swift](launcher/Sources/vesper-vmlauncher/main.swift) | `run/systemvm/console.log` | Swift, not part of the crate |
+| `vesper-vmlauncher` | Boot one launch config on Virtualization.framework (NAT, virtio console, virtio socket, virtio block devices including the persistent data disk), run the config's console probe, serve the vsock bridge socket, report ready, probe, running and stop status (contract: [launcher/README.md](launcher/README.md); decision: [ADR 0001](docs/design-docs/adr/0001-systemvm-launcher-swift-helper.md)) | [launcher/Sources/vesper-vmlauncher/main.swift](launcher/Sources/vesper-vmlauncher/main.swift) | `run/systemvm/console.log`; the guest writes the data disk image (default `run/systemvm/data.img`) | Swift, not part of the crate |
 
 The six Rust binaries are discovered by Cargo from `src/bin/*.rs`; see [src/bin/README.md](src/bin/README.md). The
 launcher is a separate Swift package built by `make vmlauncher-build`.
@@ -99,7 +99,7 @@ allowlist and the line budgets (TD-015).
 | 2. Control plane: `api` | State machine, dispatch, deterministic errors | `api` | `api_matrix`, `baseline`, `buildinfo`, `compat`, `platform`, `spec` | mechanical |
 | 2. Control plane: matrices | Generated route matrices | `api_matrix`, `api_behavior_matrix` | `api`, `baseline`, `spec`; `api_behavior_matrix` also `api_matrix` | mechanical |
 | 2. Control plane: families | Extracted route-family handlers | `api/*` | `super` only (no `crate::` references) | mechanical |
-| 3. Runtime adapters | Socket proxying, published ports, System VM artifacts, guest control channel | `proxy`, `ports`, `systemvm` (+ `systemvm/image_lock`, `systemvm/packages`, `super` only), `control` (+ `control/suites`, `control/suites/{bundle,restart,exec}`, `super` only) | `buildinfo`, `platform` (`control`: nothing local) | mechanical |
+| 3. Runtime adapters | Socket proxying, published ports, System VM artifacts, guest control channel | `proxy`, `ports`, `systemvm` (+ `systemvm/data_disk`, `systemvm/image_lock`, `systemvm/packages`, `super` only), `control` (+ `control/suites`, `control/suites/{bundle,restart,exec}`, `super` only) | `buildinfo`, `platform` (`control`: nothing local) | mechanical |
 | 4. Entry points | `clap` binaries | `src/bin/*` | any library layer | review |
 | 5. Tests and harness | Contract tests, sensors (CI scripts that detect drift), docs, Symphony templates | `tests/`, `src/api/tests.rs`, `scripts/harness/`, `harness/`, `.github/workflows/`, `docs/`, `.symphony/templates/` | may import the library; nothing imports them | review |
 
@@ -301,7 +301,9 @@ with dockerd's errors intact and no bypass of the ingress, and `make ports-suite
 localhost through the bridge and the guest port relay (ADR 0005). `make binds-suite` proves host directories
 named in `VESPER_SHARES` reach containers over virtio-fs at their host paths, read-only when asked, with
 ownership mapped to the sharing user, and inotify events for host edits on watched read-write shares (the
-launcher's FSEvents watcher feeds the guest's `vesper-share notify` sink, GH #150; residuals in TD-038). `make dns-suite` proves dockerd's
+launcher's FSEvents watcher feeds the guest's `vesper-share notify` sink, GH #150; residuals in TD-038). `make data-disk-suite` proves that images, stopped containers and volumes survive a System VM
+reboot on the persistent data disk, that only an empty disk is formatted, and that a disk with another label is
+refused while Docker keeps working on tmpfs (GH #164; packages are still reinstalled on every boot, TD-025). `make dns-suite` proves dockerd's
 embedded DNS, aliases and external forwarding for a compose stack driven from macOS; `make workflow-suite` covers
 compose, build, `logs -f`, interactive `exec -it` and signals, and `--platform linux/amd64` now runs through `binfmt_misc` and the pinned `qemu-x86_64` in the
 System VM (`make crossarch-suite`, `vesper-arch mode` for native/emulated/unsupported). MicroVMs have no network
