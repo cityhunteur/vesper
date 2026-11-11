@@ -97,3 +97,10 @@ After pushing:
 
 - Crate name: `vesper`
 - Edition: `2024`
+
+## Review Tooling
+
+EGM artifact directory: run/egm
+
+EGM review and drift reports are working papers and `run/` is not tracked. Carry their conclusions into the documents
+they concern and into `docs/design-docs/decision-log.md`.

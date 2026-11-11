@@ -2,8 +2,8 @@
 # GH #29 checklist: virtio-fs shares configured in the launch config are mounted in the guest at the same
 # absolute path, so Docker bind mounts of those host paths work from macOS; ownership mapping, chmod,
 # read-only enforcement (share-level and `:ro`), promptness of host edits, inotify behaviour and the path
-# policy are recorded. Needs `make systemvm-up` with VESPER_SHARES naming run/WOR-39/share and
-# run/WOR-39/share-ro:ro (see Makefile `binds-suite`), `make docker-up`, and the alpine:3.22 image.
+# policy are recorded. Needs `make systemvm-up-shares` (three shares: run/WOR-39/share, watched;
+# run/WOR-39/share-ro:ro; run/WOR-39/share-nowatch:nowatch), `make docker-up`, and the alpine:3.22 image.
 set -uo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SOCKET="${DOCKER_SOCKET:-${ROOT_DIR}/run/vesper/docker.sock}"
@@ -56,9 +56,9 @@ ev="$(events)"
 case "${ev}" in *from-guest.txt*) record inotify_guest_writes_seen true "events: ${ev}" ;; *) record inotify_guest_writes_seen false "events: ${ev}" ;; esac
 hint="no event within 2 s; is the share watched (launch config \"watch\": true, launcher status share-watch) and is vesper-share-notify started?"
 echo "host-edit" >> "${SHARE}/hello.txt"; mtime_at_write="$(stat -f '%Fm' "${SHARE}/hello.txt")"
-if ms="$(wait_event hello.txt)"; then [ "${ms}" -le 1000 ] && record inotify_host_edit_propagated true "host append to hello.txt reached the container as an inotify event after ${ms} ms (polled)" || record inotify_host_edit_propagated false "event after ${ms} ms, bound 1000 ms"; else record inotify_host_edit_propagated false "${hint} events: $(events)"; fi
+if ms="$(wait_event hello.txt)"; then [ "${ms}" -le 500 ] && record inotify_host_edit_propagated true "host append to hello.txt reached the container as an inotify event after ${ms} ms (polled)" || record inotify_host_edit_propagated false "event after ${ms} ms, bound 500 ms"; else record inotify_host_edit_propagated false "${hint} events: $(events)"; fi
 echo "new" > "${SHARE}/from-host.txt"
-if ms="$(wait_event from-host.txt)"; then [ "${ms}" -le 1000 ] && record inotify_host_create_propagated true "host create of from-host.txt reached the container as an inotify event (IN_MODIFY, not IN_CREATE) after ${ms} ms (polled)" || record inotify_host_create_propagated false "event after ${ms} ms, bound 1000 ms"; else record inotify_host_create_propagated false "${hint} events: $(events)"; fi
+if ms="$(wait_event from-host.txt)"; then [ "${ms}" -le 500 ] && record inotify_host_create_propagated true "host create of from-host.txt reached the container as an inotify event (IN_MODIFY, not IN_CREATE) after ${ms} ms (polled)" || record inotify_host_create_propagated false "event after ${ms} ms, bound 500 ms"; else record inotify_host_create_propagated false "${hint} events: $(events)"; fi
 sleep 5
 mtime_after="$(stat -f '%Fm' "${SHARE}/hello.txt")"; content="$(tail -1 "${SHARE}/hello.txt")"
 [ "${mtime_after}" = "${mtime_at_write}" ] && [ "${content}" = "host-edit" ] && record inotify_host_mtime_preserved true "the replay left hello.txt's contents and mtime (${mtime_after}) unchanged; only the host ctime moves" || record inotify_host_mtime_preserved false "mtime ${mtime_at_write} -> ${mtime_after}, last line ${content}"
@@ -76,8 +76,9 @@ wait_more '^c /data sub$' "${base}" && record inotify_host_delete_seen_on_parent
 echo e > "${SHARE}/sub/e.txt"; wait_event e.txt >/dev/null; sleep 1
 base="$(count_ev '^c /data sub$')"; mv "${SHARE}/sub/e.txt" "${SHARE}/sub/f.txt"
 wait_more '^c /data sub$' "${base}" && wait_more ' f.txt$' 0 && record inotify_host_rename_seen true "host rename sub/e.txt -> sub/f.txt reached the container as a change of sub and an event for f.txt (no IN_MOVED_FROM/TO)" || record inotify_host_rename_seen false "events: $(events | cut -c1-200)"
-base="$(count_ev ' from-host.txt$')"; /bin/rm -f "${SHARE}/from-host.txt"; sleep 2
-[ "$(count_ev ' from-host.txt$')" = "${base}" ] && record inotify_share_root_delete_not_propagated true "a host delete directly in the share's root directory produces no event (the guest cannot touch a share root; documented residual, TD-038)" || record inotify_share_root_delete_not_propagated false "unexpected events: $(events | cut -c1-200)"
+# Counts every event, named or not: a replay of the share root would show as an event on /data itself.
+sleep 1; base="$(events | tr ';' '\n' | grep -c .)"; /bin/rm -f "${SHARE}/from-host.txt"; sleep 2
+[ "$(events | tr ';' '\n' | grep -c .)" = "${base}" ] && record inotify_share_root_delete_not_propagated true "a host delete directly in the share's root directory produces no event (the guest cannot touch a share root; documented residual, TD-038)" || record inotify_share_root_delete_not_propagated false "unexpected events: $(events | cut -c1-200)"
 python3 -c 'import sys
 for i in range(500): open(f"{sys.argv[1]}/burst-{i}.txt", "w").write("x\n")' "${SHARE}/sub"
 t0="$(now_ms)"; n=0; for _ in $(seq 1 50); do n="$(events | tr ';' '\n' | grep -o 'burst-[0-9]*\.txt' | sort -u | wc -l | tr -d ' ')"; [ "${n}" -ge 500 ] && break; sleep 0.2; done
@@ -85,6 +86,23 @@ health="$("${CTL[@]}" health 2>&1 | grep -c '"docker_ok":true')"
 [ "${n}" = 500 ] && [ "${health}" = 1 ] && record inotify_burst_delivered true "500 files created on the host in one burst: events for all 500 within $(( $(now_ms) - t0 )) ms (polled); System VM healthy" || record inotify_burst_delivered false "events for ${n} of 500 files after $(( $(now_ms) - t0 )) ms; healthy=${health}"
 echo "nw-edit" >> "${SHARE_NW}/nw.txt"; sleep 2
 case "$(events)" in *nw.txt*) record inotify_nowatch_share_silent false "unexpected: a :nowatch share produced inotify events" ;; *) if "${CTL[@]}" share list 2>&1 | grep -q " ${SHARE_NW} mode=rw"; then record inotify_nowatch_share_silent true "host edits on the read-write share mounted with :nowatch produce no inotify events (opt-out honoured)"; else record inotify_nowatch_share_silent false "the :nowatch share ${SHARE_NW} is not mounted; boot with 'make systemvm-up-shares'"; fi ;; esac
+# Rapid edits of one file while a container keeps stat-ing it (so the guest holds cached attributes): the
+# replay reads the mtime and writes it back, and must never leave the host with an older mtime than the
+# last host write (GH #150 council, parity and runtime judges). 5 rounds of 40 appends, 25 ms apart.
+echo r > "${SHARE}/sub/rapid.txt"; wait_event rapid.txt >/dev/null
+"${DOCKER}" exec -d binds-inot sh -c 'while [ -e /data/sub/rapid.txt ]; do stat -c %Y /data/sub/rapid.txt >/dev/null 2>&1; done'
+rapid="$(python3 -c 'import os, sys, time
+p = sys.argv[1]; bad = []
+for r in range(5):
+    for i in range(40):
+        with open(p, "a") as f: f.write("x\n")
+        time.sleep(0.025)
+    want = os.stat(p).st_mtime_ns; time.sleep(2); got = os.stat(p).st_mtime_ns
+    if got != want: bad.append(f"round {r}: {want} -> {got}")
+print("; ".join(bad) if bad else "same")' "${SHARE}/sub/rapid.txt")"
+lines="$(wc -l < "${SHARE}/sub/rapid.txt" | tr -d ' ')"
+[ "${rapid}" = "same" ] && [ "${lines}" = 201 ] && record inotify_host_rapid_edits_mtime_preserved true "200 host appends to one file, 25 ms apart, while a container stat-ed it in a loop: after each of 5 rounds the host mtime (ns) equalled the last host write and all 201 lines were intact" || record inotify_host_rapid_edits_mtime_preserved false "host mtime changed after the last write (${rapid}); lines=${lines}"
+/bin/rm -f "${SHARE}/sub/rapid.txt"
 "${DOCKER}" rm -f binds-inot >/dev/null 2>&1
 rm -f "${SHARE}"/sub/*; rmdir "${SHARE}/sub" 2>/dev/null
 

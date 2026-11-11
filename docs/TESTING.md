@@ -1,7 +1,7 @@
 ---
 status: verified
 owner: cityhunteur
-last_reviewed: 2026-11-09
+last_reviewed: 2026-11-11
 ---
 
 # Testing
@@ -35,7 +35,7 @@ the broader suite. `cargo test` was run successfully on 2026-11-05.
 | Shim restart | Yes | Go unit test (task record round trip) and `make systemvm-restart-suite` (18 steps: task survives a SIGKILLed containerd with the same VMM pid, dead shim leaves no microVM, in-flight `ctr run` fails cleanly, durable record); report in `run/systemvm/restart-report.json` | Go + Rust + guest shell | `make systemvm-up && make systemvm-restart-suite` | macOS on an M3 or later |
 | Docker API conformance | Yes | `make docker-conformance`: 22 checks from macOS through `vesper-proxy` (protocol, context, images, run/exec/stop/kill/rm, pull, error passthrough, ingress boundary); report in `run/systemvm/docker-conformance-report.json` | bash + docker CLI | `make systemvm-up && make docker-up && make docker-conformance` | macOS on an M3 or later with outbound network |
 | Published ports | Yes | `cargo test ports` (bindings, planning, events, HTTP framing, conflict status) and `make ports-suite` (11 steps: localhost reachability, multiple mappings, dockerd and host conflicts, teardown on stop and rm, launcher survives a proxy restart, republish after restart); report in `run/systemvm/ports-report.json` | Rust + bash | `make systemvm-up && make docker-up && make ports-suite` | macOS on an M3 or later with outbound network |
-| Bind mounts | Yes | `make binds-suite` (19 steps: shares at host paths, read, ownership mapping, chmod/chown, read-only at share level and `:ro`, promptness, inotify for guest writes, host edit and host create propagated within 1 s, host mtime preserved, no echo storm, read-only share silent, host delete and rename seen on the parent directory, share-root delete not propagated, 500-file burst delivered, `:nowatch` share silent, path policy); without a VM, `make share-notify-selftest` (guest sink path policy, 19 checks) and `make share-watch-selftest` (launcher watcher dry run, 11 checks, macOS); report in `run/systemvm/binds-report.json` | bash + docker CLI | `make systemvm-up-shares && make docker-up && make binds-suite` | macOS on an M3 or later with outbound network |
+| Bind mounts | Yes | `make binds-suite` (20 steps: shares at host paths, read, ownership mapping, chmod/chown, read-only at share level and `:ro`, promptness, inotify for guest writes, host edit and host create propagated within 1 s, host mtime preserved after one edit and after 200 rapid edits of one file, no echo storm, read-only share silent, host delete and rename seen on the parent directory, share-root delete not propagated, 500-file burst delivered, `:nowatch` share silent, path policy); report in `run/systemvm/binds-report.json`. `make binds-suite` never runs in CI (developer hardware only, TD-005). CI runs two self-tests without a VM: `make share-notify-selftest` (guest sink path policy, 20 checks, Linux) and `make share-watch-selftest` (launcher watcher: dry-run decisions, delivery to a socket sink, reconnect, queue limit, exit under a stalled sink; 20 checks, macOS, needs python3) | bash + docker CLI | `make systemvm-up-shares && make docker-up && make binds-suite` | macOS on an M3 or later with outbound network |
 | DNS and network defaults | Yes | `make dns-suite` (12 steps: default-bridge resolver and external DNS/egress, compose embedded DNS, service discovery, aliases, external forwarding, NXDOMAIN, determinism across runs, cleanup); report in `run/systemvm/dns-report.json` | bash + docker compose | `make systemvm-up && make docker-up && make dns-suite` | macOS on an M3 or later with outbound network |
 | Developer workflows | Yes | `make workflow-suite` (8 steps: compose up, build from a host context, logs -f streaming, interactive exec -it via expect, HUP/TERM/KILL signals, amd64 probe recorded as a gap); report with baseline metadata in `run/systemvm/workflow-report.json` | bash + docker compose + expect | `make systemvm-up && make docker-up && make workflow-suite` | macOS on an M3 or later with outbound network |
 | Cross-architecture | Yes | `make crossarch-suite` (9 steps: binfmt registration, execution modes, `--platform linux/amd64` run, image and container architecture metadata, unsupported platform error, emulated-vs-native timing, native image untouched); report in `run/systemvm/crossarch-report.json` | bash + docker CLI | `make systemvm-up && make docker-up && make crossarch-suite` | macOS on an M3 or later with outbound network |
@@ -66,12 +66,19 @@ make contract-check            # what contract-tests.yml runs first
 make contract-test             # contract-check + the two integration suites
 ```
 
-CI workflows and what each runs, all on Linux and all reproducible locally:
+CI workflows and what each runs. All run on Linux except the `launcher-build` job of `systemvm-image.yml`, which
+runs on `macos-15`; all are reproducible locally:
 
 - `rust-tests.yml` (any `src/**`, `tests/**`, `Cargo.*`, `Makefile`, `third_party/**`, `docs/generated/**`,
   `docs/specs/*.yaml`, `packaging/**`, `scripts/ci/**` change): `make build`, `cargo test`,
   `make surface-matrix-check`, `make behavior-matrix-check`, `make validate-entitlements`.
 - `contract-tests.yml` (swagger, `src/spec.rs`, `src/api.rs`, `contractgen`, golden file): golden check, `make contract-test`.
+- `systemvm-image.yml` (image and packages locks, `systemvm/**`, `scripts/systemvm/**`, `launcher/**`,
+  `scripts/macos/build-vmlauncher.sh`, `scripts/macos/share-watch-selftest.sh`, the launcher entitlements,
+  `src/systemvm.rs`, `src/bin/systemvmctl.rs`, `Makefile`): job `reproducible-image` on Linux runs the systemvm unit
+  tests, `make share-notify-selftest`, the pinned image fetch and the deterministic overlay build; job
+  `launcher-build` on `macos-15` builds and signs the launcher and runs `make share-watch-selftest`. No job boots
+  a VM, so `make binds-suite` and the other System VM suites run only on developer hardware (TD-005).
 - `shim-tests.yml` (`shim/**`, `build-shim.sh`): `go vet`, `go test`, cross-build, artifact upload.
 - `ctr-conformance.yml` (the committed ctr capture, lock, assembler): self-test, `--validate`, artifact upload.
 - `parity-baseline.yml` (the committed capture, lock, registry, archives, assembler): assembler self-test, `--validate` of `docs/specs/backend-a-parity-baseline.json`, artifact upload.
