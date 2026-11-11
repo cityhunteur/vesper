@@ -8,4 +8,5 @@ case "$port" in
   ''|*[!0-9]*) exit 1 ;;
 esac
 [ "$port" -ge 1 ] && [ "$port" -le 65535 ] || exit 1
-exec /usr/bin/socat STDIO "TCP:127.0.0.1:$port"
+# -t: see vesper-port-relay; a half-closed client still receives the whole response (GH #167).
+exec /usr/bin/socat -t 86400 STDIO "TCP:127.0.0.1:$port"

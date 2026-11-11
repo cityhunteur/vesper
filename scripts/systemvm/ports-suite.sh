@@ -66,6 +66,14 @@ out="$(wait_http 18091)"; [ "${out}" = "port-80" ] && record republished_after_p
 "${DOCKER}" rm -f pp4 >/dev/null 2>&1
 wait_closed 18091 && record cleanup_on_rm true "18091 closed after docker rm -f" || record cleanup_on_rm false "18091 still answers"
 
+# A client that half-closes after its request still gets a response that comes later (GH #167).
+"${DOCKER}" rm -f pp5 >/dev/null 2>&1
+"${DOCKER}" run -d --name pp5 -p 18095:80 "${IMAGE}" sh -c 'while true; do nc -l -p 80 -e sh -c "read -r _; sleep 2; echo late-reply"; done' >/dev/null 2>&1
+sleep 2
+out="$(printf 'hello\n' | python3 -c 'import socket,sys; s=socket.create_connection(("127.0.0.1",18095),5); s.sendall(sys.stdin.buffer.read()); s.shutdown(socket.SHUT_WR); s.settimeout(10); print(s.recv(100).decode().strip())' 2>&1)"
+[ "${out}" = late-reply ] && record half_closed_client_gets_late_reply true "reply 2 s after the client shut its write side: ${out}" || record half_closed_client_gets_late_reply false "got '${out}'"
+"${DOCKER}" rm -f pp5 >/dev/null 2>&1
+
 cleanup
 passed=true; for s in "${steps[@]}"; do case "$s" in *'"ok":false'*) passed=false;; esac; done
 printf '{"socket":"%s","status_file":"%s","steps":[%s],"passed":%s}\n' "${SOCKET}" "${STATUS}" "$(IFS=,; echo "${steps[*]}")" "${passed}" > "${REPORT}"
