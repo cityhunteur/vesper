@@ -121,6 +121,7 @@ pub fn documented_route_semantics(operation: &str) -> Option<RouteSemantics> {
         | "PATCH /drives/{drive_id}"
         | "PATCH /hotplug/memory"
         | "PATCH /network-interfaces/{iface_id}"
+        | "PATCH /pmem/{id}"
         | "PUT /snapshot/create" => PostBoot,
         "PUT /balloon"
         | "PUT /boot-source"

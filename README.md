@@ -83,9 +83,11 @@ Normative design references are `docs/specs/design-v0.md` and
   and `baseline_firecracker_revision` set from the loaded baseline lock. `lock.baselines["firecracker"].revision` must be non-blank.
 - Route gating is data-driven: `validate_state_guard` reads `RouteSemantics`
   (`Any`, `PreBoot`, `PostBoot`, `PreBootRuntime`) for the operation key.
-  `PUT /actions` and `PATCH /vm` dispatch before the guard; all other routes
-  run it first. The guard does not distinguish `Running` from `Paused`.
-- Every one of the 37 pinned routes has an explicit arm in `handle_all`. The
+  `PUT /actions`, `PATCH /vm` and `PUT` of drives, pmem and network
+  interfaces dispatch before the guard (the device `PUT`s answer
+  `PCI is not enabled` after boot, as Firecracker without `--enable-pci`);
+  all other routes run it first. The guard does not distinguish `Running` from `Paused`.
+- Every one of the 38 pinned routes has an explicit arm in `handle_all`. The
   trailing `matrix_response` fallback (stub status from the surface stub
   matrix, always `{501, "NotImplemented", "operation not implemented"}`) is a
   safety net that is unreachable with the current swagger and generated matrix.

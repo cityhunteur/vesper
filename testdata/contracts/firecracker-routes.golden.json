@@ -116,6 +116,10 @@
     "path": "/network-interfaces/{iface_id}"
   },
   {
+    "method": "PATCH",
+    "path": "/pmem/{id}"
+  },
+  {
     "method": "PUT",
     "path": "/pmem/{id}"
   },

@@ -3,18 +3,18 @@ use axum::http::{Request, StatusCode};
 use tempfile::{NamedTempFile, tempdir};
 use tower::ServiceExt;
 
+// `PUT /drives`, `/network-interfaces` and `/pmem` are documented pre-boot only, but the pinned
+// binary answers them after boot with "PCI is not enabled"; see
+// `postboot_device_puts_report_pci_not_enabled_on_full_router`.
 const PREBOOT_ONLY_ROUTES: &[(&str, &str)] = &[
     ("PUT", "/balloon"),
     ("PUT", "/boot-source"),
     ("PUT", "/cpu-config"),
-    ("PUT", "/drives/{drive_id}"),
     ("PUT", "/entropy"),
     ("PUT", "/hotplug/memory"),
     ("PATCH", "/machine-config"),
     ("PUT", "/machine-config"),
     ("PUT", "/mmds/config"),
-    ("PUT", "/network-interfaces/{iface_id}"),
-    ("PUT", "/pmem/{id}"),
     ("PUT", "/snapshot/load"),
     ("PUT", "/vsock"),
 ];
@@ -30,6 +30,7 @@ const POSTBOOT_ONLY_ROUTES: &[(&str, &str)] = &[
     ("GET", "/hotplug/memory"),
     ("PATCH", "/hotplug/memory"),
     ("PATCH", "/network-interfaces/{iface_id}"),
+    ("PATCH", "/pmem/{id}"),
     ("PUT", "/snapshot/create"),
 ];
 
@@ -5028,7 +5029,7 @@ async fn pmem_put_matches_pinned_root_device_behavior() {
     assert_eq!(block_root_conflict_payload["code"], "InvalidRequest");
     assert_eq!(
         block_root_conflict_payload["fault_message"],
-        "Pmem device error: Attempt to add pmem as a root device while the root device defined as a block device"
+        "Pmem config error: Attempt to add pmem as a root device while the root device defined as a block device"
     );
     assert_eq!(
         block_root_conflict_payload["baseline_firecracker_revision"]
@@ -5084,7 +5085,7 @@ async fn pmem_put_matches_pinned_root_device_behavior() {
     assert_eq!(second_root_payload["code"], "InvalidRequest");
     assert_eq!(
         second_root_payload["fault_message"],
-        "Pmem device error: A root pmem device already exist"
+        "Pmem config error: A root pmem device already exist"
     );
 
     let default_flags_response = second_router
@@ -5125,99 +5126,501 @@ async fn pmem_put_matches_pinned_root_device_behavior() {
     assert_eq!(vm_config_payload["pmem"][0]["read_only"], false);
 }
 
+async fn send_json(
+    router: &axum::Router,
+    method: &str,
+    uri: &str,
+    body: &str,
+) -> (StatusCode, serde_json::Value) {
+    let response = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(method)
+                .uri(uri)
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = response.status();
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let value = if bytes.is_empty() {
+        serde_json::Value::Null
+    } else {
+        serde_json::from_slice(&bytes).unwrap()
+    };
+    (status, value)
+}
+
+async fn get_json(router: &axum::Router, uri: &str) -> serde_json::Value {
+    let (status, value) = send_json(router, "GET", uri, "").await;
+    assert_eq!(status, StatusCode::OK, "GET {uri}");
+    value
+}
+
+fn assert_fault(
+    status: StatusCode,
+    payload: &serde_json::Value,
+    code: &str,
+    message: &str,
+    firecracker: &str,
+) {
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{payload}");
+    assert_eq!(payload["code"], code, "{payload}");
+    assert_eq!(payload["fault_message"], message, "{payload}");
+    assert_eq!(
+        payload["baseline_firecracker_revision"].as_str().unwrap(),
+        firecracker
+    );
+}
+
+async fn put_pmem(router: &axum::Router, id: &str, path: &std::path::Path, extra: &str) -> StatusCode {
+    send_json(
+        router,
+        "PUT",
+        &format!("/pmem/{id}"),
+        &format!(r#"{{"id":"{id}","path_on_host":"{}"{extra}}}"#, path.display()),
+    )
+    .await
+    .0
+}
+
+const RATE_LIMITER_JSON: &str = r#"{"bandwidth":{"size":1048576,"refill_time":100},"ops":{"size":10,"one_time_burst":5,"refill_time":1000}}"#;
+
 #[tokio::test]
-async fn pmem_put_rejects_invalid_backing_files() {
+async fn pmem_backing_files_are_validated_at_instance_start_on_full_router() {
     let (router, firecracker) = app_router();
+    let kernel = NamedTempFile::new().unwrap();
+    let (status, _) = send_json(
+        &router,
+        "PUT",
+        "/boot-source",
+        &format!(r#"{{"kernel_image_path":"{}"}}"#, kernel.path().display()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
     let missing_dir = tempdir().unwrap();
     let missing_path = missing_dir.path().join("missing.img");
     let zero_sized_backing_file = NamedTempFile::new().unwrap();
+    let backing_file = NamedTempFile::new().unwrap();
+    backing_file.as_file().set_len(0x1000).unwrap();
+    let start = r#"{"action_type":"InstanceStart"}"#;
 
-    let missing_response = router
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("PUT")
-                .uri("/pmem/pmem0")
-                .header("content-type", "application/json")
-                .body(Body::from(format!(
-                    r#"{{"id":"pmem0","path_on_host":"{}"}}"#,
-                    missing_path.display()
-                )))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(missing_response.status(), StatusCode::BAD_REQUEST);
-    let missing_payload: serde_json::Value = serde_json::from_slice(
-        &to_bytes(missing_response.into_body(), usize::MAX)
-            .await
-            .unwrap(),
-    )
-    .unwrap();
-    assert_eq!(missing_payload["code"], "InvalidRequest");
+    // At the pinned revision PUT /pmem only stores the config; the file is opened at boot.
     assert_eq!(
-        missing_payload["fault_message"],
-        "Pmem device error: Unable to create the virtio-pmem device: Error accessing backing file: No such file or directory (os error 2)"
+        put_pmem(&router, "pmem0", &missing_path, "").await,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(get_json(&router, "/vm/config").await["pmem"][0]["id"], "pmem0");
+    let (status, payload) = send_json(&router, "PUT", "/actions", start).await;
+    assert_fault(
+        status,
+        &payload,
+        "InvalidRequest",
+        "Start microvm error: Cannot create pmem device: Error accessing backing file: No such file or directory (os error 2)",
+        &firecracker,
+    );
+    assert_eq!(get_json(&router, "/").await["state"], "Not started");
+
+    assert_eq!(
+        put_pmem(&router, "pmem0", zero_sized_backing_file.path(), "").await,
+        StatusCode::NO_CONTENT
+    );
+    let (status, payload) = send_json(&router, "PUT", "/actions", start).await;
+    assert_fault(
+        status,
+        &payload,
+        "InvalidRequest",
+        "Start microvm error: Cannot create pmem device: Error backing file size is 0",
+        &firecracker,
+    );
+    assert_eq!(get_json(&router, "/").await["state"], "Not started");
+
+    assert_eq!(
+        put_pmem(&router, "pmem0", backing_file.path(), "").await,
+        StatusCode::NO_CONTENT
+    );
+    let (status, _) = send_json(&router, "PUT", "/actions", start).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert_eq!(get_json(&router, "/").await["state"], "Running");
+}
+
+#[tokio::test]
+async fn pmem_put_accepts_rate_limiter_and_exports_it_on_full_router() {
+    let (router, _) = app_router();
+    let backing_file = NamedTempFile::new().unwrap();
+    backing_file.as_file().set_len(0x1000).unwrap();
+
+    assert_eq!(
+        put_pmem(
+            &router,
+            "pmem0",
+            backing_file.path(),
+            &format!(r#","rate_limiter":{RATE_LIMITER_JSON}"#)
+        )
+        .await,
+        StatusCode::NO_CONTENT
     );
     assert_eq!(
-        missing_payload["baseline_firecracker_revision"]
-            .as_str()
-            .unwrap(),
-        firecracker
+        put_pmem(&router, "pmem1", backing_file.path(), "").await,
+        StatusCode::NO_CONTENT
+    );
+    let pmem = get_json(&router, "/vm/config").await["pmem"].clone();
+    assert_eq!(
+        pmem[0]["rate_limiter"],
+        serde_json::from_str::<serde_json::Value>(RATE_LIMITER_JSON).unwrap()
+    );
+    assert!(pmem[1]["rate_limiter"].is_null());
+
+    for bad in [
+        r#","rate_limiter":{"bandwidth":{"size":1}}"#,
+        r#","rate_limiter":{"iops":{"size":1,"refill_time":1}}"#,
+    ] {
+        let (status, payload) = send_json(
+            &router,
+            "PUT",
+            "/pmem/pmem2",
+            &format!(
+                r#"{{"id":"pmem2","path_on_host":"{}"{bad}}}"#,
+                backing_file.path().display()
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{bad}");
+        assert_eq!(payload["fault_message"], "invalid JSON payload");
+    }
+}
+
+#[tokio::test]
+async fn pmem_patch_matches_pinned_behavior_on_full_router() {
+    let (router, firecracker) = app_router();
+    let backing_file = NamedTempFile::new().unwrap();
+    backing_file.as_file().set_len(0x1000).unwrap();
+    assert_eq!(
+        put_pmem(&router, "pmem0", backing_file.path(), "").await,
+        StatusCode::NO_CONTENT
+    );
+    let patch_body = format!(r#"{{"id":"pmem0","rate_limiter":{RATE_LIMITER_JSON}}}"#);
+
+    let (status, payload) = send_json(&router, "PATCH", "/pmem/pmem0", &patch_body).await;
+    assert_fault(
+        status,
+        &payload,
+        "InvalidState",
+        "The requested operation is not supported before starting the microVM.",
+        &firecracker,
     );
 
-    let zero_sized_response = router
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("PUT")
-                .uri("/pmem/pmem0")
-                .header("content-type", "application/json")
-                .body(Body::from(format!(
-                    r#"{{"id":"pmem0","path_on_host":"{}"}}"#,
-                    zero_sized_backing_file.path().display()
-                )))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(zero_sized_response.status(), StatusCode::BAD_REQUEST);
-    let zero_sized_payload: serde_json::Value = serde_json::from_slice(
-        &to_bytes(zero_sized_response.into_body(), usize::MAX)
-            .await
-            .unwrap(),
+    boot_instance(router.clone()).await;
+
+    let (status, payload) = send_json(&router, "PATCH", "/pmem/pmem0", &patch_body).await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{payload}");
+    assert!(payload.is_null());
+    let (status, _) = send_json(&router, "PATCH", "/pmem/pmem0", r#"{"id":"pmem0"}"#).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    // Firecracker reports the PUT-time pmem config, not the patched limiter.
+    assert!(get_json(&router, "/vm/config").await["pmem"][0]["rate_limiter"].is_null());
+
+    let (status, payload) = send_json(
+        &router,
+        "PATCH",
+        "/pmem/missing",
+        &format!(r#"{{"id":"missing","rate_limiter":{RATE_LIMITER_JSON}}}"#),
     )
-    .unwrap();
-    assert_eq!(zero_sized_payload["code"], "InvalidRequest");
-    assert_eq!(
-        zero_sized_payload["fault_message"],
-        "Pmem device error: Unable to create the virtio-pmem device: Error backing file size is 0"
+    .await;
+    assert_fault(
+        status,
+        &payload,
+        "InvalidRequest",
+        "Pmem config error: Unable to patch the pmem device: Failed perform action on device: Device not found Please verify the request arguments.",
+        &firecracker,
     );
-    assert_eq!(
-        zero_sized_payload["baseline_firecracker_revision"]
-            .as_str()
-            .unwrap(),
-        firecracker
+    // Without a rate limiter Firecracker does not look the device up.
+    let (status, _) = send_json(&router, "PATCH", "/pmem/missing", r#"{"id":"missing"}"#).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    let (status, payload) = send_json(&router, "PATCH", "/pmem/pmem1", &patch_body).await;
+    assert_fault(
+        status,
+        &payload,
+        "InvalidRequest",
+        "The id from the path does not match the id from the body!",
+        &firecracker,
     );
 
-    let vm_config_response = router
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/vm/config")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(vm_config_response.status(), StatusCode::OK);
-    let vm_config_payload: serde_json::Value = serde_json::from_slice(
-        &to_bytes(vm_config_response.into_body(), usize::MAX)
-            .await
-            .unwrap(),
+    for bad_body in [
+        "",
+        "{not-json",
+        r#"{"rate_limiter":{}}"#,
+        r#"{"id":"pmem0","read_only":true}"#,
+        r#"{"id":"pmem0","rate_limiter":{"ops":{"refill_time":1}}}"#,
+    ] {
+        let (status, payload) = send_json(&router, "PATCH", "/pmem/pmem0", bad_body).await;
+        assert_fault(
+            status,
+            &payload,
+            "InvalidRequest",
+            "invalid JSON payload",
+            &firecracker,
+        );
+    }
+}
+
+#[tokio::test]
+async fn postboot_device_puts_report_pci_not_enabled_on_full_router() {
+    let (router, firecracker) = app_router();
+    let drive_file = NamedTempFile::new().unwrap();
+    let pmem_file = NamedTempFile::new().unwrap();
+    pmem_file.as_file().set_len(0x1000).unwrap();
+    let requests = [
+        (
+            "/drives/rootfs",
+            format!(
+                r#"{{"drive_id":"rootfs","is_root_device":false,"path_on_host":"{}"}}"#,
+                drive_file.path().display()
+            ),
+            r#"{"drive_id":"other","is_root_device":false,"path_on_host":"/x"}"#.to_string(),
+            "The id from the path does not match the id from the body!",
+        ),
+        (
+            "/network-interfaces/eth0",
+            // An out-of-range MTU is not checked before the PCI error after boot.
+            r#"{"iface_id":"eth0","host_dev_name":"tap0","mtu":67}"#.to_string(),
+            r#"{"iface_id":"eth1","host_dev_name":"tap0"}"#.to_string(),
+            "The id from the path [eth0] does not match the id from the body [eth1]!",
+        ),
+        (
+            "/pmem/pmem0",
+            format!(
+                r#"{{"id":"pmem0","path_on_host":"{}"}}"#,
+                pmem_file.path().display()
+            ),
+            r#"{"id":"pmem1","path_on_host":"/x"}"#.to_string(),
+            "The id from the path does not match the id from the body!",
+        ),
+    ];
+
+    boot_instance(router.clone()).await;
+    for vm_state in ["Running", "Paused"] {
+        if vm_state == "Paused" {
+            let (status, _) = send_json(&router, "PATCH", "/vm", r#"{"state":"Paused"}"#).await;
+            assert_eq!(status, StatusCode::NO_CONTENT);
+        }
+        assert_eq!(get_json(&router, "/").await["state"], vm_state);
+        for (uri, valid, mismatch, mismatch_message) in &requests {
+            let (status, payload) = send_json(&router, "PUT", uri, valid).await;
+            assert_fault(status, &payload, "InvalidRequest", "PCI is not enabled", &firecracker);
+            // Body parsing and the id check run before the PCI error, as in Firecracker.
+            let (status, payload) = send_json(&router, "PUT", uri, mismatch).await;
+            assert_fault(status, &payload, "InvalidRequest", mismatch_message, &firecracker);
+            let (status, payload) = send_json(&router, "PUT", uri, "{not-json").await;
+            assert_fault(status, &payload, "InvalidRequest", "invalid JSON payload", &firecracker);
+        }
+    }
+
+    let vm_config = get_json(&router, "/vm/config").await;
+    assert!(vm_config["drives"].is_null());
+    assert!(vm_config["network-interfaces"].is_null());
+    assert!(vm_config["pmem"].is_null());
+}
+
+#[tokio::test]
+async fn balloon_hinting_start_and_stop_answer_no_content_on_full_router() {
+    let (router, _) = app_router();
+    let (status, _) = send_json(
+        &router,
+        "PUT",
+        "/balloon",
+        r#"{"amount_mib":0,"deflate_on_oom":false,"free_page_hinting":true}"#,
     )
-    .unwrap();
-    assert!(vm_config_payload["pmem"].is_null());
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    boot_instance(router.clone()).await;
+
+    for (path, body) in [
+        ("/balloon/hinting/start", ""),
+        ("/balloon/hinting/start", r#"{"acknowledge_on_stop":false}"#),
+        ("/balloon/hinting/stop", ""),
+    ] {
+        let (status, payload) = send_json(&router, "PATCH", path, body).await;
+        assert_eq!(status, StatusCode::NO_CONTENT, "{path}");
+        assert!(payload.is_null(), "{path}");
+    }
+}
+
+#[tokio::test]
+async fn network_put_validates_mtu_bounds_on_full_router() {
+    let (router, firecracker) = app_router();
+
+    let (status, payload) = send_json(
+        &router,
+        "PUT",
+        "/network-interfaces/eth0",
+        r#"{"iface_id":"eth0","host_dev_name":"tap0","mtu":67}"#,
+    )
+    .await;
+    assert_fault(
+        status,
+        &payload,
+        "InvalidRequest",
+        "Network config error: Could not create the network device: MTU 67 is out of range [68, 65535]",
+        &firecracker,
+    );
+    for bad in ["65536", "-1", "1500.5", r#""1500""#] {
+        let (status, payload) = send_json(
+            &router,
+            "PUT",
+            "/network-interfaces/eth0",
+            &format!(r#"{{"iface_id":"eth0","host_dev_name":"tap0","mtu":{bad}}}"#),
+        )
+        .await;
+        assert_fault(
+            status,
+            &payload,
+            "InvalidRequest",
+            "invalid JSON payload",
+            &firecracker,
+        );
+    }
+    assert!(get_json(&router, "/vm/config").await["network-interfaces"].is_null());
+
+    for (iface, tap, mtu) in [("eth0", "tap0", "68"), ("eth1", "tap1", "65535")] {
+        let (status, payload) = send_json(
+            &router,
+            "PUT",
+            &format!("/network-interfaces/{iface}"),
+            &format!(r#"{{"iface_id":"{iface}","host_dev_name":"{tap}","mtu":{mtu}}}"#),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT, "{payload}");
+    }
+    let (status, _) = send_json(
+        &router,
+        "PUT",
+        "/network-interfaces/eth2",
+        r#"{"iface_id":"eth2","host_dev_name":"tap2"}"#,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    let interfaces = get_json(&router, "/vm/config").await["network-interfaces"].clone();
+    assert_eq!(interfaces[0]["iface_id"], "eth0");
+    assert_eq!(interfaces[0]["mtu"], 68);
+    assert_eq!(interfaces[1]["mtu"], 65535);
+    assert!(interfaces[2]["mtu"].is_null());
+
+    // The MTU survives a runtime rate-limiter patch.
+    boot_instance(router.clone()).await;
+    let (status, _) = send_json(
+        &router,
+        "PATCH",
+        "/network-interfaces/eth0",
+        &format!(r#"{{"iface_id":"eth0","rx_rate_limiter":{RATE_LIMITER_JSON}}}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert_eq!(
+        get_json(&router, "/vm/config").await["network-interfaces"][0]["mtu"],
+        68
+    );
+}
+
+#[tokio::test]
+async fn serial_put_accepts_token_bucket_rate_limiter_on_full_router() {
+    let (router, firecracker) = app_router();
+    let tempdir = tempdir().unwrap();
+    let serial_path = tempdir.path().join("serial.out");
+
+    let (status, payload) = send_json(
+        &router,
+        "PUT",
+        "/serial",
+        &format!(
+            r#"{{"serial_out_path":"{}","rate_limiter":{{"size":4096,"one_time_burst":1024,"refill_time":100}}}}"#,
+            serial_path.display()
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{payload}");
+    let (status, _) = send_json(
+        &router,
+        "PUT",
+        "/serial",
+        r#"{"rate_limiter":{"size":4096,"refill_time":100}}"#,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    // Firecracker never exports the serial config in GET /vm/config.
+    assert!(get_json(&router, "/vm/config").await.get("serial").is_none());
+
+    for bad in [
+        r#"{"rate_limiter":{"size":4096}}"#,
+        r#"{"rate_limiter":{"bandwidth":{"size":1,"refill_time":1}}}"#,
+        r#"{"rate_limiter":{"size":-1,"refill_time":1}}"#,
+    ] {
+        let (status, payload) = send_json(&router, "PUT", "/serial", bad).await;
+        assert_fault(
+            status,
+            &payload,
+            "InvalidRequest",
+            "invalid JSON payload",
+            &firecracker,
+        );
+    }
+}
+
+#[tokio::test]
+async fn snapshot_load_accepts_vsock_override_and_clock_realtime_on_full_router() {
+    let (_, firecracker) = app_router();
+    for body in [
+        r#"{"snapshot_path":"snap","mem_file_path":"mem","vsock_override":{"uds_path":"/tmp/v.sock"}}"#,
+        r#"{"snapshot_path":"snap","mem_backend":{"backend_type":"File","backend_path":"mem"},"vsock_override":{"uds_path":"/tmp/v.sock"},"clock_realtime":false,"resume_vm":true}"#,
+    ] {
+        let (router, _) = app_router();
+        let (status, payload) = send_json(&router, "PUT", "/snapshot/load", body).await;
+        assert_eq!(status, StatusCode::NO_CONTENT, "{body}: {payload}");
+    }
+
+    for body in [
+        r#"{"snapshot_path":"snap","mem_file_path":"mem","vsock_override":{}}"#,
+        r#"{"snapshot_path":"snap","mem_file_path":"mem","vsock_override":{"uds_path":7}}"#,
+        r#"{"snapshot_path":"snap","mem_file_path":"mem","clock_realtime":1}"#,
+    ] {
+        let (router, _) = app_router();
+        let (status, payload) = send_json(&router, "PUT", "/snapshot/load", body).await;
+        assert_fault(
+            status,
+            &payload,
+            "InvalidRequest",
+            "invalid JSON payload",
+            &firecracker,
+        );
+        assert_eq!(get_json(&router, "/").await["state"], "Not started");
+    }
+
+    let (router, _) = app_router();
+    let (status, payload) = send_json(
+        &router,
+        "PUT",
+        "/snapshot/load",
+        r#"{"snapshot_path":"snap","mem_file_path":"mem","clock_realtime":true}"#,
+    )
+    .await;
+    if cfg!(target_arch = "aarch64") {
+        assert_fault(
+            status,
+            &payload,
+            "InvalidRequest",
+            "Load snapshot error: Failed to restore from snapshot: Failed to build microVM from snapshot: clock_realtime is not supported on aarch64.",
+            &firecracker,
+        );
+        assert_eq!(get_json(&router, "/").await["state"], "Not started");
+    } else {
+        assert_eq!(status, StatusCode::NO_CONTENT, "{payload}");
+        assert_eq!(get_json(&router, "/").await["state"], "Paused");
+    }
 }
 
 #[tokio::test]

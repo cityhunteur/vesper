@@ -316,8 +316,8 @@ snapshots again, and assembles `run/systemvm/reliability-report.json` with
 
 ## Backend A: Firecracker microVMs inside the System VM (GH #18)
 
-The packages lock's `archives` section pins the Firecracker v1.16.0 aarch64 release (the first release that contains
-the baseline revision `083c4cf6…` of `docs/specs/design-v0.baselines.lock.yaml`); `make systemvm-overlay` places
+The packages lock's `archives` section pins the Firecracker v1.16.0 aarch64 release (its tag commit `d83d72b7…` is
+the baseline revision of `docs/specs/design-v0.baselines.lock.yaml`, GH #162); `make systemvm-overlay` places
 `firecracker` and `jailer` under `/var/lib/vesper/firecracker/` in the guest. `vesper-microvm` (overlay,
 `usr/local/bin`) manages jailed microVMs: `prepare` unpacks the ISO's zboot kernel into a raw Image and builds a
 busybox initramfs whose init prints `VESPER-MICROVM-OK` (and powers off when the command line has `vesper_exit=1`);

@@ -44,6 +44,16 @@ All handlers share the signature
 - `machine_config.rs:validate_machine_config` and
   `machine_config.rs:validate_machine_config_against_balloon` (private)
   enforce the vCPU, memory, SMT, and balloon-size rules listed below.
+- `pmem.rs:handle_put_pmem` serves `PUT /pmem/{id}`. Stores a
+  `PmemConfigRequest` (`id`, `path_on_host`, `root_device`, `read_only`,
+  `rate_limiter`) keyed by id; it does not open the backing file.
+- `pmem.rs:handle_patch_pmem` serves `PATCH /pmem/{id}`. Validates a
+  `PartialPmemConfigRequest` (`id`, optional `rate_limiter`) and returns
+  `204`; it does not change the stored config.
+- `pmem.rs:validate_pmem_backing_files` is called by `handle_actions` for
+  `InstanceStart` and opens every stored pmem backing file.
+- `pmem.rs:PmemConfigRequest` is also the element type of
+  `AppState::pmem_devices` and of the `pmem` block of `GET /vm/config`.
 
 Subdirectories: none.
 
@@ -51,7 +61,13 @@ Subdirectories: none.
 
 - Every handler rejects an undeserializable body with
   `400 InvalidRequest "invalid JSON payload"` before touching `AppState`.
-- No module in this directory applies a `VmState` guard except `handle_actions`.
+- No module in this directory applies a `VmState` guard except `handle_actions`
+  and `handle_put_pmem`, which calls `reject_runtime_hotplug` in `../api.rs`
+  after the id check: after boot it returns `400 InvalidRequest`
+  `"PCI is not enabled"` (Firecracker without `--enable-pci`). `handle_all`
+  dispatches `PUT /pmem/{id}` before `validate_state_guard` for that reason.
+  `PATCH /pmem/{id}` is post-boot only through its `PostBoot` semantics in
+  `../api_matrix.rs:documented_route_semantics`.
   Pre-boot and post-boot gating for the other routes is applied by
   `validate_state_guard` in `../api.rs` before dispatch.
 - `handle_actions`: `FlushMetrics` and x86_64 `SendCtrlAltDel` return
@@ -59,7 +75,9 @@ Subdirectories: none.
   `PreBoot`. `InstanceStart` returns `400 InvalidState` with
   `ACTION_NOT_SUPPORTED_POSTBOOT_MESSAGE` unless `PreBoot`, then
   `400 InvalidRequest` with `MISSING_KERNEL_CONFIG_MESSAGE` if
-  `boot_source.kernel_image_path` is empty. On aarch64, `SendCtrlAltDel`
+  `boot_source.kernel_image_path` is empty, then `400 InvalidRequest` with
+  the first `validate_pmem_backing_files` failure; `vm_state` stays
+  `PreBoot` on any failure. On aarch64, `SendCtrlAltDel`
   always returns `400 InvalidRequest` with `SEND_CTRL_ALT_DEL_AARCH64_MESSAGE`.
 - `validate_boot_source`: kernel path must open for reading, else
   `"The kernel file cannot be opened: {err}"`. An `initrd_path` that is `Some`
@@ -87,6 +105,19 @@ Subdirectories: none.
   `MACHINE_CONFIG_INCOMPATIBLE_BALLOON_SIZE_MESSAGE`. Config is written only
   after both validators pass.
 
+- `handle_put_pmem`: path/body id mismatch returns
+  `PMEM_ID_PATH_MISMATCH_MESSAGE`; `root_device` with a block root drive
+  returns `PMEM_ROOT_BLOCK_CONFLICT_MESSAGE`; `root_device` with another pmem
+  root returns `PMEM_ROOT_ALREADY_EXISTS_MESSAGE`. Same-id PUT replaces.
+- `handle_patch_pmem`: path/body id mismatch returns
+  `PMEM_ID_PATH_MISMATCH_MESSAGE`; a `rate_limiter` for an id that has no
+  stored device returns `PMEM_UPDATE_NOT_FOUND_MESSAGE`; without
+  `rate_limiter` it returns `204` for any id, as Firecracker does.
+- `validate_pmem_backing_files`: devices are checked in id order. An open
+  failure returns
+  `"Start microvm error: Cannot create pmem device: Error accessing backing file: {err}"`;
+  an empty file returns `PMEM_BACKING_FILE_ZERO_SIZE_MESSAGE`.
+
 ## Side Effects
 
 - `handle_actions` takes the `state.vm_state` write lock for `InstanceStart`
@@ -101,6 +132,11 @@ Subdirectories: none.
 - `handle_put_metrics` sets `state.metrics_config` only when it was `None`.
 - `handle_put_machine_config` and `handle_patch_machine_config` replace
   `state.machine_config`; both read `state.balloon_config`.
+- `handle_put_pmem` reads `state.drives` and writes `state.pmem_devices`;
+  `handle_patch_pmem` only reads `state.pmem_devices`.
+- `validate_pmem_backing_files` opens each pmem backing file (read, write
+  unless `read_only`) and reads its metadata; handles are dropped
+  immediately.
 - All `RwLock` acquisitions use `.expect(...)` and panic on a poisoned lock.
 
 ## Verification
