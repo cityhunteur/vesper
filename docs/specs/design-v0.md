@@ -1,968 +1,616 @@
 ---
 status: draft
 owner: cityhunteur
-last_reviewed: 2026-11-05
+last_reviewed: 2026-11-11
 ---
 
 # Vesper: Firecracker‑compatible microVM runtime on macOS using Apple Virtualization
 
 ## Summary
 
-Vesper is a macOS‑native system that replaces Docker Desktop by running **each container inside a Firecracker‑compatible microVM**, while using Apple’s first‑party virtualization stack (no third‑party KEXTs). It must:
+Vesper has two goals, and the first leads (decision D-011).
 
-* Achieve **100% feature parity** with Firecracker on Linux (API + behavior + tooling expectations), with explicit scope:
+1. A Firecracker-compatible microVM runtime on macOS, for tools and tests that speak the Firecracker API. It uses Apple’s virtualisation frameworks and no kernel extension.
+2. A Docker Desktop replacement in which each container runs in one of those microVMs. It is the first workload and the proof of the runtime, not its definition.
 
-  * Backend A (`Vesper-KVMHost`) on M3+ is the first GA parity target.
-  * Backend B (`Vesper-HVF`) on all supported Apple Silicon reaches the same parity bar before cross-hardware GA.
-* Provide **containerd runtime compatibility** (shim v2) so it can be used as a Docker replacement path.
-* Offer a practical macOS developer UX (volumes, networking, port publishing, build workflows).
-* Support cross-architecture image workflows (`linux/arm64` and `linux/amd64`) with documented execution mode and limits.
-* Treat parity as **versioned and reproducible** against a pinned baseline manifest, not against moving upstream heads.
+No consumer of the Firecracker API exists in this repository beyond the contract tests. The intended consumers are clients written for Firecracker’s API, such as tooling in the style of firecracker-containerd.
 
-This design intentionally borrows proven ideas from:
+Neither goal is met yet. The Docker commands work today without `vesperd`, on runc containers in the System VM, and `vesperd` drives no microVM. [Implementation status](#implementation-status-as-of-2026-11-11-commit-9c5a865) says what exists and what comes next.
 
-* Firecracker’s architecture (API thread + VMM thread + vCPU threads, minimal virtio device model, jailer hardening, rate limiting, MMDS, snapshots). ([GitHub][1])
-* Apple’s direction for “containers on macOS” (VM‑per‑container, vsock control plane, minimal init, ext4 tooling). ([GitHub][2])
-* containerd runtime v2 (shim API as the runtime integration point). ([GitHub][3])
-* Apple Virtualization limitations (e.g., save/restore state encryption and portability constraints). ([Apple Developer][4])
+## Terms
 
-Vesper ships with **two execution backends** so feature parity is not blocked by framework limits:
+* **System VM**: the Linux virtual machine that Virtualization.framework boots on macOS. It runs containerd, dockerd and Firecracker.
+* **microVM**: a Firecracker virtual machine inside the System VM. The document names the System VM or a microVM and does not use “guest” alone.
+* **Backend A**: stock Firecracker in the System VM, on KVM through nested virtualisation.
+* **Backend B**: a native macOS implementation of the Firecracker API and device model on Apple’s virtualisation frameworks.
+* **Docker path**: dockerd → containerd → runc in the System VM. The container is a set of processes in the System VM.
+* **microVM path**: a containerd client that names the runtime `io.containerd.vesper.v2` (today only `ctr`) → the shim → Firecracker → runc inside the microVM.
+* **Shim**: `containerd-shim-vesper-v2`, the containerd runtime v2 shim. containerd starts every container through a shim, so the shim is the one integration point with containerd. ([GitHub][3])
+* **vsock bridge**: the Unix socket that `vesper-vmlauncher` serves on macOS. A client names a System VM vsock port and the bridge connects it.
+* **Share**: a macOS directory that the System VM mounts over virtio-fs so that containers can bind-mount it.
+* **Baseline**: the upstream revisions pinned in [design-v0.baselines.lock.yaml](design-v0.baselines.lock.yaml).
+* **Parity**: the same observable behaviour as Firecracker at the baseline. [What parity covers](#what-parity-covers) lists the four parts.
+* **Parity GA**: Backend A passes the stage gates with zero open compat exceptions.
+* **Cross-hardware GA**: Backend B reaches the same bar on all supported Apple Silicon.
 
-1. **Parity Backend (Vesper‑KVMHost)** — runs *stock Firecracker on Linux* inside a lightweight Linux “system VM” started by Virtualization.framework, with **nested virtualization** enabled (M3+). This delivers feature parity immediately because it is literally Firecracker on Linux. Nested virt availability is exposed by Apple’s API and is available on **M3 and later**. ([Apple Developer][5])
-2. **Native Backend (Vesper‑HVF)** — ports Firecracker’s VMM core to macOS using Apple’s virtualization stack (Hypervisor.framework / Virtualization.framework). This removes reliance on nested virtualization over time, but must still match Firecracker’s API and behavior.
+## Goals and non-goals
 
-Vesper uses the **Parity Backend as the gold reference** and as a continuous “truth oracle” for conformance testing, while the Native Backend closes gaps until it reaches full parity.
+Goals:
 
-`vesperd` is the single external control-plane owner (Firecracker-compatible API and lifecycle state machine). Backends are execution engines behind `vesperd`:
-* Backend A delegates execution to stock Firecracker running inside the Linux System VM.
-* Backend B executes directly on macOS with Apple virtualization APIs.
+* Reach parity with Firecracker on Linux in API, behaviour and tooling. Backend A on M3 and later is the first target (parity GA); Backend B follows on all supported Apple Silicon (cross-hardware GA).
+* Provide a containerd runtime (the shim) so that Docker containers can run in microVMs.
+* Support the Docker workflows a macOS developer uses: volumes, networking, port publishing and builds. [Phase 4](#phase-4-docker-desktop-experience-on-macos) lists them.
+* Run `linux/arm64` images natively and `linux/amd64` images through a documented emulation mode.
+* Measure parity against the pinned baseline, not against moving upstream heads.
 
-### Normative baselines (pinned)
+Non-goals:
 
-All parity claims in this document are evaluated against immutable upstream revisions captured in:
-`docs/specs/design-v0.baselines.lock.yaml`
+* Intel Macs. Every requirement names Apple Silicon and the pinned System VM image is aarch64.
+* A general virtual machine manager. Vesper runs Firecracker microVMs and the one System VM that hosts them.
+* Changes or extensions to the Firecracker API. `vesperd` accepts the pinned API and nothing else.
 
-Rules:
-* Any baseline change requires a PR that updates the lock file and reruns parity/regression suites.
+## Implementation status (as of 2026-11-11, commit 9c5a865)
+
+This section records how far the code is from this design. The requirements in the later sections still stand.
+
+Every status label in this document is a snapshot at `9c5a865`. The [parity matrix](firecracker-feature-parity.md) and the [milestone log](../progress/symphony-milestones.md) hold the running status; the labels are refreshed when the design is next revised.
+
+### Labels
+
+The document uses these labels and no others. A label is followed by its pointer in parentheses.
+
+* **Meets the requirement**: the code does what the text requires. A scope in plain words may follow, for example “on the Docker path”.
+* **Accepted deviation**: the code differs, and the ADR or decision in the pointer accepts the difference.
+* **Not met**: the requirement stands and the code falls short. The pointer is a TD row in the [tech-debt tracker](../exec-plans/tech-debt-tracker.md), a CE entry in [compat-exceptions.yaml](compat-exceptions.yaml) or an open GitHub issue.
+* **Not yet measured**: the requirement is a number and no measurement of it exists.
+* **Deferred**: the item is not planned before step 2 of [Next work](#next-work) is done, or before the event in the pointer.
+* **Provisional**: the text is a decision or a threshold that waits for an ADR, for the owner’s confirmation or for evidence, named in the pointer. It can still change.
+
+An item with no label has not been assessed on its own; the status of its phase in the table below applies. Decisions (D-nnn) are in the [decision log](../design-docs/decision-log.md). `WOR-nn` is an issue identifier in the Linear tracker; the milestone log has an entry for each.
+
+### Phase status
+
+All runtime evidence comes from one developer machine (Apple M3 Pro). No CI job can boot the System VM (TD-005).
+
+| Phase | Exit criterion status | Proven, and by what | Missing | Tracker |
+| --- | --- | --- | --- | --- |
+| [0: Repository, packaging and API contract](#phase-0-repository-packaging-and-api-contract) | Coverage and errors: [Meets the requirement](#phase-0-exit-criterion). Socket stability: Not met (TD-052). | All 37 pinned routes have handlers with deterministic, baseline-stamped errors: `cargo test` (245 tests on 2026-11-11, of which `tests/api_contract.rs` holds 115), `make contract-check`, `make surface-matrix-check` and `make behavior-matrix-check`, all in CI. The behavior matrix pins 157 cases across the 37 operations. `vesper-proxy` forwards to unix, tcp and vsock upstreams. CI enforces the baseline lock and the compat registry. | Deliverables: logging and metrics (TD-007); packaging (TD-046). Behaviour-level proof is thinner than route coverage (TD-003). | GH #59 |
+| [1: System VM bring-up](#phase-1-system-vm-bring-up) | [Meets the requirement](#phase-1-exit-criterion), with TD-027 outstanding against the deliverable on private sockets. | 200 of 200 probed boots under the 5 s threshold (`make systemvm-boot-smoke`; milestone log, WOR-27). `make systemvm-control-suite`, `make systemvm-services-suite`, `make docker-smoke` and `make systemvm-reliability` (default 50 boots plus those suites; WOR-21). `docker version` and a trivial container work from macOS. | The System VM has no persistent disk (TD-025). The vsock bridge reaches every System VM vsock port (TD-027). No packaged service (TD-046). | GH #54 (closed) |
+| [2: Backend A runs stock Firecracker microVMs](#phase-2-backend-a-runs-stock-firecracker-microvms) | [Not met](#phase-2-exit-criterion) (TD-045, CE-0001) | Nested-virtualisation gating (`systemvmctl backend-select`). Jailed stock Firecracker v1.16.0 microVMs: `make systemvm-microvm-suite`, `make systemvm-rootfs-suite`, `make systemvm-workload-suite`. `make systemvm-parity-baseline`: 19 API conformance checks and two performance runs, committed as [backend-a-parity-baseline.json](backend-a-parity-baseline.json). | `vesperd` has no backend flow, and snapshot create and load are stubs (TD-045). The upstream Firecracker suite is not run (CE-0001). The System VM runs Firecracker release v1.16.0, not the pinned commit (CE-0002). No Linux baseline exists (CE-0003). MicroVMs have no network device (TD-032). | GH #156 |
+| [3: containerd shim v2](#phase-3-containerd-shim-v2) | [Not met](#phase-3-exit-criterion) (GH #53) | For `ctr`: `make ctr-conformance`, 74 of 74 steps in four suites (shim 22, bundle 15, restart 18, exec 19), committed as [ctr-conformance-baseline.json](ctr-conformance-baseline.json) (generated 2026-11-09 at `74e6544`). `go test` runs in `shim-tests.yml`. | dockerd does not use the runtime (GH #53). `Pause`, `Resume`, `Checkpoint` and `Update` (TD-042). Root drives are copied per task and never pruned (TD-035). | GH #103 |
+| [4: Docker Desktop experience on macOS](#phase-4-docker-desktop-experience-on-macos) | [Not met](#phase-4-exit-criterion) (GH #53, TD-005) | For the Docker path, from macOS through `vesper-proxy`: `make docker-conformance` (22 steps), `make ports-suite` (11), `make binds-suite` (20), `make dns-suite` (12), `make workflow-suite` (8) and `make crossarch-suite` (9). Step counts are from [TESTING.md](../TESTING.md) and the milestone log. Host-edit events were delivered by GH #150; the residuals are in TD-038. | The containers are not microVMs (GH #53). No path carries a share into a microVM (TD-049). No pass in CI (TD-005). UDP and non-loopback ports (TD-037). `host.docker.internal` (TD-039). | GH #53 |
+| [5: Backend B](#phase-5-backend-b) | [Not met](#phase-5-exit-criterion) (GH #56) | Nothing. `src/platform.rs` selects Backend B only to report that it is not implemented. | All of it. Sub-issues GH #82, #83, #84, #86, #87 and #91 are open. | GH #56 |
+
+### Next work
+
+The order is decision D-008, as amended by D-015 and D-017. Two time-boxed items run before or beside step 1, because each holds an unknown as large as a step. Steps 1 and 2 share no code: the shim does not call `vesperd`. Step 1 comes first as a priority, because the runtime goal leads (D-011). Step 1 closes only the `vesperd` half of the Phase 2 gate; the parity reference closes the other half. Step 3 depends on both.
+
+| Step | Why now | Tracker | Gaps to close first | Done when | Needs the owner’s confirmation |
+| --- | --- | --- | --- | --- | --- |
+| Prototype: a share path into a microVM (time-boxed; the ExecPlan that starts it sets the length) | No design exists for it. Learning that it cannot work after step 1 is the expensive order. | TD-049 | The candidates and their prerequisites are in TD-049: a block image; an NFS export over the microVM network, which needs a network device (TD-032); a vsock file service. A network file system may need kernel support that the System VM kernel lacks (TD-033). 9p is excluded. | The prototype is measured against `make binds-suite` and one of three outcomes is recorded. Full: a share path reaches the bind-mount behaviour of the Docker path, and step 2 stands as written. Partial: a named deviation, for example a microVM by default and runc for containers that mount a share; step 2 proceeds with that deviation recorded. Fallback (D-015): a microVM per container becomes opt-in and runc stays the default; step 2 becomes the work to offer the runtime as that option. | The fallback, and any partial outcome that changes a hard requirement. |
+| Parity reference (time-boxed, D-017) | It is the other half of the Phase 2 gate, and no later step produces it before step 3 needs it. | CE-0002, CE-0003, CE-0001 | None. | The binary and the lock name one Firecracker revision (CE-0002). A Linux baseline is captured on any aarch64 KVM host at the pinned revision (CE-0003). The upstream suite has been tried in the System VM and the result is recorded (CE-0001). | Nothing; a change of the pinned revision follows [baseline-governance.md](../process/baseline-governance.md). |
+| 1. Connect `vesperd` to Backend A | It is the unmet Phase 2 deliverable. Until it exists the public API never drives a real microVM, and goal 1 is unproven. | GH #156, TD-045 | An ADR that settles the open questions of the [backend ownership contract](#backend-ownership-contract) (D-013, D-017). A restriction on what the vsock bridge reaches, because this step puts a relay to Firecracker behind the bridge (TD-027, D-018). An owner-only default socket for `vesperd` (TD-050). Where snapshots persist (TD-025). | A Firecracker API client creates, starts, pauses, resumes, snapshots and stops a jailed microVM in the System VM through `vesperd`, and a suite records it. | Any new listener, on macOS or in the System VM (D-013). |
+| 2. Run Docker containers in microVMs | It is the unmet Phase 3 exit criterion for dockerd. Without it the Phase 4 suites prove the Docker path, not this design. | GH #53 | The outcome of the prototype (TD-049). A network device for each microVM (TD-032). No full root-drive copy per task (TD-035). Persistent System VM storage (TD-025). | `docker run` from macOS starts a microVM, and the Phase 4 suites pass against microVM containers, within the outcome the prototype recorded. | Nothing further, unless the prototype ends in the fallback or in a partial outcome. |
+| 3. Phase 5: Backend B | It removes the dependency on nested virtualisation. | GH #56 | Step 1. The parity reference and the differential harness (GH #87). A design for the boundary between the shim and Backend B (D-017). | The [Phase 5 exit criterion](#phase-5-exit-criterion). | Not known yet. |
+
+## Normative baselines
+
+All parity claims in this document are evaluated against the immutable upstream revisions in [design-v0.baselines.lock.yaml](design-v0.baselines.lock.yaml).
+
+* Any baseline change requires a pull request that updates the lock file and reruns the parity and regression suites.
 * Results are reported with the exact baseline revision IDs used in that run.
 * Without a populated lock file, parity claims are provisional and cannot be used for GA sign-off.
-
----
+* Normative documents pin upstream references to tags or commit SHAs, not to a moving `main`.
+* The Apple WWDC citations are explanatory. Pinned references, tests and parity harness outputs decide normative behaviour.
 
 ## Requirements
 
-### Hard requirements (must ship)
+* Firecracker API parity: Vesper must accept the same OpenAPI requests, with the same ordering and state-machine rules, and return the same response codes and messages where the baseline specifies them. **Not met** (TD-003, TD-045): the routes answer from memory, and behaviour-level proof is incomplete.
+* Parity scope by backend:
 
-* **Firecracker API parity**: Vesper must accept the same OpenAPI/REST requests (including ordering and state machine semantics) and return the same response codes/messages where specified.
-* **Parity scope by backend/hardware**:
+  * Backend A on M3 and later must meet full parity with no waived tests at parity GA. The pass set for the upstream suite is defined in [Parity harness](#parity-harness). **Not met** (CE-0001).
+  * Backend B may ship with declared gaps, but cannot reach cross-hardware GA until it passes the same full suite. **Not met** (GH #56).
+  * Compat exceptions are allowed only before parity GA and must name an owner, a linked issue, an expiry date and a target release.
+* Device and feature parity:
 
-  * Backend A on M3+ must meet full parity with no waived tests at parity GA.
-  * Backend B on M1/M2/M3+ may launch with declared gaps, but cannot be marked parity-GA until it passes the same full suite.
-  * Compatibility exceptions are allowed only pre-parity-GA and must include owner, linked issue, expiry date, and target release.
-* **Device & feature parity**:
+  * virtio‑blk (multiple drives, read-only flags, rate limiters), virtio‑net (MAC address configuration, RX and TX rate limiters), virtio‑vsock (CID mapping, connection behaviour), balloon (target size, statistics), entropy, serial console, MMDS (API and access from the microVM), rate limiters, metrics and logging pipes (including back-pressure behaviour), snapshot create and load (full and diff), pause and resume, and CPU templates where the architecture has them. **Not met** (TD-045): Vesper exercises none of these through its API.
+  * The same behaviour under load and in failure modes: I/O errors, invalid configuration, state transitions. **Not met** (TD-052): the criterion has no measurable form yet.
+* containerd compatibility: implement a containerd shim v2 runtime that runs OCI workloads as microVMs. **Meets the requirement** on the microVM path (`make ctr-conformance`).
+* Docker replacement on macOS:
 
-  * virtio‑blk (multiple drives), virtio‑net, virtio‑vsock, balloon, entropy, serial/console, MMDS, rate limiters, metrics/logging pipes, snapshot create/load (full + diff), pause/resume, CPU templates (when applicable by arch).
-  * Equivalent behavior under load and failure modes (I/O errors, invalid config, state transitions).
-* **containerd compatibility**:
+  * Serve the Docker Engine API on an endpoint that the Docker CLI can use unchanged.
+  * Run each Docker container in its own microVM. **Not met** (GH #53): Docker containers run on runc in the System VM. D-015 names a fallback that would change this requirement; see [Next work](#next-work).
+  * Handle port publishing, volumes and bind mounts, image pulls, logs, exec and signals.
+  * Support `docker run --platform linux/amd64` on Apple Silicon through `binfmt_misc` and `qemu-user` inside the System VM. **Meets the requirement** on the Docker path (`make crossarch-suite`).
+  * Optional acceleration with Rosetta for Linux, where supported and explicitly enabled. **Deferred** (until step 2 of [Next work](#next-work) is done).
+* No kernel extensions. Use Apple frameworks and user-space isolation (App Sandbox or a seatbelt profile). **Not met** (TD-046): only two of the three entitlement plists carry the App Sandbox key and no seatbelt profile exists.
+* All artefacts are reproducible in CI:
 
-  * Implement a **containerd shim v2 runtime** to run OCI workloads as microVMs. containerd uses shims as the integration point and does not directly launch containers. ([GitHub][3])
-* **Docker replacement story on macOS**:
+  * The System VM image, the overlay and the shim binary. **Meets the requirement** (`systemvm-image.yml`, `shim-tests.yml`).
+  * The runtime captures and suite reports. **Not met** (TD-005): they are produced on developer hardware only.
 
-  * Provide a Docker‑like workflow (docker CLI compatibility via a compatible endpoint or via nerdctl).
-  * Handle port publishing, volumes/binds, image pulls, logs, exec, signals.
-  * Support `docker run --platform linux/amd64` on Apple Silicon via a deterministic execution path:
-    * required baseline: `binfmt_misc + qemu-user` inside the System VM
-    * optional acceleration: Rosetta-for-Linux where supported and explicitly enabled
-* **No kernel extensions**; use Apple frameworks + user‑space isolation (App Sandbox / seatbelt).
+### What parity covers
 
-### Platform constraints to account for
+Vesper must match four parts of Firecracker’s observable contract:
 
-* **Nested virtualization** is only available on M3+ Macs (and later). ([Apple Developer][5])
-* **Virtualization.framework save/restore state** is hardware‑encrypted and **cannot be restored by other users or on another Mac**, limiting portability/migration if you rely on it. ([Apple Developer][4])
-* **Bridged networking** via Virtualization.framework can require the restricted entitlement `com.apple.vm.networking`. ([Apple Developer][6])
-* **M1/M2 support** cannot rely on nested KVM backend; it uses the Native backend until parity is reached.
+1. The OpenAPI control plane (HTTP over a Unix socket): every path and method in the pinned `firecracker.yaml`.
+2. The state machine: which endpoints are pre-boot only and which are mutable at run time, and the error returned for a call at the wrong time.
+3. Behaviour visible inside the microVM: device IDs, virtio feature bits, MMDS semantics, vsock behaviour, rate limiting and reboot handling.
+4. Tooling: Firecracker’s integration tests and snapshot tooling run against Vesper without changes to the tools.
 
-(Background references from your Apple research notes are incorporated as guidance and constraints.)
+The Firecracker design document fixes the model that Vesper must reproduce: one Firecracker process per microVM with API, VMM and vCPU threads; virtio‑net, virtio‑blk, virtio‑vsock and a serial console; storage backed by files; networking backed by TAP; rate limiting in the I/O thread; snapshots of memory and device state. ([GitHub][1], [GitHub][7])
 
----
+## Risks and limits
 
-## High‑level architecture
+| Risk or limit | Effect | Mitigation |
+| --- | --- | --- |
+| Nested virtualisation exists only on M3 and later Macs. ([Apple Developer][5]) | Backend A cannot run on M1 or M2. | Backend B (GH #56). |
+| Virtualization.framework save and restore state is hardware-encrypted and cannot be restored by another user or on another Mac. ([Apple Developer][4]) | It cannot carry Firecracker snapshots, which must load in a different process. | Backend B implements Firecracker’s snapshot format itself ([Snapshot strategy](#snapshot-strategy)). |
+| Bridged networking can require the restricted entitlement `com.apple.vm.networking`. ([Apple Developer][6]) | LAN-visible microVMs are not available by default. | NAT is the default ([Networking strategy](#networking-strategy)). |
+| The cost of nested virtualisation against Firecracker on a Linux host is unknown. | The performance thresholds may not be reachable on Backend A. | Capture a Linux baseline (CE-0003). The two relative [thresholds](#performance-thresholds) stand only if a baseline on the same host class can be obtained. |
+| One developer machine is the only source of runtime evidence. | A regression in the System VM path is found only when someone runs the suites locally. | A self-hosted Apple Silicon runner, or scheduled local runs that upload the reports (TD-005). |
+| Phase 5 is a port of a hypervisor back end and is larger than Phases 0 to 4 together. | Cross-hardware GA may be far from parity GA. | Phase 5 starts after steps 1 and 2 of [Next work](#next-work); Backend A remains the supported path on M3 and later. |
+| Step 2 has no design for a share into a microVM. | A microVM per Docker container may not be reachable with bind mounts intact. | The time-boxed prototype and its three outcomes in [Next work](#next-work) (TD-049). |
+
+## High-level architecture
 
 ### Component diagram
 
-![Vesper Component Diagram (2K PNG)](assets/design-v0-component-diagram.png)
+![Vesper component diagram](assets/design-v0-component-diagram.png)
 
-**Why a System VM exists:** Vesper’s runtime path relies on Linux-native container runtime components (containerd + shim + guest agent), with shim v2 as the integration contract. ([GitHub][3])
-So Vesper uses a minimal Linux System VM to host containerd/dockerd and integrates via shim v2.
+The diagram shows the component flow as built at `9c5a865`. Solid arrows exist in code; dashed arrows are the target and are not built. The target adds a `vesperd` connection to Backend A, Docker containers on the Vesper runtime instead of runc, a network device for each microVM, and Backend B.
 
-**Backend ownership contract**
-* `vesperd` is the only external API endpoint and authoritative lifecycle/state-machine implementation.
-* In Backend A, `vesperd` translates/forwards backend calls to stock Firecracker inside the System VM; microVM execution and dataplane live inside the System VM.
-* In Backend B, `vesperd` executes microVMs directly on macOS.
-* Conformance is always measured against Backend A as the baseline oracle.
-* No direct external access to raw containerd or Firecracker sockets is supported in GA mode.
+A System VM exists because containerd, dockerd and Firecracker need Linux, and Firecracker needs KVM.
 
-### Runtime lifecycle sequence (container create/start)
+### Components
 
-![Vesper Runtime Lifecycle Sequence (2K PNG)](assets/design-v0-runtime-lifecycle.png)
+The table lists the components as built at `9c5a865`.
 
----
+| Component | Runs in | Role | Record |
+| --- | --- | --- | --- |
+| `vesperd` | macOS | Serves the Firecracker-compatible API. | [ARCHITECTURE.md](../../ARCHITECTURE.md#components) |
+| `vesper-proxy` | macOS | Serves the Docker socket and publishes container TCP ports on loopback. It reaches the System VM only through the vsock bridge. | [ADR 0003](../design-docs/adr/0003-systemvm-control-channel.md), [ADR 0005](../design-docs/adr/0005-published-ports-via-vsock-gateway.md) |
+| `vesper-vmlauncher` | macOS | A separate, signed Swift helper. It boots the System VM on Virtualization.framework, serves the vsock bridge, attaches the shares and runs the share watcher. | [ADR 0001](../design-docs/adr/0001-systemvm-launcher-swift-helper.md), [launcher/README.md](../../launcher/README.md) |
+| `systemvmctl` | macOS | Verifies the image and package locks, writes the launch configuration, selects the backend, and is the control client that runs the System VM suites. | [src/bin/README.md](../../src/bin/README.md) |
+| `baselinectl`, `compatexctl`, `contractgen` | macOS, CI | Governance: parity metadata and generated matrices, compat registry checks, golden route list. | [baseline-governance.md](../process/baseline-governance.md) |
+| System VM | Virtualization.framework | The pinned Alpine `virt` ISO plus an initramfs overlay that installs the pinned packages on each boot. It runs containerd and dockerd. | [ADR 0002](../design-docs/adr/0002-systemvm-overlay-via-initramfs.md), [systemvm-bringup.md](../process/systemvm-bringup.md) |
+| `vesper-agent` | System VM | The System VM control agent, a line protocol on System VM vsock port 1024. It is not an agent inside a microVM. | [ADR 0003](../design-docs/adr/0003-systemvm-control-channel.md) |
+| System VM vsock listeners | System VM | 1024 (`vesper-agent`), 2375 (relay to the Docker socket), 2400 (`vesper-port-relay`, the System VM gateway for published ports), 2401 (`vesper-share notify`, the share notification sink). | [SECURITY.md](../SECURITY.md#trust-boundaries) |
+| Shim (`containerd-shim-vesper-v2`) | System VM | The Go runtime v2 shim. It runs each task as one jailed Firecracker microVM through its backend interface. | [ADR 0004](../design-docs/adr/0004-containerd-shim-in-go.md), [shim/README.md](../../shim/README.md) |
+| `vesper-microvm` | System VM | A shell script that launches, stops and cleans up one jailed Firecracker microVM. The shim calls it, and so do the `MICROVM` and `WORKLOAD` commands of the agent. | [shim/README.md](../../shim/README.md), [systemvm-bringup.md](../process/systemvm-bringup.md#backend-a-firecracker-microvms-inside-the-system-vm-gh-18) |
+| MicroVM init and sessions | microVM | runc inside the microVM runs init and exec, driven by the shim over private vsock sessions. | [ADR 0006](../design-docs/adr/0006-guest-exec-via-runc-delegation.md) |
 
-## Feature parity: what “100% parity” means in practice
+### Backend ownership contract
 
-Vesper must match Firecracker’s **observable contract**:
+This is the target design. **Provisional** (D-013 as amended by D-017; an ADR under GH #156 confirms or replaces it).
 
-1. **OpenAPI control plane** (HTTP over Unix socket): endpoints like `/machine-config`, `/boot-source`, `/drives`, `/network-interfaces`, `/vsock`, `/mmds`, `/balloon`, `/snapshot/*`, `/actions`, `/logger`, `/metrics`, etc.
-2. **State machine**: “pre‑boot only” vs “runtime mutable” endpoints; error codes when called at wrong time.
-3. **Guest‑visible behavior**: device IDs, virtio feature bits (where relevant), MMDS semantics, vsock behavior, rate limiting, reboot handling.
-4. **Tooling compatibility**: Firecracker’s integration tests and snapshot tooling should work without special‑casing.
+* `vesperd` is the only public control-plane endpoint, and raw backend sockets are never public ([AGENTS.md](../../AGENTS.md), invariant 1). It is authoritative for the microVMs created through it.
+* For Backend A, `vesperd` drives stock Firecracker inside the System VM. MicroVM execution and data plane stay inside the System VM. **Not met** (TD-045, GH #156): `vesperd` answers every route from memory.
+* The current seam between the shim and a backend is the `backend.Backend` interface in `shim/internal/backend`. It is shaped by Backend A and is not a stable boundary. For Backend A the shim implements it by calling `vesper-microvm` in the System VM, with no call to `vesperd`. The shim owns the microVMs it creates.
+* For Backend B, `vesperd` executes microVMs on macOS. How a containerd task in the System VM reaches a microVM on macOS is not designed (D-017).
 
-Firecracker’s design doc is explicit about:
+The path from `vesperd` to Firecracker is not designed. The vsock bridge reaches System VM vsock ports only; the Firecracker API is a Unix socket inside each jail; the paths in API requests are macOS paths; and `vesper-microvm` boots a microVM from a configuration file, not through the API. The ADR must settle these questions before any code:
 
-* One Firecracker process per microVM, threads: API, VMM, and vCPU(s). ([GitHub][1])
-* Devices: virtio‑net, virtio‑blk, virtio‑vsock, serial console, keyboard controller for reset, plus KVM‑provided PIC/IOAPIC/PIT (x86). ([GitHub][1])
-* Storage backed by files; networking backed by TAP; rate limiting in the I/O thread. ([GitHub][1])
-* Snapshots: Firecracker has snapshot support and associated semantics (see below). ([GitHub][8])
+1. Whether `vesperd` is a pass-through relay to one jailed Firecracker per socket, with its own state machine serving Backend B only, or a stateful front end for both backends (D-017). Questions 4, 5 and 7 arise only for a stateful front end.
+2. Where the paths in Firecracker API requests live (macOS or the System VM) and how files move between them.
+3. The relay and the launch mode that give `vesperd` an unconfigured Firecracker process.
+4. One `vesperd` per microVM, as Firecracker has one process per microVM, or one `vesperd` that multiplexes.
+5. How `vesperd` reconciles its state with running microVMs after a restart.
+6. Where snapshots persist (TD-025).
+7. How `vesperd` and the shim, two owners of one backend, stay apart. Partition comes first: disjoint microVM id prefixes and jailer uids, where every microVM has one uid today. A shared inventory, resource budget and orphan clean-up follow only if partition is not enough.
+8. Whether `vesperd` should run inside the System VM instead. That conflicts with Backend B, where `vesperd` must run on macOS ([Alternatives considered](#alternatives-considered)).
 
----
+Any new listener needs the owner’s confirmation.
 
-## Backends: how we guarantee parity
+### Runtime lifecycle sequence
 
-### Backend A: Vesper‑KVMHost (Parity backend)
+![Vesper runtime lifecycle sequence](assets/design-v0-runtime-lifecycle.png)
 
-**What it is:**
-A Linux System VM (started with Virtualization.framework) runs containerd and stock Firecracker. MicroVMs run **inside** that System VM using KVM, requiring nested virtualization. Nested virtualization is available on M3+ Macs and later. ([Apple Developer][5])
+The diagram shows the sequence as built at `9c5a865`. `docker run` ends in a runc container in the System VM; only a client that names the runtime `io.containerd.vesper.v2` reaches the shim and gets a microVM. The target joins the two halves, so that the task dockerd creates goes to the shim. `vesperd` is not on this path for Backend A (D-013).
 
-**Why it matters:**
+## Backends
 
-* Immediate 100% parity (because it is Firecracker on Linux).
-* Serves as the “oracle” to validate the Native backend.
-* Provides a fallback path if Apple APIs restrict something needed (e.g., exact snapshot portability semantics).
+Parity is not guaranteed by either backend. It is measured, by the chain in [Parity harness](#parity-harness).
 
-**Key design points**
+### Backend A
 
-* System VM kernel: tuned for fast boot and KVM + tap + vsock.
-* Export only the Docker-compatible socket to macOS via `vesper-proxy`; keep raw containerd sockets private to the System VM.
-* Host filesystem sharing: `virtio-fs` is the required path between macOS and System VM for bind mounts.
-* 9p is not a supported GA transport due to consistency/performance variance.
-* Firecracker microVM consumes bind-mounted data via the runtime rootfs strategy (typically block-rootfs + writable delta).
-* Networking:
+A Linux System VM runs containerd and stock Firecracker. MicroVMs run inside the System VM on KVM, which needs nested virtualisation ([Risks and limits](#risks-and-limits)).
 
-  * System VM uses NAT attachment by default (no restricted entitlement).
-  * MicroVM networking uses standard Linux TAP + CNI inside the System VM.
+Backend A runs stock Firecracker on Linux, so its parity depends on the System VM, not on a port. That holds for a client of Firecracker inside the System VM. For a client of `vesperd` it depends on step 1 of [Next work](#next-work). Backend A is also the supported path if an Apple API prevents part of Backend B.
 
-**Stage‑gate parity bar:** Vesper passes Firecracker’s upstream integration suite with no exclusions.
+* System VM kernel: tuned for boot time, with KVM, TAP and vsock. **Accepted deviation** ([ADR 0002](../design-docs/adr/0002-systemvm-overlay-via-initramfs.md)): the System VM boots the stock Alpine `virt` kernel from the pinned ISO, with an initramfs overlay, inside the 5 s boot threshold. The pins are [systemvm-image.lock.yaml](systemvm-image.lock.yaml) and [systemvm-packages.lock.yaml](systemvm-packages.lock.yaml).
+* `vesper-vmlauncher` owns the System VM and applies the nested-virtualisation policy from the image lock ([ADR 0001](../design-docs/adr/0001-systemvm-launcher-swift-helper.md), [systemvm-bringup.md](../process/systemvm-bringup.md#nested-virtualization-and-backend-selection-gh-17)).
+* Control channel: the vsock bridge carries connections from macOS to System VM vsock ports, and `vesper-agent` answers in the System VM ([ADR 0003](../design-docs/adr/0003-systemvm-control-channel.md)).
+* Only the Docker-compatible socket is exported to macOS:
 
-### Backend B: Vesper‑HVF/VF (Native backend)
+  * Published TCP ports on loopback are visible on macOS as well. **Accepted deviation** ([ADR 0005](../design-docs/adr/0005-published-ports-via-vsock-gateway.md)).
+  * The vsock bridge is visible on macOS as well and reaches every System VM vsock port. **Not met** (TD-027).
+* Shares use virtio-fs between macOS and the System VM. **Meets the requirement** (`make binds-suite`): a share is mounted in the System VM at its macOS path ([systemvm-bringup.md](../process/systemvm-bringup.md#bind-mounts-over-virtio-fs-gh-29)).
+* 9p is not a supported GA transport for shares.
+* A microVM can use bind-mounted data from a share. **Not met** (TD-049): no path carries a share into a microVM.
+* A microVM gets the vCPUs and memory its workload asks for. **Not met** (TD-048): every microVM has 1 vCPU and 256 MiB.
+* Stock Firecracker runs under the jailer in the System VM. **Meets the requirement** (`make systemvm-microvm-suite`).
+* The System VM uses a NAT attachment by default, which needs no restricted entitlement. MicroVM networking is in [Networking strategy](#networking-strategy).
 
-**What it is:**
-A macOS VMM implementation that exposes Firecracker’s API but uses Apple’s virtualization stack to execute the microVM directly on macOS.
+### Backend B
 
-**When it is used:**
+A macOS implementation that exposes the Firecracker API and executes the microVM on macOS with Hypervisor.framework or Virtualization.framework. **Not met** (GH #56): no code exists.
 
-* When nested virt is unavailable (M1/M2).
-* When performance/latency is better with direct host microVMs.
-* When you want to eliminate the “VM‑in‑VM” layering.
+It is used where nested virtualisation is unavailable (M1 and M2), and it removes the layer of a virtual machine inside a virtual machine. Whether it is also preferred on M3 and later is decided by the [performance thresholds](#performance-thresholds) once both backends can be measured.
 
-**Key technical challenge:** achieving Firecracker’s exact behavior while using different host primitives (KVM vs Apple frameworks). Apple’s “save state” facility is hardware‑encrypted and not portable across Mac/user. ([Apple Developer][4])
-Therefore, for full Firecracker snapshot parity, Vesper‑HVF must implement Firecracker’s snapshot format itself (not just call `saveMachineState`).
+The main difficulty is to reproduce Firecracker’s behaviour on different primitives: Apple frameworks in place of KVM. Snapshots are the clearest case ([Snapshot strategy](#snapshot-strategy)).
 
----
+How Docker containers run on Backend B is not designed: containerd and the shim are in the System VM and the microVM would be on macOS (D-017).
+
+## Alternatives considered
+
+| Option | Outcome and reason | Record |
+| --- | --- | --- |
+| Backend A only | Rejected. Nested virtualisation exists only on M3 and later, so M1 and M2 would have no path. | [Risks and limits](#risks-and-limits) |
+| `vesperd` inside the System VM | Open. No recorded reason; to be weighed in the ADR under GH #156. It conflicts with Backend B, where `vesperd` must run on macOS. | D-013 |
+| `vesperd` as a pass-through relay to one jailed Firecracker per socket, with its state machine serving Backend B only | Open; to be weighed in the ADR under GH #156. A relay avoids the multiplexing, restart and inventory questions of a stateful front end. | D-017 |
+| An RPC from the shim to `vesperd` for Backend A | Rejected for Backend A: every container start would make a round trip from the System VM to macOS and depend on a macOS daemon. Open for Backend B. | D-013, [ADR 0004](../design-docs/adr/0004-containerd-shim-in-go.md) |
+| Backend B on Virtualization.framework save state instead of Firecracker’s snapshot format | Rejected. The saved state is hardware-encrypted and cannot be restored by another user or on another Mac. | [Risks and limits](#risks-and-limits) |
+| 9p for shares | Rejected: 9p is not a supported GA transport. The stated reason is variance in consistency and performance; no measurement is recorded. The share prototype does not re-examine it. | [Backend A](#backend-a), TD-049 |
+| A custom System VM image or kernel | Rejected for the image: a Linux-only build and a second image pipeline. A dedicated microVM kernel remains open (TD-033). | [ADR 0002](../design-docs/adr/0002-systemvm-overlay-via-initramfs.md) |
+| A microVM per container as opt-in, with runc as the default | Held as the fallback if the share prototype fails. It changes a hard requirement and needs the owner’s confirmation. | D-015 |
+| A custom agent inside the microVM instead of runc | Not chosen: runc already owns the kernel-facing work (clone, namespaces, `pivot_root`, exec, seccomp). The ADR keeps a custom agent as its fallback. Vendoring the Kata or firecracker-containerd agent was rejected as unmaintained or mismatched with containerd 2.1. | [ADR 0006](../design-docs/adr/0006-guest-exec-via-runc-delegation.md) |
+| Rust bindings to Virtualization.framework, or an external launcher (`vfkit`, `limactl`), instead of a Swift helper | Rejected. The bindings were a new dependency with unverified coverage; an external launcher would make boot evidence depend on a tool outside the repository. | [ADR 0001](../design-docs/adr/0001-systemvm-launcher-swift-helper.md) |
+| A Rust shim, or building the shim inside the System VM | Rejected. No maintained Rust implementation of containerd’s shim framework exists; a build inside the System VM is slow and not pinned by the repository. | [ADR 0004](../design-docs/adr/0004-containerd-shim-in-go.md) |
 
 ## Component mapping: Firecracker → Vesper
 
-### Mapping table (port plan)
+| Firecracker component | Linux (KVM) behaviour | Provided by stock Firecracker (Backend A) | Backend B plan |
+| --- | --- | --- | --- |
+| `/dev/kvm`, `KVM_RUN` loop | vCPU threads run the `KVM_RUN` loop ([GitHub][1]) | Yes, on nested KVM | Port: a Hypervisor.framework vCPU run loop |
+| TAP networking | virtio‑net backed by TAP ([GitHub][1]) | Yes, with TAP and CNI in the System VM | Port: a user-space net backend with vmnet or NAT |
+| Block devices | virtio‑blk backed by files ([GitHub][1]) | Yes | ext4 disk images attached as virtio‑blk |
+| MMDS | metadata service exposed to the microVM ([GitHub][1]) | Yes | Port: an HTTP handler on macOS and routing from the microVM |
+| Rate limiter | token bucket in the I/O path ([GitHub][1]) | Yes | Reuse Firecracker’s algorithm at the device back end |
+| Logger and metrics | named pipes configured through the API ([GitHub][1]) | Yes | Map to macOS FIFOs or sockets with the same semantics |
+| Snapshots | memory and device state, full and diff ([GitHub][7]) | Yes | Port: Firecracker’s snapshot format |
+| Jailer | cgroups, namespaces, chroot, seccomp ([GitHub][1]) | Yes, inside the System VM | Port: a macOS sandbox profile, a dedicated user and scoped file access |
+| CPU templates | control of CPU information exposed to the microVM ([GitHub][1]) | Yes | Port: the API and its behaviour for aarch64 |
 
-| Firecracker component / dependency | Linux (KVM) behavior                                           | Vesper mapping                                                                                         | Backend A            | Backend B |
-| ---------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ | -------------------- | --------- |
-| `/dev/kvm`, `KVM_RUN` loop         | vCPU threads run `KVM_RUN` main loop ([GitHub][1])             | **A:** nested KVM inside System VM; **B:** HVF vCPU run loop                                           | ✅ native             | 🔧 port   |
-| TAP networking                     | virtio‑net backed by TAP ([GitHub][1])                         | **A:** TAP + CNI inside System VM; **B:** user‑space net backend + vmnet/NAT                           | ✅                    | 🔧        |
-| Block devices                      | virtio‑blk backed by files ([GitHub][1])                       | ext4 disk images stored on APFS; attach as virtio‑blk                                                  | ✅                    | ✅         |
-| MMDS                               | metadata service exposed to guest ([GitHub][1])                | replicate: host HTTP handler + guest routing (netfilter or virtio‑net interception)                    | ✅                    | 🔧        |
-| Rate limiter                       | token bucket limiter in I/O path ([GitHub][1])                 | reuse Firecracker algo; enforce at device backend                                                      | ✅                    | ✅         |
-| Logger + metrics                   | named pipes configured via API ([GitHub][1])                   | map to macOS FIFOs or sockets; preserve semantics                                                      | ✅                    | ✅         |
-| Snapshots                          | save memory + device state; full/diff, semantics ([GitHub][8]) | implement Firecracker snapshot format; do not rely solely on VF encrypted state ([Apple Developer][4]) | ✅                    | 🔧        |
-| Jailer                             | cgroups/namespaces/chroot/seccomp ([GitHub][1])                | macOS sandbox profile + seatbelt + dedicated user + file access scoping                                | ✅ (inside System VM) | 🔧        |
-| CPU templates                      | control CPU info exposure ([GitHub][1])                        | implement API + behavior per arch; may require HVF CPUID/MSR control on Intel                          | ✅                    | 🔧        |
+The Backend A column records what stock Firecracker provides inside the System VM, not what Vesper exercises: at `9c5a865` Vesper configures only a boot source, one root drive, the machine configuration and a vsock device.
 
-Legend: ✅ mostly “works as-is” | 🔧 needs port/build
+## Phases
 
----
+Each phase has deliverables, verification and an exit criterion. A phase must pass its exit criterion before the next begins. Time-boxed prototypes are exempt from this rule.
 
-## Phases to implement Vesper (with stage‑gated verification)
+The gate was not followed for Phases 3 and 4: they were built while the Phase 2 exit criterion was unmet. [Next work](#next-work) restores the order. The status of each exit criterion is in [Phase status](#phase-status).
 
-Below are phases that lead to a production‑ready tool. Each phase includes:
+### Phase 0: Repository, packaging and API contract
 
-* **Deliverables**
-* **Verification/Evals**
-* **Exit criteria** (must pass before proceeding)
+#### Phase 0 deliverables
 
-### Phase 0 — Repo, packaging, and API contract scaffolding
+* The `vesperd` daemon, which exposes the Firecracker OpenAPI surface and has versioning, logging and metrics ([Auditing](#security-model)).
+* `vesper-proxy`, which forwards a Unix socket on macOS to a vsock port in the System VM.
+* A macOS application or service with the virtualisation entitlement `com.apple.security.virtualization`. **Not met** (TD-046): the entitlement plists exist; no application bundle, installer or launchd service does.
+* Golden API contract tests built from the pinned `firecracker.yaml`.
+* The governance artefacts and tools that the parity rules depend on: the golden route list, the generated surface stub and behavior matrices, the capture registries, the compat registry and the committed captures. [index.md](index.md) lists each file; [baseline-governance.md](../process/baseline-governance.md) and [compat-exceptions.md](../process/compat-exceptions.md) give the rules.
 
-**Deliverables**
+#### Phase 0 verification
 
-* `vesperd` daemon skeleton
+* Every path and method in the Firecracker specification exists.
+* For implemented, unimplemented and state-invalid cases, the status code and error payload match the pinned Firecracker behaviour, not a fixed 4xx envelope.
+* State-machine unit tests: for example, `PUT /actions` with `InstanceStart` before `PUT /boot-source` fails as Firecracker does.
 
-  * exposes Firecracker OpenAPI surface (no‑op handlers initially)
-  * versioning, logging, metrics plumbing
-* `vesper-proxy` socket forwarder (unix socket on macOS ↔ vsock in System VM)
-* Build system:
+#### Phase 0 exit criterion
 
-  * macOS app/service with required virtualization entitlements (at minimum `com.apple.security.virtualization`; bridged networking is optional due to restricted entitlement). ([Apple Developer][6])
-* Golden API contract tests built from Firecracker’s `firecracker.yaml`
+* Every pinned endpoint is covered and errors are deterministic. **Meets the requirement** (`make contract-test`).
+* The API socket is stable. **Not met** (TD-052): the criterion has no measurable form yet.
 
-**Verification/Evals**
+### Phase 1: System VM bring-up
 
-* OpenAPI schema conformance test:
+#### Phase 1 deliverables
 
-  * Ensure every path+method in Firecracker spec exists.
-  * For implemented/unimplemented/state-invalid cases, validate status code + error payload against the pinned Firecracker baseline behavior (not a hardcoded 4xx envelope).
-* “API state machine” unit tests:
+* Build and boot a minimal Linux System VM on macOS with Virtualization.framework, on NAT by default ([ADR 0001](../design-docs/adr/0001-systemvm-launcher-swift-helper.md), [ADR 0002](../design-docs/adr/0002-systemvm-overlay-via-initramfs.md)).
+* A vsock channel between macOS and the System VM ([ADR 0003](../design-docs/adr/0003-systemvm-control-channel.md)).
+* containerd and dockerd installed and running in the System VM.
+* The Docker socket is served on macOS only by `vesper-proxy`, at `/var/run/vesper/docker.sock` in a packaged install. **Not met** (TD-046): no packaged install exists; the development loop serves an owner-only socket under `run/` ([systemvm-bringup.md](../process/systemvm-bringup.md#docker-ingress-gh-15)).
+* Raw containerd and Firecracker sockets stay private to the System VM.
 
-  * e.g., calling `/actions InstanceStart` before `/boot-source` should fail exactly as Firecracker does.
+#### Phase 1 verification
 
-**Exit criteria**
+* The System VM boots 200 times in a row with zero kernel panics and zero unrecoverable launcher failures.
+* `docker version` works from macOS against the forwarded socket.
 
-* 100% endpoint coverage, deterministic errors, API socket stable.
+#### Phase 1 exit criterion
 
----
+A macOS user can start and stop Vesper and run a trivial container, even if the container runs as a process in the System VM.
 
-### Phase 1 — System VM bring‑up (required for Docker replacement + parity baseline)
+### Phase 2: Backend A runs stock Firecracker microVMs
 
-**Deliverables**
+#### Phase 2 deliverables
 
-* Build and boot a minimal Linux System VM on macOS using Virtualization.framework (NAT networking by default).
-* vsock channel between macOS ↔ System VM.
-* Install + run `containerd` and optionally `dockerd` in System VM.
-* Expose runtime access on macOS only through `vesper-proxy` (`/var/run/vesper/docker.sock` by default).
-* Keep raw containerd and Firecracker sockets private to the System VM.
+* Nested virtualisation enabled on machines that support it.
+* `firecracker` and `jailer` running inside the System VM.
+* A backend flow from `vesperd` to the Firecracker API for the lifecycle primitives `CreateVM`, `StartVM`, `PauseVM`, `ResumeVM`, `StopVM` and `DeleteVM` ([Backend ownership contract](#backend-ownership-contract)).
+* A rootfs flow in the style of firecracker-containerd: OCI image → ext4 root drive → microVM boot → runc inside the microVM runs the container. **Meets the requirement** ([ADR 0006](../design-docs/adr/0006-guest-exec-via-runc-delegation.md), `make systemvm-rootfs-suite`).
 
-**Verification/Evals**
+#### Phase 2 verification
 
-* Boot time and stability smoke tests:
+* The upstream Firecracker integration suite runs against Firecracker inside the System VM, with the pass set defined in [Parity harness](#parity-harness).
+* Snapshot tests on upstream semantics confirm a create and load cycle. ([GitHub][7]) **Not met** (CE-0001): the local checks create one full snapshot and never load one.
+* MicroVM boot time and create rate are measured against the [performance thresholds](#performance-thresholds). ([GitHub][8])
 
-  * System VM boots reliably 200 times in a row with zero kernel panics and zero unrecoverable launcher failures.
-* Socket round‑trip:
+#### Phase 2 exit criterion
 
-  * `docker version` works from macOS against forwarded socket.
-  * Or `nerdctl` talking to containerd (note: nerdctl is Docker‑compatible CLI for containerd). ([GitHub][9])
+Backend A passes the upstream integration suite as defined in [Parity harness](#parity-harness), and a workload runs through backend calls from `vesperd`, with one microVM per workload.
 
-**Exit criteria**
+### Phase 3: containerd shim v2
 
-* macOS user can start/stop the Vesper service and run a trivial container (even if it runs as a process in the System VM initially).
+#### Phase 3 deliverables
 
----
+* The shim implements `Create`, `Start`, `Kill`, `Delete`, `State`, `Wait`, `Exec`, `ResizePty` and `Stats`. **Meets the requirement** (`make ctr-conformance`).
+* `Pause`, `Resume`, `Checkpoint` and `Update`. **Not met** (TD-042): they return `ErrNotImplemented`.
+* A stable boundary between the shim and a backend, as an RPC over vsock or a Unix socket. **Accepted deviation** ([ADR 0004](../design-docs/adr/0004-containerd-shim-in-go.md)): for Backend A the shim calls `vesper-microvm` directly, through the `backend.Backend` seam. The boundary for Backend B is not designed (D-017).
+* MicroVM sessions: init and exec run through runc inside the microVM, driven by the shim over private vsock sessions ([ADR 0006](../design-docs/adr/0006-guest-exec-via-runc-delegation.md), [shim/README.md](../../shim/README.md#guest-session-protocol)).
+* Exec sessions are reclaimed when they end. **Not met** (TD-041): one task accepts a bounded number of execs.
+* OCI bundle unpacking and a block root drive (ext4). **Meets the requirement** (`make systemvm-bundle-suite`). The storage model is in [Rootfs strategy](#rootfs-strategy).
 
-### Phase 2 — Backend A (KVMHost): run stock Firecracker microVMs (fastest path to 100% parity)
+#### Phase 3 verification
 
-**Deliverables**
+* containerd conformance through `ctr`: `ctr run`, `ctr tasks exec`, `ctr tasks kill`, `ctr tasks metrics`.
+* The shim stays the parent of its task and survives a containerd restart; attach works after containerd reconnects.
 
-* Enable nested virtualization on supported machines (M3+). ([Apple Developer][5])
-* Run `firecracker` + `jailer` inside System VM.
-* Integrate a direct backend flow (`vesperd` -> backend adapter -> Firecracker API) for lifecycle primitives:
+#### Phase 3 exit criterion
 
-  * `CreateVM`, `StartVM`, `PauseVM`, `ResumeVM`, `StopVM`, `DeleteVM`
-* Integrate `firecracker-containerd` style rootfs flow:
+containerd runs workloads on the Vesper runtime without special handling, including the containers that dockerd creates.
 
-  * OCI image → ext4 rootfs block → microVM boot → agent executes container
+### Phase 4: Docker Desktop experience on macOS
 
-**Verification/Evals**
+#### Phase 4 deliverables
 
-* Firecracker integration tests (upstream suite) run inside System VM:
+* Docker Engine API forwarding through `vesper-proxy`. **Meets the requirement** on the Docker path (`make docker-conformance`). The path is `vesper-proxy` → vsock bridge → dockerd; `vesperd` is not on it.
+* Port publishing with one owner for each hop, macOS → `vesper-proxy` → System VM gateway → microVM, reachable on localhost ([Networking strategy](#networking-strategy)).
+* Bind mounts of macOS paths into the System VM over virtio-fs. **Meets the requirement** (`make binds-suite`).
+* Bind mounts passed on into the container. **Meets the requirement** on the Docker path (`make binds-suite`). For the microVM path, see the share requirement under [Backend A](#backend-a).
+* Edits made on macOS reach containers as inotify events. **Accepted deviation** (D-002, D-003): the launcher watches read-write shares and the System VM replays each changed path, so containers see `IN_MODIFY` only, and nothing on read-only shares. GH #150 delivered this; TD-038 lists the residuals and [systemvm-bringup.md](../process/systemvm-bringup.md#bind-mounts-over-virtio-fs-gh-29) describes the mechanism.
+* DNS and network defaults match Docker Desktop for the cases in `make dns-suite`, and containers can resolve `host.docker.internal`. **Not met** (TD-039): `host.docker.internal` is not provided.
+* `linux/arm64` is the native default on Apple Silicon.
+* `linux/amd64` runs through emulation in the System VM, and the image and container metadata report the architecture. **Meets the requirement** on the Docker path (`make crossarch-suite`).
 
-  * Must pass unmodified for parity-GA at the pinned baseline revision.
-* Snapshot tests based on upstream semantics:
+#### Phase 4 verification
 
-  * Firecracker snapshot semantics include memory snapshot + microVM state snapshot; confirm create/load cycle. ([GitHub][8])
-* Performance sanity:
+* A developer workflow suite: `docker compose up` for a stack of a web server, Redis and a database; bind mounts that reload on edit; port publishing collisions; `docker run --platform linux/amd64` on Apple Silicon.
+* File system behaviour: inotify events for watchers, uid and gid mapping, permissions.
 
-  * MicroVM boot time, create rate, etc. (Firecracker publishes performance expectations/specs in-tree). ([GitHub][10])
+#### Phase 4 exit criterion
 
-**Exit criteria**
+The workload matrix passes in CI and on a reference developer machine: the compose stack; bind-mount reload; the same error on every port collision; `docker exec`, `docker logs`, graceful and forced stop; and the `linux/amd64` flow.
 
-* Backend A passes Firecracker integration tests and can execute a container workload through direct backend calls (`vesperctl`/integration harness), with one microVM per workload.
+### Phase 5: Backend B
 
----
+Phase 5 ports the hypervisor back end and keeps Firecracker’s semantics.
 
-### Phase 3 — containerd shim v2: make Vesper a drop‑in runtime (contract‑level)
+#### Phase 5 deliverables
 
-Even if you use Firecracker inside System VM, you still must provide a **shim v2** runtime so containerd can treat it as a runtime.
+1. Execution: `vesperd` executes microVMs on macOS behind the API it already serves.
+2. CPU and memory: create microVM memory, load the kernel and initrd, run vCPUs.
+3. Devices: virtio‑blk, virtio‑net, virtio‑vsock, serial console, entropy, balloon.
+4. MMDS: the Firecracker MMDS access path from inside the microVM.
+5. Rate limiting: a token bucket on block and network I/O with Firecracker’s semantics. ([GitHub][1])
+6. Snapshots: Firecracker’s snapshot format, full and diff, readable by Firecracker’s tools ([Snapshot strategy](#snapshot-strategy)).
 
-**Deliverables**
+#### Phase 5 verification
 
-* `containerd-shim-vesper-v2` implementing:
+The [parity harness](#parity-harness), a snapshot round trip (pause → snapshot → new process → restore → the workload continues) and failure injection (corrupted rootfs, dropped network back end, full pipes).
 
-  * `Create`, `Start`, `Kill`, `Delete`, `State`, `Wait`, `Exec`, `ResizePty`, `Stats`
-* A stable RPC boundary:
+#### Phase 5 exit criterion
 
-  * shim ↔ Vesper backend over vsock or unix socket
-* Implement Vesper’s containerd shim v2 in System VM (or reuse upstream patterns), delegating runtime requests to Firecracker through Vesper backend APIs.
-* OCI bundle unpacking + rootfs preparation
+Backend B passes the same parity suite as Backend A at the same pinned baseline revision.
 
-  * Prefer block rootfs (ext4) for Firecracker compatibility
-  * Apple’s Containerization project explicitly includes “Create and populate ext4 file systems” and netlink tooling—this is a good reference for how to do it efficiently. ([GitHub][2])
+## Verification plan
 
-**Verification/Evals**
+### Parity harness
 
-* containerd conformance:
+Parity has one reference chain (D-014):
 
-  * `ctr run`, `ctr tasks exec`, `ctr tasks kill`, `ctr tasks metrics`
-* lifecycle correctness:
+1. The truth is stock Firecracker on Linux aarch64 at the revision in the baseline lock, on any aarch64 KVM host. **Not met** (CE-0003): no Linux baseline exists.
+2. The binary and the lock name the same revision before any reference capture. **Not met** (CE-0002, TD-029): the System VM runs release v1.16.0, which is 285 commits after the pinned commit.
+3. Backend A stands in for the truth only for the cases where a captured Linux result agrees with it.
+4. Backend B is compared with the truth, and with Backend A where item 3 allows.
 
-  * shim must remain as parent, survive containerd restart
-  * restart test: restart containerd while microVM is running; attach works after reconnect
+The upstream integration suite targets raw Firecracker inside the System VM, not `vesperd`. Its pass set is the tests that pass on the Linux baseline of item 1. D-014 changed this from “unmodified, with no exclusions”, because the suite has kernel and architecture expectations that a nested Alpine System VM has not been shown to meet. A feasibility run of the suite in the System VM comes before anything depends on it. **Not met** (CE-0001): the suite has never been run; 19 local API checks stand in for it.
 
-**Exit criteria**
+`vesperd` is checked separately, by the behavior matrix and by a differential harness (working name `vesper-parity`). Comparing Backend B with Backend A through the same `vesperd` would hide an error in `vesperd`, so the harness compares each candidate with the Linux capture. **Not met** (GH #87): no differential harness exists.
 
-* containerd can run workloads entirely via Vesper runtime without special casing.
+The harness:
 
----
+* takes the Firecracker OpenAPI schema, a corpus of microVM configurations (machine configuration, drives, network interfaces, vsock, balloon, MMDS) and workload scripts that check devices and behaviour inside the microVM;
+* runs a case against the Linux reference environment, which is outside the System VM under test, and against a candidate;
+* compares API responses, behaviour visible inside the microVM (device enumeration, IP addressing patterns, MMDS) and log and metric counters, and fails on any mismatch;
+* writes a JSON report per test with API traces (request, response, headers), microVM logs, a metrics snapshot, and the hashes and metadata of snapshot files.
 
-### Phase 4 — macOS UX parity with Docker Desktop
+Before parity GA, a mismatch requires an approved compat exception with an owner, a linked issue, an expiry date and a target release. At parity GA no compat exception is open.
 
-**Deliverables**
+### Feature-area gates
 
-* `vesper-proxy` supports:
+Each row is a check that must pass before the feature area counts as done.
 
-  * Docker Engine API socket forwarding (if dockerd is enabled in System VM) through the canonical `vesper-proxy` ingress
-  * deterministic port publishing ownership path (`host -> vesper-proxy -> System VM gateway -> microVM`) and “localhost” usability
-* Volume mounts:
+| Area | Check | Status | Pointer |
+| --- | --- | --- | --- |
+| API | Contract tests generated from the OpenAPI schema: required fields, error responses | Meets the requirement | `make contract-test` |
+| API | State-machine tests: pre-boot-only enforcement | Meets the requirement | `tests/api_contract.rs` |
+| API | Fuzzing of JSON bodies and of invalid call sequences | Not met | TD-047 |
+| Devices | Inside a microVM: virtio device enumeration, network device name and MAC address, virtio queue features | Not met | TD-032 |
+| Networking | Outbound access and DNS; container-to-container traffic on one network; Compose service discovery and aliases | Meets the requirement on the Docker path | `make dns-suite` |
+| Networking | Localhost port forwarding through the whole forwarding chain | Meets the requirement on the Docker path | `make ports-suite` |
+| Networking | IPv6: supported, or disabled with an explicit error | Not met | TD-037, TD-039; which of the two outcomes is not decided |
+| Networking | iperf3 throughput and latency distribution | Not met | TD-047 |
+| Storage | fio read and write patterns | Not met | TD-033 |
+| Storage | Recovery after a sudden stop and a simulated macOS crash | Not met | TD-047 |
+| Storage | Rate limiter: token bucket behaviour matches Firecracker’s model ([GitHub][1]) | Not met | TD-047 |
+| Snapshots | Full restore; diff chain restore; snapshot under network and disk load; rejection of an incompatible version, a corrupted memory file and an invalid state file | Not met | TD-045 |
+| Logging and metrics | Behaviour when the pipes are full, including the lost-log counters ([GitHub][8]) | Not met | TD-047 |
+| Security | Jailer equivalence on macOS: the microVM process is sandboxed, file access is limited to its bundle, network is denied unless configured | Not met | TD-046, TD-047 |
+| Security | Review of the [threat table](#threats) against Firecracker’s containment model ([GitHub][1]) | Not met | TD-051 |
 
-  * bind mount host paths into System VM (virtio‑fs best)
-  * pass into microVM rootfs or mount into container
-* DNS and networking defaults consistent with Docker Desktop expectations
-* Cross-architecture execution policy:
+### Test levels
 
-  * `linux/arm64` is native default on Apple Silicon.
-  * `linux/amd64` is supported via System VM emulation (`binfmt_misc + qemu-user`) and surfaced clearly in runtime metadata.
+Unit:
 
-**Verification/Evals**
+* API state-machine transitions against upstream. **Meets the requirement** (`cargo test`).
+* The rate limiter with a deterministic time source; the snapshot serialiser against golden files; virtio descriptor framing in the network back end. **Deferred** (Phase 5, GH #56): these belong to Backend B.
 
-* “Developer workflow suite”:
+Integration, on one machine and automated:
 
-  * `docker compose up` common stacks (nginx+redis+db)
-  * hot‑reloading bind mounts
-  * port publishing collisions
-  * `docker run --platform linux/amd64` smoke tests on Apple Silicon
-* filesystem correctness:
+* Boot a microVM with a kernel and initrd and assert the boot banner; add a drive, mount it inside the microVM, read and write files; a ping protocol over vsock between the System VM and a microVM; inflate and deflate the balloon and check the memory the microVM reports.
+* Add a network interface, configure an address, ping the System VM and a peer. **Not met** (TD-032).
 
-  * inotify behavior expectations (often required for dev servers)
-  * uid/gid mapping; permission correctness
+End to end, from macOS against a running Vesper:
 
-**Exit criteria**
+* `docker run hello-world`; `docker run -p 8080:80 nginx`; `docker run --platform linux/amd64 alpine uname -m`; `docker compose up` on a small stack; a bind mount edited on macOS and observed in the container; `docker logs -f`, `docker exec -it`, `docker stop` (SIGTERM, then SIGKILL).
+* `docker build` with BuildKit in the System VM. **Meets the requirement** on the Docker path (`make workflow-suite`).
 
-* Workload matrix passes in CI and on a reference developer machine:
+[TESTING.md](../TESTING.md) lists the suites that exist, their Make targets and what each needs. Every suite writes a JSON report.
 
-  * compose stack (`web + redis + db`)
-  * bind mount hot reload
-  * deterministic port-collision behavior
-  * `docker exec`, `docker logs`, graceful + forced stop
-  * `--platform linux/amd64` smoke flow on Apple Silicon
+* JUnit output from the suites. **Deferred** (until a consumer of JUnit exists).
+* A CI matrix: M3 and later runs Backend A and Backend B side by side; M1 and M2 run Backend B; Linux runs the Firecracker baseline. **Deferred** (until TD-005 is closed: no CI job can boot the System VM).
 
----
+### Performance thresholds
 
-### Phase 5 — Backend B (Native): port Firecracker VMM behavior to macOS (HVF/VF)
+The measurements track Firecracker’s published targets for boot latency, microVM create rate and overhead. ([GitHub][8]) The thresholds are initial values.
 
-This is the long phase: you’re porting the hypervisor backend while keeping Firecracker semantics.
-
-**Deliverables (incremental)**
-
-1. **API parity**: Vesper already matches OpenAPI; now it must actually execute microVMs.
-2. **CPU/memory bring‑up**:
-
-   * Create guest memory, load kernel/initrd, run vCPUs.
-3. **Devices parity**:
-
-   * virtio‑blk, virtio‑net, virtio‑vsock, serial console, rng, balloon.
-4. **MMDS**:
-
-   * emulate Firecracker MMDS guest access path.
-5. **Rate limiting**:
-
-   * token bucket limiter on block+net I/O (match Firecracker semantics). ([GitHub][1])
-6. **Snapshot parity**:
-
-   * implement Firecracker snapshot format (full+diff) and tool compatibility. Firecracker snapshot semantics are documented; don’t rely on Virtualization.framework state saving because it is hardware‑encrypted and non‑portable across Mac/user. ([GitHub][8])
-
-**Verification/Evals**
-
-* **Differential conformance harness** (critical):
-
-  * For every test case, run it against:
-
-    * stock Firecracker (Linux baseline)
-    * Vesper Native backend
-  * Compare:
-
-    * API responses
-    * guest observable behavior (device enumeration, IP addressing patterns, MMDS)
-    * logs/metrics counters
-* Snapshot round‑trip:
-
-  * Pause → snapshot → new process → restore → validate process continues.
-* Chaos/failure injection:
-
-  * corrupted rootfs; network backend drop; full pipes; etc.
-
-**Exit criteria**
-
-* Native backend passes the same full parity suite as Backend A for the same pinned baseline revision.
-
----
-
-## Comprehensive verification & evaluation plan
-
-### A. Parity test harness (the core of “100% parity”)
-
-Build a dedicated harness called `vesper-parity`:
-
-**Inputs**
-
-* Firecracker OpenAPI schema (firecracker.yaml)
-* A corpus of microVM configs (machine‑config, drives, nets, vsock, balloon, MMDS)
-* Workload scripts (in‑guest) that validate devices and behavior
-
-**Execution modes**
-
-* `--baseline=linux-firecracker` (runs Firecracker in a dedicated Linux reference environment outside the System VM-under-test)
-* `--candidate=vesper-native` (runs Vesper HVF backend on macOS)
-* `--compare` (diff outputs and fail on mismatch)
-
-**Outputs**
-
-* JSON report per test with:
-
-  * API traces (request, response, headers)
-  * guest logs
-  * metrics snapshot
-  * snapshot files hash / metadata
-
-**Pass criteria**
-
-* Pre-parity-GA: mismatches require a documented, approved compat exception with owner, linked issue, expiry date, and target release for removal.
-* Parity-GA: zero open compat exceptions.
-
-### B. Stage‑gated verifications per feature area
-
-**1) API correctness**
-
-* Contract tests generated from OpenAPI:
-
-  * ensure required fields, error responses
-* State machine tests:
-
-  * “pre‑boot only” enforcement
-* Fuzzing:
-
-  * JSON body fuzzing + invalid sequences
-
-**2) Guest device verification**
-
-* Boot a minimal kernel and run:
-
-  * `lspci`/`ls /sys/bus/virtio/devices` checks
-  * network device name and MAC checks
-  * virtio queue feature checks (where relevant)
-
-**3) Networking**
-
-* Connectivity:
-
-  * outbound internet, DNS
-  * container‑to‑container comms (same network)
-  * deterministic localhost port-forward behavior through the full forwarding chain
-  * Compose service discovery and network alias resolution
-  * IPv6 mode behavior (explicitly supported or explicitly disabled with clear error)
-* Performance:
-
-  * iperf3 throughput
-  * latency distribution
-
-**4) Storage**
-
-* fio read/write patterns
-* corruption resistance:
-
-  * sudden stop, host crash simulation
-* rate limiter conformance:
-
-  * verify token bucket behavior aligns with Firecracker’s model ([GitHub][1])
-
-**5) Snapshots**
-Firecracker snapshot expectations:
-
-* Snapshot contains memory + emulated device state, stored in files; used to load later in a different process. ([GitHub][8])
-  Tests:
-* full snapshot restore
-* diff snapshot chain restore
-* snapshot under load (network active, disk IO active)
-* negative tests: incompatible version, corrupted memory file, invalid state file
-
-**6) Logging + metrics**
-
-* Pipe backpressure tests:
-
-  * verify behavior when pipes are full (lost logs counters, etc.) ([GitHub][10])
-
-**7) Security**
-
-* Jailer equivalence tests:
-
-  * confirm microVM process is sandboxed (macOS sandbox profile)
-  * filesystem access restricted to VM bundle
-  * deny network if not configured
-* Threat model reviews aligned with Firecracker containment model. ([GitHub][1])
-
----
-
-## Comprehensive test strategy (unit → integration → e2e)
-
-### 1) Unit tests
-
-* Firecracker API state machine implementation:
-
-  * ensure transitions match upstream
-* Rate limiter:
-
-  * deterministic time source; verify token bucket refill logic
-* Snapshot serializer/deserializer:
-
-  * golden files compatibility checks
-* Networking backend framing:
-
-  * virtio descriptors correctness
-
-### 2) Integration tests (single node, automated)
-
-* Start VM with kernel+initrd, attach console, assert boot banner
-* Add drive, mount inside guest, read/write files
-* Add network interface, configure IP, ping host/peer
-* Vsock:
-
-  * host ↔ guest ping protocol
-* Balloon:
-
-  * inflate/deflate and validate guest memory reporting
-
-### 3) End-to-end (Docker replacement) tests
-
-Run on macOS with Vesper service installed:
-
-* Basic:
-
-  * `docker run hello-world`
-  * `docker run -p 8080:80 nginx`
-  * `docker run --platform linux/amd64 alpine uname -m` (verify emulation path + architecture reporting)
-* Compose:
-
-  * `docker compose up` on a small stack
-* Volumes:
-
-  * bind mount: edit file on host, observe inside container
-* Logs/exec/signals:
-
-  * `docker logs -f`
-  * `docker exec -it`
-  * `docker stop` (SIGTERM then SIGKILL)
-* Build:
-
-  * buildkit inside System VM; `docker build` typical Dockerfile
-
-### 4) Regression + performance tests
-
-Track against Firecracker’s own published targets:
-
-* boot latency, microVM create rate, overhead (where feasible). ([GitHub][10])
-  Also track:
-* System VM overhead (memory idle footprint)
-* host CPU overhead per microVM
-* I/O throughput vs baseline
-* Target thresholds (initial, can be tightened over time):
-
-  * Backend A p95 boot latency within 20% of Linux Firecracker baseline on the same host class
-  * Backend A create-rate within 20% of Linux baseline at equal vCPU/memory shape
-  * Idle System VM memory budget <= 1.5 GiB
-
-### 5) Test harness implementation details
-
-* Canonical parity harness is `vesper-parity`; `vesper-test` is an orchestration wrapper that invokes `vesper-parity` plus integration/e2e suites.
-* `vesper-test` can:
-
-  * build images
-  * start/stop Vesper
-  * run all suites
-  * emit JUnit + JSON
-* CI matrix:
-
-  * macOS (M3+): run Backend A + Backend B side-by-side comparisons
-  * macOS (M1/M2): run Backend B only
-  * Linux: run baseline Firecracker tests
-
----
+* Backend A p95 boot latency is within 20% of the Linux Firecracker baseline on the same host class. **Provisional** (CE-0003): the threshold stands only if a Linux baseline on the same host class can be obtained; nothing is measured against one yet.
+* Backend A create rate is within 20% of the Linux baseline at the same vCPU and memory shape. **Provisional** (CE-0003): as above.
+* Idle System VM memory is at most 1.5 GiB. **Not yet measured** (TD-033).
+* Firecracker’s published overhead target for a microVM. **Not yet measured** (TD-033).
+* The macOS CPU cost per microVM, and I/O throughput against the baseline. **Not yet measured** (TD-033).
 
 ## Containerd compatibility design
 
-### Why shim v2
+### Shim and microVM responsibilities
 
-Runtime v2 is containerd’s supported integration point: it introduces a first‑class shim API for runtime authors. ([GitHub][3])
+The shim is written in Go ([ADR 0004](../design-docs/adr/0004-containerd-shim-in-go.md)). It prepares the OCI bundle, creates the microVM through its backend interface, and maintains the container life cycle and stdio.
 
-### Implementation approach
+Inside the microVM the requirement is to mount the rootfs, set up the container’s namespaces and cgroups, exec the process, and stream I/O and exit status back over vsock.
 
-* Implement `containerd-shim-vesper-v2` (Go recommended for ecosystem fit).
-* Shim responsibilities:
-
-  * prepare OCI bundle
-  * request microVM creation from Vesper
-  * maintain container lifecycle and stdio
-* Guest agent responsibilities (`vesper-agent`):
-
-  * mount rootfs
-  * set up container namespace/cgroups *inside the guest Linux*
-  * exec process
-  * stream IO and exit status back over vsock
+* Execution through runc inside the microVM, with no custom agent and no ttrpc or gRPC. **Accepted deviation** ([ADR 0006](../design-docs/adr/0006-guest-exec-via-runc-delegation.md)).
+* The workload’s requested security posture is honoured inside the microVM. **Not met** (CE-0004): runc runs the processes with no new namespaces and with full capabilities, whatever the workload asked for.
 
 ### Rootfs strategy
 
-* Prefer **block‑based rootfs** (ext4 disk images) for Firecracker‑compatibility and isolation.
-* Use APFS on host for storage; attach disk images accordingly.
-* Leverage ideas from Apple Containerization which includes explicit ext4 creation tooling and an optimized kernel for fast boot. ([GitHub][2])
-* Layer sharing and CoW model:
-
-  * Keep OCI blobs in a shared content-addressed store (containerd content store) to avoid duplicate pulls.
-  * Build immutable base ext4 artifacts keyed by image digest, then attach a writable delta disk per container/microVM.
-  * Garbage collection must be explicit (high-watermark/low-watermark) for blobs, base ext4 artifacts, and writable deltas.
-* Build cache strategy:
-
-  * BuildKit cache lives in the System VM and is exported/imported using content-addressed cache metadata.
-  * Cache eviction policy is metrics-driven (size + age), not ad-hoc.
+* The root file system is a block device (an ext4 disk image), as Firecracker expects.
+* System VM storage persists across boots: images, the rootfs cache and task drives. **Not met** (TD-025): they live in tmpfs.
+* Disk images and the image store live on APFS on macOS. **Not met** (TD-025): they live in the System VM’s tmpfs.
+* A dedicated microVM kernel is pinned. **Not met** (TD-033): microVMs boot the System VM’s kernel. Apple’s Containerization project is the reference for ext4 creation and for a kernel built for boot time. ([GitHub][2])
+* OCI blobs live in containerd’s content-addressed store, so that an image is pulled once.
+* An immutable base ext4 per image digest, with a writable delta disk per microVM. **Not met** (TD-035): each task gets a full copy of the drive.
+* Explicit garbage collection with high and low watermarks for blobs, base images and deltas. **Deferred** (until step 2 of [Next work](#next-work) is done).
+* A BuildKit cache in the System VM that is exported and imported by content-addressed metadata and evicted by size and age. **Deferred** (until step 2 of [Next work](#next-work) is done).
 
 ### Networking strategy
 
-* Default: NAT to avoid restricted bridged entitlement. ([Apple Developer][6])
-* Optional (if entitlement available): bridged mode for LAN‑visible microVMs.
-* Provide CNI inside System VM (Backend A).
-* Explicit forwarding contract:
+* NAT is the default, because it needs no restricted entitlement. ([Apple Developer][6])
+* Bridged mode for LAN-visible microVMs, where the entitlement is available. **Deferred** (until step 2 of [Next work](#next-work) is done).
+* CNI inside the System VM, with a TAP device for each microVM. **Not met** (TD-032): microVMs have no network device.
+* The forwarding contract for published ports ([ADR 0005](../design-docs/adr/0005-published-ports-via-vsock-gateway.md)):
 
-  * host bind on `127.0.0.1` and `::1` (if IPv6 enabled) terminates in `vesper-proxy`
-  * `vesper-proxy` forwards to System VM gateway over vsock
-  * System VM gateway forwards to target microVM interface/port
-  * port-collision behavior is deterministic and returns a stable error surface
-* Native backend networking decision:
+  * A TCP bind on `127.0.0.1`, and on `::1` when IPv6 is enabled, terminates in `vesper-proxy`. **Meets the requirement** (`make ports-suite`); IPv6 is not enabled.
+  * UDP ports and non-loopback addresses on macOS. **Not met** (TD-037).
+  * `vesper-proxy` forwards to the System VM gateway over vsock. **Meets the requirement** (`make ports-suite`).
+  * The System VM gateway forwards to the interface and port of the target microVM. **Not met** (TD-032, GH #53): the gateway reaches Docker-path containers only.
+  * A port collision produces the same recorded error every time. **Meets the requirement** (`make ports-suite`).
+* For Backend B, network traffic routes through the System VM gateway, which acts as the network controller. **Deferred** (Phase 5, GH #56).
+* A user-space network back end on macOS for Backend B, to replace that route once it matches it on latency, packet loss and failure behaviour. **Deferred** (until step 2 of [Next work](#next-work) is done).
 
-  * production path (v0/v1): route via System VM gateway as the network controller for deterministic behavior and shared policy enforcement
-  * direct macOS user-space net backend is experimental until it matches production path on latency, packet-loss handling, and failure semantics
+## Snapshot strategy
 
----
+Vesper must match Firecracker’s snapshot semantics: full and diff snapshots, a state file and a memory file, a load into a different process, and the documented limits on restoring network state. ([GitHub][7])
 
-## Snapshot strategy (full parity)
+Virtualization.framework save state cannot provide this ([Risks and limits](#risks-and-limits)).
 
-Firecracker snapshot semantics are non‑trivial and must match:
+* Backend A uses stock Firecracker snapshots. **Not met** (TD-045, TD-042): neither `vesperd` nor the shim reaches them.
+* Backend B implements Firecracker’s snapshot format: it serialises device models and vCPU state, saves microVM memory, and for a diff snapshot finds dirty pages by comparing pages with the parent snapshot. **Not met** (GH #56).
+* Dirty-page tracking in place of that comparison, if Hypervisor.framework allows it. **Deferred** (until step 2 of [Next work](#next-work) is done).
 
-* full vs diff snapshots
-* state file + memory file
-* load into a different process
-* caveats around runtime network restoration, etc. ([GitHub][8])
+## Security model
 
-**Key decision:**
-Do not rely solely on Virtualization.framework’s save state because it’s hardware‑encrypted and cannot be restored by other users or on another Mac. ([Apple Developer][4])
-Instead:
+Firecracker relies on layers: the virtualisation boundary, seccomp, and a jailer that uses cgroups, namespaces and chroot. ([GitHub][1]) On macOS Vesper adds:
 
-* Backend A: use stock Firecracker snapshotting (already correct).
-* Backend B: implement Firecracker’s snapshot format directly:
+* Process sandboxing: App Sandbox or a seatbelt profile, file access limited to the microVM bundle directories, and no network access unless configured. The status is under [Requirements](#requirements).
+* Privilege separation: `vesperd` runs unprivileged. A root helper exists only if networking needs one; it does network set-up only, validates its input, denies by default and writes an audit record for each call.
+* CPU and memory ceilings in the microVM configuration. **Not met** (TD-048).
+* Process priorities and limits on macOS. **Not met** (TD-046).
+* Auditing: structured logs and metrics that record every API call. **Not met** (TD-007): no binary has logging, metrics or tracing.
+* A threat-model review and a security review before parity GA. **Not met** (TD-051): neither has an owner, and the table below is a first draft.
 
-  * serialize device models and vCPU state
-  * save guest RAM
-  * diff snapshots:
+### Threats
 
-    * phase 1: compute dirty pages by scanning/hashing pages vs parent snapshot
-    * phase 2: optimize using dirty tracking if HVF APIs allow
+The components on macOS must treat every byte from the System VM as untrusted (D-016). A control-channel mechanism is required only if a row of this table names it (D-018).
 
----
-
-## Security model (Firecracker‑equivalent hardening on macOS)
-
-Firecracker relies on layers: virtualization boundary + seccomp + jailer using cgroups/namespaces/chroot. ([GitHub][1])
-
-Vesper’s macOS mapping:
-
-* Process sandboxing:
-
-  * App Sandbox / seatbelt profile
-  * restrict file access to VM bundle directories
-  * restrict network access unless explicitly configured
-* Privilege separation:
-
-  * root helper only if strictly needed (e.g., special networking)
-  * otherwise run `vesperd` unprivileged
-* Resource controls:
-
-  * enforce CPU/memory ceilings at VM config
-  * host side process priorities and limits
-* Auditing:
-
-  * structured logs + metrics; record all API calls
+| Actor | Boundary crossed | Asset | Mitigation today | Required mechanism | Pointer |
+| --- | --- | --- | --- | --- | --- |
+| A process of the same user on macOS | The vsock bridge, the Docker socket and the `vesperd` socket | Every System VM vsock port: the agent (which can run and stop microVMs and power off the System VM), the Docker API, the port relay and the share notification sink | None against the same user. The sockets under `run/` are owner-only, which stops other users; the `vesperd` default is `/tmp/vesperd.sock` with mode 0660 | A restriction on what the vsock bridge reaches (a port allow-list or a check of the peer); an owner-only `vesperd` socket | TD-027, TD-050 |
+| A hostile container on the Docker path | Container → System VM kernel, which every container shares; read-write shares → macOS files | Other containers, the System VM, and macOS files in the shares, written as the sharing user | Whatever isolation dockerd and runc apply by default; Vesper adds none and no Vesper test checks it. Only directories named at launch are shared, and a read-only share is enforced at the virtio-fs level | A microVM per container | GH #53 |
+| A hostile workload in a microVM | microVM → shim, over its private vsock session; microVM → Firecracker and the jailer | The shim, other tasks and the System VM | The microVM boundary and the jailer (dedicated uid, pivot-root jail, cgroup limits, seccomp); the shim bounds control replies; microVMs have no network device. Inside the microVM the workload has full capabilities, and every microVM shares one jailer uid | The workload’s requested posture honoured, or the full-capability model confirmed by the security review; a jailer uid per owner | CE-0004, GH #156 |
+| A compromised System VM | System VM → `vesper-proxy`, the launcher and, after step 1, `vesperd` | macOS listeners, files in the shares, and later the state of `vesperd` | `vesper-proxy` opens loopback TCP listeners only, from what dockerd reports. The launcher sends path names only, never file contents. Nothing limits or validates control replies | Schema validation and bounded replies in every macOS component that reads from the System VM | TD-026 |
 
 ### Trust boundaries and control-plane security invariants
 
-* Socket access control:
+* The `vesperd` API socket and the Docker-compatible socket are local endpoints restricted to their owner:
 
-  * `vesperd` API socket and Docker-compatible socket are local-only endpoints with explicit filesystem ACLs.
-  * unauthorized UID/GID access attempts are rejected and audited.
-* Backend RPC hardening:
+  * In the development loop both are Unix sockets under `run/`, restricted by file mode. **Meets the requirement** ([SECURITY.md](../SECURITY.md#trust-boundaries)).
+  * The shipped default of `vesperd`. **Not met** (TD-050): `/tmp/vesperd.sock` with mode 0660.
+* Access attempts by another uid or gid are rejected and audited. **Not met** (TD-007): the kernel refuses them through the file mode; nothing in Vesper rejects or records them.
+* The vsock bridge limits what a client can reach, by a port allow-list or a check of the peer. **Not met** (TD-027). This gap closes before step 1 of [Next work](#next-work), because step 1 puts a relay to Firecracker behind the bridge (D-018).
+* Control messages are versioned and validated against a schema, and replies are bounded. **Not met** (TD-026): the protocol carries a version number only.
+* Further control RPC mechanisms. **Deferred** (D-018, until a row of the threat table requires them): a same-user process can read any token the client can, and a compromised System VM is the peer that would hold the key. The mechanisms are:
 
-  * `vesperd <-> System VM` control RPC must include capability-scoped auth tokens and replay protection.
-  * control messages are versioned and schema-validated.
-  * bootstrap trust uses per-boot ephemeral key material generated by `vesperd` and delivered only over an already-authenticated local channel (0600 file descriptor handoff or equivalent).
-  * replay defense uses monotonic nonce + bounded timestamp window; out-of-window and duplicate messages are rejected and audited.
-  * key rotation is mandatory on every System VM restart and can be forced via admin action.
-* Privileged helper minimization:
+  * capability-scoped auth tokens and replay protection on the control RPC between `vesperd` and the System VM;
+  * bootstrap trust from per-boot ephemeral key material that `vesperd` generates and delivers only over an already-authenticated local channel (a 0600 file descriptor hand-off or equivalent);
+  * replay defence with a monotonic nonce and a bounded timestamp window, where out-of-window and duplicate messages are rejected and audited;
+  * key rotation on every System VM restart, which an administrator can also force.
+* Sinks in the System VM accept names, not content: the share notification sink can do no more than make a path inside a read-write share emit an event ([SECURITY.md](../SECURITY.md#shared-host-directories-gh-29)).
 
-  * any root helper must expose a minimal syscall surface (network setup only) with strict input validation.
-  * helper calls are deny-by-default and observable in audit logs.
+## Release checklist
 
----
+The status of each item is the status of what decides it.
 
-## Checklists
+| Item | Decided by |
+| --- | --- |
+| All parity tests pass against the Linux baseline | [Parity harness](#parity-harness) (CE-0003, GH #87) |
+| Backend A meets parity GA on M3 and later, with no open compat exception | [compat-exceptions.yaml](compat-exceptions.yaml) (CE-0001, CE-0002, CE-0003, CE-0004) |
+| Backend B parity status is published: full parity, or a gap list with owners and dates | [Phase 5](#phase-5-backend-b) (GH #56) |
+| The baseline lock is current and cited in test reports | [Normative baselines](#normative-baselines) (CE-0002) |
+| The Docker replacement suite passes: compose, bind mounts, exec, logs | [Phase 4](#phase-4-docker-desktop-experience-on-macos) (GH #53) |
+| A 24-hour soak with 100 containers in mixed life cycles ends with zero unrecoverable daemon failures | TD-047 |
+| Performance thresholds are defined and met | [Performance thresholds](#performance-thresholds) (CE-0003, TD-033) |
+| The security review is complete: sandbox, file access, network | [Security model](#security-model) (TD-051, CE-0004) |
+| Hardware and operating system requirements are documented, including the nested-virtualisation gate | [systemvm-bringup.md](../process/systemvm-bringup.md#nested-virtualization-and-backend-selection-gh-17) |
+| Cross-architecture behaviour is documented: native `linux/arm64`, emulated `linux/amd64`, and the limits | [systemvm-bringup.md](../process/systemvm-bringup.md#cross-architecture-containers-gh-39) |
+| The installer and uninstaller remove services and data | [Phase 0](#phase-0-repository-packaging-and-api-contract) (TD-046) |
 
-### Implementation checklist (engineering)
+## Related documents
 
-* [ ] Firecracker OpenAPI endpoints implemented (all methods)
-* [ ] API state machine matches upstream
-* [ ] System VM boot + vsock connectivity
-* [ ] containerd + shim v2 working end‑to‑end
-* [ ] Backend A: Firecracker microVM per container (nested KVM)
-* [ ] Backend B: native microVM boot
-* [ ] virtio‑blk parity (multi-drive, read-only flags, rate limiters)
-* [ ] virtio‑net parity (MAC config, RX/TX rate limiters)
-* [ ] vsock parity (CID mapping, connection behavior)
-* [ ] MMDS parity (API + guest access)
-* [ ] balloon parity (set target, stats)
-* [ ] metrics/logging parity (pipes/backpressure behavior)
-* [ ] snapshot create/load parity (full + diff)
-* [ ] CPU templates parity (where applicable)
-* [ ] docker socket proxy + port publish + volumes
+* [AGENTS.md](../../AGENTS.md) and [ARCHITECTURE.md](../../ARCHITECTURE.md): how to work in the repository and how it is laid out.
+* [Parity matrix](firecracker-feature-parity.md) and [milestone log](../progress/symphony-milestones.md): the running status.
+* [ADR index](../design-docs/adr/index.md) and [decision log](../design-docs/decision-log.md): the decisions cited here.
+* [TESTING.md](../TESTING.md), [SECURITY.md](../SECURITY.md) and [systemvm-bringup.md](../process/systemvm-bringup.md): suites, exposure rules and the System VM mechanisms.
 
-### Release readiness checklist
+## References
 
-* [ ] All parity tests pass vs Linux baseline
-* [ ] Backend A parity GA criteria met on M3+ (no open compat exceptions)
-* [ ] Backend B parity status published (full parity or explicit gap list with owners and dates)
-* [ ] Baseline lock file (`docs/specs/design-v0.baselines.lock.yaml`) is up to date and referenced in test reports
-* [ ] “Docker replacement suite” passes (compose, bind mounts, exec/logs)
-* [ ] Stability soak test passes (24h, 100 mixed-lifecycle containers, zero unrecoverable daemon failures)
-* [ ] Performance regression thresholds defined + met
-* [ ] Security review complete (sandbox, file access, network)
-* [ ] Clear hardware/OS requirements documented (nested virt gating) ([Apple Developer][5])
-* [ ] Cross-architecture behavior documented (`linux/arm64` native and `linux/amd64` emulated path + caveats)
-* [ ] Installer + uninstall cleanly removes services and data
-
----
-
-## Detailed prompt for a coding agent
-
-Use the following prompt as an implementation accelerator.
-This section is **informative**; the normative source of truth is the design sections above.
-If any prompt text conflicts with the normative sections, the normative sections win.
-
----
-
-**Coding Agent Prompt: Implement “Vesper” (Firecracker‑compatible microVM runtime on macOS using Apple Virtualization)**
-
-You are implementing a production‑grade system called **Vesper**. The goal is to replace Docker Desktop on macOS by running each container inside a **Firecracker‑compatible microVM** using Apple’s first‑party virtualization stack. Requirements:
-
-### A. Top-level deliverables
-
-1. A macOS daemon `vesperd` that:
-
-   * Exposes a **Firecracker‑compatible REST API** over a Unix domain socket (OpenAPI parity).
-   * Exposes a **private containerd runtime v2 integration endpoint** (used by shim components, not as a public external API).
-   * Manages microVM lifecycle, logging, metrics, snapshots.
-2. A Linux “System VM” image + launcher:
-
-   * booted via Apple Virtualization (Virtualization.framework)
-   * runs containerd and optionally dockerd
-3. A containerd shim v2: `containerd-shim-vesper-v2`:
-
-   * implements containerd runtime v2 Task API
-   * creates a microVM per container via Vesper
-4. A guest agent `vesper-agent` that runs inside the microVM:
-
-   * receives commands over vsock (ttrpc/gRPC)
-   * sets up rootfs and execs the container process
-5. A test harness `vesper-parity`:
-
-   * runs contract + integration + e2e tests
-   * compares Vesper behavior to Linux Firecracker baseline
-
-### B. Architecture constraints
-
-* Must support **two backends**:
-
-  * **Backend A (Parity/KVMHost):** run stock Firecracker inside the System VM using nested virtualization (M3+). This must pass upstream Firecracker tests.
-  * **Backend B (Native):** run microVMs directly on macOS using Apple virtualization APIs. This must eventually match Backend A.
-* `vesperd` is the only external control-plane endpoint; both backends are internal execution engines behind the same API/state machine.
-* Do NOT rely on Virtualization.framework `saveMachineState` for Firecracker snapshot parity (it is hardware-encrypted and non-portable). Implement Firecracker snapshot format for Backend B.
-* Networking default must work without restricted bridged entitlement; use NAT/port-forwarding by default.
-* Support cross-architecture workloads on Apple Silicon: `linux/arm64` native, `linux/amd64` via documented emulation mode.
-* Use pinned baseline revisions from `docs/specs/design-v0.baselines.lock.yaml` for all parity and regression evaluations.
-
-### C. Repository layout (create)
-
-* `vesperd/` (Rust preferred; Swift allowed only as FFI shim)
-
-  * `api/` Firecracker REST API handlers + state machine
-  * `backend/` backend trait + implementations
-  * `backend_kvmhost/` client to Firecracker inside System VM
-  * `backend_native/` native macOS backend
-  * `snapshot/` Firecracker snapshot format implementation
-  * `metrics/`, `logging/`
-* `systemvm/`
-
-  * kernel config, rootfs build scripts
-  * containerd + shim install
-* `shim/` (Go)
-
-  * `containerd-shim-vesper-v2`
-* `agent/` (Rust or Go)
-
-  * vsock RPC server, OCI exec support
-* `tests/`
-
-  * parity tests
-  * docker replacement tests
-  * performance tests
-
-### D. Implementation phases
-
-Implement in this order, with each phase producing working software + tests:
-
-1. Firecracker OpenAPI surface stubbed in `vesperd` + contract tests.
-2. System VM boot + vsock + socket forwarding; prove `docker version` works via `vesper-proxy`.
-3. Backend A: run Firecracker inside System VM with direct backend lifecycle primitives and parity harness hooks.
-4. Implement shim v2 runtime contract (`containerd-shim-vesper-v2`) and wire it to backend APIs.
-5. End-to-end Docker workflow on Backend A: `docker run`, `docker logs`, `docker exec`, bind mounts, port publish, plus `--platform linux/amd64`.
-6. Backend B: native microVM boot with block rootfs + console output.
-7. Add devices + MMDS + rate limiting + balloon on Backend B.
-8. Implement snapshot create/load parity (full+diff) for Backend B.
-9. Full parity harness: run same suites on Backend A and Backend B, fail on mismatches.
-
-### E. Test requirements
-
-* Provide `make test` running:
-
-  * unit tests
-  * contract tests against OpenAPI
-* Provide `make integration` running:
-
-  * bring-up tests
-  * shim+agent tests
-* Provide `make e2e` running:
-
-  * docker replacement suite
-* Provide a JSON report for parity differences.
-
-### F. Definition of done
-
-* Backend A passes upstream Firecracker integration tests for the pinned baseline revision with no exclusions.
-* Backend B passes the same parity suite as Backend A.
-* Docker Desktop can be replaced for common workflows (compose, binds, ports, exec, logs) on supported hardware.
-* Cross-architecture behavior is validated in CI (`linux/arm64` and `linux/amd64` execution paths).
-* All artifacts are reproducible in CI.
-
----
-
-## Appendix: Mermaid source
-
-### Component diagram
-
-```mermaid
-flowchart TB
-  subgraph macOS["macOS Host"]
-    CLI["docker / nerdctl / vesperctl"]
-    PROXY["vesper-proxy\n(Docker socket + port forward)"]
-    VESPERD["vesperd\n(orchestration + APIs)"]
-    STORE["Image+Snapshot Store\n(APFS)"]
-    NET["Host Networking\n(vmnet/NAT/portfw)"]
-  end
-
-  subgraph SYSVM["Vesper System VM (Linux control plane)"]
-    DOCKERD["dockerd (optional)"]
-    CONTAINERD["containerd"]
-    SHIM["containerd-shim-vesper-v2"]
-  end
-
-  subgraph BACKENDS["MicroVM Backends"]
-    KVMHOST["Backend A: KVMHost\n(stock firecracker inside SYSVM)\nrequires nested virt"]
-    NATIVE["Backend B: Native HVF/VF\nmacOS VMM port"]
-  end
-
-  subgraph UVM["Workload MicroVM (per container)"]
-    AGENT["vesper-agent\n(ttrpc/gRPC over vsock)"]
-    PROC["Container Process(es)"]
-  end
-
-  CLI --> PROXY
-  PROXY --> VESPERD
-  VESPERD --> STORE
-  VESPERD --> NET
-
-  VESPERD <--> SYSVM
-  SYSVM --> SHIM
-  SHIM --> BACKENDS
-  KVMHOST --> UVM
-  NATIVE --> UVM
-  AGENT --> PROC
-```
-
-### Runtime lifecycle sequence (container create/start)
-
-```mermaid
-sequenceDiagram
-  participant U as User (docker/nerdctl)
-  participant P as vesper-proxy (socket)
-  participant D as vesperd
-  participant C as containerd (in System VM)
-  participant S as containerd-shim-vesper-v2
-  participant B as Vesper Backend
-  participant V as MicroVM
-  participant A as vesper-agent (in MicroVM)
-
-  U->>P: docker run ...
-  P->>D: Docker API request (or nerdctl via containerd)
-  D->>C: forward to containerd (vsock)
-  C->>S: CreateTask / StartTask (shim v2)
-  S->>B: CreateMicroVM(spec, rootfs, net)
-  B->>V: Boot microVM
-  V->>A: agent starts (vsock listener)
-  S->>A: CreateContainer + Exec (ttrpc/gRPC)
-  A->>A: setup mounts/cgroups inside guest
-  A->>V: launch container process
-  U<<->>P: attach logs/stdin/stdout
-```
-
----
-
-## Notes / references used
-
-* Apple virtualization & containerization background from your supplied research notes.
-* Apple Containerization project details: VM‑per‑container, vminitd over vsock, ext4 tooling. ([GitHub][2])
-* Firecracker internal architecture and device model expectations. ([GitHub][1])
-* Firecracker snapshot semantics (full/diff, memory + state). ([GitHub][8])
-* containerd runtime v2 shim API rationale. ([GitHub][3])
-* Apple limitation: save/restore state is hardware‑encrypted and tied to Mac/user. ([Apple Developer][4])
-* Nested virtualization availability on M3+ Macs. ([Apple Developer][5])
-* Reference hygiene policy: normative implementation documents should pin upstream references to tags or commit SHAs (not moving `main`) during execution-phase docs and RFCs.
-* Apple WWDC video citations are explanatory; normative behavior is enforced by pinned references, implementation tests, and parity harness outputs.
-* Locked baselines used by this spec are captured in `docs/specs/design-v0.baselines.lock.yaml`.
-
----
+* Firecracker design, snapshot support and specification at the pinned revision. ([GitHub][1], [GitHub][7], [GitHub][8])
+* Apple Containerization: a virtual machine per container, an init over vsock, ext4 tooling. ([GitHub][2])
+* containerd runtime v2 and its shim API. ([GitHub][3])
+* Apple: save and restore state is tied to one Mac and one user. ([Apple Developer][4])
+* Apple: nested virtualisation support and the bridged network attachment. ([Apple Developer][5], [Apple Developer][6])
 
 [1]: https://raw.githubusercontent.com/firecracker-microvm/firecracker/083c4cf69281178acc910f7f857f88e69c51d3b5/docs/design.md "https://raw.githubusercontent.com/firecracker-microvm/firecracker/083c4cf69281178acc910f7f857f88e69c51d3b5/docs/design.md"
 [2]: https://raw.githubusercontent.com/apple/containerization/636eef0eff00e451de6d5d426e6a6785b90b44e2/README.md "https://raw.githubusercontent.com/apple/containerization/636eef0eff00e451de6d5d426e6a6785b90b44e2/README.md"
 [3]: https://github.com/containerd/containerd/blob/d1d9d07f1960f7f3648298e44963a263eac87fa5/core/runtime/v2/README.md "https://github.com/containerd/containerd/blob/d1d9d07f1960f7f3648298e44963a263eac87fa5/core/runtime/v2/README.md"
 [4]: https://developer.apple.com/videos/play/wwdc2023/10007/ "Create seamless experiences with Virtualization - WWDC23 - Videos - Apple Developer"
-[5]: https://developer.apple.com/documentation/virtualization/vzgenericplatformconfiguration/isnestedvirtualizationsupported?utm_source=chatgpt.com "isNestedVirtualizationSupported"
-[6]: https://developer.apple.com/documentation/virtualization/vzbridgednetworkdeviceattachment?utm_source=chatgpt.com "VZBridgedNetworkDeviceAttach..."
-[8]: https://raw.githubusercontent.com/firecracker-microvm/firecracker/083c4cf69281178acc910f7f857f88e69c51d3b5/docs/snapshotting/snapshot-support.md "https://raw.githubusercontent.com/firecracker-microvm/firecracker/083c4cf69281178acc910f7f857f88e69c51d3b5/docs/snapshotting/snapshot-support.md"
-[9]: https://github.com/containerd/nerdctl "https://github.com/containerd/nerdctl"
-[10]: https://raw.githubusercontent.com/firecracker-microvm/firecracker/083c4cf69281178acc910f7f857f88e69c51d3b5/SPECIFICATION.md "https://raw.githubusercontent.com/firecracker-microvm/firecracker/083c4cf69281178acc910f7f857f88e69c51d3b5/SPECIFICATION.md"
+[5]: https://developer.apple.com/documentation/virtualization/vzgenericplatformconfiguration/isnestedvirtualizationsupported "isNestedVirtualizationSupported"
+[6]: https://developer.apple.com/documentation/virtualization/vzbridgednetworkdeviceattachment "VZBridgedNetworkDeviceAttach..."
+[7]: https://raw.githubusercontent.com/firecracker-microvm/firecracker/083c4cf69281178acc910f7f857f88e69c51d3b5/docs/snapshotting/snapshot-support.md "https://raw.githubusercontent.com/firecracker-microvm/firecracker/083c4cf69281178acc910f7f857f88e69c51d3b5/docs/snapshotting/snapshot-support.md"
+[8]: https://raw.githubusercontent.com/firecracker-microvm/firecracker/083c4cf69281178acc910f7f857f88e69c51d3b5/SPECIFICATION.md "https://raw.githubusercontent.com/firecracker-microvm/firecracker/083c4cf69281178acc910f7f857f88e69c51d3b5/SPECIFICATION.md"
+
+## Appendix: Mermaid source
+
+The two diagrams in [High-level architecture](#high-level-architecture) are rendered from these files:
+
+* [assets/design-v0-component-diagram.mmd](assets/design-v0-component-diagram.mmd)
+* [assets/design-v0-runtime-lifecycle.mmd](assets/design-v0-runtime-lifecycle.mmd)

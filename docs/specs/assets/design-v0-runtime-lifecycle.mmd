@@ -1,21 +1,29 @@
 sequenceDiagram
-  participant U as User (docker/nerdctl)
+  participant U as User (docker CLI or ctr)
   participant P as vesper-proxy (socket)
-  participant D as vesperd
+  participant L as vesper-vmlauncher (bridge socket)
+  participant D as dockerd (in System VM)
   participant C as containerd (in System VM)
+  participant R as runc (in System VM)
   participant S as containerd-shim-vesper-v2
-  participant B as Vesper Backend
-  participant V as MicroVM
-  participant A as vesper-agent (in MicroVM)
+  participant M as vesper-microvm (jailer + Firecracker)
+  participant G as MicroVM guest (vesper-guest-session + runc)
 
-  U->>P: docker run ...
-  P->>D: Docker API request (or nerdctl via containerd)
-  D->>C: forward to containerd (vsock)
-  C->>S: CreateTask / StartTask (shim v2)
-  S->>B: CreateMicroVM(spec, rootfs, net)
-  B->>V: Boot microVM
-  V->>A: agent starts (vsock listener)
-  S->>A: CreateContainer + Exec (ttrpc/gRPC)
-  A->>A: setup mounts/cgroups inside guest
-  A->>V: launch container process
+  Note over U,R: docker run: a runc container in the System VM
+  U->>P: docker run ... (run/vesper/docker.sock)
+  P->>L: CONNECT 2375
+  L->>D: guest vsock 2375 to /var/run/docker.sock
+  D->>C: create and start task (default runtime)
+  C->>R: start container
   U<<->>P: attach logs/stdin/stdout
+
+  Note over U,G: ctr run --runtime io.containerd.vesper.v2: a microVM per task
+  U->>C: ctr run (through vesper-agent on vsock 1024)
+  C->>S: Create / Start (shim v2 over ttrpc)
+  S->>S: validate bundle, build or reuse ext4 root drive, copy it for the task
+  S->>M: vesper-microvm launch ID --rootfs IMAGE --guest-exec
+  M->>G: boot jailed Firecracker microVM
+  S->>G: RUN config on vsock 1025, stdio on ports from 1028
+  G->>G: runc runs the init process
+  G-->>S: STARTED pid, later EXIT status
+  S-->>C: task state and exit status

@@ -1,36 +1,52 @@
 flowchart TB
   subgraph macOS["macOS Host"]
-    CLI["docker / nerdctl / vesperctl"]
-    PROXY["vesper-proxy\n(Docker socket + port forward)"]
-    VESPERD["vesperd\n(orchestration + APIs)"]
-    STORE["Image+Snapshot Store\n(APFS)"]
-    NET["Host Networking\n(vmnet/NAT/portfw)"]
+    DOCKER["docker CLI"]
+    FCCLIENT["Firecracker API client"]
+    CTL["systemvmctl<br/>(control client + suites)"]
+    PROXY["vesper-proxy<br/>(Docker socket + TCP ports on 127.0.0.1)"]
+    VESPERD["vesperd<br/>(Firecracker API, in-memory state)"]
+    LAUNCHER["vesper-vmlauncher<br/>(Virtualization.framework, vsock bridge socket,<br/>virtio-fs shares, share watcher)"]
   end
 
-  subgraph SYSVM["Vesper System VM (Linux control plane)"]
-    DOCKERD["dockerd (optional)"]
+  subgraph SYSVM["Vesper System VM (Alpine, nested KVM)"]
+    AGENT["vesper-agent<br/>(vsock 1024)"]
+    DRELAY["Docker relay<br/>(vsock 2375)"]
+    PRELAY["vesper-port-relay<br/>(vsock 2400)"]
+    NOTIFY["vesper-share notify<br/>(vsock 2401)"]
+    DOCKERD["dockerd"]
     CONTAINERD["containerd"]
+    RUNC["runc containers<br/>(every Docker container)"]
     SHIM["containerd-shim-vesper-v2"]
+    MICROVM["vesper-microvm<br/>(jailer + stock Firecracker v1.16.0)"]
+
+    subgraph UVM["Workload microVM (one per task)"]
+      SESSION["vesper-microvm-init + vesper-guest-session<br/>(vsock 1025)"]
+      PROC["runc: init and exec processes"]
+    end
   end
 
-  subgraph BACKENDS["MicroVM Backends"]
-    KVMHOST["Backend A: KVMHost\n(stock firecracker inside SYSVM)\nrequires nested virt"]
-    NATIVE["Backend B: Native HVF/VF\nmacOS VMM port"]
-  end
+  NATIVE["Backend B: Native HVF/VF<br/>(not built)"]
 
-  subgraph UVM["Workload MicroVM (per container)"]
-    AGENT["vesper-agent\n(ttrpc/gRPC over vsock)"]
-    PROC["Container Process(es)"]
-  end
+  DOCKER --> PROXY
+  FCCLIENT --> VESPERD
+  PROXY -- "CONNECT port" --> LAUNCHER
+  CTL -- "CONNECT port" --> LAUNCHER
+  LAUNCHER --> AGENT
+  LAUNCHER --> DRELAY
+  LAUNCHER --> PRELAY
+  LAUNCHER -- "changed paths" --> NOTIFY
+  DRELAY --> DOCKERD
+  DOCKERD --> CONTAINERD
+  CONTAINERD -- "default runtime" --> RUNC
+  PRELAY -- "127.0.0.1:port" --> RUNC
+  NOTIFY -- "IN_MODIFY on shares" --> RUNC
+  CONTAINERD -- "runtime io.containerd.vesper.v2 (ctr)" --> SHIM
+  AGENT -- "vesper-workload, vesper-ctr" --> MICROVM
+  SHIM -- "launch / stop / cleanup" --> MICROVM
+  MICROVM --> UVM
+  SHIM -- "RUN / EXEC sessions over vsock" --> SESSION
+  SESSION --> PROC
 
-  CLI --> PROXY
-  PROXY --> VESPERD
-  VESPERD --> STORE
-  VESPERD --> NET
-
-  VESPERD <--> SYSVM
-  SYSVM --> SHIM
-  SHIM --> BACKENDS
-  KVMHOST --> UVM
-  NATIVE --> UVM
-  AGENT --> PROC
+  VESPERD -. "target: Backend A (path to be designed, GH #156)" .-> MICROVM
+  DOCKERD -. "target: Docker containers on the Vesper runtime" .-> SHIM
+  VESPERD -. "target: Backend B" .-> NATIVE

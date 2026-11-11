@@ -6,10 +6,23 @@ last_reviewed: 2026-11-11
 
 # Symphony milestones
 
+### 2026-11-11 — GH-155 — design, parity matrix and specs index brought back in line with the code
+- GitHub issue: #155
+- PR: see the issue
+- Commit: see the issue
+- Phase: governance (all phases)
+- Parity unit: none; documentation truth. `docs/specs/design-v0.md` rewritten from an EGM drift report: as-built text where the code is the intended design, and every unmet requirement kept and labelled with a tracker pointer
+- Result: keep
+- Verification bundle: none (no runtime change); review papers in `run/egm/` (local, not tracked): drift report, four stage reports, requirement audit, consolidated report
+- Council summary: not run (no code path changed). EGM review instead: zoom-out, comprehension, critic (design, structure, style) and a second zoom-out, with remediation after each stage; 4 blockers, 41 majors and 17 nits, all applied. A separate audit checked about 220 requirements of the previous text: none lost after remediation, no number changed
+- Harness update: `docs/design-docs/decision-log.md` rows D-009 to D-018; tech-debt rows TD-045 to TD-052; GH #156 opened for connecting `vesperd` to Backend A, with the questions its ADR must settle; both design diagrams regenerated from their Mermaid sources; stale statements fixed in `ARCHITECTURE.md`, `docs/TESTING.md` and `docs/process/shim-operations.md`
+- Remaining risks: the architecture is coherent for Backend A only; Docker on Backend B is undesigned (D-017). The threat table has no reviewer (TD-051). The parity matrix and specs index were corrected from the drift report but not reviewed stage by stage. No reviewer re-read the design after the final pass
+- Truthful project state after this milestone: Docker commands work from macOS on runc containers in the System VM; microVMs run only for a client that names the Vesper runtime (`ctr`); `vesperd` answers the Firecracker API from memory and drives no microVM; Backend B has no code. Next work, in order: a share-path prototype and the parity reference (both time-boxed), then `vesperd` to Backend A (GH #156), then Docker containers in microVMs (GH #53), then Phase 5 (GH #56)
+
 ### 2026-11-11 — GH-150 — council rework (shutdown hang and host mtime rollback fixed)
 - GitHub issue: #150 (item 3 of #29); Linear mirror WOR-107
-- PR: pending
-- Commit: pending
+- PR: #154
+- Commit: `9c5a865` (squash merge; CI green on the PR head `51fd52e` and on main)
 - Phase: 4
 - Parity unit: the same as the 2026-11-10 entry, made safe: the launcher's share watcher never waits for the guest, and the guest replay no longer moves host mtimes backwards
 - Result: keep

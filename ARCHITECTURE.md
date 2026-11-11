@@ -32,10 +32,12 @@ applies that label to every row or bullet in it.
 Firecracker OpenAPI route set over a Unix socket from an in-memory VM state machine, and every response produced after
 request extraction is either a success or a deterministic envelope carrying the pinned Firecracker baseline
 revision (the pre-extraction exceptions are listed in Invariant 3; [src/api.rs](src/api.rs),
-[src/bin/vesperd.rs](src/bin/vesperd.rs)). The repository today contains that control
-plane, governance tooling, a socket proxy, and System VM scaffolding. It does not yet run guest microVMs.
+[src/bin/vesperd.rs](src/bin/vesperd.rs)). The repository also contains governance
+tooling, a socket proxy, the System VM with its Swift launcher, and the Go containerd shim. Firecracker microVMs run
+in the System VM through the shim and the guest scripts, but not through `vesperd`: the control plane has no backend
+connection yet (TD-045, GH #156), and Docker containers run on runc.
 
-**Intended** (per [design-v0](docs/specs/design-v0.md#backends-how-we-guarantee-parity)): parity is reached through
+**Intended** (per [design-v0](docs/specs/design-v0.md#backends)): parity is reached through
 staged backends. Backend A (`Vesper-KVMHost`) runs stock Firecracker inside a System VM, a Linux guest booted by
 Virtualization.framework that hosts containerd and Firecracker, because Firecracker needs KVM and macOS has none;
 the guest supplies KVM through nested virtualization on M3 and later hosts, per design-v0.
@@ -318,7 +320,7 @@ or parity documents.
 | # | Invariant | Status | Enforced by | Verify with | See |
 |---|---|---|---|---|---|
 | 1a | `vesperd` is the only binary that serves the control-plane API; `vesper-proxy` is the only other host-visible socket and only relays bytes (plus the vsock `CONNECT` preface) | Verified | Review only; no mechanical check (TD-008) | `grep -n 'UnixListener::bind' src/bin/vesperd.rs src/proxy.rs` (expect 1 hit in `vesperd.rs` and 3 in `proxy.rs`, of which the two inside the `#[cfg(test)]` module are test fixtures) | [src/bin/vesperd.rs](src/bin/vesperd.rs), [src/proxy.rs](src/proxy.rs) |
-| 1b | Raw Firecracker and containerd sockets stay private to the System VM | Verified | The guest exposes only vsock 1024 (agent) and 2375 (Docker relay); `make docker-smoke` enumerates host sockets and expects a refused `CONNECT` to a port without a listener | `make systemvm-up && make docker-up && make docker-smoke` (steps `no_raw_host_sockets`, `raw_guest_port_denied`) | [design-v0](docs/specs/design-v0.md#security-model-firecrackerequivalent-hardening-on-macos), [docs/SECURITY.md](docs/SECURITY.md) |
+| 1b | Raw Firecracker and containerd sockets stay private to the System VM | Verified | The guest listens on vsock 1024 (agent), 2375 (Docker relay), 2400 (port relay) and 2401 (share notification sink), none of which reaches Firecracker or containerd; `make docker-smoke` enumerates host sockets and expects a refused `CONNECT` to a port without a listener | `make systemvm-up && make docker-up && make docker-smoke` (steps `no_raw_host_sockets`, `raw_guest_port_denied`) | [design-v0](docs/specs/design-v0.md#security-model), [docs/SECURITY.md](docs/SECURITY.md) |
 | 2 | Intra-crate single-path references in the 22 `RULES` files follow the layer table | Verified | `RULES` in `check_structure.py`, run by `harness-structure.yml` on `src/**` changes; a new module needs a `RULES` row (TD-018) | `python3 scripts/harness/check_structure.py --root .` | [scripts/harness/check_structure.py](scripts/harness/check_structure.py) |
 | 3 | Every error response produced by `handle_all` is an `ErrorEnvelope` with the pinned baseline revision. Exceptions before extraction: a body over axum's default 2 MiB limit gets a plain `413`, a body-read failure gets a plain `400`, and a poisoned `RwLock` panics the task (TD-019) | Verified | `AppState::new_with_matrix` rejects a blank revision; `tests/api_contract.rs` asserts envelopes; `rust-tests.yml` runs `cargo test` for every `src/**` change | `make contract-test` | [tests/api_contract.rs](tests/api_contract.rs) |
 | 4 | The golden route list equals `contractgen`'s serialisation of the pinned swagger | Verified | `contractgen --mode check` and `tests/contract_golden.rs` in `contract-tests.yml`; `tests/**` changes are covered by `rust-tests.yml` | `make contract-check` | [tests/contract_golden.rs](tests/contract_golden.rs) |

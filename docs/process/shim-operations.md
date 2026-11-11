@@ -26,9 +26,9 @@ IMAGE ID CMD` (from the host: `systemvmctl control ctr run NAME WORDS…`). Dock
 | Check | Command | Expect |
 |---|---|---|
 | Whole runtime contract | `make ctr-conformance` | `ctr conformance passed (74 steps, …)` and `run/systemvm/ctr-conformance-report.json` |
-| Task lifecycle only | `make systemvm-shim-suite` | 21 steps incl. `task_metrics` |
+| Task lifecycle only | `make systemvm-shim-suite` | 22 steps incl. `task_metrics` |
 | Exec, streams and terminals | `make systemvm-exec-suite` | 19 steps, including signals and resize |
-| Root drive cache | `make systemvm-bundle-suite` | 16 steps |
+| Root drive cache | `make systemvm-bundle-suite` | 15 steps |
 | Restart behaviour | `make systemvm-restart-suite` | 18 steps |
 | Committed capture still valid | `make ctr-conformance-check` | `ctr conformance report valid` (also run by the `ctr Conformance` workflow) |
 
