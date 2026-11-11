@@ -32,6 +32,8 @@ start() {
       echo "vesper: networking failed to start" > /dev/console
       exit 1
     fi
+    # The persistent data disk (GH #164) must be mounted before containerd and dockerd open their state.
+    echo "vesper: $(/usr/local/bin/vesper-data mount 2>&1 | tail -1)" > /dev/console
     for svc in containerd docker; do
       if out="$(rc-service "$svc" start 2>&1)"; then
         echo "vesper: service $svc started" > /dev/console
@@ -49,6 +51,7 @@ stop() {
   ebegin "Stopping Vesper runtime services"
   env -i PATH=/sbin:/usr/sbin:/bin:/usr/bin rc-service docker stop >/dev/null 2>&1 || true
   env -i PATH=/sbin:/usr/sbin:/bin:/usr/bin rc-service containerd stop >/dev/null 2>&1 || true
+  /usr/local/bin/vesper-data stop >/dev/null 2>&1 || true
   rm -f /run/vesper/services-ready
   eend 0
 }

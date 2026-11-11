@@ -25,7 +25,11 @@ errors to stderr and exits with code 1 on failure.
   `vesper::api::AppState::new_with_matrix`, and `AppState::router`.
   `shutdown_signal` resolves on Ctrl-C or SIGTERM.
 - `systemvmctl launch-config --share PATH[:ro][:nowatch]` (repeatable; read-write shares get `watch: true` unless `:nowatch`, GH #150) adds `shared_directories` to the written config;
-  `systemvmctl control share <args…>` runs `vesper-share` in the guest; `control arch status|mode ARCH` runs
+  `systemvmctl launch-config --data-disk PATH` (absolute path to a disk image on macOS, GH #164) sets
+  `data_disk_path` and appends `vesper_data=/dev/vdX` to the kernel command line
+  (`vesper::systemvm::attach_data_disk`);
+  `systemvmctl control share <args…>` runs `vesper-share` in the guest; `control data mount|status|stop` runs
+  `vesper-data` (the persistent data disk); `control arch status|mode ARCH` runs
   `vesper-arch` (execution mode per architecture).
 - `vesper-proxy.rs:main` (binary `vesper-proxy`, `#[tokio::main]`). `--publish-ports` adds the GH #28
   publisher (`--relay-port` default 2400, `--ports-status` default `run/vesper/ports.json`); it needs a vsock
@@ -99,7 +103,7 @@ errors to stderr and exits with code 1 on failure.
   script substitutes the launcher and the lock's threshold). Calls `vesper::systemvm::{build_manifest, write_manifest,
   default_launch_config, launch_config_from_lock, write_launch_config,
   load_image_lock, image_lock_env, verify_image, load_packages_lock,
-  packages_list, verify_packages, run_boot_check}` and
+  packages_list, verify_packages, run_boot_check, attach_data_disk}` and
   `vesper::control::{connect, run_suite, write_report, ControlEndpoint}`.
 
 Subdirectories: none.

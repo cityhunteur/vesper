@@ -55,6 +55,8 @@ struct LaunchConfig: Decodable {
     let memory_mib: UInt64
     let console_log_path: String
     let shared_directories: [SharedDirectory]?
+    /// Persistent data disk image on macOS, attached writable after the boot media and rootfs (GH #164).
+    let data_disk_path: String?
 }
 
 struct Options {
@@ -252,8 +254,8 @@ func buildConfiguration(_ config: LaunchConfig, consoleOutput: FileHandle, conso
     }
     vm.directorySharingDevices = shares
 
-    // Block devices in order: boot media (read-only) first, then the writable rootfs, so the
-    // kernel command line can name them as /dev/vda and /dev/vdb.
+    // Block devices in order: boot media (read-only) first, then the writable rootfs, then the writable
+    // data disk, so the kernel command line can name them as /dev/vda, /dev/vdb and so on.
     var disks: [VZStorageDeviceConfiguration] = []
     if let media = config.boot_media_path, !media.isEmpty {
         do {
@@ -271,6 +273,17 @@ func buildConfiguration(_ config: LaunchConfig, consoleOutput: FileHandle, conso
             disks.append(VZVirtioBlockDeviceConfiguration(attachment: attachment))
         } catch {
             fail(3, "cannot attach rootfs \(rootfs): \(error)")
+        }
+    }
+    if let data = config.data_disk_path, !data.isEmpty {
+        do {
+            // Cached access with full sync: the System VM's ext4 journal and fsync must reach the disk image.
+            let attachment = try VZDiskImageStorageDeviceAttachment(
+                url: requireFile(data, "data disk"), readOnly: false, cachingMode: .cached,
+                synchronizationMode: .full)
+            disks.append(VZVirtioBlockDeviceConfiguration(attachment: attachment))
+        } catch {
+            fail(3, "cannot attach data disk \(data): \(error)")
         }
     }
     vm.storageDevices = disks

@@ -30,8 +30,8 @@ Public symbols by file:
 
 - `lib.rs`: `pub mod api, api_behavior_matrix, api_matrix, baseline,
   buildinfo, compat, control, platform, proxy, spec, systemvm`. `systemvm.rs` declares
-  the private children `systemvm/image_lock.rs` and `systemvm/packages.rs`
-  and re-exports them, so every symbol below is reachable as
+  the private children `systemvm/data_disk.rs`, `systemvm/image_lock.rs` and
+  `systemvm/packages.rs` and re-exports them, so every symbol below is reachable as
   `vesper::systemvm::*`.
 - `api.rs:ErrorEnvelope` `{ fault_message, code, path, method,
   baseline_firecracker_revision }`; `api.rs:OperationStatus`
@@ -106,8 +106,14 @@ Public symbols by file:
   (serde default, omitted when empty); `shared_directories_from_specs(&[String])` turns `PATH[:ro][:nowatch]`
   into tags `share0`, `share1`, … and rejects relative paths or non-directories. `watch` (GH #150, serde
   default false) is true for a read-write share unless the spec ends in `:nowatch`; never for `:ro`.
+- `systemvm/data_disk.rs` (GH #164): `LaunchConfig.data_disk_path` (serde default, omitted when `None`, so
+  configs without it still parse); `attach_data_disk(&mut LaunchConfig, path)` sets it and appends
+  `vesper_data=<device>` to `kernel_cmdline`, rejecting a relative path or a second disk;
+  `data_disk_device(&LaunchConfig)` is the next virtio block device after the boot media and the rootfs
+  (`/dev/vda`, `/dev/vdb` or `/dev/vdc`); constant `DATA_DISK_LABEL` (`vesper-data`), the ext4 label the guest
+  formats an empty disk with.
 - `control.rs:Session::share(args)` runs `vesper-share` in the guest (same shape as the other guest tools);
-  `Session::arch(args)` runs `vesper-arch`.
+  `Session::data(args)` runs `vesper-data` (agent command `DATA`); `Session::arch(args)` runs `vesper-arch`.
 - `ports.rs`: `PortsConfig { docker_socket, bridge_path, relay_port, status_path, bind_ip }` (`Default`:
   `run/vesper/docker.sock`, `run/systemvm/vsock/3.sock`, 2400, `run/vesper/ports.json`, 127.0.0.1);
   `parse_bindings(inspect) -> Vec<Binding>` (`NetworkSettings.Ports`, IPv6 twins of a `0.0.0.0` binding
@@ -151,7 +157,7 @@ Public symbols by file:
   kernel_path, rootfs_path?, initrd_path?, boot_media_path?, kernel_cmdline,
   ready_pattern, max_boot_ms?, probe?: ProbeSettings, vsock_bridge_path?,
   agent_port?, nested_virtualization?, network_mode, cpu_count, memory_mib,
-  console_log_path }`, `ProbeSettings { login_user, shell_prompt,
+  console_log_path, shared_directories, data_disk_path? }`, `ProbeSettings { login_user, shell_prompt,
   commands, success_pattern, shutdown_command }` with `validate()`,
   `LaunchInputs` (borrowed inputs for `default_launch_config`),
   `BootCheckConfig { …, max_boot_ms: Option }`, `BootCheckReport {

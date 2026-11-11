@@ -41,6 +41,8 @@ There is no `.env` file. The binaries take flags, not environment variables; see
 |---|---|---|---|
 | `VESPER_GIT_COMMIT`, `VESPER_BUILD_DATE` | Baked into `buildinfo` at compile time | no | `unknown` when unset ([src/buildinfo.rs](../src/buildinfo.rs)) |
 | `VESPER_SHARES` | Host directories to share into the System VM over virtio-fs, space-separated `PATH`, `PATH:ro` or `PATH:nowatch` (no inotify replay of host edits, GH #150); read by `make systemvm-launch-config` | no | empty |
+| `VESPER_DATA_DISK` | Persistent System VM data disk image on macOS (GH #164); a relative path is taken from the repository root; `none` attaches no disk, so the System VM keeps its state in tmpfs. Created sparse on first use; delete it with the System VM stopped to reset all container state ([systemvm-bringup.md](process/systemvm-bringup.md#persistent-data-disk-gh-164)); read by `make systemvm-launch-config` | no | `run/systemvm/data.img` |
+| `VESPER_DATA_DISK_GIB` | Size in GiB of a data disk image that `make systemvm-launch-config` creates; an existing image is never resized | no | `64` |
 | `VALIDATE_ENTITLEMENTS_FORCE_PYTHON` | Force the Python plist validator | no | `0` |
 | `REPO` | Target repo for `scripts/update-issue-checklists.sh` | no | `cityhunteur/vesper` |
 | `VESPER_ISSUE_ID`, `VESPER_RUN_DIR`, `VESPER_BUNDLE_DIR` | Exported by the `env.sh` that `scripts/harness/init_issue_run.sh` writes | no | per issue |

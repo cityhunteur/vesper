@@ -79,9 +79,10 @@ To add a package: run `python3 -I scripts/systemvm/resolve-apks.py` with the thr
 3. Generate the NAT-default launch configuration from the lock:
    `make systemvm-launch-config` (runs `systemvmctl launch-config --from-lock --dir build/systemvm`), which writes
    `build/systemvm/launch-config.json` with the kernel, the derived initramfs, boot media, command line and ready
-   pattern.
+   pattern, and attaches the persistent data disk, creating it on first use
+   ([Persistent data disk](#persistent-data-disk-gh-164)).
    Explicit inputs: `cargo run --bin systemvmctl -- launch-config --kernel <path> [--initrd <path>] [--rootfs <path>]
-   [--boot-media <path>] [--cmdline <text>] [--ready-pattern <text>] --console-log run/systemvm/console.log --out
+   [--boot-media <path>] [--cmdline <text>] [--ready-pattern <text>] [--data-disk <absolute path>] --console-log run/systemvm/console.log --out
    build/systemvm/launch-config.json`. With no `--cmdline` the line is `console=hvc0`, plus ` root=/dev/vda rw`
    (or `/dev/vdb` behind boot media) when a rootfs is given.
 
@@ -168,6 +169,54 @@ for each service: healthy at boot, `KILL` (SIGKILL), recovery judged by `HEALTH`
 `/var/log/<svc>.log` plus `supervise-daemon` lines in `/var/log/messages` as evidence; it writes
 `run/systemvm/services-report.json`. On 2026-11-06 (M3): both recovered in under 600 ms; the login prompt stays
 at about 2.2 s.
+
+## Persistent data disk (GH #164)
+
+The System VM's root is a tmpfs, but its state lives on a data disk: a raw image on macOS that the guest formats
+as ext4. What persists across `make systemvm-down` and `make systemvm-up`: `/var/lib/docker` (images, containers,
+volumes), `/var/lib/containerd`, and the Vesper state directories `/var/lib/vesper/rootfs`,
+`/var/lib/vesper/rootfs-cache` (the microVM root-drive cache), `/var/lib/vesper/workloads` and
+`/var/lib/vesper/state`. What does not: the packages, which are still reinstalled into the tmpfs root on every
+boot, and anything else outside those directories, such as task bundles under `/run/containerd` and the jails
+under `/srv/jailer` (TD-025).
+
+- Creation: `make systemvm-launch-config` (`scripts/systemvm/generate-launch-config.sh`, from-lock mode) uses
+  `VESPER_DATA_DISK`, default `run/systemvm/data.img`; a relative path is taken from the repository root. A
+  missing image is created sparse with `VESPER_DATA_DISK_GIB` GiB (default 64) and mode 0600; an existing image is
+  never changed. The script passes `--data-disk <absolute path>` to `systemvmctl launch-config`, which sets
+  `data_disk_path` in the launch config and appends `vesper_data=/dev/vdX` to the kernel command line: the next
+  virtio block device after the boot media and the rootfs, `/dev/vdb` with the pinned image. The launcher attaches
+  the image writable, with cached access and full synchronisation, and exits 3 when the file is missing.
+- First boot and later boots: `vesper-services` runs `vesper-data mount` before it starts containerd and dockerd.
+  An empty disk is formatted ext4 with label `vesper-data` (lazy init, about a second); a disk labelled
+  `vesper-data` is mounted without formatting. The disk is mounted at `/var/lib/vesper-data` and each persistent
+  directory is bind-mounted onto it. The console shows `vesper: DATA formatted /dev/vdb` or
+  `vesper: DATA mounted /dev/vdb`. When the services stop, `vesper-data stop` syncs and unmounts the disk.
+- Refusal: a disk with any other filesystem or label is never formatted. The console shows
+  `vesper: DATA refused <dev> <reason>` (for example `foreign:ext4:other-label`) and the System VM keeps its state in
+  tmpfs, as before GH #164; Docker still works but nothing survives the next reboot.
+- Status: `cargo run --bin systemvmctl -- control data status` prints the outcome of the last mount
+  (`DATA formatted|mounted <dev>`, `DATA absent` or `DATA refused <dev> <reason>`, kept in `/run/vesper/data-state`)
+  and, while the disk is mounted, `used=` and `avail=` in KiB.
+- Reset: stop the System VM (`make systemvm-down`), delete the image
+  (`rm run/systemvm/data.img`), then `make systemvm-launch-config` and `make systemvm-up`. This deletes every image,
+  container, volume and cached root drive; the next boot formats a new disk.
+- Turn it off: `VESPER_DATA_DISK=none make systemvm-launch-config` writes a config without a data disk; the guest
+  prints `vesper: DATA absent` and keeps everything in tmpfs (the behaviour before GH #164). The tmpfs has about
+  600 MiB free, too little for large images such as the upstream Firecracker test container.
+- Space: the image is sparse, so it uses only what the guest has written (about 18 MB on macOS after formatting a
+  64 GiB image). It is not trimmed when the guest deletes data, and the root-drive cache is never pruned (TD-035),
+  so the file grows over time. A larger size applies only to a new image.
+
+`make data-disk-suite` (`scripts/systemvm/data-disk-suite.sh`, 9 steps; needs `make docker-up`) restarts the System
+VM itself four times and leaves it running on the default disk. It checks that the disk is in use and holds the
+state directories, that the second boot mounts without formatting, that an image, a stopped container and a named
+volume survive a reboot, that the launcher is ready within 5000 ms with the disk mounted, that a disk relabelled
+by the suite is refused and keeps its label, and that Docker works with the disk refused. It writes
+`run/systemvm/data-disk-report.json`. On 2026-11-11 (M3 Pro): 9/9, ready in 2.7 s with the disk mounted.
+
+With the disk the upstream Firecracker test container (`public.ecr.aws/firecracker/fcuvm`, 1.31 GiB compressed for
+arm64) has room to be pulled, which the CE-0001 feasibility run needs (decision D-017).
 
 ## Docker ingress (GH #15)
 

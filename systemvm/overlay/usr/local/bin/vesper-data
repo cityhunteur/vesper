@@ -1,0 +1,80 @@
+#!/bin/sh
+# Persistent data disk for the System VM (GH #164, TD-025). The launcher attaches a sparse disk image from macOS as
+# a writable block device and names it on the kernel command line as vesper_data=/dev/vdX. This formats it as
+# ext4 on first use (label vesper-data), mounts it, and bind-mounts the state directories onto it so containerd,
+# dockerd and the Vesper tools keep their data across boots. A disk with any other filesystem or label is never
+# formatted: the System VM then keeps its state in tmpfs, as before.
+# usage: vesper-data mount     DATA mounted|formatted <dev> | DATA absent | DATA refused <dev> <reason> | ERR ...
+#        vesper-data status    DATA <state> [<dev>] used=<KiB> avail=<KiB>   (state from the last mount)
+#        vesper-data stop      sync and unmount; DATA stopped
+set -u
+LABEL=vesper-data
+MNT=/var/lib/vesper-data
+STATE=/run/vesper/data-state
+# Directories kept on the disk. /var/lib/vesper itself also holds the overlay's package archives, so only its
+# state subdirectories move.
+DIRS="/var/lib/docker /var/lib/containerd /var/lib/vesper/rootfs /var/lib/vesper/rootfs-cache /var/lib/vesper/workloads /var/lib/vesper/state"
+
+device() { sed -n 's/.*vesper_data=\(\/dev\/[a-z0-9]*\).*/\1/p' /proc/cmdline; }
+record() { mkdir -p /run/vesper; echo "$*" > "$STATE"; echo "DATA $*"; }
+
+# Prints the filesystem type and label of $1 as "<type> <label>", or "none" when blkid finds no filesystem.
+probe() {
+  out=$(blkid "$1" 2>/dev/null)
+  [ -n "$out" ] || { echo none; return; }
+  t=$(printf '%s' "$out" | sed -n 's/.* TYPE="\([^"]*\)".*/\1/p')
+  l=$(printf '%s' "$out" | sed -n 's/.* LABEL="\([^"]*\)".*/\1/p')
+  echo "${t:-unknown} ${l:-}"
+}
+
+mount_() {
+  dev=$(device)
+  [ -n "$dev" ] || { record absent; return 0; }
+  for _ in 1 2 3 4 5 6 7 8 9 10; do [ -b "$dev" ] && break; sleep 0.2; done
+  [ -b "$dev" ] || { record refused "$dev" no-device; return 1; }
+  grep -q " $MNT " /proc/mounts && { record mounted "$dev"; return 0; }
+  modprobe -q ext4 2>/dev/null
+  how=mounted
+  set -- $(probe "$dev")
+  case "$1 ${2:-}" in
+    "none ")
+      # First use: the image is all zeros. Lazy init keeps this to about a second for a sparse image.
+      mkfs.ext4 -q -F -L "$LABEL" -E lazy_itable_init=1,lazy_journal_init=1 "$dev" >/dev/null 2>&1 \
+        || { record refused "$dev" mkfs-failed; return 1; }
+      how=formatted ;;
+    "ext4 $LABEL") ;;
+    *) record refused "$dev" "foreign:$1:${2:-}"; return 1 ;;
+  esac
+  mkdir -p "$MNT"
+  mount -t ext4 -o noatime "$dev" "$MNT" || { record refused "$dev" mount-failed; return 1; }
+  for d in $DIRS; do
+    sub="$MNT/$(echo "$d" | sed 's|^/var/lib/||; s|/|-|g')"
+    mkdir -p "$sub" "$d"
+    mount --bind "$sub" "$d" || { record refused "$dev" "bind-failed:$d"; return 1; }
+  done
+  record "$how" "$dev"
+}
+
+status() {
+  st=$(cat "$STATE" 2>/dev/null || echo unknown)
+  if grep -q " $MNT " /proc/mounts; then
+    set -- $(df -k "$MNT" | awk 'NR==2 {print $3, $4}')
+    echo "DATA $st used=$1 avail=$2"
+  else
+    echo "DATA $st"
+  fi
+}
+
+stop() {
+  sync
+  for d in $DIRS; do grep -q " $d " /proc/mounts && umount "$d" 2>/dev/null; done
+  grep -q " $MNT " /proc/mounts && umount "$MNT" 2>/dev/null
+  echo "DATA stopped"
+}
+
+case "${1:-}" in
+  mount) mount_ ;;
+  status) status ;;
+  stop) stop ;;
+  *) echo "ERR usage: vesper-data mount|status|stop"; exit 2 ;;
+esac
