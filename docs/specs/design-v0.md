@@ -575,7 +575,7 @@ The status of each item is the status of what decides it.
 | All parity tests pass against the Linux baseline | [Parity harness](#parity-harness) (CE-0003, GH #87) |
 | Backend A meets parity GA on M3 and later, with no open compat exception | [compat-exceptions.yaml](compat-exceptions.yaml) (CE-0001, CE-0003, CE-0004) |
 | Backend B parity status is published: full parity, or a gap list with owners and dates | [Phase 5](#phase-5-backend-b) (GH #56) |
-| The baseline lock is current and cited in test reports | [Normative baselines](#normative-baselines) (GH #162; the committed parity and ctr captures still cite the previous pin until they are re-captured) |
+| The baseline lock is current and cited in test reports | [Normative baselines](#normative-baselines) (GH #162; both committed captures re-taken at the new pin on 2026-11-11) |
 | The Docker replacement suite passes: compose, bind mounts, exec, logs | [Phase 4](#phase-4-docker-desktop-experience-on-macos) (GH #53) |
 | A 24-hour soak with 100 containers in mixed life cycles ends with zero unrecoverable daemon failures | TD-047 |
 | Performance thresholds are defined and met | [Performance thresholds](#performance-thresholds) (CE-0003, TD-033) |
