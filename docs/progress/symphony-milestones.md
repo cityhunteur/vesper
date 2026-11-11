@@ -6,6 +6,19 @@ last_reviewed: 2026-11-11
 
 # Symphony milestones
 
+### 2026-11-11 — GH-159 — prototype of a share path into a microVM (outcome partial)
+- GitHub issue: #159 (TD-049); follow-up #160
+- PR: see the issue
+- Commit: see the issue
+- Phase: 4
+- Parity unit: none (time-boxed prototype, no product change). Finds whether a macOS share can reach a Firecracker microVM with the bind-mount behaviour of the Docker path
+- Result: keep (outcome partial, decision D-020)
+- Verification bundle: none; transcripts and scripts in `run/GH-159/` (local, not tracked)
+- Council summary: not run (no code path changed)
+- Harness update: none. Before the prototype, `make binds-suite` passed 20/20 with the 500 ms latency bound set by #154 (76 ms measured)
+- Remaining risks: single runs on one machine; one unexplained missing line in the first microVM run (not reproduced by a dedicated integrity test); the `unfs3` dependency needs the owner (GH #160); NFS must be kept away from containers on the Docker bridge
+- Truthful project state after this milestone: no share reaches a microVM in the product. NFSv3 from userspace `unfs3` over a TAP device is shown to work with deviations (`stat` visibility up to 1 s, I/O 3 to 11 times slower, events need one more replay hop); the kernel `nfsd` and a block image are ruled out
+
 ### 2026-11-11 — GH-155 — design, parity matrix and specs index brought back in line with the code
 - GitHub issue: #155
 - PR: see the issue
