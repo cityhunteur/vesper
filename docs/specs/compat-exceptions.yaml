@@ -13,7 +13,7 @@ exceptions:
       confidence comes from the API conformance subset in vesper-fcparity (version, instance state, machine
       and VM config, pause/resume, full snapshot while paused, deterministic 400 faults, SIGTERM stop) run
       against the stock release binary inside the System VM. Resolve by running the upstream suite at the
-      pinned revision inside the System VM (Phase 5 parity gate).
+      pinned revision inside the System VM (the Phase 2 stage gate; decision D-014 defines the pass set).
   - id: CE-0002
     owner: cityhunteur
     issue: 21
