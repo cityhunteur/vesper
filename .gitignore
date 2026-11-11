@@ -8,6 +8,11 @@
 !/run/WOR-*/api/
 /run/WOR-*/api/*
 !/run/WOR-*/api/*-endpoint-baseline-packet.md
+!/run/GH-*/
+/run/GH-*/*
+!/run/GH-*/api/
+/run/GH-*/api/*
+!/run/GH-*/api/*-endpoint-baseline-packet.md
 !/run/WOR-20/
 /run/WOR-20/*
 !/run/WOR-20/api/

@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "firecracker_revision": "083c4cf69281178acc910f7f857f88e69c51d3b5",
-  "firecracker_version": "1.16.0-dev",
+  "firecracker_revision": "d83d72b710361a10294480131377b1b00b163af8",
+  "firecracker_version": "1.16.0",
   "source": {
     "baseline_lock": "docs/specs/design-v0.baselines.lock.yaml",
     "swagger": "third_party/firecracker/firecracker.yaml",
@@ -201,6 +201,17 @@
     {
       "method": "PATCH",
       "path": "/network-interfaces/{iface_id}",
+      "semantics": "PO",
+      "stub_response": {
+        "status_code": 501,
+        "code": "NotImplemented",
+        "message": "operation not implemented"
+      },
+      "baseline_capture": "not_applicable"
+    },
+    {
+      "method": "PATCH",
+      "path": "/pmem/{id}",
       "semantics": "PO",
       "stub_response": {
         "status_code": 501,

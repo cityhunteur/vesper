@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "firecracker_revision": "083c4cf69281178acc910f7f857f88e69c51d3b5",
-  "firecracker_version": "1.16.0-dev",
+  "firecracker_revision": "d83d72b710361a10294480131377b1b00b163af8",
+  "firecracker_version": "1.16.0",
   "source": {
     "baseline_lock": "docs/specs/design-v0.baselines.lock.yaml",
     "swagger": "third_party/firecracker/firecracker.yaml",
@@ -1807,6 +1807,72 @@
     },
     {
       "method": "PATCH",
+      "path": "/pmem/{id}",
+      "semantics": "PO",
+      "behavior_path": "concrete_handler",
+      "capture_state": "captured_in_repo",
+      "cases": [
+        {
+          "id": "preboot_invalid_state",
+          "arch": "any",
+          "when": "Patch a pmem device before boot with a valid body",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidState",
+          "message": "The requested operation is not supported before starting the microVM.",
+          "evidence_files": [
+            "run/GH-162/api/baseline-v1.16.0-endpoint-baseline-packet.md"
+          ]
+        },
+        {
+          "id": "patch_rate_limiter_runtime",
+          "arch": "any",
+          "when": "Patch the rate limiter of an existing pmem device after boot",
+          "status_code": 204,
+          "outcome": "no_content",
+          "evidence_files": [
+            "run/GH-162/api/baseline-v1.16.0-endpoint-baseline-packet.md"
+          ]
+        },
+        {
+          "id": "id_mismatch_runtime",
+          "arch": "any",
+          "when": "Patch a pmem device after boot with a path/body id mismatch",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidRequest",
+          "message": "The id from the path does not match the id from the body!",
+          "evidence_files": [
+            "run/GH-162/api/baseline-v1.16.0-endpoint-baseline-packet.md"
+          ]
+        },
+        {
+          "id": "missing_device_runtime",
+          "arch": "any",
+          "when": "Patch the rate limiter of a pmem device that does not exist after boot",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidRequest",
+          "message": "Pmem config error: Unable to patch the pmem device: Failed perform action on device: Device not found Please verify the request arguments.",
+          "evidence_files": [
+            "run/GH-162/api/baseline-v1.16.0-endpoint-baseline-packet.md"
+          ]
+        },
+        {
+          "id": "missing_device_without_rate_limiter_runtime",
+          "arch": "any",
+          "when": "Patch a pmem device that does not exist after boot with no rate limiter in the body",
+          "status_code": 204,
+          "outcome": "no_content",
+          "evidence_files": [
+            "run/GH-162/api/baseline-v1.16.0-endpoint-baseline-packet.md"
+          ]
+        }
+      ],
+      "capture_note": "Pins the concrete-handler `PATCH /pmem/{id}` preboot invalid-state rejection plus the runtime rate-limiter update, path/body id mismatch and missing-device surface from the pinned Firecracker controller behavior."
+    },
+    {
+      "method": "PATCH",
       "path": "/vm",
       "semantics": "Any",
       "behavior_path": "concrete_handler",
@@ -1886,6 +1952,32 @@
           "message": "Cannot start microvm without kernel configuration.",
           "evidence_files": [
             "run/WOR-20/api/step29-upstream-actions-baseline.md"
+          ]
+        },
+        {
+          "id": "instance_start_pmem_missing_backing_file",
+          "arch": "any",
+          "when": "InstanceStart before boot with a stored pmem device whose backing file does not exist",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidRequest",
+          "message": "Start microvm error: Cannot create pmem device: Error accessing backing file: No such file or directory (os error 2)",
+          "evidence_files": [
+            "run/WOR-20/api/step63-upstream-pmem-backing-file-baseline.md",
+            "run/GH-162/api/baseline-v1.16.0-endpoint-baseline-packet.md"
+          ]
+        },
+        {
+          "id": "instance_start_pmem_zero_sized_backing_file",
+          "arch": "any",
+          "when": "InstanceStart before boot with a stored pmem device whose backing file is empty",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidRequest",
+          "message": "Start microvm error: Cannot create pmem device: Error backing file size is 0",
+          "evidence_files": [
+            "run/WOR-20/api/step63-upstream-pmem-backing-file-baseline.md",
+            "run/GH-162/api/baseline-v1.16.0-endpoint-baseline-packet.md"
           ]
         },
         {
@@ -2040,6 +2132,18 @@
       "behavior_path": "concrete_handler",
       "capture_state": "captured_in_repo",
       "cases": [
+        {
+          "id": "postboot_pci_not_enabled",
+          "arch": "any",
+          "when": "Store a drive after boot with a valid body in a process started without PCI",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidRequest",
+          "message": "PCI is not enabled",
+          "evidence_files": [
+            "run/GH-162/api/baseline-v1.16.0-endpoint-baseline-packet.md"
+          ]
+        },
         {
           "id": "put_valid_preboot",
           "arch": "any",
@@ -2405,6 +2509,18 @@
       "capture_state": "captured_in_repo",
       "cases": [
         {
+          "id": "postboot_pci_not_enabled",
+          "arch": "any",
+          "when": "Store a network interface after boot with a valid body in a process started without PCI",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidRequest",
+          "message": "PCI is not enabled",
+          "evidence_files": [
+            "run/GH-162/api/baseline-v1.16.0-endpoint-baseline-packet.md"
+          ]
+        },
+        {
           "id": "id_mismatch_preboot",
           "arch": "any",
           "when": "Store a network interface before boot with a path/body id mismatch",
@@ -2449,6 +2565,28 @@
           "evidence_files": [
             "run/WOR-20/api/step62-upstream-network-create-conflict-baseline.md"
           ]
+        },
+        {
+          "id": "mtu_below_minimum_preboot",
+          "arch": "any",
+          "when": "Store a network interface before boot with `mtu` 67",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidRequest",
+          "message": "Network config error: Could not create the network device: MTU 67 is out of range [68, 65535]",
+          "evidence_files": [
+            "run/GH-162/api/baseline-v1.16.0-endpoint-baseline-packet.md"
+          ]
+        },
+        {
+          "id": "mtu_bounds_preboot",
+          "arch": "any",
+          "when": "Store network interfaces before boot with `mtu` 68 and 65535",
+          "status_code": 204,
+          "outcome": "no_content",
+          "evidence_files": [
+            "run/GH-162/api/baseline-v1.16.0-endpoint-baseline-packet.md"
+          ]
         }
       ],
       "capture_note": "Pins the current concrete-handler `PUT /network-interfaces/{iface_id}` preboot store success and conflict surface from the pinned Firecracker controller behavior."
@@ -2461,6 +2599,18 @@
       "capture_state": "captured_in_repo",
       "cases": [
         {
+          "id": "postboot_pci_not_enabled",
+          "arch": "any",
+          "when": "Store a pmem device after boot with a valid body in a process started without PCI",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidRequest",
+          "message": "PCI is not enabled",
+          "evidence_files": [
+            "run/GH-162/api/baseline-v1.16.0-endpoint-baseline-packet.md"
+          ]
+        },
+        {
           "id": "put_valid_preboot",
           "arch": "any",
           "when": "Store a valid pmem configuration before boot",
@@ -2471,27 +2621,23 @@
           ]
         },
         {
-          "id": "missing_backing_file",
+          "id": "missing_backing_file_stored",
           "arch": "any",
           "when": "Store a pmem configuration before boot with a missing backing file path",
-          "status_code": 400,
-          "outcome": "error_envelope",
-          "code": "InvalidRequest",
-          "message": "Pmem device error: Unable to create the virtio-pmem device: Error accessing backing file: No such file or directory (os error 2)",
+          "status_code": 204,
+          "outcome": "no_content",
           "evidence_files": [
-            "run/WOR-20/api/step63-upstream-pmem-backing-file-baseline.md"
+            "run/GH-162/api/baseline-v1.16.0-endpoint-baseline-packet.md"
           ]
         },
         {
-          "id": "zero_sized_backing_file",
+          "id": "put_with_rate_limiter_preboot",
           "arch": "any",
-          "when": "Store a pmem configuration before boot with a zero-sized backing file",
-          "status_code": 400,
-          "outcome": "error_envelope",
-          "code": "InvalidRequest",
-          "message": "Pmem device error: Unable to create the virtio-pmem device: Error backing file size is 0",
+          "when": "Store a pmem configuration before boot with a bandwidth and ops rate limiter",
+          "status_code": 204,
+          "outcome": "no_content",
           "evidence_files": [
-            "run/WOR-20/api/step63-upstream-pmem-backing-file-baseline.md"
+            "run/GH-162/api/baseline-v1.16.0-endpoint-baseline-packet.md"
           ]
         },
         {
@@ -2501,9 +2647,10 @@
           "status_code": 400,
           "outcome": "error_envelope",
           "code": "InvalidRequest",
-          "message": "Pmem device error: Attempt to add pmem as a root device while the root device defined as a block device",
+          "message": "Pmem config error: Attempt to add pmem as a root device while the root device defined as a block device",
           "evidence_files": [
-            "run/WOR-20/api/step16-upstream-pmem-create-baseline.md"
+            "run/WOR-20/api/step16-upstream-pmem-create-baseline.md",
+            "run/GH-162/api/baseline-v1.16.0-endpoint-baseline-packet.md"
           ]
         },
         {
@@ -2513,13 +2660,14 @@
           "status_code": 400,
           "outcome": "error_envelope",
           "code": "InvalidRequest",
-          "message": "Pmem device error: A root pmem device already exist",
+          "message": "Pmem config error: A root pmem device already exist",
           "evidence_files": [
-            "run/WOR-20/api/step16-upstream-pmem-create-baseline.md"
+            "run/WOR-20/api/step16-upstream-pmem-create-baseline.md",
+            "run/GH-162/api/baseline-v1.16.0-endpoint-baseline-packet.md"
           ]
         }
       ],
-      "capture_note": "Pins the current concrete-handler `PUT /pmem/{id}` preboot store success path plus pinned backing-file and root-device conflict failures, including defaulted booleans and same-id replacement, from the pinned Firecracker controller behavior."
+      "capture_note": "Pins the current concrete-handler `PUT /pmem/{id}` preboot store success path, including a backing file that is opened only at `InstanceStart`, a stored `rate_limiter`, and the root-device conflict failures, including defaulted booleans and same-id replacement, from the pinned Firecracker controller behavior."
     },
     {
       "method": "PUT",
@@ -2546,6 +2694,16 @@
           "outcome": "no_content",
           "evidence_files": [
             "run/WOR-20/api/step108-upstream-serial-runtime-baseline.md"
+          ]
+        },
+        {
+          "id": "put_with_rate_limiter_any",
+          "arch": "any",
+          "when": "Store serial configuration with a token bucket rate limiter",
+          "status_code": 204,
+          "outcome": "no_content",
+          "evidence_files": [
+            "run/GH-162/api/baseline-v1.16.0-endpoint-baseline-packet.md"
           ]
         }
       ],
@@ -2743,6 +2901,38 @@
           "message": "Load snapshot can only be called before configuring resources other than logger and metrics.",
           "evidence_files": [
             "run/WOR-20/api/step38-upstream-snapshot-load-network-interface-baseline.md"
+          ]
+        },
+        {
+          "id": "vsock_override_accepted",
+          "arch": "any",
+          "when": "Load a snapshot in a fresh process with `vsock_override.uds_path` set",
+          "status_code": 204,
+          "outcome": "no_content",
+          "evidence_files": [
+            "run/GH-162/api/baseline-v1.16.0-endpoint-baseline-packet.md"
+          ]
+        },
+        {
+          "id": "clock_realtime_x86_64",
+          "arch": "x86_64",
+          "when": "Load a snapshot in a fresh process with `clock_realtime` true on x86_64",
+          "status_code": 204,
+          "outcome": "no_content",
+          "evidence_files": [
+            "run/GH-162/api/baseline-v1.16.0-endpoint-baseline-packet.md"
+          ]
+        },
+        {
+          "id": "clock_realtime_aarch64",
+          "arch": "aarch64",
+          "when": "Load a snapshot in a fresh process with `clock_realtime` true on aarch64",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidRequest",
+          "message": "Load snapshot error: Failed to restore from snapshot: Failed to build microVM from snapshot: clock_realtime is not supported on aarch64.",
+          "evidence_files": [
+            "run/GH-162/api/baseline-v1.16.0-endpoint-baseline-packet.md"
           ]
         }
       ],

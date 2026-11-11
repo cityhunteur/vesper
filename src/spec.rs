@@ -88,6 +88,6 @@ mod tests {
     #[test]
     fn loads_swagger_info_version() {
         let version = load_info_version("third_party/firecracker/firecracker.yaml").unwrap();
-        assert_eq!(version, "1.16.0-dev");
+        assert_eq!(version, "1.16.0");
     }
 }

@@ -22,7 +22,7 @@ data-driven from the surface stub matrix semantics, not hardcoded per handler.
 Child contracts:
 
 - [api](./api/README.md): route-family handler modules (`actions`,
-  `boot_source`, `logger_metrics`, `machine_config`).
+  `boot_source`, `logger_metrics`, `machine_config`, `pmem`).
 - [bin](./bin/README.md): `vesperd`, `vesper-proxy`, `baselinectl`,
   `compatexctl`, `contractgen`, `systemvmctl`.
 
@@ -51,7 +51,7 @@ Public symbols by file:
   /balloon`, `GET|PATCH /balloon/statistics`, `GET /balloon/hinting/status`,
   `PATCH /balloon/hinting/start`, `PATCH /balloon/hinting/stop`,
   `PUT|PATCH /drives/{drive_id}`, `PUT|PATCH /network-interfaces/{iface_id}`,
-  `PUT /pmem/{id}`, `GET|PUT|PATCH /hotplug/memory`, `PUT /snapshot/create`,
+  `PUT|PATCH /pmem/{id}`, `GET|PUT|PATCH /hotplug/memory`, `PUT /snapshot/create`,
   `PUT /snapshot/load`. Every pinned route has an arm; the trailing
   `matrix_response` fallback is unreachable with the current swagger.
 - `api_matrix.rs`: `RouteSemantics { Any, PreBoot, PostBoot,
@@ -214,8 +214,12 @@ Public symbols by file:
   `PUT /mmds/config` requires a non-empty interface list, every id present in
   `network_interfaces`, and a `169.254.x.y` address with `x` not 0 or 255.
 - `api.rs` devices: drive and pmem ids in the body must equal the path
-  parameter; only one root device may exist across drives and pmem; drive and
-  pmem backing files are opened for validation; a duplicate `guest_mac` or
+  parameter; only one root device may exist across drives and pmem; drive
+  backing files are opened at `PUT`, pmem backing files at `InstanceStart`
+  (`api/pmem.rs`); `mtu` on a network interface must be 68 to 65535; after
+  boot the three device `PUT` routes parse the body, check the ids and return
+  `PCI is not enabled` (`reject_runtime_hotplug`, PCI disabled is modelled); a
+  duplicate `guest_mac` or
   `host_dev_name` on network interfaces is rejected (tap-busy is simulated
   from in-memory state, no tap is opened). Memory hotplug sizes must satisfy
   `validate_memory_hotplug_config` (block >= 2 MiB power of two, slot >= 128
@@ -392,9 +396,10 @@ Public symbols by file:
   `balloon_hinting_state`, `drives`, `network_interfaces`, `mmds_config`,
   `mmds_data_store`, `pmem_devices`, `memory_hotplug`, `entropy_config`,
   `vsock_config`). Lock acquisitions use `.expect` and panic on poison.
-- `api.rs:validate_drive_backing_file` and `handle_put_pmem_stub` open the
-  host backing file (read, write unless read-only) and drop the handle.
-  `handle_put_pmem_stub` also calls `metadata()`.
+- `api.rs:validate_drive_backing_file` and `api/pmem.rs:validate_pmem_backing_files`
+  (called by `InstanceStart`) open the host backing file (read, write unless
+  read-only) and drop the handle. `validate_pmem_backing_files` also calls
+  `metadata()`.
 - `api_matrix.rs`, `api_behavior_matrix.rs`, `baseline.rs`, `compat.rs`,
   `platform.rs`, `spec.rs` read files at caller-supplied paths; the matrix
   `write_*` functions call `create_dir_all` then `fs::write`. Capture

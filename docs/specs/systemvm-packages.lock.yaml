@@ -164,8 +164,8 @@ packages:
 # scripts/systemvm/resolve-apks.py --extra-yaml. Every archive and member is digest-pinned.
 archives:
   - name: firecracker
-    # First upstream release that contains the baseline revision 083c4cf69281 pinned in
-    # docs/specs/design-v0.baselines.lock.yaml (v1.15.x diverged before it).
+    # The baseline itself: the v1.16.0 tag commit d83d72b71036 is the Firecracker revision pinned in
+    # docs/specs/design-v0.baselines.lock.yaml (GH #162).
     version: v1.16.0
     url: https://github.com/firecracker-microvm/firecracker/releases/download/v1.16.0/firecracker-v1.16.0-aarch64.tgz
     sha256: 531c713cdbc37d4b8bc2533d851aabc0267096afa1768086a37672abb668efd7

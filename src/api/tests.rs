@@ -1,4 +1,9 @@
 
+use super::pmem::{
+    PMEM_BACKING_FILE_ZERO_SIZE_MESSAGE, PMEM_ID_PATH_MISMATCH_MESSAGE,
+    PMEM_ROOT_ALREADY_EXISTS_MESSAGE, PMEM_ROOT_BLOCK_CONFLICT_MESSAGE,
+    PMEM_UPDATE_NOT_FOUND_MESSAGE,
+};
 use super::*;
 use axum::body::to_bytes;
 use axum::http::Request;
@@ -138,6 +143,10 @@ fn test_state() -> AppState {
             },
             RouteSpec {
                 method: "PUT".to_string(),
+                path: "/pmem/{id}".to_string(),
+            },
+            RouteSpec {
+                method: "PATCH".to_string(),
                 path: "/pmem/{id}".to_string(),
             },
             RouteSpec {
@@ -3427,81 +3436,385 @@ async fn pmem_stub_validates_path_body_id_match() {
     assert_eq!(vm_config_payload["pmem"][0]["read_only"], false);
 }
 
+async fn send_json(
+    router: &Router,
+    method: &str,
+    uri: &str,
+    body: &str,
+) -> (StatusCode, serde_json::Value) {
+    let response = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(method)
+                .uri(uri)
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = response.status();
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let value = if bytes.is_empty() {
+        serde_json::Value::Null
+    } else {
+        serde_json::from_slice(&bytes).unwrap()
+    };
+    (status, value)
+}
+
+async fn get_json(router: &Router, uri: &str) -> serde_json::Value {
+    let (status, value) = send_json(router, "GET", uri, "").await;
+    assert_eq!(status, StatusCode::OK);
+    value
+}
+
+async fn put_kernel(router: &Router, kernel: &NamedTempFile) {
+    let response = router
+        .clone()
+        .oneshot(put_boot_source_request(kernel.path().to_str().unwrap(), None))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+}
+
+async fn instance_start(router: &Router) -> (StatusCode, serde_json::Value) {
+    send_json(router, "PUT", "/actions", r#"{"action_type":"InstanceStart"}"#).await
+}
+
+fn pmem_body(id: &str, path: &std::path::Path, extra: &str) -> String {
+    format!(r#"{{"id":"{id}","path_on_host":"{}"{extra}}}"#, path.display())
+}
+
+const RATE_LIMITER_JSON: &str =
+    r#"{"bandwidth":{"size":1048576,"refill_time":100},"ops":{"size":10,"one_time_burst":5,"refill_time":1000}}"#;
+
 #[tokio::test]
-async fn pmem_stub_rejects_invalid_backing_files() {
+async fn pmem_backing_files_are_validated_at_instance_start() {
     let router = test_state().router();
+    let kernel = NamedTempFile::new().unwrap();
+    put_kernel(&router, &kernel).await;
     let missing_dir = tempfile::tempdir().unwrap();
     let missing_path = missing_dir.path().join("missing.img");
     let zero_sized_backing_file = NamedTempFile::new().unwrap();
+    let backing_file = NamedTempFile::new().unwrap();
+    backing_file.as_file().set_len(0x1000).unwrap();
 
-    let missing_response = router
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("PUT")
-                .uri("/pmem/pmem0")
-                .header("content-type", "application/json")
-                .body(axum::body::Body::from(format!(
-                    r#"{{"id":"pmem0","path_on_host":"{}"}}"#,
-                    missing_path.display()
-                )))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(missing_response.status(), StatusCode::BAD_REQUEST);
-    let missing_body = to_bytes(missing_response.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let missing_payload: ErrorEnvelope = serde_json::from_slice(&missing_body).unwrap();
-    assert_eq!(missing_payload.code, "InvalidRequest");
+    // Firecracker stores the pmem config without opening the backing file.
+    let (status, _) = send_json(&router, "PUT", "/pmem/pmem0", &pmem_body("pmem0", &missing_path, "")).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, payload) = instance_start(&router).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(payload["code"], "InvalidRequest");
     assert_eq!(
-        missing_payload.fault_message,
-        "Pmem device error: Unable to create the virtio-pmem device: Error accessing backing file: No such file or directory (os error 2)"
+        payload["fault_message"],
+        "Start microvm error: Cannot create pmem device: Error accessing backing file: No such file or directory (os error 2)"
+    );
+    assert_eq!(get_json(&router, "/").await["state"], "Not started");
+
+    let (status, _) = send_json(
+        &router,
+        "PUT",
+        "/pmem/pmem0",
+        &pmem_body("pmem0", zero_sized_backing_file.path(), ""),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, payload) = instance_start(&router).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(payload["fault_message"], PMEM_BACKING_FILE_ZERO_SIZE_MESSAGE);
+    assert_eq!(get_json(&router, "/").await["state"], "Not started");
+
+    let (status, _) = send_json(&router, "PUT", "/pmem/pmem0", &pmem_body("pmem0", backing_file.path(), "")).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, _) = instance_start(&router).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert_eq!(get_json(&router, "/").await["state"], "Running");
+}
+
+#[tokio::test]
+async fn pmem_put_accepts_and_exports_rate_limiter() {
+    let router = test_state().router();
+    let backing_file = NamedTempFile::new().unwrap();
+    backing_file.as_file().set_len(0x1000).unwrap();
+
+    let (status, _) = send_json(
+        &router,
+        "PUT",
+        "/pmem/pmem0",
+        &pmem_body("pmem0", backing_file.path(), &format!(r#","rate_limiter":{RATE_LIMITER_JSON}"#)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let vm_config = get_json(&router, "/vm/config").await;
+    assert_eq!(
+        vm_config["pmem"][0]["rate_limiter"],
+        serde_json::from_str::<serde_json::Value>(RATE_LIMITER_JSON).unwrap()
     );
 
-    let zero_sized_response = router
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("PUT")
-                .uri("/pmem/pmem0")
-                .header("content-type", "application/json")
-                .body(axum::body::Body::from(format!(
-                    r#"{{"id":"pmem0","path_on_host":"{}"}}"#,
-                    zero_sized_backing_file.path().display()
-                )))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(zero_sized_response.status(), StatusCode::BAD_REQUEST);
-    let zero_sized_body = to_bytes(zero_sized_response.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let zero_sized_payload: ErrorEnvelope = serde_json::from_slice(&zero_sized_body).unwrap();
-    assert_eq!(zero_sized_payload.code, "InvalidRequest");
+    let (status, payload) = send_json(
+        &router,
+        "PUT",
+        "/pmem/pmem1",
+        &pmem_body("pmem1", backing_file.path(), r#","rate_limiter":{"bandwidth":{"size":1}}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(payload["fault_message"], "invalid JSON payload");
+}
+
+#[tokio::test]
+async fn pmem_patch_requires_running_vm_and_matching_ids() {
+    let router = test_state().router();
+    let kernel = NamedTempFile::new().unwrap();
+    put_kernel(&router, &kernel).await;
+    let backing_file = NamedTempFile::new().unwrap();
+    backing_file.as_file().set_len(0x1000).unwrap();
+    let (status, _) = send_json(&router, "PUT", "/pmem/pmem0", &pmem_body("pmem0", backing_file.path(), "")).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let patch_body = format!(r#"{{"id":"pmem0","rate_limiter":{RATE_LIMITER_JSON}}}"#);
+
+    let (status, payload) = send_json(&router, "PATCH", "/pmem/pmem0", &patch_body).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(payload["code"], "InvalidState");
+    assert_eq!(payload["fault_message"], ACTION_NOT_SUPPORTED_PREBOOT_MESSAGE);
+
+    let (status, _) = instance_start(&router).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    let (status, payload) = send_json(&router, "PATCH", "/pmem/pmem0", &patch_body).await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{payload}");
+
+    // Firecracker's GET /vm/config reports the PUT-time pmem config, not the patched limiter.
+    let vm_config = get_json(&router, "/vm/config").await;
+    assert!(vm_config["pmem"][0]["rate_limiter"].is_null());
+
+    let (status, payload) = send_json(
+        &router,
+        "PATCH",
+        "/pmem/pmem1",
+        &format!(r#"{{"id":"pmem1","rate_limiter":{RATE_LIMITER_JSON}}}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(payload["code"], "InvalidRequest");
+    assert_eq!(payload["fault_message"], PMEM_UPDATE_NOT_FOUND_MESSAGE);
+
+    // Without a rate limiter Firecracker does not look the device up.
+    let (status, _) = send_json(&router, "PATCH", "/pmem/pmem1", r#"{"id":"pmem1"}"#).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    let (status, payload) = send_json(&router, "PATCH", "/pmem/pmem1", &patch_body).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(payload["fault_message"], PMEM_ID_PATH_MISMATCH_MESSAGE);
+
+    for bad_body in [
+        "{not-json",
+        r#"{"rate_limiter":{}}"#,
+        r#"{"id":"pmem0","path_on_host":"/tmp/x"}"#,
+        r#"{"id":"pmem0","rate_limiter":{"bandwidth":{"size":1}}}"#,
+    ] {
+        let (status, payload) = send_json(&router, "PATCH", "/pmem/pmem0", bad_body).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{bad_body}");
+        assert_eq!(payload["fault_message"], "invalid JSON payload", "{bad_body}");
+    }
+}
+
+#[tokio::test]
+async fn postboot_device_puts_report_pci_not_enabled() {
+    let router = test_state().router();
+    let kernel = NamedTempFile::new().unwrap();
+    put_kernel(&router, &kernel).await;
+    let (status, _) = instance_start(&router).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let backing_file = NamedTempFile::new().unwrap();
+    backing_file.as_file().set_len(0x1000).unwrap();
+
+    for (uri, body) in [
+        (
+            "/drives/data",
+            format!(
+                r#"{{"drive_id":"data","is_root_device":false,"path_on_host":"{}"}}"#,
+                backing_file.path().display()
+            ),
+        ),
+        (
+            "/network-interfaces/eth0",
+            r#"{"iface_id":"eth0","host_dev_name":"tap0"}"#.to_string(),
+        ),
+        ("/pmem/pmem0", pmem_body("pmem0", backing_file.path(), "")),
+    ] {
+        let (status, payload) = send_json(&router, "PUT", uri, &body).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{uri}");
+        assert_eq!(payload["code"], "InvalidRequest", "{uri}");
+        assert_eq!(payload["fault_message"], PCI_NOT_ENABLED_MESSAGE, "{uri}");
+    }
+
+    let (status, payload) = send_json(
+        &router,
+        "PUT",
+        "/pmem/pmem0",
+        &pmem_body("pmem1", backing_file.path(), ""),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(payload["fault_message"], PMEM_ID_PATH_MISMATCH_MESSAGE);
+
+    let vm_config = get_json(&router, "/vm/config").await;
+    assert!(vm_config["drives"].is_null());
+    assert!(vm_config["network-interfaces"].is_null());
+    assert!(vm_config["pmem"].is_null());
+}
+
+#[tokio::test]
+async fn network_put_validates_mtu_bounds() {
+    let router = test_state().router();
+
+    let (status, payload) = send_json(
+        &router,
+        "PUT",
+        "/network-interfaces/eth0",
+        r#"{"iface_id":"eth0","host_dev_name":"tap0","mtu":67}"#,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(payload["code"], "InvalidRequest");
     assert_eq!(
-        zero_sized_payload.fault_message,
-        PMEM_BACKING_FILE_ZERO_SIZE_MESSAGE
+        payload["fault_message"],
+        "Network config error: Could not create the network device: MTU 67 is out of range [68, 65535]"
     );
 
-    let vm_config_response = router
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/vm/config")
-                .body(axum::body::Body::empty())
-                .unwrap(),
+    let (status, payload) = send_json(
+        &router,
+        "PUT",
+        "/network-interfaces/eth0",
+        r#"{"iface_id":"eth0","host_dev_name":"tap0","mtu":65536}"#,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(payload["fault_message"], "invalid JSON payload");
+    assert!(get_json(&router, "/vm/config").await["network-interfaces"].is_null());
+
+    for (iface, tap, mtu) in [("eth0", "tap0", 68), ("eth1", "tap1", 65535)] {
+        let (status, _) = send_json(
+            &router,
+            "PUT",
+            &format!("/network-interfaces/{iface}"),
+            &format!(r#"{{"iface_id":"{iface}","host_dev_name":"{tap}","mtu":{mtu}}}"#),
         )
-        .await
-        .unwrap();
-    assert_eq!(vm_config_response.status(), StatusCode::OK);
-    let vm_config_body = to_bytes(vm_config_response.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let vm_config_payload: serde_json::Value = serde_json::from_slice(&vm_config_body).unwrap();
-    assert!(vm_config_payload["pmem"].is_null());
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+    }
+    let (status, _) = send_json(
+        &router,
+        "PUT",
+        "/network-interfaces/eth2",
+        r#"{"iface_id":"eth2","host_dev_name":"tap2"}"#,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    let interfaces = get_json(&router, "/vm/config").await["network-interfaces"].clone();
+    assert_eq!(interfaces[0]["mtu"], 68);
+    assert_eq!(interfaces[1]["mtu"], 65535);
+    assert!(interfaces[2]["mtu"].is_null());
+}
+
+#[tokio::test]
+async fn serial_put_accepts_token_bucket_rate_limiter() {
+    let state = Arc::new(test_state());
+
+    let response = handle_put_serial(
+        &state,
+        &Method::PUT,
+        "/serial",
+        Bytes::from_static(
+            br#"{"serial_out_path":"serial.log","rate_limiter":{"size":4096,"one_time_burst":1024,"refill_time":100}}"#,
+        ),
+    );
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    assert_eq!(
+        *state
+            .serial_config
+            .read()
+            .expect("serial config lock poisoned while reading"),
+        SerialConfig {
+            serial_out_path: Some("serial.log".to_string()),
+            rate_limiter: Some(TokenBucket {
+                one_time_burst: Some(1024),
+                refill_time: 100,
+                size: 4096,
+            }),
+        }
+    );
+
+    for bad_body in [
+        r#"{"rate_limiter":{"size":4096}}"#,
+        r#"{"rate_limiter":{"bandwidth":{"size":1,"refill_time":1}}}"#,
+    ] {
+        let response = handle_put_serial(
+            &state,
+            &Method::PUT,
+            "/serial",
+            Bytes::from(bad_body.to_string()),
+        );
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{bad_body}");
+    }
+}
+
+#[tokio::test]
+async fn snapshot_load_accepts_vsock_override_and_clock_realtime() {
+    for body in [
+        r#"{"snapshot_path":"snap","mem_file_path":"mem","vsock_override":{"uds_path":"/tmp/v.sock"}}"#,
+        r#"{"snapshot_path":"snap","mem_file_path":"mem","clock_realtime":false}"#,
+    ] {
+        let router = test_state().router();
+        let (status, payload) = send_json(&router, "PUT", "/snapshot/load", body).await;
+        assert_eq!(status, StatusCode::NO_CONTENT, "{body}: {payload}");
+        assert_eq!(get_json(&router, "/").await["state"], "Paused");
+    }
+
+    for body in [
+        r#"{"snapshot_path":"snap","mem_file_path":"mem","vsock_override":{}}"#,
+        r#"{"snapshot_path":"snap","mem_file_path":"mem","vsock_override":"/tmp/v.sock"}"#,
+        r#"{"snapshot_path":"snap","mem_file_path":"mem","clock_realtime":"yes"}"#,
+    ] {
+        let router = test_state().router();
+        let (status, payload) = send_json(&router, "PUT", "/snapshot/load", body).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+        assert_eq!(payload["fault_message"], "invalid JSON payload");
+        assert_eq!(get_json(&router, "/").await["state"], "Not started");
+    }
+}
+
+#[tokio::test]
+async fn snapshot_load_clock_realtime_follows_target_architecture() {
+    let router = test_state().router();
+    let (status, payload) = send_json(
+        &router,
+        "PUT",
+        "/snapshot/load",
+        r#"{"snapshot_path":"snap","mem_file_path":"mem","clock_realtime":true}"#,
+    )
+    .await;
+
+    #[cfg(target_arch = "aarch64")]
+    {
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(payload["code"], "InvalidRequest");
+        assert_eq!(
+            payload["fault_message"],
+            SNAPSHOT_LOAD_CLOCK_REALTIME_AARCH64_MESSAGE
+        );
+        assert_eq!(get_json(&router, "/").await["state"], "Not started");
+    }
+
+    #[cfg(not(target_arch = "aarch64"))]
+    {
+        assert_eq!(status, StatusCode::NO_CONTENT, "{payload}");
+        assert_eq!(get_json(&router, "/").await["state"], "Paused");
+    }
 }
 
 #[tokio::test]

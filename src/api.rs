@@ -15,6 +15,7 @@ mod actions;
 mod boot_source;
 mod logger_metrics;
 mod machine_config;
+mod pmem;
 #[cfg(test)]
 mod tests;
 
@@ -22,6 +23,7 @@ use self::actions::handle_actions;
 use self::boot_source::handle_put_boot_source;
 use self::logger_metrics::{handle_put_cpu_config, handle_put_logger, handle_put_metrics};
 use self::machine_config::{handle_patch_machine_config, handle_put_machine_config};
+use self::pmem::{PmemConfigRequest, handle_patch_pmem, handle_put_pmem};
 use crate::api_matrix::{
     RouteSemantics, SurfaceStubMatrix, generate_surface_stub_matrix, validate_surface_stub_matrix,
 };
@@ -57,13 +59,10 @@ const DRIVE_ROOT_ALREADY_EXISTS_MESSAGE: &str =
 const DRIVE_UPDATE_NOT_FOUND_MESSAGE: &str = "Drive config error: Unable to patch the block device: Failed perform action on device: Device not found Please verify the request arguments.";
 const NETWORK_UPDATE_NOT_FOUND_MESSAGE: &str = "Network config error: Unable to update the net device: Failed perform action on device: Device not found";
 const NETWORK_TAP_OPEN_BUSY_DETAIL: &str = "Device or resource busy (os error 16)";
-const PMEM_ID_PATH_MISMATCH_MESSAGE: &str =
-    "The id from the path does not match the id from the body!";
-const PMEM_ROOT_BLOCK_CONFLICT_MESSAGE: &str = "Pmem device error: Attempt to add pmem as a root device while the root device defined as a block device";
-const PMEM_ROOT_ALREADY_EXISTS_MESSAGE: &str =
-    "Pmem device error: A root pmem device already exist";
-const PMEM_BACKING_FILE_ZERO_SIZE_MESSAGE: &str =
-    "Pmem device error: Unable to create the virtio-pmem device: Error backing file size is 0";
+const NETWORK_MTU_MIN: u16 = 68;
+const PCI_NOT_ENABLED_MESSAGE: &str = "PCI is not enabled";
+#[cfg(target_arch = "aarch64")]
+const SNAPSHOT_LOAD_CLOCK_REALTIME_AARCH64_MESSAGE: &str = "Load snapshot error: Failed to restore from snapshot: Failed to build microVM from snapshot: clock_realtime is not supported on aarch64.";
 const BALLOON_TOO_MANY_PAGES_REQUESTED_MESSAGE: &str =
     "Balloon config error: Amount of pages requested is too large.";
 const BALLOON_UPDATE_NOT_CONFIGURED_MESSAGE: &str =
@@ -322,6 +321,8 @@ struct MetricsConfig {
 #[serde(deny_unknown_fields)]
 struct SerialConfig {
     serial_out_path: Option<String>,
+    #[serde(default)]
+    rate_limiter: Option<TokenBucket>,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
@@ -474,22 +475,13 @@ struct VsockConfigRequest {
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
-struct PmemConfigRequest {
-    id: String,
-    path_on_host: String,
-    #[serde(default)]
-    root_device: bool,
-    #[serde(default)]
-    read_only: bool,
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
-#[serde(deny_unknown_fields)]
 struct NetworkInterfaceConfigRequest {
     #[serde(default)]
     guest_mac: Option<String>,
     host_dev_name: String,
     iface_id: String,
+    #[serde(default)]
+    mtu: Option<u16>,
     #[serde(default)]
     rx_rate_limiter: Option<RateLimiterConfig>,
     #[serde(default)]
@@ -541,6 +533,12 @@ struct NetworkOverrideRequest {
     host_dev_name: String,
 }
 
+/// Firecracker's `VsockOverride` does not deny unknown fields.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+struct VsockOverrideRequest {
+    uds_path: String,
+}
+
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 struct SnapshotLoadRequest {
@@ -557,6 +555,10 @@ struct SnapshotLoadRequest {
     resume_vm: Option<bool>,
     #[serde(default)]
     network_overrides: Option<Vec<NetworkOverrideRequest>>,
+    #[serde(default)]
+    vsock_override: Option<VsockOverrideRequest>,
+    #[serde(default)]
+    clock_realtime: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq, Serialize)]
@@ -599,15 +601,15 @@ fn network_tap_open_message(host_dev_name: &str) -> String {
     )
 }
 
-fn drive_backing_file_access_message(err: &std::io::Error, path: &str) -> String {
+fn network_invalid_mtu_message(mtu: u16) -> String {
     format!(
-        "Drive config error: Unable to create the virtio block device: Virtio backend error: Error manipulating the backing file: {err} {path}"
+        "Network config error: Could not create the network device: MTU {mtu} is out of range [68, 65535]"
     )
 }
 
-fn pmem_backing_file_access_message(err: &std::io::Error) -> String {
+fn drive_backing_file_access_message(err: &std::io::Error, path: &str) -> String {
     format!(
-        "Pmem device error: Unable to create the virtio-pmem device: Error accessing backing file: {err}"
+        "Drive config error: Unable to create the virtio block device: Virtio backend error: Error manipulating the backing file: {err} {path}"
     )
 }
 
@@ -1197,6 +1199,22 @@ async fn handle_all(
         return handle_patch_vm(&state, &method, &route_match.template.template, body);
     }
 
+    // Firecracker v1.16.0 sends post-boot device PUTs to PCI hotplug after parsing the body, so
+    // these handlers apply their own state check (`reject_runtime_hotplug`) instead of the guard.
+    match (
+        route_match.template.method.as_str(),
+        route_match.template.template.as_str(),
+    ) {
+        ("PUT", "/drives/{drive_id}") => {
+            return handle_put_drive_stub(&state, &method, &route_match, body);
+        }
+        ("PUT", "/network-interfaces/{iface_id}") => {
+            return handle_put_network_interface_stub(&state, &method, &route_match, body);
+        }
+        ("PUT", "/pmem/{id}") => return handle_put_pmem(&state, &method, &route_match, body),
+        _ => {}
+    }
+
     if let Some(message) = validate_state_guard(&state, route_match.template) {
         return error_response(
             &state.firecracker_revision,
@@ -1306,14 +1324,8 @@ async fn handle_all(
                 body,
             );
         }
-        ("PUT", "/drives/{drive_id}") => {
-            return handle_put_drive_stub(&state, &method, &route_match, body);
-        }
         ("PATCH", "/drives/{drive_id}") => {
             return handle_patch_drive_stub(&state, &method, &route_match, body);
-        }
-        ("PUT", "/network-interfaces/{iface_id}") => {
-            return handle_put_network_interface_stub(&state, &method, &route_match, body);
         }
         ("PATCH", "/network-interfaces/{iface_id}") => {
             return handle_patch_network_interface_stub(&state, &method, &route_match, body);
@@ -1337,7 +1349,7 @@ async fn handle_all(
                 body,
             );
         }
-        ("PUT", "/pmem/{id}") => return handle_put_pmem_stub(&state, &method, &route_match, body),
+        ("PATCH", "/pmem/{id}") => return handle_patch_pmem(&state, &method, &route_match, body),
         ("PUT", "/snapshot/create") => {
             return handle_put_snapshot_create_stub(&state, &method, &route_match, body);
         }
@@ -2127,6 +2139,10 @@ fn handle_put_drive_stub(
         );
     }
 
+    if let Some(response) = reject_runtime_hotplug(state, method, &route.template.template) {
+        return response;
+    }
+
     if payload.is_root_device
         && state
             .pmem_devices
@@ -2275,6 +2291,10 @@ fn handle_put_network_interface_stub(
         );
     }
 
+    if let Some(response) = reject_runtime_hotplug(state, method, &route.template.template) {
+        return response;
+    }
+
     let mut interfaces = state
         .network_interfaces
         .write()
@@ -2305,6 +2325,17 @@ fn handle_put_network_interface_stub(
             StatusCode::BAD_REQUEST,
             "InvalidRequest",
             &network_tap_open_message(&payload.host_dev_name),
+            &route.template.template,
+            method.as_str(),
+        );
+    }
+
+    if let Some(mtu) = payload.mtu.filter(|mtu| *mtu < NETWORK_MTU_MIN) {
+        return error_response(
+            &state.firecracker_revision,
+            StatusCode::BAD_REQUEST,
+            "InvalidRequest",
+            &network_invalid_mtu_message(mtu),
             &route.template.template,
             method.as_str(),
         );
@@ -2371,125 +2402,6 @@ fn handle_patch_network_interface_stub(
     if let Some(tx_rate_limiter) = payload.tx_rate_limiter {
         existing.tx_rate_limiter = Some(tx_rate_limiter);
     }
-
-    StatusCode::NO_CONTENT.into_response()
-}
-
-fn handle_put_pmem_stub(
-    state: &Arc<AppState>,
-    method: &Method,
-    route: &RouteMatch<'_>,
-    body: Bytes,
-) -> Response {
-    let payload: PmemConfigRequest = match serde_json::from_slice(&body) {
-        Ok(value) => value,
-        Err(_) => {
-            return error_response(
-                &state.firecracker_revision,
-                StatusCode::BAD_REQUEST,
-                "InvalidRequest",
-                "invalid JSON payload",
-                &route.template.template,
-                method.as_str(),
-            );
-        }
-    };
-
-    let path_id = route
-        .template
-        .path_param(&route.path, "id")
-        .unwrap_or_default();
-    if payload.id != path_id {
-        return error_response(
-            &state.firecracker_revision,
-            StatusCode::BAD_REQUEST,
-            "InvalidRequest",
-            PMEM_ID_PATH_MISMATCH_MESSAGE,
-            &route.template.template,
-            method.as_str(),
-        );
-    }
-
-    if payload.root_device
-        && state
-            .drives
-            .read()
-            .expect("drive config lock poisoned while reading")
-            .values()
-            .any(|drive| drive.is_root_device)
-    {
-        return error_response(
-            &state.firecracker_revision,
-            StatusCode::BAD_REQUEST,
-            "InvalidRequest",
-            PMEM_ROOT_BLOCK_CONFLICT_MESSAGE,
-            &route.template.template,
-            method.as_str(),
-        );
-    }
-
-    let mut pmem_devices = state
-        .pmem_devices
-        .write()
-        .expect("pmem config lock poisoned while writing");
-    if payload.root_device
-        && pmem_devices
-            .iter()
-            .any(|(id, device)| id != &payload.id && device.root_device)
-    {
-        return error_response(
-            &state.firecracker_revision,
-            StatusCode::BAD_REQUEST,
-            "InvalidRequest",
-            PMEM_ROOT_ALREADY_EXISTS_MESSAGE,
-            &route.template.template,
-            method.as_str(),
-        );
-    }
-
-    let backing_file = OpenOptions::new()
-        .read(true)
-        .write(!payload.read_only)
-        .open(&payload.path_on_host);
-    let backing_file = match backing_file {
-        Ok(file) => file,
-        Err(err) => {
-            return error_response(
-                &state.firecracker_revision,
-                StatusCode::BAD_REQUEST,
-                "InvalidRequest",
-                &pmem_backing_file_access_message(&err),
-                &route.template.template,
-                method.as_str(),
-            );
-        }
-    };
-
-    let backing_file_len = match backing_file.metadata() {
-        Ok(metadata) => metadata.len(),
-        Err(err) => {
-            return error_response(
-                &state.firecracker_revision,
-                StatusCode::BAD_REQUEST,
-                "InvalidRequest",
-                &pmem_backing_file_access_message(&err),
-                &route.template.template,
-                method.as_str(),
-            );
-        }
-    };
-    if backing_file_len == 0 {
-        return error_response(
-            &state.firecracker_revision,
-            StatusCode::BAD_REQUEST,
-            "InvalidRequest",
-            PMEM_BACKING_FILE_ZERO_SIZE_MESSAGE,
-            &route.template.template,
-            method.as_str(),
-        );
-    }
-
-    pmem_devices.insert(payload.id.clone(), payload);
 
     StatusCode::NO_CONTENT.into_response()
 }
@@ -2711,6 +2623,20 @@ fn handle_put_snapshot_load_stub(
         );
     }
 
+    // Firecracker rejects `clock_realtime` on aarch64 while building the microVM from the
+    // snapshot (`BuildMicrovmFromSnapshotError::UnsupportedClockRealtime`); x86_64 accepts it.
+    #[cfg(target_arch = "aarch64")]
+    if payload.clock_realtime {
+        return error_response(
+            &state.firecracker_revision,
+            StatusCode::BAD_REQUEST,
+            "InvalidRequest",
+            SNAPSHOT_LOAD_CLOCK_REALTIME_AARCH64_MESSAGE,
+            &route.template.template,
+            method.as_str(),
+        );
+    }
+
     let loaded_vm_state = if payload.resume_vm.unwrap_or(false) {
         VmState::Running
     } else {
@@ -2830,6 +2756,26 @@ fn snapshot_load_has_blocking_config(state: &Arc<AppState>) -> bool {
     }
 
     false
+}
+
+/// Post-boot `PUT /drives`, `/pmem` and `/network-interfaces` reach Firecracker's
+/// `DeviceManager::hotplug_device`, which fails with `VmmActionError::PciNotEnabled` because
+/// `vesperd` models a Firecracker process started without `--enable-pci`.
+fn reject_runtime_hotplug(state: &AppState, method: &Method, template: &str) -> Option<Response> {
+    let vm_state = *state
+        .vm_state
+        .read()
+        .expect("vm state lock poisoned while reading");
+    (vm_state != VmState::PreBoot).then(|| {
+        error_response(
+            &state.firecracker_revision,
+            StatusCode::BAD_REQUEST,
+            "InvalidRequest",
+            PCI_NOT_ENABLED_MESSAGE,
+            template,
+            method.as_str(),
+        )
+    })
 }
 
 fn validate_state_guard(state: &Arc<AppState>, route: &RouteTemplate) -> Option<String> {

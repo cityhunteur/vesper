@@ -34,6 +34,7 @@ conformance subset stands in), CE-0002 (the guest runs the v1.16.0 release, not 
 TD-029) and CE-0003 (performance is captured under nested virtualization with no Linux baseline on the same host
 class). All three were approved by cityhunteur on 2026-11-08 (`approved_by`/`approved_on`), which satisfied the
 GH #21 criterion "tracked as approved pre-GA compat exceptions" and closed WOR-26 and the Phase 2 epic WOR-14.
+CE-0002 was closed on 2026-11-11 by GH #162, which moved the lock to the v1.16.0 tag commit.
 They are summarised in `docs/specs/backend-a-parity-baseline.json`; the `Parity Baseline` workflow fails if the
 capture and the registry disagree about which ids are open.
 
@@ -41,8 +42,11 @@ A fourth open exception, CE-0004 (WOR-32 / GH #23, owned by cityhunteur, expiry 
 records that guest exec deliberately overrides a workload's requested in-guest security posture: it always grants
 the full capability set, forces no-new-privileges off and drops AppArmor/SELinux labels, because the microVM is
 the isolation boundary (ADR 0006). It was approved by cityhunteur on 2026-11-09 (`approved_by`/`approved_on`),
-so `compatexctl` now counts four approved open exceptions. It is also listed in the parity baseline capture so
+so `compatexctl` counted four approved open exceptions before CE-0002 closed. It is also listed in the parity baseline capture so
 the `Parity Baseline` workflow's registry cross-check stays green.
+
+`compatexctl` now reports `open=3 closed=1 approved=3`. The parity baseline capture still lists CE-0002 as open, so
+the `Parity Baseline` workflow fails until the capture is re-taken at the new pin.
 
 ## Policy checks
 

@@ -8,6 +8,7 @@ use super::{
     ActionType, AppState, MISSING_KERNEL_CONFIG_MESSAGE, SEND_CTRL_ALT_DEL_AARCH64_MESSAGE,
     VmState, error_response,
 };
+use super::pmem::validate_pmem_backing_files;
 
 pub(super) fn handle_actions(
     state: &Arc<AppState>,
@@ -76,6 +77,17 @@ pub(super) fn handle_actions(
                     StatusCode::BAD_REQUEST,
                     "InvalidRequest",
                     MISSING_KERNEL_CONFIG_MESSAGE,
+                    template,
+                    method.as_str(),
+                );
+            }
+
+            if let Err(message) = validate_pmem_backing_files(state) {
+                return error_response(
+                    &state.firecracker_revision,
+                    StatusCode::BAD_REQUEST,
+                    "InvalidRequest",
+                    &message,
                     template,
                     method.as_str(),
                 );

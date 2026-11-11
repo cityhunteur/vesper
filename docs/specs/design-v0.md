@@ -53,7 +53,7 @@ Non-goals:
 
 This section records how far the code is from this design. The requirements in the later sections still stand.
 
-Every status label in this document is a snapshot at `9c5a865`. The [parity matrix](firecracker-feature-parity.md) and the [milestone log](../progress/symphony-milestones.md) hold the running status; the labels are refreshed when the design is next revised.
+Every status label in this document is a snapshot at `9c5a865`, except the baseline-revision labels that GH #162 refreshed. The [parity matrix](firecracker-feature-parity.md) and the [milestone log](../progress/symphony-milestones.md) hold the running status; the labels are refreshed when the design is next revised.
 
 ### Labels
 
@@ -74,7 +74,7 @@ All runtime evidence comes from one developer machine (Apple M3 Pro). No CI job 
 
 | Phase | Exit criterion status | Proven, and by what | Missing | Tracker |
 | --- | --- | --- | --- | --- |
-| [0: Repository, packaging and API contract](#phase-0-repository-packaging-and-api-contract) | Coverage and errors: [Meets the requirement](#phase-0-exit-criterion). Socket stability: Not met (TD-052). | All 37 pinned routes have handlers with deterministic, baseline-stamped errors: `cargo test` (245 tests on 2026-11-11, of which `tests/api_contract.rs` holds 115), `make contract-check`, `make surface-matrix-check` and `make behavior-matrix-check`, all in CI. The behavior matrix pins 157 cases across the 37 operations. `vesper-proxy` forwards to unix, tcp and vsock upstreams. CI enforces the baseline lock and the compat registry. | Deliverables: logging and metrics (TD-007); packaging (TD-046). Behaviour-level proof is thinner than route coverage (TD-003). | GH #59 |
+| [0: Repository, packaging and API contract](#phase-0-repository-packaging-and-api-contract) | Coverage and errors: [Meets the requirement](#phase-0-exit-criterion). Socket stability: Not met (TD-052). | All 38 pinned routes have handlers with deterministic, baseline-stamped errors: `cargo test` (259 tests after GH #162 on 2026-11-11, of which `tests/api_contract.rs` holds 122), `make contract-check`, `make surface-matrix-check` and `make behavior-matrix-check`, all in CI. The behavior matrix pins 173 cases across the 38 operations. `vesper-proxy` forwards to unix, tcp and vsock upstreams. CI enforces the baseline lock and the compat registry. | Deliverables: logging and metrics (TD-007); packaging (TD-046). Behaviour-level proof is thinner than route coverage (TD-003). | GH #59 |
 | [1: System VM bring-up](#phase-1-system-vm-bring-up) | [Meets the requirement](#phase-1-exit-criterion), with TD-027 outstanding against the deliverable on private sockets. | 200 of 200 probed boots under the 5 s threshold (`make systemvm-boot-smoke`; milestone log, WOR-27). `make systemvm-control-suite`, `make systemvm-services-suite`, `make docker-smoke` and `make systemvm-reliability` (default 50 boots plus those suites; WOR-21). `docker version` and a trivial container work from macOS. | The System VM has no persistent disk (TD-025). The vsock bridge reaches every System VM vsock port (TD-027). No packaged service (TD-046). | GH #54 (closed) |
 | [2: Backend A runs stock Firecracker microVMs](#phase-2-backend-a-runs-stock-firecracker-microvms) | [Not met](#phase-2-exit-criterion) (TD-045, CE-0001) | Nested-virtualisation gating (`systemvmctl backend-select`). Jailed stock Firecracker v1.16.0 microVMs: `make systemvm-microvm-suite`, `make systemvm-rootfs-suite`, `make systemvm-workload-suite`. `make systemvm-parity-baseline`: 19 API conformance checks and two performance runs, committed as [backend-a-parity-baseline.json](backend-a-parity-baseline.json). | `vesperd` has no backend flow, and snapshot create and load are stubs (TD-045). The upstream Firecracker suite is not run (CE-0001). The System VM runs Firecracker release v1.16.0, not the pinned commit (CE-0002). No Linux baseline exists (CE-0003). MicroVMs have no network device (TD-032). | GH #156 |
 | [3: containerd shim v2](#phase-3-containerd-shim-v2) | [Not met](#phase-3-exit-criterion) (GH #53) | For `ctr`: `make ctr-conformance`, 74 of 74 steps in four suites (shim 22, bundle 15, restart 18, exec 19), committed as [ctr-conformance-baseline.json](ctr-conformance-baseline.json) (generated 2026-11-09 at `74e6544`). `go test` runs in `shim-tests.yml`. | dockerd does not use the runtime (GH #53). `Pause`, `Resume`, `Checkpoint` and `Update` (TD-042). Root drives are copied per task and never pruned (TD-035). | GH #103 |
@@ -88,7 +88,7 @@ The order is decision D-008, as amended by D-015 and D-017. Two time-boxed items
 | Step | Why now | Tracker | Gaps to close first | Done when | Needs the owner’s confirmation |
 | --- | --- | --- | --- | --- | --- |
 | Prototype: a share path into a microVM (done 2026-11-11, GH #159) | Outcome **partial** (D-020): NFSv3 from userspace `unfs3` over a TAP device. | TD-049 | — | Done. Deviations are recorded in D-020; adoption is GH #160. | The `unfs3` dependency (GH #160). |
-| Parity reference (time-boxed, D-017) | It is the other half of the Phase 2 gate, and no later step produces it before step 3 needs it. | CE-0002, CE-0003, CE-0001 | None. | The binary and the lock name one Firecracker revision (CE-0002). A Linux baseline is captured on any aarch64 KVM host at the pinned revision (CE-0003). The upstream suite has been tried in the System VM and the result is recorded (CE-0001). | Nothing; a change of the pinned revision follows [baseline-governance.md](../process/baseline-governance.md). |
+| Parity reference (time-boxed, D-017) | It is the other half of the Phase 2 gate, and no later step produces it before step 3 needs it. | CE-0003, CE-0001 | None. | The binary and the lock name one Firecracker revision (done 2026-11-11, GH #162; CE-0002 closed). A Linux baseline is captured on any aarch64 KVM host at the pinned revision (CE-0003). The upstream suite has been tried in the System VM and the result is recorded (CE-0001). | Nothing; a change of the pinned revision follows [baseline-governance.md](../process/baseline-governance.md). |
 | 1. Connect `vesperd` to Backend A | It is the unmet Phase 2 deliverable. Until it exists the public API never drives a real microVM, and goal 1 is unproven. | GH #156, TD-045 | An ADR that settles the open questions of the [backend ownership contract](#backend-ownership-contract) (D-013, D-017). A restriction on what the vsock bridge reaches, because this step puts a relay to Firecracker behind the bridge (TD-027, D-018). An owner-only default socket for `vesperd` (TD-050). Where snapshots persist (TD-025). | A Firecracker API client creates, starts, pauses, resumes, snapshots and stops a jailed microVM in the System VM through `vesperd`, and a suite records it. | Any new listener, on macOS or in the System VM (D-013). |
 | 2. Run Docker containers in microVMs | It is the unmet Phase 3 exit criterion for dockerd. Without it the Phase 4 suites prove the Docker path, not this design. | GH #53 | Shares over NFS from `unfs3` (GH #160, D-020). A network device for each microVM (TD-032). No full root-drive copy per task (TD-035). Persistent System VM storage (TD-025). | `docker run` from macOS starts a microVM, and the Phase 4 suites pass against microVM containers, within the outcome the prototype recorded. | Nothing further, unless the prototype ends in the fallback or in a partial outcome. |
 | 3. Phase 5: Backend B | It removes the dependency on nested virtualisation. | GH #56 | Step 1. The parity reference and the differential harness (GH #87). A design for the boundary between the shim and Backend B (D-017). | The [Phase 5 exit criterion](#phase-5-exit-criterion). | Not known yet. |
@@ -409,7 +409,7 @@ Backend B passes the same parity suite as Backend A at the same pinned baseline 
 Parity has one reference chain (D-014):
 
 1. The truth is stock Firecracker on Linux aarch64 at the revision in the baseline lock, on any aarch64 KVM host. **Not met** (CE-0003): no Linux baseline exists.
-2. The binary and the lock name the same revision before any reference capture. **Not met** (CE-0002, TD-029): the System VM runs release v1.16.0, which is 285 commits after the pinned commit.
+2. The binary and the lock name the same revision before any reference capture. **Meets the requirement** (GH #162): the lock pins the v1.16.0 tag commit `d83d72b7…`, the release the System VM runs.
 3. Backend A stands in for the truth only for the cases where a captured Linux result agrees with it.
 4. Backend B is compared with the truth, and with Backend A where item 3 allows.
 
@@ -573,9 +573,9 @@ The status of each item is the status of what decides it.
 | Item | Decided by |
 | --- | --- |
 | All parity tests pass against the Linux baseline | [Parity harness](#parity-harness) (CE-0003, GH #87) |
-| Backend A meets parity GA on M3 and later, with no open compat exception | [compat-exceptions.yaml](compat-exceptions.yaml) (CE-0001, CE-0002, CE-0003, CE-0004) |
+| Backend A meets parity GA on M3 and later, with no open compat exception | [compat-exceptions.yaml](compat-exceptions.yaml) (CE-0001, CE-0003, CE-0004) |
 | Backend B parity status is published: full parity, or a gap list with owners and dates | [Phase 5](#phase-5-backend-b) (GH #56) |
-| The baseline lock is current and cited in test reports | [Normative baselines](#normative-baselines) (CE-0002) |
+| The baseline lock is current and cited in test reports | [Normative baselines](#normative-baselines) (GH #162; the committed parity and ctr captures still cite the previous pin until they are re-captured) |
 | The Docker replacement suite passes: compose, bind mounts, exec, logs | [Phase 4](#phase-4-docker-desktop-experience-on-macos) (GH #53) |
 | A 24-hour soak with 100 containers in mixed life cycles ends with zero unrecoverable daemon failures | TD-047 |
 | Performance thresholds are defined and met | [Performance thresholds](#performance-thresholds) (CE-0003, TD-033) |
@@ -599,14 +599,14 @@ The status of each item is the status of what decides it.
 * Apple: save and restore state is tied to one Mac and one user. ([Apple Developer][4])
 * Apple: nested virtualisation support and the bridged network attachment. ([Apple Developer][5], [Apple Developer][6])
 
-[1]: https://raw.githubusercontent.com/firecracker-microvm/firecracker/083c4cf69281178acc910f7f857f88e69c51d3b5/docs/design.md "https://raw.githubusercontent.com/firecracker-microvm/firecracker/083c4cf69281178acc910f7f857f88e69c51d3b5/docs/design.md"
+[1]: https://raw.githubusercontent.com/firecracker-microvm/firecracker/d83d72b710361a10294480131377b1b00b163af8/docs/design.md "https://raw.githubusercontent.com/firecracker-microvm/firecracker/d83d72b710361a10294480131377b1b00b163af8/docs/design.md"
 [2]: https://raw.githubusercontent.com/apple/containerization/636eef0eff00e451de6d5d426e6a6785b90b44e2/README.md "https://raw.githubusercontent.com/apple/containerization/636eef0eff00e451de6d5d426e6a6785b90b44e2/README.md"
 [3]: https://github.com/containerd/containerd/blob/d1d9d07f1960f7f3648298e44963a263eac87fa5/core/runtime/v2/README.md "https://github.com/containerd/containerd/blob/d1d9d07f1960f7f3648298e44963a263eac87fa5/core/runtime/v2/README.md"
 [4]: https://developer.apple.com/videos/play/wwdc2023/10007/ "Create seamless experiences with Virtualization - WWDC23 - Videos - Apple Developer"
 [5]: https://developer.apple.com/documentation/virtualization/vzgenericplatformconfiguration/isnestedvirtualizationsupported "isNestedVirtualizationSupported"
 [6]: https://developer.apple.com/documentation/virtualization/vzbridgednetworkdeviceattachment "VZBridgedNetworkDeviceAttach..."
-[7]: https://raw.githubusercontent.com/firecracker-microvm/firecracker/083c4cf69281178acc910f7f857f88e69c51d3b5/docs/snapshotting/snapshot-support.md "https://raw.githubusercontent.com/firecracker-microvm/firecracker/083c4cf69281178acc910f7f857f88e69c51d3b5/docs/snapshotting/snapshot-support.md"
-[8]: https://raw.githubusercontent.com/firecracker-microvm/firecracker/083c4cf69281178acc910f7f857f88e69c51d3b5/SPECIFICATION.md "https://raw.githubusercontent.com/firecracker-microvm/firecracker/083c4cf69281178acc910f7f857f88e69c51d3b5/SPECIFICATION.md"
+[7]: https://raw.githubusercontent.com/firecracker-microvm/firecracker/d83d72b710361a10294480131377b1b00b163af8/docs/snapshotting/snapshot-support.md "https://raw.githubusercontent.com/firecracker-microvm/firecracker/d83d72b710361a10294480131377b1b00b163af8/docs/snapshotting/snapshot-support.md"
+[8]: https://raw.githubusercontent.com/firecracker-microvm/firecracker/d83d72b710361a10294480131377b1b00b163af8/SPECIFICATION.md "https://raw.githubusercontent.com/firecracker-microvm/firecracker/d83d72b710361a10294480131377b1b00b163af8/SPECIFICATION.md"
 
 ## Appendix: Mermaid source
 
