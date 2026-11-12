@@ -244,8 +244,13 @@ fn busy_is_retried_and_a_refused_fcapi_closes_the_client_with_no_body() {
     let mut client = UnixStream::connect(&v.socket).unwrap();
     client.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
     client.write_all(b"GET / HTTP/1.1\r\n\r\n").unwrap();
+    // "Closed with no bytes": macOS reports end of file; Linux resets a socket closed with the request unread.
     let mut rest = Vec::new();
-    client.read_to_end(&mut rest).unwrap();
+    match client.read_to_end(&mut rest) {
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::ConnectionReset => {}
+        Err(e) => panic!("read: {e}"),
+    }
     assert!(rest.is_empty(), "vesperd sent {:?}", String::from_utf8_lossy(&rest));
 }
 
