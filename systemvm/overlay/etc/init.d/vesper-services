@@ -19,6 +19,8 @@ start() {
     fi
   done
   mkdir -p /run/vesper
+  # TAP devices (microVM networks, TD-032; the upstream suite, GH #173) need /dev/net/tun.
+  modprobe tun 2>/dev/null || echo "vesper: modprobe tun failed" > /dev/console
   # Detached so the default runlevel (and the login prompt) does not wait for dockerd;
   # /run/vesper/services-ready marks completion and the probe and HEALTH wait for it.
   # A clean environment: inside a runlevel change rc-service would only schedule the start.

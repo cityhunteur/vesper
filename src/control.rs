@@ -367,7 +367,7 @@ mod tests {
                                 writer.write_all(&buf).unwrap();
                             }
                             Some("HEALTH") => writer
-                                .write_all(b"HEALTH {\"packages_ready\":true,\"services\":{\"vesper-agent\":\"started\",\"containerd\":\"started\",\"docker\":\"started\"},\"containerd_ok\":true,\"docker_ok\":true}\n")
+                                .write_all(b"HEALTH {\"packages_ready\":true,\"services\":{\"vesper-agent\":\"started\",\"containerd\":\"started\",\"docker\":\"started\"},\"containerd_ok\":true,\"docker_ok\":true,\"tun\":true}\n")
                                 .unwrap(),
                             Some("MICROVM") => {
                                 let sub = parts.next().unwrap_or("");
@@ -488,7 +488,8 @@ mod tests {
         assert_eq!(session.logs("docker", 10).unwrap().len(), 2);
         let report = run_services_suite(&endpoint, &["containerd", "docker"], Duration::from_secs(2));
         let names: Vec<&str> = report.steps.iter().map(|s| s.name.as_str()).collect();
-        assert_eq!(names.len(), 9);
+        assert_eq!(names.len(), 10);
+        assert!(names.contains(&"tun_loaded_at_boot"));
         assert!(names.contains(&"docker_recovers") && names.contains(&"containerd_logs_capture_startup_and_recovery"));
         assert!(report.passed, "{:?}", report.steps);
     }

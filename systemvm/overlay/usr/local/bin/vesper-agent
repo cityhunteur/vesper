@@ -44,14 +44,15 @@ while IFS= read -r line; do
     HEALTH)
       ready=false; sready=false; cok=false; dok=false; dver=""; kvm=false
       [ -c /dev/kvm ] && kvm=true
+      tun=false; [ -c /dev/net/tun ] && tun=true
       [ -f /run/vesper/packages-ready ] && ready=true
       [ -f /run/vesper/services-ready ] && sready=true
       ctr --connect-timeout 2s version >/dev/null 2>&1 && cok=true
       dver="$(docker version --format '{{.Server.Version}}' 2>/dev/null || true)"
       [ -n "$dver" ] && dok=true
       ip=$(ip -4 -o addr show dev eth0 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -1)
-      printf 'HEALTH {"packages_ready":%s,"services_ready":%s,"services":{"containerd":"%s","docker":"%s","vesper-agent":"%s"},"containerd_ok":%s,"docker_ok":%s,"docker_version":"%s","kvm":%s,"ip":"%s"}\n' \
-        "$ready" "$sready" "$(service_state containerd)" "$(service_state docker)" "$(service_state vesper-agent)" "$cok" "$dok" "$dver" "$kvm" "$ip"
+      printf 'HEALTH {"packages_ready":%s,"services_ready":%s,"services":{"containerd":"%s","docker":"%s","vesper-agent":"%s"},"containerd_ok":%s,"docker_ok":%s,"docker_version":"%s","kvm":%s,"tun":%s,"ip":"%s"}\n' \
+        "$ready" "$sready" "$(service_state containerd)" "$(service_state docker)" "$(service_state vesper-agent)" "$cok" "$dok" "$dver" "$kvm" "$tun" "$ip"
       ;;
     KILL)
       case "$2" in
