@@ -9,7 +9,7 @@ supervisor=supervise-daemon
 notify_port="${VESPER_SHARE_NOTIFY_PORT:-2401}"
 command=/usr/bin/socat
 # max-children bounds the handlers a caller can start; the launcher holds one connection.
-command_args="VSOCK-LISTEN:${notify_port},reuseaddr,fork,max-children=4 EXEC:'/usr/local/bin/vesper-share notify'"
+command_args="-t 86400 VSOCK-LISTEN:${notify_port},reuseaddr,fork,max-children=4 EXEC:'/usr/local/bin/vesper-share notify'"
 respawn_delay=1
 respawn_max=0
 

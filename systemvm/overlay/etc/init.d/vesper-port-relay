@@ -6,7 +6,9 @@ description="Vesper published-port relay (vsock)"
 supervisor=supervise-daemon
 relay_port="${VESPER_PORT_RELAY:-2400}"
 command=/usr/bin/socat
-command_args="VSOCK-LISTEN:${relay_port},reuseaddr,fork EXEC:/usr/local/bin/vesper-port-relay-conn"
+# -t: after one side half-closes (an attach with no stdin, an HTTP client that shuts its write side), keep
+# relaying the other direction until it closes too; socat's default ends the connection 0.5 s later (GH #167).
+command_args="-t 86400 VSOCK-LISTEN:${relay_port},reuseaddr,fork EXEC:/usr/local/bin/vesper-port-relay-conn"
 respawn_delay=1
 respawn_max=0
 

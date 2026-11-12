@@ -80,6 +80,19 @@ out="$("${DOCKER}" checkpoint create vc3 cp0 2>&1 | tail -1)"; rc=${PIPESTATUS[0
 "${DOCKER}" rm -f vc3 >/dev/null 2>&1
 out="$("${DOCKER}" run --rm --runtime nosuch-runtime "${IMG}" /bin/true 2>&1 | grep -i -m1 runtime)"; rc=${PIPESTATUS[0]}
 [ $rc -ne 0 ] && [ -n "${out}" ] && record unsupported_runtime_error true "rc=${rc}: ${out}" || record unsupported_runtime_error false "rc=${rc}: ${out}"
+# Attached streams survive silence and a closed stdin (GH #167): the relays used to drop the connection 0.5 s
+# after the client half-closed its write side. The trivial image has no sleep or cat, so these use alpine.
+ATTACH_IMAGE="${ATTACH_IMAGE:-alpine:3.22}"
+# Each attached run is limited to 60 s so a hang fails its step instead of stalling the suite (macOS has no timeout(1)).
+limited() { perl -e 'alarm 60; exec @ARGV' "$@"; }
+"${DOCKER}" image inspect "${ATTACH_IMAGE}" >/dev/null 2>&1 || "${DOCKER}" pull -q "${ATTACH_IMAGE}" >/dev/null 2>&1
+out="$(limited "${DOCKER}" run --rm "${ATTACH_IMAGE}" /bin/sh -c 'echo a; sleep 3; echo b' 2>&1 | tr '\n' ' ')"
+[ "${out}" = "a b " ] && record attach_output_after_pause true "attached non-TTY run printed '${out}' across a 3 s pause" || record attach_output_after_pause false "got '${out}' (expected 'a b ')"
+out="$(echo x | limited "${DOCKER}" run --rm -i "${ATTACH_IMAGE}" /bin/sh -c 'cat; sleep 2; echo done' 2>&1 | tr '\n' ' ')"
+[ "${out}" = "x done " ] && record attach_output_after_stdin_closed true "stdin closed early, output 2 s later still arrived: '${out}'" || record attach_output_after_stdin_closed false "got '${out}' (expected 'x done ')"
+n="$(limited "${DOCKER}" run --rm "${ATTACH_IMAGE}" /bin/sh -c 'i=0; while [ $i -lt 7 ]; do echo tick$i; sleep 1; i=$((i+1)); done' 2>&1 | grep -c '^tick')"
+[ "${n}" = 7 ] && record attach_long_running_output true "7 lines over 7 s all arrived" || record attach_long_running_output false "${n} of 7 lines arrived"
+
 "${DOCKER}" rmi "${IMG}" >/dev/null 2>&1
 
 # Ingress boundary: owner-only socket, no TCP listener, no other host sockets, raw guest ports refused.

@@ -222,8 +222,7 @@ arm64) has room to be pulled, which the CE-0001 feasibility run needs (decision 
 
 `make docker-up` (`scripts/systemvm/docker-up.sh`) starts `vesper-proxy --listen run/vesper/docker.sock --upstream
 vsock://3:2375 --vsock-socket-dir run/systemvm/vsock --validate-upstream` detached (pid and log under
-`run/vesper/`), after checking that the bridge socket exists. In the guest, `vesper-docker-relay` (supervised
-`socat VSOCK-LISTEN:2375,fork UNIX-CONNECT:/var/run/docker.sock`) forwards that port to the Docker daemon, so
+`run/vesper/`), after checking that the bridge socket exists. In the guest, `vesper-docker-relay` (supervised `socat -t 86400 VSOCK-LISTEN:2375,fork UNIX-CONNECT:/var/run/docker.sock`) forwards that port to the Docker daemon. The long `-t` keeps relaying after one side half-closes; socat's default ends the connection 0.5 s later, which cut attached output (GH #167). The port relay, the agent and the share sink use the same setting, so
 `DOCKER_HOST=unix://$PWD/run/vesper/docker.sock docker version` reaches Docker 28 inside the VM. The listen socket
 is created with mode 0600 (`--listen-mode`). `make systemvm-trivial-image` builds `build/systemvm/trivial-rootfs.tar`
 (busybox and musl from the pinned ISO, deterministic) and `make docker-smoke` runs the GH #15 checklist: socket
