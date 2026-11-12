@@ -101,13 +101,10 @@ pub fn documented_route_semantics(operation: &str) -> Option<RouteSemantics> {
         "GET /"
         | "PUT /actions"
         | "GET /balloon"
-        | "PUT /logger"
         | "GET /machine-config"
-        | "PUT /metrics"
         | "GET /mmds"
         | "PATCH /mmds"
         | "PUT /mmds"
-        | "PUT /serial"
         | "GET /version"
         | "PATCH /vm"
         | "GET /vm/config" => Any,
@@ -134,6 +131,10 @@ pub fn documented_route_semantics(operation: &str) -> Option<RouteSemantics> {
         | "PUT /network-interfaces/{iface_id}"
         | "PUT /pmem/{id}"
         | "PUT /hotplug/memory"
+        // Firecracker v1.16.0 refuses these after boot (`rpc_interface.rs`, operations not allowed post-boot).
+        | "PUT /logger"
+        | "PUT /metrics"
+        | "PUT /serial"
         | "PUT /snapshot/load"
         | "PUT /vsock" => PreBoot,
         _ => return None,

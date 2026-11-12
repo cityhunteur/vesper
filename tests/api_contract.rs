@@ -613,7 +613,7 @@ async fn balloon_runtime_update_matches_pinned_behavior() {
     assert_eq!(oversized_payload["code"], "InvalidRequest");
     assert_eq!(
         oversized_payload["fault_message"],
-        "Balloon update error: Balloon: Requested memory should be less than 128MiB"
+        "Balloon update error: Balloon: Requested memory should be less than 129MiB"
     );
     assert_eq!(
         oversized_payload["baseline_firecracker_revision"]
@@ -1514,7 +1514,7 @@ async fn machine_config_cannot_shrink_below_balloon_target() {
         assert_eq!(payload["code"], "InvalidRequest");
         assert_eq!(
             payload["fault_message"],
-            "The memory size (MiB) is smaller than the previously set balloon device target size."
+            "Machine config error: The memory size (MiB) is smaller than the previously set balloon device target size."
         );
         assert_eq!(
             payload["baseline_firecracker_revision"].as_str().unwrap(),
@@ -1543,7 +1543,7 @@ async fn documented_postboot_only_routes_reject_before_start() {
 }
 
 #[tokio::test]
-async fn logger_metrics_and_serial_remain_callable_after_start() {
+async fn logger_metrics_and_serial_are_refused_after_start() {
     let (router, _) = app_router();
     let tempdir = tempdir().unwrap();
     let metrics_path = tempdir.path().join("metrics-after-start.jsonl");
@@ -1571,7 +1571,8 @@ async fn logger_metrics_and_serial_remain_callable_after_start() {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), StatusCode::NO_CONTENT, "{path}");
+        // Firecracker v1.16.0 refuses all three after boot (D-026, Backend A replay).
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{path}");
     }
 }
 
@@ -1668,8 +1669,9 @@ async fn vm_config_vsock_export_remains_available_after_boot_on_full_router() {
 }
 
 #[tokio::test]
-async fn vsock_put_rejects_invalid_guest_cid_on_full_router() {
-    let (router, firecracker) = app_router();
+async fn vsock_put_accepts_low_guest_cid_on_full_router() {
+    // Firecracker v1.16.0 checks no minimum guest CID (D-026, Backend A replay).
+    let (router, _) = app_router();
 
     let response = router
         .oneshot(
@@ -1685,15 +1687,7 @@ async fn vsock_put_rejects_invalid_guest_cid_on_full_router() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    let payload: serde_json::Value =
-        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
-    assert_eq!(payload["code"], "InvalidRequest");
-    assert_eq!(
-        payload["fault_message"],
-        "Guest CID must be greater than or equal to 3."
-    );
-    assert_eq!(payload["baseline_firecracker_revision"], firecracker);
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
 }
 
 #[tokio::test]
@@ -2274,7 +2268,7 @@ async fn cpu_config_put_matches_pinned_store_behavior_without_vm_config_export()
             .unwrap(),
     )
     .unwrap();
-    assert!(vm_config_payload.get("cpu-config").is_none());
+    assert!(vm_config_payload["cpu-config"].is_null());
 }
 
 #[tokio::test]
@@ -2380,7 +2374,7 @@ async fn serial_put_matches_pinned_store_behavior_without_vm_config_export() {
 }
 
 #[tokio::test]
-async fn serial_put_remains_available_after_boot_on_full_router() {
+async fn serial_put_is_refused_after_boot_on_full_router() {
     let (router, _) = app_router();
 
     boot_instance(router.clone()).await;
@@ -2396,14 +2390,20 @@ async fn serial_put_remains_available_after_boot_on_full_router() {
         )
         .await
         .unwrap();
-    assert_eq!(serial_response.status(), StatusCode::NO_CONTENT);
+    // Firecracker v1.16.0 refuses this after boot (D-026, Backend A replay).
+    assert_eq!(serial_response.status(), StatusCode::BAD_REQUEST);
+    let payload: serde_json::Value =
+        serde_json::from_slice(&to_bytes(serial_response.into_body(), usize::MAX).await.unwrap()).unwrap();
+    assert_eq!(
+        payload["fault_message"],
+        "The requested operation is not supported after starting the microVM."
+    );
 }
 
 #[tokio::test]
 async fn vm_config_serial_omission_persists_after_boot_on_full_router() {
     let (router, _) = app_router();
 
-    boot_instance(router.clone()).await;
 
     let serial_response = router
         .clone()
@@ -2418,6 +2418,8 @@ async fn vm_config_serial_omission_persists_after_boot_on_full_router() {
         .await
         .unwrap();
     assert_eq!(serial_response.status(), StatusCode::NO_CONTENT);
+    // Configured before boot: Firecracker refuses it afterwards (D-026).
+    boot_instance(router.clone()).await;
 
     let vm_config_response = router
         .oneshot(
@@ -2639,7 +2641,7 @@ async fn snapshot_create_requires_paused_vm_on_full_router() {
     assert_eq!(running_payload["code"], "InvalidState");
     assert_eq!(
         running_payload["fault_message"],
-        "operation PUT /snapshot/create is not allowed while instance state is running"
+        "Create snapshot error: Cannot save the microVM state: Operation not allowed: save/restore unavailable while running"
     );
     assert_eq!(
         running_payload["baseline_firecracker_revision"],
@@ -2781,7 +2783,7 @@ async fn snapshot_load_rejects_boot_source_configuration_on_full_router() {
     assert_eq!(payload["code"], "InvalidState");
     assert_eq!(
         payload["fault_message"],
-        "Load snapshot can only be called before configuring resources other than logger and metrics."
+        "Load snapshot error: Loading a microVM snapshot not allowed after configuring boot-specific resources."
     );
     assert_eq!(payload["baseline_firecracker_revision"], firecracker);
 }
@@ -2827,14 +2829,14 @@ async fn snapshot_load_rejects_memory_hotplug_configuration_on_full_router() {
     assert_eq!(payload["code"], "InvalidState");
     assert_eq!(
         payload["fault_message"],
-        "Load snapshot can only be called before configuring resources other than logger and metrics."
+        "Load snapshot error: Loading a microVM snapshot not allowed after configuring boot-specific resources."
     );
     assert_eq!(payload["baseline_firecracker_revision"], firecracker);
 }
 
 #[tokio::test]
-async fn snapshot_load_rejects_cpu_config_configuration_on_full_router() {
-    let (router, firecracker) = app_router();
+async fn snapshot_load_is_allowed_after_cpu_config_on_full_router() {
+    let (router, _) = app_router();
 
     let cpu_config_response = router
         .clone()
@@ -2865,19 +2867,8 @@ async fn snapshot_load_rejects_cpu_config_configuration_on_full_router() {
         )
         .await
         .unwrap();
-    assert_eq!(snapshot_response.status(), StatusCode::BAD_REQUEST);
-    let payload: serde_json::Value = serde_json::from_slice(
-        &to_bytes(snapshot_response.into_body(), usize::MAX)
-            .await
-            .unwrap(),
-    )
-    .unwrap();
-    assert_eq!(payload["code"], "InvalidState");
-    assert_eq!(
-        payload["fault_message"],
-        "Load snapshot can only be called before configuring resources other than logger and metrics."
-    );
-    assert_eq!(payload["baseline_firecracker_revision"], firecracker);
+    // `PUT /cpu-config` does not set Firecracker's `boot_path`, so a load is allowed (D-026).
+    assert_eq!(snapshot_response.status(), StatusCode::NO_CONTENT);
 }
 
 #[tokio::test]
@@ -2923,7 +2914,7 @@ async fn snapshot_load_rejects_entropy_configuration_on_full_router() {
     assert_eq!(payload["code"], "InvalidState");
     assert_eq!(
         payload["fault_message"],
-        "Load snapshot can only be called before configuring resources other than logger and metrics."
+        "Load snapshot error: Loading a microVM snapshot not allowed after configuring boot-specific resources."
     );
     assert_eq!(payload["baseline_firecracker_revision"], firecracker);
 }
@@ -2971,7 +2962,7 @@ async fn snapshot_load_rejects_vsock_configuration_on_full_router() {
     assert_eq!(payload["code"], "InvalidState");
     assert_eq!(
         payload["fault_message"],
-        "Load snapshot can only be called before configuring resources other than logger and metrics."
+        "Load snapshot error: Loading a microVM snapshot not allowed after configuring boot-specific resources."
     );
     assert_eq!(payload["baseline_firecracker_revision"], firecracker);
 }
@@ -3017,7 +3008,7 @@ async fn snapshot_load_rejects_balloon_configuration_on_full_router() {
     assert_eq!(payload["code"], "InvalidState");
     assert_eq!(
         payload["fault_message"],
-        "Load snapshot can only be called before configuring resources other than logger and metrics."
+        "Load snapshot error: Loading a microVM snapshot not allowed after configuring boot-specific resources."
     );
     assert_eq!(payload["baseline_firecracker_revision"], firecracker);
 }
@@ -3063,7 +3054,7 @@ async fn snapshot_load_rejects_network_interface_configuration_on_full_router() 
     assert_eq!(payload["code"], "InvalidState");
     assert_eq!(
         payload["fault_message"],
-        "Load snapshot can only be called before configuring resources other than logger and metrics."
+        "Load snapshot error: Loading a microVM snapshot not allowed after configuring boot-specific resources."
     );
     assert_eq!(payload["baseline_firecracker_revision"], firecracker);
 }
@@ -3123,7 +3114,7 @@ async fn snapshot_load_rejects_mmds_configuration_on_full_router() {
     assert_eq!(payload["code"], "InvalidState");
     assert_eq!(
         payload["fault_message"],
-        "Load snapshot can only be called before configuring resources other than logger and metrics."
+        "Load snapshot error: Loading a microVM snapshot not allowed after configuring boot-specific resources."
     );
     assert_eq!(payload["baseline_firecracker_revision"], firecracker);
 }
@@ -3168,11 +3159,11 @@ async fn metrics_put_matches_pinned_store_behavior_without_vm_config_export() {
             .unwrap(),
     )
     .unwrap();
-    assert!(vm_config_payload.get("metrics").is_none());
+    assert!(vm_config_payload["metrics"].is_null());
 }
 
 #[tokio::test]
-async fn metrics_put_remains_available_after_boot_on_full_router() {
+async fn metrics_put_is_refused_after_boot_on_full_router() {
     let (router, _) = app_router();
     let tempdir = tempdir().unwrap();
     let metrics_path = tempdir.path().join("metrics-after-boot.jsonl");
@@ -3193,7 +3184,14 @@ async fn metrics_put_remains_available_after_boot_on_full_router() {
         )
         .await
         .unwrap();
-    assert_eq!(metrics_response.status(), StatusCode::NO_CONTENT);
+    // Firecracker v1.16.0 refuses this after boot (D-026, Backend A replay).
+    assert_eq!(metrics_response.status(), StatusCode::BAD_REQUEST);
+    let payload: serde_json::Value =
+        serde_json::from_slice(&to_bytes(metrics_response.into_body(), usize::MAX).await.unwrap()).unwrap();
+    assert_eq!(
+        payload["fault_message"],
+        "The requested operation is not supported after starting the microVM."
+    );
 }
 
 #[tokio::test]
@@ -3202,7 +3200,6 @@ async fn vm_config_metrics_omission_persists_after_boot_on_full_router() {
     let tempdir = tempdir().unwrap();
     let metrics_path = tempdir.path().join("metrics-omitted-after-boot.jsonl");
 
-    boot_instance(router.clone()).await;
 
     let metrics_response = router
         .clone()
@@ -3220,6 +3217,8 @@ async fn vm_config_metrics_omission_persists_after_boot_on_full_router() {
         .await
         .unwrap();
     assert_eq!(metrics_response.status(), StatusCode::NO_CONTENT);
+    // Configured before boot: Firecracker refuses it afterwards (D-026).
+    boot_instance(router.clone()).await;
 
     let vm_config_response = router
         .oneshot(
@@ -3238,7 +3237,7 @@ async fn vm_config_metrics_omission_persists_after_boot_on_full_router() {
             .unwrap(),
     )
     .unwrap();
-    assert!(vm_config_payload.get("metrics").is_none());
+    assert!(vm_config_payload["metrics"].is_null());
 }
 
 #[tokio::test]
@@ -3283,7 +3282,7 @@ async fn metrics_put_rejects_reinitialization_on_full_router() {
     assert_eq!(duplicate_payload["code"], "InvalidRequest");
     assert_eq!(
         duplicate_payload["fault_message"],
-        "Cannot initialize the metrics system due to bad user input: Reinitialization of metrics not allowed."
+        "Metrics error: Cannot initialize the metrics system due to bad user input: Reinitialization of metrics not allowed."
     );
     assert_eq!(
         duplicate_payload["baseline_firecracker_revision"],
@@ -3392,11 +3391,11 @@ async fn logger_put_matches_pinned_acceptance_without_vm_config_export() {
             .unwrap(),
     )
     .unwrap();
-    assert!(vm_config_payload.get("logger").is_none());
+    assert!(vm_config_payload["logger"].is_null());
 }
 
 #[tokio::test]
-async fn logger_put_remains_available_after_boot_on_full_router() {
+async fn logger_put_is_refused_after_boot_on_full_router() {
     let (router, _) = app_router();
 
     boot_instance(router.clone()).await;
@@ -3412,14 +3411,20 @@ async fn logger_put_remains_available_after_boot_on_full_router() {
         )
         .await
         .unwrap();
-    assert_eq!(logger_response.status(), StatusCode::NO_CONTENT);
+    // Firecracker v1.16.0 refuses this after boot (D-026, Backend A replay).
+    assert_eq!(logger_response.status(), StatusCode::BAD_REQUEST);
+    let payload: serde_json::Value =
+        serde_json::from_slice(&to_bytes(logger_response.into_body(), usize::MAX).await.unwrap()).unwrap();
+    assert_eq!(
+        payload["fault_message"],
+        "The requested operation is not supported after starting the microVM."
+    );
 }
 
 #[tokio::test]
 async fn vm_config_logger_omission_persists_after_boot_on_full_router() {
     let (router, _) = app_router();
 
-    boot_instance(router.clone()).await;
 
     let logger_response = router
         .clone()
@@ -3434,6 +3439,8 @@ async fn vm_config_logger_omission_persists_after_boot_on_full_router() {
         .await
         .unwrap();
     assert_eq!(logger_response.status(), StatusCode::NO_CONTENT);
+    // Configured before boot: Firecracker refuses it afterwards (D-026).
+    boot_instance(router.clone()).await;
 
     let vm_config_response = router
         .oneshot(
@@ -3452,7 +3459,7 @@ async fn vm_config_logger_omission_persists_after_boot_on_full_router() {
             .unwrap(),
     )
     .unwrap();
-    assert!(vm_config_payload.get("logger").is_none());
+    assert!(vm_config_payload["logger"].is_null());
 }
 
 #[tokio::test]
@@ -3733,7 +3740,7 @@ async fn actions_route_matches_pinned_instance_start_and_flush_metrics_guards() 
     assert_eq!(missing_kernel_payload["code"], "InvalidRequest");
     assert_eq!(
         missing_kernel_payload["fault_message"],
-        "Cannot start microvm without kernel configuration."
+        "Start microvm error: Cannot start microvm without kernel configuration."
     );
     assert_eq!(
         missing_kernel_payload["baseline_firecracker_revision"],
@@ -4412,7 +4419,7 @@ async fn drive_put_rejects_missing_backing_files() {
             .unwrap(),
     )
     .unwrap();
-    assert!(vm_config_payload["drives"].is_null());
+    assert!(vm_config_payload["drives"].as_array().is_some_and(Vec::is_empty));
 }
 
 #[tokio::test]
@@ -4624,7 +4631,7 @@ async fn network_put_rejects_path_body_id_mismatch_on_full_router() {
     )
     .unwrap();
     assert!(
-        vm_config_payload["network-interfaces"].is_null()
+        vm_config_payload["network-interfaces"].as_array().is_some_and(Vec::is_empty)
             || vm_config_payload["network-interfaces"]
                 .as_array()
                 .map(|interfaces| interfaces.is_empty())
@@ -5421,9 +5428,9 @@ async fn postboot_device_puts_report_pci_not_enabled_on_full_router() {
     }
 
     let vm_config = get_json(&router, "/vm/config").await;
-    assert!(vm_config["drives"].is_null());
-    assert!(vm_config["network-interfaces"].is_null());
-    assert!(vm_config["pmem"].is_null());
+    assert!(vm_config["drives"].as_array().is_some_and(Vec::is_empty));
+    assert!(vm_config["network-interfaces"].as_array().is_some_and(Vec::is_empty));
+    assert!(vm_config["pmem"].as_array().is_some_and(Vec::is_empty));
 }
 
 #[tokio::test]
@@ -5484,7 +5491,7 @@ async fn network_put_validates_mtu_bounds_on_full_router() {
             &firecracker,
         );
     }
-    assert!(get_json(&router, "/vm/config").await["network-interfaces"].is_null());
+    assert!(get_json(&router, "/vm/config").await["network-interfaces"].as_array().is_some_and(Vec::is_empty));
 
     for (iface, tap, mtu) in [("eth0", "tap0", "68"), ("eth1", "tap1", "65535")] {
         let (status, payload) = send_json(
@@ -6010,7 +6017,7 @@ async fn memory_hotplug_put_rejects_invalid_total_size_preboot_on_full_router() 
     assert_eq!(payload["code"], "InvalidRequest");
     assert_eq!(
         payload["fault_message"],
-        "The total size of the hotpluggable memory device must be at least the slot size and a multiple of the slot size."
+        "Memory hotplug config error: Total size must be a multiple of slot size (128 MiB)"
     );
     assert_eq!(
         payload["baseline_firecracker_revision"].as_str().unwrap(),
@@ -6040,7 +6047,7 @@ async fn memory_hotplug_put_rejects_invalid_block_size_preboot_on_full_router() 
     assert_eq!(payload["code"], "InvalidRequest");
     assert_eq!(
         payload["fault_message"],
-        "The block size of the hotpluggable memory device must be at least 2 MiB and a power of 2."
+        "Memory hotplug config error: Block size must be a power of 2"
     );
     assert_eq!(
         payload["baseline_firecracker_revision"].as_str().unwrap(),
@@ -6086,7 +6093,7 @@ async fn memory_hotplug_patch_rejects_invalid_requested_size_on_full_router() {
     assert_eq!(payload["code"], "InvalidRequest");
     assert_eq!(
         payload["fault_message"],
-        "The requested size of the hotpluggable memory device must be a multiple of the block size and no larger than the total size."
+        "Memory hotplug update error: Failed to create memory hotplug device: Size 537919488 is invalid: it must be a multiple of block size and less than the total size"
     );
     assert_eq!(
         payload["baseline_firecracker_revision"].as_str().unwrap(),
@@ -6474,7 +6481,7 @@ async fn mmds_runtime_requires_config_with_baseline_revision() {
     assert_eq!(payload["code"], "InvalidRequest");
     assert_eq!(
         payload["fault_message"],
-        "The MMDS data store is not initialized."
+        "MMDS error: The MMDS data store is not initialized."
     );
     assert_eq!(
         payload["baseline_firecracker_revision"].as_str().unwrap(),
@@ -6505,7 +6512,7 @@ async fn mmds_put_rejects_oversized_store_on_full_router() {
     assert_eq!(payload["code"], "PayloadTooLarge");
     assert_eq!(
         payload["fault_message"],
-        "The MMDS patch request doesn't fit."
+        "MMDS limit exceeded error: The MMDS patch request doesn't fit."
     );
     assert_eq!(
         payload["baseline_firecracker_revision"].as_str().unwrap(),
@@ -6551,7 +6558,7 @@ async fn mmds_put_requires_runtime_config_on_full_router() {
     assert_eq!(payload["code"], "InvalidRequest");
     assert_eq!(
         payload["fault_message"],
-        "The MMDS data store is not initialized."
+        "MMDS error: The MMDS data store is not initialized."
     );
     assert_eq!(
         payload["baseline_firecracker_revision"].as_str().unwrap(),
@@ -6581,7 +6588,7 @@ async fn mmds_patch_requires_initialized_store_on_full_router() {
     assert_eq!(payload["code"], "InvalidRequest");
     assert_eq!(
         payload["fault_message"],
-        "The MMDS data store is not initialized."
+        "MMDS error: The MMDS data store is not initialized."
     );
     assert_eq!(
         payload["baseline_firecracker_revision"].as_str().unwrap(),
@@ -6627,7 +6634,7 @@ async fn mmds_patch_requires_runtime_config_on_full_router() {
     assert_eq!(payload["code"], "InvalidRequest");
     assert_eq!(
         payload["fault_message"],
-        "The MMDS data store is not initialized."
+        "MMDS error: The MMDS data store is not initialized."
     );
     assert_eq!(
         payload["baseline_firecracker_revision"].as_str().unwrap(),
@@ -6672,7 +6679,7 @@ async fn mmds_patch_rejects_oversized_merge_on_full_router() {
     assert_eq!(payload["code"], "PayloadTooLarge");
     assert_eq!(
         payload["fault_message"],
-        "The MMDS patch request doesn't fit."
+        "MMDS limit exceeded error: The MMDS patch request doesn't fit."
     );
     assert_eq!(
         payload["baseline_firecracker_revision"].as_str().unwrap(),
@@ -6702,7 +6709,7 @@ async fn mmds_config_put_rejects_empty_network_interface_list_on_full_router() {
     assert_eq!(payload["code"], "InvalidRequest");
     assert_eq!(
         payload["fault_message"],
-        "The list of network interface IDs that allow forwarding MMDS requests is empty."
+        "MMMDS config error: The list of network interface IDs that allow forwarding MMDS requests is empty."
     );
     assert_eq!(
         payload["baseline_firecracker_revision"].as_str().unwrap(),
@@ -6749,7 +6756,7 @@ async fn mmds_config_put_rejects_unknown_network_interface_on_full_router() {
     assert_eq!(payload["code"], "InvalidRequest");
     assert_eq!(
         payload["fault_message"],
-        "The list of network interface IDs provided contains at least one ID that does not correspond to any existing network interface."
+        "MMMDS config error: The list of network interface IDs provided contains at least one ID that does not correspond to any existing network interface."
     );
     assert_eq!(
         payload["baseline_firecracker_revision"].as_str().unwrap(),
@@ -6798,7 +6805,7 @@ async fn mmds_config_put_rejects_non_link_local_ipv4_on_full_router() {
     assert_eq!(payload["code"], "InvalidRequest");
     assert_eq!(
         payload["fault_message"],
-        "The MMDS IPv4 address is not link local."
+        "MMMDS config error: The MMDS IPv4 address is not link local."
     );
     assert_eq!(
         payload["baseline_firecracker_revision"].as_str().unwrap(),

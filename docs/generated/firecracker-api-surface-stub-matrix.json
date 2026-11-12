@@ -311,7 +311,7 @@
     {
       "method": "PUT",
       "path": "/logger",
-      "semantics": "Any",
+      "semantics": "PB",
       "stub_response": {
         "status_code": 501,
         "code": "NotImplemented",
@@ -333,7 +333,7 @@
     {
       "method": "PUT",
       "path": "/metrics",
-      "semantics": "Any",
+      "semantics": "PB",
       "stub_response": {
         "status_code": 501,
         "code": "NotImplemented",
@@ -388,7 +388,7 @@
     {
       "method": "PUT",
       "path": "/serial",
-      "semantics": "Any",
+      "semantics": "PB",
       "stub_response": {
         "status_code": 501,
         "code": "NotImplemented",
