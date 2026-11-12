@@ -67,7 +67,7 @@ These rules are not negotiable. Each one says how it is enforced; detail is in [
 
 1. `vesperd` is the only public control-plane endpoint; raw backend sockets are never part of the GA surface. *Enforced by: review, SECURITY.md.*
 2. Intra-crate dependencies follow the layer table. *Enforced by: `scripts/harness/check_structure.py` in CI.*
-3. Every error is a deterministic `ErrorEnvelope` carrying the pinned baseline revision. *Enforced by: `tests/api_contract.rs`.*
+3. On the model backend every error is a deterministic `ErrorEnvelope` carrying the pinned baseline revision; on the System VM backend HTTP errors are Firecracker's own ([ADR 0007](docs/design-docs/adr/0007-vesperd-to-backend-a.md)). *Enforced by: `tests/api_contract.rs`.*
 4. The golden route list and generated matrices match the pinned swagger. *Enforced by: `make contract-check`, `make surface-matrix-check`, `make behavior-matrix-check`, CI.*
 5. A reachable route or a `501` is not parity; parity claims cite the baseline lock revision. *Enforced by: review against the parity matrix; compat drift tracked in `docs/specs/compat-exceptions.yaml`.*
 6. Runtime-sensitive changes need runtime artifacts, not just unit tests. *Enforced by: verification bundles under `.symphony/runs/`, council review.*

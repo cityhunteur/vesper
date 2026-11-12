@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "generated_at": "2026-11-11T17:50:17Z",
+ "generated_at": "2026-11-12T06:22:22Z",
  "host": {
   "description": "macOS 27.0.1 / Apple M3 Pro",
   "commit": "f5f784a"
@@ -51,12 +51,13 @@
   }
  ],
  "compat_exceptions": {
-  "open": 3,
+  "open": 4,
   "closed": 1,
   "open_ids": [
    "CE-0001",
    "CE-0003",
-   "CE-0004"
+   "CE-0004",
+   "CE-0006"
   ],
   "entries": [
    {
@@ -83,6 +84,13 @@
    {
     "id": "CE-0004",
     "issue": "23",
+    "expiry_date": "2027-03-31",
+    "target_release": "parity-ga",
+    "status": "open"
+   },
+   {
+    "id": "CE-0006",
+    "issue": "156",
     "expiry_date": "2027-03-31",
     "target_release": "parity-ga",
     "status": "open"
