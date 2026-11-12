@@ -97,9 +97,18 @@ Public symbols by file:
   diagnostics }`, `select_backend(&caps, policy)`.
 - `proxy.rs`: `Target { scheme, address, cid, port }`, `parse_target(raw)`,
   `ServerConfig { listen_path, upstream_raw, dial_timeout, vsock_socket_dir,
-  listen_mode, validate_upstream }` with `Default` (5 s, mode `0o600`, no
-  validation), `upstream_socket_path(&target, vsock_socket_dir)`, `async
-  run_server(config, shutdown)`.
+  listen_mode, validate_upstream, preface, bounds }` with `Default` (5 s, mode `0o600`, no
+  validation, no preface, no bounds), `upstream_socket_path(&target, vsock_socket_dir)`, `async
+  run_server(config, shutdown)` (validate, bind, then `serve`), `async serve(listener, config, shutdown)` (the
+  accept loop on a listener the caller bound), trait `Upstream` and `async open_upstream(&target, &config)` (dial,
+  plus the vsock `CONNECT <port>` line), `claim_socket(path) -> File` (slice 1's owner-only directory check,
+  `<path>.lock`, live-socket refusal and stale-socket removal, moved here from `vesperd` in ADR 0007 slice 4).
+- `proxy/relay.rs` (ADR 0007 slice 4, `super::` only; re-exported by `proxy`): `Preface { greeting_prefix,
+  request, accept }`, `Bounds { handshake_timeout, max_line, read_buffer, idle_timeout, request_ceiling,
+  max_connections }` (`Default`: none, which keeps `copy_bidirectional`), `RelayEnd { Closed, Idle, Ceiling }`,
+  `async read_line_bounded(reader, max, timeout)` (one byte at a time, so nothing past the newline is consumed),
+  `async write_line(writer, line, timeout)`, constants `DEFAULT_MAX_LINE` (1 KiB) and `DEFAULT_READ_BUFFER`
+  (8 KiB).
 - `spec.rs`: `Route { method, path }`, `load_routes(path)`,
   `load_info_version(path)`.
 - `systemvm.rs:SharedDirectory { tag, host_path, read_only, watch }` and `LaunchConfig.shared_directories`
@@ -145,6 +154,8 @@ Public symbols by file:
   `run_workload_suite(&endpoint)`, `run_parity_suite(&endpoint, id, perf_cycles)`, `run_shim_suite(&endpoint)`,
   `run_bundle_suite(&endpoint)`, `run_restart_suite(&endpoint)`, `run_exec_suite(&endpoint)`,
   `run_launchapi_suite(&endpoint, id, expected_version)`,
+  `run_vesperd_suite(&endpoint, &VesperdRun { binary, workdir, extra_args }, id, expected_version)` with constants
+  `VESPERD_IDLE_TIMEOUT` and `VESPERD_REQUEST_CEILING` (both 120 s, the values in `src/bin/vesperd/systemvm.rs`),
   `write_report(path, &report)`; constants
   `AGENT_PROTOCOL_VERSION` (1), `DEFAULT_AGENT_PORT` (1024).
 - `control/launchapi.rs` (ADR 0007 slice 3, `super::` only): `Ready { id, pid, firecracker_version }`,
@@ -152,7 +163,9 @@ Public symbols by file:
   and dots>`; `ERR <reason>` becomes the error), `valid_microvm_id(id)` (1 to 64 ASCII letters, digits, hyphens);
   `Session::launch_api(id, ceiling, timeout)` (sends `LAUNCHAPI`, waits up to `timeout` for `READY`; the session is
   then the lease), `Session::fcapi(id)` (`FCAPI`, waits for `OK`), `Session::http(method, path, body)` (one HTTP/1.1
-  exchange on a relayed connection, Content-Length bodies up to 1 MiB, lines up to 8 KiB), `Session::wait_closed(timeout)`
+  exchange on a relayed connection, Content-Length bodies up to 1 MiB, lines up to 8 KiB), `Session::http_raw(request)`
+  (the response bytes unchanged), `http_request(method, path, body)`, `read_http_response(reader)` (the raw bytes of
+  one response) and `parse_http_response(raw) -> HttpResponse`, `Session::wait_closed(timeout)`
   (end of file or reset from the agent), `Session::vesperd(args)` (agent `VESPERD`, the buffered guest-tool shape).
 - `systemvm.rs` (manifest, launch config, boot smoke),
   `systemvm/image_lock.rs` (`ImageLock` and everything lock-related) and
@@ -278,7 +291,13 @@ Public symbols by file:
 - `proxy.rs:parse_target` accepts only `unix://`, `tcp://`, and
   `vsock://<cid>:<port>`. The vsock bridge preface is exactly
   `"CONNECT {port}\n"` with no reply awaited. Upstream dial is bounded by
-  `dial_timeout`; relay has no size or idle limits.
+  `dial_timeout`. With the default `Bounds` the relay has no size or idle limits (`copy_bidirectional`), as before.
+  With bounds, `proxy/relay.rs` applies `handshake_timeout` to the `CONNECT` write, the preface write and each
+  preface line, refuses a preface line over `max_line` or a reply other than `accept` (the client connection is
+  closed with no bytes), reads at most `read_buffer` bytes at a time with no total limit, passes a half-close on,
+  and closes the connection when `idle_timeout` passes while the upstream spoke last (or nothing was sent yet) or
+  `request_ceiling` passes while the client spoke last. Which side spoke last is the only signal; pipelined
+  requests defeat it.
 - `spec.rs:load_routes` sorts by path then method and dedups; errors on a
   missing `paths` section or empty route list.
 - `systemvm.rs:run_boot_check` requires `iterations > 0` and non-blank
@@ -407,6 +426,16 @@ Public symbols by file:
   `teardown_lease_shell_killed_reaped` (no manual reap: the periodic reaper within 35 s),
   `reaper_ignores_reused_pid`, `reaper_spares_new_unrecorded_jail`, `default_container_cannot_open_vsock` and
   `nothing_left`; `passed` requires all 20 steps ok.
+- `control/suites/vesperd.rs:run_vesperd_suite` (ADR 0007 slice 4) creates `workdir` with mode 0700, ages and
+  reaps leftovers of its ids (`id`, `id-kill`, `id-fcexit`), starts `vesperd --backend systemvm` as a child process
+  and drives the microVM only through its socket: `handshake`, `vesperd_starts` (socket 0600, the pinned version in
+  its first line), `second_vesperd_on_socket_refused` (no microVM launched), `get_root_not_started`,
+  `boot_through_vesperd`, `get_root_running`, `guest_boots`, `firecracker_error_byte_for_byte` (a 400 through
+  `vesperd` equals the same request over `FCAPI`), `pause`, `snapshot_create_under_ceiling` (under a tenth of the
+  ceiling), `resume`, `firecracker_connection_limit_passes_through` (Firecracker's own 503 to the 11th connection),
+  `idle_timeout_closes_only_vesperd_connections` (about 125 s), `same_id_refused`, `sigterm_stops_microvm`,
+  `sigkill_removes_microvm`, `firecracker_killed_vesperd_exits` and `nothing_left`; `passed` requires all 18 steps
+  ok. It uses the control channel only to inspect and fault the guest.
 - `systemvm/packages.rs:validate_packages_lock` requires schema `2`,
   non-blank branch and arch, every requested package in the closure,
   packages sorted by name without duplicates, `file ==
@@ -435,8 +464,10 @@ Public symbols by file:
   registry validation checks `Path::exists` on every evidence file.
 - `proxy.rs:run_server` creates the listen socket's parent directory, removes
   any existing socket file, binds a `UnixListener`, and spawns one tokio task
-  per client. `handle_client` connects to the unix, tcp, or
-  `<vsock_socket_dir>/<cid>.sock` upstream.
+  per client (`serve`). `handle_client` connects to the unix, tcp, or
+  `<vsock_socket_dir>/<cid>.sock` upstream, runs the preface when one is set, and relays. With
+  `bounds.max_connections` a client accepted beyond the cap is dropped at once. `claim_socket` creates a missing
+  parent directory with mode 0700, creates `<path>.lock` and removes a stale socket.
 - `systemvm.rs:run_boot_check` spawns `std::process::Command::new(command)`
   per iteration, kills it on timeout, and writes `log_path` and
   `report_path`. `build_manifest` reads the kernel and rootfs files to

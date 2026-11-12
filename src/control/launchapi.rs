@@ -58,6 +58,72 @@ pub fn parse_ready(line: &str, id: &str) -> Result<Ready, String> {
     Ok(Ready { id: id.to_string(), pid, firecracker_version: version.to_string() })
 }
 
+/// An HTTP/1.1 request with a JSON body (empty when `None`), as the System VM suites send it.
+pub fn http_request(method: &str, path: &str, body: Option<&str>) -> Vec<u8> {
+    let body = body.unwrap_or("");
+    format!(
+        "{method} {path} HTTP/1.1\r\nHost: localhost\r\nAccept: application/json\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+        body.len()
+    )
+    .into_bytes()
+}
+
+fn read_raw_line<R: BufRead>(reader: &mut R, out: &mut Vec<u8>) -> Result<String, String> {
+    let mut buf = Vec::new();
+    let read = reader
+        .take(MAX_LINE as u64 + 1)
+        .read_until(b'\n', &mut buf)
+        .map_err(|err| format!("read response: {err}"))?;
+    if read == 0 {
+        return Err("closed before a response".to_string());
+    }
+    if buf.last() != Some(&b'\n') {
+        return Err(format!("response line longer than {MAX_LINE} bytes or cut short"));
+    }
+    out.extend_from_slice(&buf);
+    Ok(String::from_utf8_lossy(&buf).trim_end_matches(['\r', '\n']).to_string())
+}
+
+/// Reads one HTTP response (status line, headers and a `Content-Length` body of at most `MAX_BODY` bytes) and
+/// returns its bytes unchanged.
+pub fn read_http_response<R: BufRead>(reader: &mut R) -> Result<Vec<u8>, String> {
+    let mut raw = Vec::new();
+    read_raw_line(reader, &mut raw)?;
+    let mut length = 0usize;
+    loop {
+        let header = read_raw_line(reader, &mut raw)?;
+        if header.is_empty() {
+            break;
+        }
+        if let Some((name, value)) = header.split_once(':') {
+            if name.eq_ignore_ascii_case("content-length") {
+                length = value.trim().parse().map_err(|_| format!("bad {header:?}"))?;
+            }
+        }
+    }
+    if length > MAX_BODY {
+        return Err(format!("body of {length} bytes exceeds {MAX_BODY}"));
+    }
+    let start = raw.len();
+    raw.resize(start + length, 0);
+    reader.read_exact(&mut raw[start..]).map_err(|err| format!("body: {err}"))?;
+    Ok(raw)
+}
+
+/// Status and body of a response read by `read_http_response`.
+pub fn parse_http_response(raw: &[u8]) -> Result<HttpResponse, String> {
+    let text = String::from_utf8_lossy(raw);
+    let (head, body) = text.split_once("\r\n\r\n").ok_or("no end of headers")?;
+    let status_line = head.lines().next().unwrap_or("");
+    let status: u16 = status_line
+        .strip_prefix("HTTP/1.1 ")
+        .or_else(|| status_line.strip_prefix("HTTP/1.0 "))
+        .and_then(|rest| rest.get(..3))
+        .and_then(|code| code.parse().ok())
+        .ok_or_else(|| format!("bad status line {status_line:?}"))?;
+    Ok(HttpResponse { status, body: body.to_string() })
+}
+
 impl Session {
     /// Reads one line of at most `MAX_LINE` bytes.
     fn read_bounded_line(&mut self) -> Result<String, String> {
@@ -117,42 +183,18 @@ impl Session {
 
     /// One HTTP/1.1 request on a relayed (`FCAPI`) connection; the connection stays open for the next one.
     pub fn http(&mut self, method: &str, path: &str, body: Option<&str>) -> Result<HttpResponse, String> {
-        let body = body.unwrap_or("");
-        let request = format!(
-            "{method} {path} HTTP/1.1\r\nHost: localhost\r\nAccept: application/json\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
-            body.len()
-        );
-        self.writer
-            .write_all(request.as_bytes())
-            .and_then(|_| self.writer.flush())
-            .map_err(|err| format!("{method} {path}: write: {err}"))?;
-        let status_line = self.read_bounded_line().map_err(|err| format!("{method} {path}: {err}"))?;
-        let status: u16 = status_line
-            .strip_prefix("HTTP/1.1 ")
-            .or_else(|| status_line.strip_prefix("HTTP/1.0 "))
-            .and_then(|rest| rest.get(..3))
-            .and_then(|code| code.parse().ok())
-            .ok_or_else(|| format!("{method} {path}: bad status line {status_line:?}"))?;
-        let mut length = 0usize;
-        loop {
-            let header = self.read_bounded_line().map_err(|err| format!("{method} {path}: {err}"))?;
-            if header.is_empty() {
-                break;
-            }
-            if let Some((name, value)) = header.split_once(':') {
-                if name.eq_ignore_ascii_case("content-length") {
-                    length = value.trim().parse().map_err(|_| format!("{method} {path}: bad {header:?}"))?;
-                }
-            }
-        }
-        if length > MAX_BODY {
-            return Err(format!("{method} {path}: body of {length} bytes exceeds {MAX_BODY}"));
-        }
-        let mut buf = vec![0u8; length];
-        self.reader.read_exact(&mut buf).map_err(|err| format!("{method} {path}: body: {err}"))?;
-        Ok(HttpResponse { status, body: String::from_utf8_lossy(&buf).into_owned() })
+        let raw = self.http_raw(&http_request(method, path, body))?;
+        parse_http_response(&raw).map_err(|err| format!("{method} {path}: {err}"))
     }
 
+    /// Writes `request` on a relayed (`FCAPI`) connection and returns the response exactly as received.
+    pub fn http_raw(&mut self, request: &[u8]) -> Result<Vec<u8>, String> {
+        self.writer
+            .write_all(request)
+            .and_then(|_| self.writer.flush())
+            .map_err(|err| format!("write request: {err}"))?;
+        read_http_response(&mut self.reader)
+    }
     /// Waits up to `timeout` for the agent to close this connection (end of file); bytes are discarded.
     pub fn wait_closed(&mut self, timeout: Duration) -> Result<Duration, String> {
         let started = Instant::now();

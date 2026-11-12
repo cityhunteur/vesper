@@ -76,3 +76,26 @@ exceptions:
       baseline_firecracker_revision, beside Firecracker's fault_message. Clients that compare bodies byte for
       byte see a difference. Resolve when the System VM backend becomes the default (its errors are
       Firecracker's own), or by dropping the extra fields from the model backend.
+  - id: CE-0007
+    owner: cityhunteur
+    issue: 156
+    expiry_date: "2027-03-31"
+    target_release: parity-ga
+    status: open
+    approved_by: cityhunteur
+    approved_on: "2026-11-12"
+    description: >-
+      vesperd --backend systemvm (ADR 0007 slice 4) relays bytes to Firecracker v1.16.0 under bounds that
+      Firecracker itself does not have, and a client can observe them. (1) A connection with no request
+      waiting is closed, with no bytes, after 120 s without a byte; Firecracker keeps an idle connection
+      open (micro_http has no idle timeout; measured: a direct connection still answered after 125 s).
+      (2) A connection whose request has had no reply byte for 120 s is closed with no bytes; Firecracker
+      answers however long the operation takes (the slowest measured, PUT /snapshot/create of a 512 MiB
+      guest, took 223 ms). vesperd infers which side spoke last, so pipelined requests can hit the ceiling
+      or escape the idle timeout. (3) More than 16 concurrent connections are closed at once with no bytes;
+      Firecracker accepts 10 and answers the 11th to 16th with its own 503 "Too many open connections",
+      which vesperd passes through. (4) vesperd's own failures are connection-level: when the bridge, the
+      agent or FCAPI fails or does not answer within 5 s, the client connection is closed with no bytes
+      where Firecracker would have answered. Every HTTP byte on the socket is Firecracker's own. Resolve
+      by measuring the slowest operation at the slice 5 memory ceiling and confirming or removing each
+      bound at the parity-GA review.

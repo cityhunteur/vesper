@@ -22,12 +22,12 @@ fn lease(endpoint: &ControlEndpoint, id: &str) -> Result<(Session, super::super:
     Ok((session, ready))
 }
 
-fn first(lines: &[String]) -> String {
+pub(super) fn first(lines: &[String]) -> String {
     lines.first().cloned().unwrap_or_default()
 }
 
 /// Polls `VESPERD status <id>` until it reports `ABSENT`; returns the elapsed time.
-fn wait_absent(session: &mut Session, id: &str, timeout: Duration) -> Result<Duration, String> {
+pub(super) fn wait_absent(session: &mut Session, id: &str, timeout: Duration) -> Result<Duration, String> {
     let started = Instant::now();
     loop {
         let (_, lines) = session.vesperd(&["status", id])?;
