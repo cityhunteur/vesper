@@ -250,7 +250,10 @@ sequenceDiagram
   participant A as vesper-agent (vsock 1024)
   participant F as Firecracker (jail, uid 20000)
   V->>V: claim_socket (lock, live-socket refusal)
-  V->>B: CONNECT 1024, then LAUNCHAPI id
+  V->>B: CONNECT 1024, then DATA status
+  A-->>V: DATA mounted (else vesperd refuses to start)
+  V->>B: CONNECT 1024, then LAUNCHAPI id [ceiling] [stage=SRC:DEST]...
+  A->>A: fresh jail on the data disk; link or copy each --stage file
   A->>F: jailer, no config file
   A-->>V: READY id pid firecracker_version (checked against the swagger)
   Note over V,A: this connection is the lease for the life of the process
@@ -267,6 +270,12 @@ with no bytes. The relay (`proxy::serve` with a `Preface` and `Bounds`) reads at
 connection idle for 120 s or a request unanswered for 120 s, and relays at most 16 connections (CE-0007). The lease
 ends the microVM when it closes: SIGTERM or SIGINT closes it and waits for the teardown (exit 0); the agent's close
 (Firecracker exited, the System VM went away) makes `vesperd` remove its socket and exit 1.
+
+Files reach a jail only through `vesperd` (ADR 0007 slice 5): `--stage` at start, and `vesperd stage` and `vesperd
+store list|rm` while microVMs run, each one `VESPERD` line to the agent. The jails and the snapshot store share one
+bind mount on the System VM's data disk, so `--stage` can hard-link a store snapshot into a fresh jail; jail-side
+reads and writes run as uid 20000, and only the store survives a reboot. **Verified** by `tests/vesperd_systemvm.rs`
+(fake agent), `make systemvm-snapshot-suite` (System VM, 23 steps) and `make data-disk-suite` (the reboot).
 
 ### Proxy connection
 
@@ -360,7 +369,7 @@ or parity documents.
 |---|---|---|---|---|---|
 | 1a | `vesperd` is the only binary that serves the control-plane API; `vesper-proxy` is the only other host-visible socket and only relays bytes (plus the vsock `CONNECT` preface) | Verified | Review only; no mechanical check (TD-008) | `grep -n 'UnixListener::bind' src/bin/vesperd.rs src/proxy.rs` (expect 1 hit in `vesperd.rs`, shared by both backends, and 6 in `proxy.rs`, of which the five inside the `#[cfg(test)]` module are test fixtures) | [src/bin/vesperd.rs](src/bin/vesperd.rs), [src/proxy.rs](src/proxy.rs) |
 | 1b | Raw Firecracker and containerd sockets stay private to the System VM | Partly verified | The guest listens on vsock 1024 (agent), 2375 (Docker relay), 2400 (port relay) and 2401 (share notification sink), none of which is a raw Firecracker or containerd socket; the agent on 1024 does reach jailed Firecracker API sockets through `FCPARITY api` and `FCAPI`, and starts `vesperd` microVMs with `LAUNCHAPI` (ADR 0007 slice 3), so 1024 is a control surface that the bridge allow-list (1024, 2375, 2400, 2401; TD-027) keeps reachable; `make docker-smoke` enumerates host sockets and expects a refused `CONNECT` to a port without a listener | `make systemvm-up && make docker-up && make docker-smoke` (steps `no_raw_host_sockets`, `raw_guest_port_denied`) | [design-v0](docs/specs/design-v0.md#security-model), [docs/SECURITY.md](docs/SECURITY.md) |
-| 2 | Intra-crate single-path references in the 22 `RULES` files follow the layer table | Verified | `RULES` in `check_structure.py`, run by `harness-structure.yml` on `src/**` changes; a new module needs a `RULES` row (TD-018) | `python3 scripts/harness/check_structure.py --root .` | [scripts/harness/check_structure.py](scripts/harness/check_structure.py) |
+| 2 | Intra-crate single-path references in the 31 `RULES` files follow the layer table | Verified | `RULES` in `check_structure.py`, run by `harness-structure.yml` on `src/**` changes; a new module needs a `RULES` row (TD-018) | `python3 scripts/harness/check_structure.py --root .` | [scripts/harness/check_structure.py](scripts/harness/check_structure.py) |
 | 3 | On the model backend, every error response produced by `handle_all` is an `ErrorEnvelope` with the pinned baseline revision; on the System VM backend (ADR 0007 slice 4; `tests/vesperd_systemvm.rs`, `make systemvm-vesperd-suite` step `firecracker_error_byte_for_byte`) HTTP errors are Firecracker's own, `vesperd`'s own failures are refused or closed connections, and its startup and command-line errors are deterministic. Exceptions before extraction: a body over axum's default 2 MiB limit gets a plain `413`, a body-read failure gets a plain `400`, and a poisoned `RwLock` panics the task (TD-019) | Verified | `AppState::new_with_matrix` rejects a blank revision; `tests/api_contract.rs` asserts envelopes; `rust-tests.yml` runs `cargo test` for every `src/**` change | `make contract-test` | [tests/api_contract.rs](tests/api_contract.rs) |
 | 4 | The golden route list equals `contractgen`'s serialisation of the pinned swagger | Verified | `contractgen --mode check` and `tests/contract_golden.rs` in `contract-tests.yml`; `tests/**` changes are covered by `rust-tests.yml` | `make contract-check` | [tests/contract_golden.rs](tests/contract_golden.rs) |
 | 5 | Generated surface stub and behavior matrices are complete and fresh | Verified | `baselinectl --mode validate-api-matrix` and `validate-api-behavior-matrix` in `rust-tests.yml`; the `validates_repo_generated_*` unit tests also fail under `cargo test` | `make surface-matrix-check`, `make behavior-matrix-check` | [docs/process/baseline-governance.md](docs/process/baseline-governance.md) |

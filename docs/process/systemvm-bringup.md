@@ -177,8 +177,11 @@ as ext4. What persists across `make systemvm-down` and `make systemvm-up`: `/var
 volumes), `/var/lib/containerd`, and the Vesper state directories `/var/lib/vesper/rootfs`,
 `/var/lib/vesper/rootfs-cache` (the microVM root-drive cache), `/var/lib/vesper/workloads` and
 `/var/lib/vesper/state`. What does not: the packages, which are still reinstalled into the tmpfs root on every
-boot, and anything else outside those directories, such as task bundles under `/run/containerd` and the jails
-under `/srv/jailer` and `/srv/vesperd` (TD-025).
+boot, and anything else outside those directories, such as task bundles under `/run/containerd` and the shim's jails
+under `/srv/jailer` (TD-025). `vesperd` jails live on the disk, under `/var/lib/vesper/state/vesperd/jailer`, but the
+first mount of each boot removes them (`vesper-vesperd sweep`), so of `vesperd`'s files only the snapshot store
+`/var/lib/vesper/state/vesperd/store` survives a reboot (ADR 0007 slice 5; `make data-disk-suite`, step
+`vesperd_store_survives_jails_swept`).
 
 - Creation: `make systemvm-launch-config` (`scripts/systemvm/generate-launch-config.sh`, from-lock mode) uses
   `VESPER_DATA_DISK`, default `run/systemvm/data.img`; a relative path is taken from the repository root. A
@@ -373,7 +376,8 @@ busybox initramfs whose init prints `VESPER-MICROVM-OK` (and powers off when the
 Firecracker config (1 vCPU, 256 MiB, no drives, `console=ttyS0 reboot=k panic=1 pci=off`) and starts
 `jailer --id ID --exec-file … --uid 10000 --gid 10000 --chroot-base-dir /srv/jailer --cgroup-version 2 --cgroup
 pids.max=256 --cgroup memory.max=671088640 -- --config-file /vm.json --api-sock /run/firecracker.socket` (the
-640 MiB cap leaves room for a full snapshot's memory file in the tmpfs jail, which is charged to the same cgroup), waiting
+640 MiB cap leaves room for a full snapshot's memory file in the tmpfs jail, which is charged to the same cgroup;
+`vesperd` microVMs have the same default, measured in ADR 0007 slice 5 with jails on the data disk), waiting
 for the marker; `isolation ID` reports uid, jail contents, mount namespace, cgroup path and seccomp mode from
 `/proc/<pid>`; the manager finds its Firecracker with `pgrep -u 10000 -f "firecracker --id ID "`, so it never acts
 on a `vesperd` microVM with the same id (uid 20000, ADR 0007); `stop`, `crash` (SIGKILL), `cleanup` (kill, remove jail and cgroup, report `CLEAN` or `DIRTY <kind>`),
@@ -494,16 +498,18 @@ The [shim contract](../../shim/README.md) describes lifecycle and protocol detai
 ## `vesperd` microVMs (ADR 0007, slice 3)
 
 `vesperd`'s backend in the System VM is `vesper-vesperd` (overlay, `usr/local/bin`), reached through three agent
-verbs. `LAUNCHAPI <id> [ceiling]` runs `vesper-microvm prepare`, copies the kernel and initramfs into
-`/srv/vesperd/firecracker/<id>/root` as `/Image` and `/initrd.gz`, and starts `jailer --id <id> --uid 20000 --gid
-20000 --chroot-base-dir /srv/vesperd --parent-cgroup vesperd --cgroup-version 2 --cgroup pids.max=256 --cgroup
+verbs. `LAUNCHAPI <id> [ceiling] [stage=SRC:DEST]...` refuses without the data disk (`ERR data disk not in use`),
+runs `vesper-microvm prepare`, copies the kernel and initramfs into
+`/var/lib/vesper/state/vesperd/jailer/firecracker/<id>/root` as `/Image` and `/initrd.gz`, stages each `stage=` token
+into that fresh jail (next section), and starts `jailer --id <id> --uid 20000 --gid 20000 --chroot-base-dir
+/var/lib/vesper/state/vesperd/jailer --parent-cgroup vesperd --cgroup-version 2 --cgroup pids.max=256 --cgroup
 memory.max=<ceiling> -- --api-sock /run/firecracker.socket`, with no configuration file, so the microVM is built from
 API requests. It replies `READY <id> pid=<n> firecracker_version=<v>` once the API socket exists, or `ERR <reason>`
 and closes. The connection is then the lease: when the client closes it, the agent stops Firecracker (SIGTERM, 3 s,
 SIGKILL) and removes the jail, the cgroup `/sys/fs/cgroup/vesperd/<id>` and the record
 `/run/vesper/vesperd/leases/<id>`; when Firecracker exits, the agent does the same and closes the connection.
 `FCAPI <id>` replies `OK` and relays bytes to the API socket. `VESPERD <args…>` runs the helper's inspection
-commands (`status`, `isolation`, `list`, `log`, `reap`) and test hooks with the buffered reply of the other guest
+commands (`status`, `isolation`, `files`, `memory`, `list`, `log`, `reap`), `stage`, `store-list`, `store-rm`, and test hooks with the buffered reply of the other guest
 tools. The `vesper-vesperd-reaper` service runs a reaper pass every 10 s. Values and their reasons are in the
 [ExecPlan](../exec-plans/active/2026-11-12-GH156-vesperd-backend-a.md#values).
 
@@ -513,7 +519,7 @@ three teardown paths, the reaper and the id checks, 20 steps, into `run/systemvm
 2026-11-12 (M3 Pro): 20/20; `READY` 0.2 s after the jailer started (1.4 s on the first launch after boot), teardown
 about 0.5 s after the lease closed, a SIGKILLed lease shell's microVM reaped within one interval.
 
-The jails are in tmpfs until slice 5 moves them onto the data disk.
+Since slice 5 the jails are on the data disk (above).
 
 ## `vesperd --backend systemvm` (ADR 0007, slice 4)
 
@@ -534,13 +540,49 @@ can observe.
     curl --unix-socket run/vm1.sock -X PUT http://localhost/actions -d '{"action_type":"InstanceStart"}'
     kill %1                                                # SIGTERM: the microVM stops, the socket is removed
 
-Paths in requests are paths inside the jail; `LAUNCHAPI` stages only `/Image` and `/initrd.gz` until slice 5 adds
-staging. `vesperd` lives as long as its microVM: SIGTERM or SIGINT stops the microVM and exits 0; a SIGKILL of
+Paths in requests are paths inside the jail. Before `LAUNCHAPI`, `vesperd` refuses to start unless `DATA status`
+reports the data disk `formatted` or `mounted`. `vesperd` lives as long as its microVM: SIGTERM or SIGINT stops the microVM and exits 0; a SIGKILL of
 `vesperd` closes the lease through the kernel, so the agent stops the microVM, but leaves the socket file (the next
 `vesperd` on the path replaces it); when Firecracker exits or the System VM goes away, `vesperd` removes its socket
 and exits 1. `make systemvm-vesperd-suite` (18 steps, `run/systemvm/vesperd-report.json`) checks each of these
 through the socket. On 2026-11-12 (M3 Pro): 18/18; listening 0.4 s after start (1.9 s on the first launch after
 boot), a SIGTERM stop in 56 ms, `vesperd` exiting 1 s after Firecracker was killed (the lease poll).
+
+## Staging, the store and snapshots (ADR 0007, slice 5)
+
+A request names jail paths, so files reach the jail through `vesperd`:
+
+- `vesperd --backend systemvm --id ID --stage SRC:DEST …` (repeatable, at most 16) stages each file into the fresh
+  jail before Firecracker starts. `SRC` is `share:/PATH` (an absolute macOS path inside a share of the launch
+  configuration) or `store:NAME`; `DEST` is a jail path. Store files named `*.mem` or `*.vmstate` are hard-linked,
+  root-owned and read-only; everything else is copied and owned by uid 20000.
+- `vesperd stage [--id ID] SRC DEST` copies while the microVM runs: `SRC` is also allowed to be `jail:/PATH`, and
+  `DEST` to be `store:NAME`. It never links and never overwrites. Exit 0 prints `STAGED SRC DEST copy bytes=N`;
+  exit 1 is a refusal in the System VM (the reason on stderr); exit 2 is a bad form, refused before connecting.
+- `vesperd store list` prints `STORE NAME bytes=N links=L` lines and `FREE avail=N reserve=N`; `vesperd store rm
+  NAME` removes one file (a jail that has it linked keeps its link).
+
+The rules (uid 20000 for jail-side reads and writes, no symlinks, a free-space reserve) are in
+[SECURITY.md](../SECURITY.md). A snapshot cycle from macOS, with a share at `$PWD/run/vesperd-share`
+(`make systemvm-up-snapshot`):
+
+    cargo run --bin vesperd -- --backend systemvm --id vm1 --socket run/vm1.sock &
+    # … boot, then PATCH /vm Paused and PUT /snapshot/create {"snapshot_path":"/s.vmstate","mem_file_path":"/s.mem"}
+    cargo run --bin vesperd -- stage --id vm1 jail:/s.mem store:s.mem
+    cargo run --bin vesperd -- stage --id vm1 jail:/s.vmstate store:s.vmstate
+    kill %1
+    cargo run --bin vesperd -- --backend systemvm --id vm2 --socket run/vm2.sock \
+      --stage store:s.mem:/s.mem --stage store:s.vmstate:/s.vmstate &
+    # PUT /snapshot/load {"snapshot_path":"/s.vmstate","mem_backend":{"backend_type":"File","backend_path":"/s.mem"}}
+    # then PATCH /vm Resumed
+
+A `PUT /snapshot/create` onto a linked file fails with Firecracker's own 400 (`Permission denied`), where upstream
+overwrites (CE-0008); write a new snapshot to new paths. `make systemvm-snapshot-suite` (23 steps,
+`run/systemvm/snapshot-report.json`; needs the share) runs that cycle with a guest that keeps a random token in
+memory (`vesper_mark=1` on the kernel command line), each staging refusal, and a timed create of a 640 MiB guest
+with 512 MiB dirtied (`vesper_fill_mib=512`) under the default 640 MiB ceiling. On 2026-11-12 (M3 Pro): 23/23; the
+256 MiB create in 156 ms, its memory file copied into the store in 732 ms, the load in 5 ms, the 640 MiB create in
+1.2 to 1.7 s.
 
 ## Proxy bridge convention
 

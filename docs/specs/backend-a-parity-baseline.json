@@ -1,9 +1,9 @@
 {
  "schema_version": 1,
- "generated_at": "2026-11-12T09:20:43Z",
+ "generated_at": "2026-11-12T13:42:30Z",
  "host": {
   "description": "macOS 27.0.1 / Apple M3 Pro",
-  "commit": "4811ca7"
+  "commit": "bbadfb9"
  },
  "baseline": {
   "firecracker": {
@@ -51,14 +51,15 @@
   }
  ],
  "compat_exceptions": {
-  "open": 5,
+  "open": 6,
   "closed": 1,
   "open_ids": [
    "CE-0001",
    "CE-0003",
    "CE-0004",
    "CE-0006",
-   "CE-0007"
+   "CE-0007",
+   "CE-0008"
   ],
   "entries": [
    {
@@ -102,6 +103,13 @@
     "expiry_date": "2027-03-31",
     "target_release": "parity-ga",
     "status": "open"
+   },
+   {
+    "id": "CE-0008",
+    "issue": "156",
+    "expiry_date": "2027-03-31",
+    "target_release": "parity-ga",
+    "status": "open"
    }
   ]
  },
@@ -112,7 +120,7 @@
    {
     "name": "launch",
     "ok": true,
-    "detail": "LAUNCHED vesper-parity pid=19141 boot_ms=1760"
+    "detail": "LAUNCHED vesper-parity pid=23885 boot_ms=1520"
    },
    {
     "name": "version",
@@ -209,29 +217,29 @@
  "performance": {
   "runs": [
    {
-    "boot_p50_ms": 1770.0,
-    "boot_p95_ms": 1770.0,
-    "boot_max_ms": 1770.0,
-    "cycle_p50_ms": 1880.0,
-    "create_rate_per_min": 31.8,
-    "wall_ms": 37710.0,
+    "boot_p50_ms": 1510.0,
+    "boot_p95_ms": 1760.0,
+    "boot_max_ms": 1760.0,
+    "cycle_p50_ms": 1620.0,
+    "create_rate_per_min": 36.1,
+    "wall_ms": 33270.0,
     "failures": 0.0,
     "n": 20,
     "ok": true
    },
    {
-    "boot_p50_ms": 1760.0,
-    "boot_p95_ms": 1770.0,
-    "boot_max_ms": 1770.0,
-    "cycle_p50_ms": 1870.0,
-    "create_rate_per_min": 31.9,
-    "wall_ms": 37560.0,
+    "boot_p50_ms": 1510.0,
+    "boot_p95_ms": 1760.0,
+    "boot_max_ms": 1760.0,
+    "cycle_p50_ms": 1620.0,
+    "create_rate_per_min": 35.9,
+    "wall_ms": 33460.0,
     "failures": 0.0,
     "n": 20,
     "ok": true
    }
   ],
-  "drift_pct": 0.5681818181818182,
+  "drift_pct": 0.0,
   "drift_limit_pct": 20.0,
   "comparable": true
  },

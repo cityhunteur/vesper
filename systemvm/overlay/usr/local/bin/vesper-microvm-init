@@ -81,4 +81,18 @@ JSON
     echo "VESPER-ROOTFS-MOUNT-FAILED"
   fi
 fi
+# vesper_fill_mib=N: write N MiB of random bytes into the initramfs, so the guest dirties that much memory (the
+# ADR 0007 slice 5 snapshot measurement). vesper_mark=1: keep a random token in memory and print it with a tick
+# count every second; a snapshot restored elsewhere goes on printing the same token (the slice 5 suite).
+fill=$(/bin/busybox sed -n 's/.*vesper_fill_mib=\([0-9]*\).*/\1/p' /proc/cmdline)
+if [ -n "$fill" ]; then
+  # Its own tmpfs: the initramfs root is capped at half the guest's memory.
+  /bin/busybox mkdir -p /fill && /bin/busybox mount -t tmpfs -o "size=$((fill + 1))m" fill /fill
+  /bin/busybox dd if=/dev/urandom of=/fill/fill.bin bs=1048576 count="$fill" 2>/dev/null
+  echo "VESPER-FILL-OK mib=$(($(/bin/busybox stat -c %s /fill/fill.bin) / 1048576))"
+fi
+if /bin/busybox grep -q vesper_mark=1 /proc/cmdline; then
+  /bin/busybox head -c 8 /dev/urandom | /bin/busybox od -A n -t x1 | /bin/busybox tr -d ' \n' > /run/vesper-mark
+  (t=0; while :; do t=$((t + 1)); echo "VESPER-MARK token=$(cat /run/vesper-mark) tick=$t"; /bin/busybox sleep 1; done) &
+fi
 exec /bin/busybox sleep 86400

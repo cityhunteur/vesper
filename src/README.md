@@ -139,7 +139,7 @@ Public symbols by file:
   `start`/`unpause` publish, `die`/`stop`/`kill`/`destroy`/`pause` release; reconnects after 2 s);
   `Publisher::status() -> Status { path, gateway, updated_at, mappings[] }` with `Mapping { container, name,
   proto, host, host_port, container_port, target, state (listening|conflict|unsupported), error }`.
-- `control.rs` (client), `control/suites.rs` (checklists, re-exported) and `control/suites/{bundle,restart,exec}.rs`
+- `control.rs` (client), `control/suites.rs` (checklists, re-exported) and `control/suites/{bundle,restart,exec,launchapi,vesperd,snapshot}.rs`
   (the GH #24, #25 and #23 checklists, `super::` helpers only):
   `ControlEndpoint { bridge_path, port, io_timeout }` with
   `new(bridge, port)` (10 s timeouts), `Handshake { protocol_version,
@@ -156,6 +156,8 @@ Public symbols by file:
   `run_launchapi_suite(&endpoint, id, expected_version)`,
   `run_vesperd_suite(&endpoint, &VesperdRun { binary, workdir, extra_args }, id, expected_version)` with constants
   `VESPERD_IDLE_TIMEOUT` and `VESPERD_REQUEST_CEILING` (both 120 s, the values in `src/bin/vesperd/systemvm.rs`),
+  `run_snapshot_suite(&endpoint, &SnapshotRun { vesperd, share_dir }, id)` with `prepare_workdir(dir)` and constants
+  `DEFAULT_CEILING_MIB` (640), `MEASURE_GUEST_MIB` (640) and `MEASURE_FILL_MIB` (512),
   `write_report(path, &report)`; constants
   `AGENT_PROTOCOL_VERSION` (1), `DEFAULT_AGENT_PORT` (1024).
 - `control/launchapi.rs` (ADR 0007 slice 3, `super::` only): `Ready { id, pid, firecracker_version }`,
@@ -167,6 +169,15 @@ Public symbols by file:
   (the response bytes unchanged), `http_request(method, path, body)`, `read_http_response(reader)` (the raw bytes of
   one response) and `parse_http_response(raw) -> HttpResponse`, `Session::wait_closed(timeout)`
   (end of file or reset from the agent), `Session::vesperd(args)` (agent `VESPERD`, the buffered guest-tool shape).
+- `control/stage.rs` (ADR 0007 slice 5, `super::` only): the staging forms, checked as the guest helper checks them.
+  `StageSource::{Share, Store, Jail}` and `StageDest::{Jail, Store}` with `parse` and `wire`; `StageSpec { src, dest }`
+  with `parse("SRC:DEST")` (the `--stage` form: SRC `share:` or `store:`, DEST a jail path), `launch_token()`
+  (`stage=SRC:DEST`) and `links()` (store `*.mem` and `*.vmstate`); `valid_stage_path` (absolute, letters, digits and
+  `._+,@=-`, no `.` or `..` component, at most `MAX_STAGE_PATH` 1024 bytes), `valid_store_name` (at most
+  `MAX_STORE_NAME` 128, no leading dot), `check_pair` (refuses store to store and jail to jail), `needs_id`,
+  `parse_store_list`, `data_disk_in_use("DATA <state> …")` (`formatted` or `mounted`), `MAX_STAGES` (16);
+  `Session::stage(id, src, dest)`, `Session::store_list()`, `Session::store_rm(name)` (agent `VESPERD stage`,
+  `store-list`, `store-rm`; a refusal is `Err((rc, reason))`).
 - `systemvm.rs` (manifest, launch config, boot smoke),
   `systemvm/image_lock.rs` (`ImageLock` and everything lock-related) and
   `systemvm/packages.rs` (`PackagesLock { schema_version, branch, arch,
@@ -436,6 +447,16 @@ Public symbols by file:
   `idle_timeout_closes_only_vesperd_connections` (about 125 s), `same_id_refused`, `sigterm_stops_microvm`,
   `sigkill_removes_microvm`, `firecracker_killed_vesperd_exits` and `nothing_left`; `passed` requires all 18 steps
   ok. It uses the control channel only to inspect and fault the guest.
+- `control/suites/snapshot.rs:run_snapshot_suite` (ADR 0007 slice 5) ages and reaps its ids (`id-a`, `id-b`, `id-c`,
+  `id-m`), clears the reserve override and removes its store names, then runs `handshake`, `data_disk_and_user`,
+  `share_files` (writes `d1.img`, `d2.img` and a `link -> /etc/shadow` into `share_dir`), `start_with_share_stage`,
+  `stage_into_running_jail`, `boot_with_both_drives` (`vesper_mark=1`), `refuses_symlinked_src`,
+  `refuses_symlinked_dest`, `refuses_src_outside_roots`, `jail_side_read_runs_as_uid_20000`,
+  `reserve_refuses_breach`, `pause_and_create`, `copy_into_store`, `stop_original`, `new_vesperd_stages_by_link`,
+  `load_and_resume`, `guest_state_survives` (the same token, later ticks), `create_onto_linked_file_fails` (CE-0008),
+  `stop_restored`, `stage_refused_at_start`, `measure_create_at_default_ceiling` (a 640 MiB guest with 512 MiB
+  dirtied, under a tenth of the request ceiling), `store_rm` and `nothing_left`; `passed` requires all 23 steps ok.
+  It drives the microVMs through their sockets and `vesperd stage|store`, and uses the control channel to inspect.
 - `systemvm/packages.rs:validate_packages_lock` requires schema `2`,
   non-blank branch and arch, every requested package in the closure,
   packages sorted by name without duplicates, `file ==

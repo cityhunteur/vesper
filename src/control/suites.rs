@@ -13,6 +13,8 @@ pub use exec::run_exec_suite;
 mod launchapi;
 pub use launchapi::run_launchapi_suite;
 mod restart;
+mod snapshot;
+pub use snapshot::{prepare_workdir, run_snapshot_suite, SnapshotRun, DEFAULT_CEILING_MIB, MEASURE_FILL_MIB, MEASURE_GUEST_MIB};
 mod vesperd;
 pub use vesperd::{run_vesperd_suite, VesperdRun, VESPERD_IDLE_TIMEOUT, VESPERD_REQUEST_CEILING};
 pub use bundle::run_bundle_suite;

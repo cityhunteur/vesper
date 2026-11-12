@@ -2,7 +2,8 @@
 # Persistent data disk for the System VM (GH #164, TD-025). The launcher attaches a sparse disk image from macOS as
 # a writable block device and names it on the kernel command line as vesper_data=/dev/vdX. This formats it as
 # ext4 on first use (label vesper-data), mounts it, and bind-mounts the state directories onto it so containerd,
-# dockerd and the Vesper tools keep their data across boots. A disk with any other filesystem or label is never
+# dockerd and the Vesper tools keep their data across boots. After the first mount of a boot it removes every
+# vesperd jail left on the disk (vesper-vesperd sweep); the vesperd store stays. A disk with any other filesystem or label is never
 # formatted: the System VM then keeps its state in tmpfs, as before.
 # usage: vesper-data mount     DATA mounted|formatted <dev> | DATA absent | DATA refused <dev> <reason> | ERR ...
 #        vesper-data status    DATA <state> [<dev>] used=<KiB> avail=<KiB>   (state from the last mount)
@@ -52,6 +53,8 @@ mount_() {
     mkdir -p "$sub" "$d"
     mount --bind "$sub" "$d" || { record refused "$dev" "bind-failed:$d"; return 1; }
   done
+  # Boot sweep (ADR 0007 section 4): vesperd jails on the disk never outlive a boot; only the store does.
+  /usr/local/bin/vesper-vesperd sweep > /dev/null 2>&1
   record "$how" "$dev"
 }
 

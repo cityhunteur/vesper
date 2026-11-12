@@ -161,15 +161,17 @@ and the bridge allow-list is unchanged.
 - `LAUNCHAPI <id> [ceiling]` starts one stock Firecracker under the jailer with no configuration file: uid and gid
   20000 (the shim's microVMs run as 10000), cgroup `/sys/fs/cgroup/vesperd/<id>` (`--parent-cgroup vesperd`,
   `pids.max=256`, `memory.max` from `ceiling`, default 640 MiB, at least 128 MiB and at most the System VM's
-  memory), chroot `/srv/vesperd/firecracker/<id>/root` (tmpfs until slice 5), the prepared kernel and initramfs as
+  memory), chroot `/var/lib/vesper/state/vesperd/jailer/firecracker/<id>/root` on the data disk (slice 5; refused
+  with `ERR data disk not in use` without it), the prepared kernel and initramfs as
   `/Image` and `/initrd.gz`. After `READY` the connection is the lease: its end stops the microVM and removes the
   jail, cgroup and record; Firecracker's exit closes it.
 - `FCAPI <id>` relays bytes to that microVM's API socket. The relay socat chroots into the jail root before it
   connects (`chroot-early`), so a symlink that a compromised Firecracker plants in its jail, which it owns, cannot
   lead the root-run socat to a socket outside the jail. It adds nothing `FCPARITY api` could not already do.
-- `VESPERD <args…>` inspects and faults these microVMs for the suite: `status`, `isolation`, `list`, `log`, `reap`,
-  `kill-holder`, `kill-fc` and the test hooks `test-forge-start`, `test-orphan`, `test-age` and
-  `test-container-vsock`. It cannot launch or connect. Like `MICROVM crash`, the hooks need nothing beyond what
+- `VESPERD <args…>` inspects and faults these microVMs for the suite: `status`, `isolation`, `files`, `memory`,
+  `list`, `log`, `reap`, `kill-holder`, `kill-fc` and the test hooks `test-forge-start`, `test-orphan`, `test-age`,
+  `test-plant`, `test-reserve` and `test-container-vsock`; since slice 5 it also carries `stage`, `store-list` and
+  `store-rm` (next section). It cannot launch or connect. Like `MICROVM crash`, the hooks need nothing beyond what
   the agent already is: root in the System VM.
 
 Every id is checked against the jailer's rule (1 to 64 letters, digits and hyphens) before it is joined into a path:
@@ -188,6 +190,43 @@ A default Docker container cannot reach the agent from inside the System VM: Doc
 `socket(AF_VSOCK)` (`make systemvm-launchapi-suite`, step `default_container_cannot_open_vsock`). A container with
 `seccomp=unconfined` can open the socket, but its connects to CID 1 and 3 fail because no vsock loopback transport
 is loaded; a privileged container that can load kernel modules is not covered.
+
+## Staging and the snapshot store (ADR 0007, slice 5)
+
+Files reach a `vesperd` jail only through `vesperd` itself: `vesperd --stage SRC:DEST` (tokens on `LAUNCHAPI`,
+staged into the fresh jail before the jailer starts) and `vesperd stage --id ID SRC DEST` (the agent's `VESPERD
+stage`, while the microVM runs). No new port, socket, share, package or entitlement is added. `SRC` is
+`share:/PATH` (inside a virtio-fs share of the launch configuration, which the System VM mounts at its macOS path),
+`store:NAME` or `jail:/PATH` (the microVM's own jail); `DEST` is a jail path or `store:NAME`. The store,
+`/var/lib/vesper/state/vesperd/store` (root, mode 0700), is shared by all of the macOS user's `vesperd` microVMs
+and is one trust domain; `vesperd store list|rm` list and remove its files.
+
+A compromised microVM controls the files in its jail (Firecracker owns the jail root), so `vesper-vesperd`:
+
+- never opens, as root, a path inside a jail that Firecracker may have run in. Jail-side checks, reads and writes run
+  as the `vesperd-jail` user (uid and gid 20000, no login shell, created at boot by `vesper-vesperd setup-user`)
+  through busybox `su -s /bin/sh vesperd-jail -c …`; root opens only share files and the store files it created,
+  and pipes bytes to or from that process. A planted root-only file (`test-plant`, `/planted-root`, mode 0600) is
+  refused with `permission denied for uid 20000` (`make systemvm-snapshot-suite`, step
+  `jail_side_read_runs_as_uid_20000`);
+- refuses a symlink in any component of `SRC` or `DEST` below the share mount or the jail root, and any `SRC` that is
+  not a regular file; paths are absolute, of letters, digits and `._+,@=-`, with no `.` or `..` component, so they
+  stay one word in the agent's line and in `su`'s command line (steps `refuses_symlinked_src`,
+  `refuses_symlinked_dest`, `refuses_src_outside_roots`);
+- writes a new file only (`set -C`, so `O_EXCL`, which also refuses a symlink as the last component) and never
+  overwrites, in the jail or the store; a store copy is written to `.partial.<pid>` and renamed;
+- hard-links into a jail only from `--stage`, into a fresh jail before Firecracker exists there, and only store files
+  named `*.mem` or `*.vmstate`; they stay root-owned and mode 0444, so the microVM can read but not change them, and
+  one store copy serves several restores. Everything else is copied, and out of a jail files are only copied;
+- checks a free-space reserve before every copy (the System VM's `MemTotal`, so the data disk keeps room for one more
+  full memory file of the largest guest), under one `flock` with the copy itself (step `reserve_refuses_breach`).
+
+Residual risks: a check and the following open are separate steps, so a symlink that appears between them is
+followed, but only with uid 20000's rights (other `vesperd` jails, which share that uid, and world-readable files).
+Whether Firecracker's seccomp filter lets a compromised Firecracker create symlinks at all is not checked. Share paths are read as root after the
+symlink check, so a same-user macOS process that swaps a share file for a symlink at the right moment could make
+root read a System VM file into a jail; that process already controls the bridge. Every `vesperd` microVM shares
+uid 20000 and the store (ADR 0007 §6, CE-0004).
 
 ## `vesperd --backend systemvm` on macOS (ADR 0007, slice 4)
 
@@ -210,6 +249,9 @@ entitlement. It reaches the System VM only through the existing bridge (`run/sys
 - The microVM lives as long as the lease: SIGTERM or SIGINT closes the lease and waits for the agent's teardown,
   SIGKILL closes it through the kernel, and the agent's close (Firecracker exited, the System VM went away) makes
   `vesperd` remove its socket and exit non-zero (`make systemvm-vesperd-suite`).
+- Before `LAUNCHAPI`, `vesperd` asks the agent for `DATA status` and refuses to start unless the data disk is
+  `formatted` or `mounted` (slice 5). `vesperd stage` and `vesperd store` check every form on macOS before they
+  connect (exit 2) and send one `VESPERD` line; the guest checks every argument again.
 
 ## Private microVM sessions (ADR 0006)
 

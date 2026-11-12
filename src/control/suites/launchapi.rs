@@ -408,7 +408,7 @@ mod tests {
                                 let lines: Vec<String> = match sub.as_str() {
                                     "status" if g.leases.contains(&id) => vec![format!("RUNNING {id} pid=4242 holder=99")],
                                     "status" => vec![format!("ABSENT {id}")],
-                                    "isolation" => vec![format!("{{\"id\":\"{id}\",\"pid\":4242,\"uid\":20000,\"jail\":\"/srv/vesperd/firecracker/{id}/root\",\"cgroup\":\"/vesperd/{id}\",\"memory_max\":\"671088640\",\"seccomp_mode\":2,\"uid_ok\":true,\"chroot_ok\":true,\"cgroup_ok\":true,\"seccomp_ok\":true}}")],
+                                    "isolation" => vec![format!("{{\"id\":\"{id}\",\"pid\":4242,\"uid\":20000,\"jail\":\"/var/lib/vesper/state/vesperd/jailer/firecracker/{id}/root\",\"cgroup\":\"/vesperd/{id}\",\"memory_max\":\"671088640\",\"seccomp_mode\":2,\"uid_ok\":true,\"chroot_ok\":true,\"cgroup_ok\":true,\"seccomp_ok\":true}}")],
                                     "log" => vec!["VESPER-MICROVM-OK".to_string()],
                                     "kill-fc" | "kill-holder" | "test-forge-start" => {
                                         g.leases.retain(|l| *l != id);

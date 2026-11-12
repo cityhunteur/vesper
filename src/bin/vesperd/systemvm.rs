@@ -1,7 +1,10 @@
-//! `vesperd --backend systemvm` (ADR 0007 §2 to §4, slice 4): a byte relay to one jailed Firecracker in the System VM.
+//! `vesperd --backend systemvm` (ADR 0007 §2 to §5, slices 4 and 5): a byte relay to one jailed Firecracker in the
+//! System VM.
 //!
-//! At start `vesperd` claims its socket (`<socket>.lock`, live-socket refusal), sends `LAUNCHAPI <id> [ceiling]` to
-//! the agent through the bridge and checks that `READY` names the pinned Firecracker version. That connection is the
+//! At start `vesperd` claims its socket (`<socket>.lock`, live-socket refusal), checks over `DATA status` that the
+//! System VM's data disk is in use (it holds the jails and the snapshot store), sends `LAUNCHAPI <id> [ceiling]
+//! [stage=SRC:DEST]...` to the agent through the bridge (one token per `--stage`, staged into the fresh jail before
+//! Firecracker starts) and checks that `READY` names the pinned Firecracker version. That connection is the
 //! microVM's lease for the life of the process: when the agent closes it (Firecracker exited, the System VM went
 //! away), `vesperd` closes its listener, removes its socket and exits non-zero; on SIGTERM or SIGINT it closes the
 //! lease, waits for the agent to confirm the teardown, and exits 0. Each client connection gets its own bridge
@@ -17,7 +20,9 @@ use std::time::{Duration, Instant};
 
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::signal::unix::{SignalKind, signal};
-use vesper::control::{AGENT_PROTOCOL_VERSION, DEFAULT_AGENT_PORT, Ready, parse_ready, valid_microvm_id};
+use vesper::control::{
+    AGENT_PROTOCOL_VERSION, DEFAULT_AGENT_PORT, MAX_STAGES, Ready, StageSpec, data_disk_in_use, parse_ready, valid_microvm_id,
+};
 use vesper::proxy::{self, Bounds, Preface, ServerConfig, Target};
 
 /// Dial of the bridge socket.
@@ -26,6 +31,10 @@ const DIAL_TIMEOUT: Duration = Duration::from_secs(5);
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 /// `LAUNCHAPI` until `READY` or `ERR`.
 const READY_TIMEOUT: Duration = Duration::from_secs(30);
+/// Added to `READY_TIMEOUT` when `--stage` copies files into the jail before Firecracker starts.
+const STAGE_ALLOWANCE: Duration = Duration::from_secs(120);
+/// Lines in a `DATA status` reply.
+const MAX_DATA_LINES: usize = 4;
 /// Longest greeting, `OK`, `READY` or `ERR` line.
 const MAX_LINE: usize = 1024;
 /// Bytes one relay read may fill.
@@ -45,9 +54,34 @@ const STOP_WAIT: Duration = Duration::from_secs(20);
 pub struct Options {
     id: String,
     memory_max: Option<u64>,
+    stages: Vec<StageSpec>,
     bridge: PathBuf,
     port: u32,
     swagger: String,
+}
+
+/// The bridge socket and agent port: `--bridge` and `--agent-port`, else the launch config's.
+pub fn bridge_and_port(args: &super::Args) -> Result<(PathBuf, u32), String> {
+    let (cfg_bridge, cfg_port) = match (&args.bridge, std::fs::read_to_string(&args.launch_config)) {
+        (Some(_), _) => (None, None),
+        (None, Ok(text)) => {
+            let cfg: vesper::systemvm::LaunchConfig = serde_json::from_str(&text)
+                .map_err(|err| format!("parse launch config {}: {err}", args.launch_config))?;
+            (cfg.vsock_bridge_path, cfg.agent_port)
+        }
+        (None, Err(err)) => {
+            return Err(format!(
+                "read launch config {}: {err} (pass --bridge or run make systemvm-launch-config)",
+                args.launch_config
+            ));
+        }
+    };
+    let bridge = args
+        .bridge
+        .clone()
+        .or(cfg_bridge)
+        .ok_or("no bridge socket: the launch config has no vsock_bridge_path and --bridge was not given")?;
+    Ok((PathBuf::from(bridge), args.agent_port.or(cfg_port).unwrap_or(DEFAULT_AGENT_PORT)))
 }
 
 impl Options {
@@ -56,32 +90,12 @@ impl Options {
         if !valid_microvm_id(&id) {
             return Err(format!("--id {id:?}: use 1 to 64 letters, digits and hyphens"));
         }
-        let (cfg_bridge, cfg_port) = match (&args.bridge, std::fs::read_to_string(&args.launch_config)) {
-            (Some(_), _) => (None, None),
-            (None, Ok(text)) => {
-                let cfg: vesper::systemvm::LaunchConfig = serde_json::from_str(&text)
-                    .map_err(|err| format!("parse launch config {}: {err}", args.launch_config))?;
-                (cfg.vsock_bridge_path, cfg.agent_port)
-            }
-            (None, Err(err)) => {
-                return Err(format!(
-                    "read launch config {}: {err} (pass --bridge or run make systemvm-launch-config)",
-                    args.launch_config
-                ));
-            }
-        };
-        let bridge = args
-            .bridge
-            .clone()
-            .or(cfg_bridge)
-            .ok_or("no bridge socket: the launch config has no vsock_bridge_path and --bridge was not given")?;
-        Ok(Options {
-            id,
-            memory_max: args.memory_max,
-            bridge: PathBuf::from(bridge),
-            port: args.agent_port.or(cfg_port).unwrap_or(DEFAULT_AGENT_PORT),
-            swagger: args.swagger.clone(),
-        })
+        if args.stage.len() > MAX_STAGES {
+            return Err(format!("at most {MAX_STAGES} --stage flags"));
+        }
+        let stages = args.stage.iter().map(|s| StageSpec::parse(s)).collect::<Result<Vec<_>, _>>()?;
+        let (bridge, port) = bridge_and_port(args)?;
+        Ok(Options { id, memory_max: args.memory_max, stages, bridge, port, swagger: args.swagger.clone() })
     }
 }
 
@@ -122,6 +136,52 @@ fn greeting_prefix() -> String {
     format!("VESPER-AGENT {AGENT_PROTOCOL_VERSION} ")
 }
 
+/// `LAUNCHAPI <id> [ceiling] [stage=SRC:DEST]...`.
+fn launch_request(opts: &Options) -> String {
+    let mut words = vec!["LAUNCHAPI".to_string(), opts.id.clone()];
+    words.extend(opts.memory_max.map(|bytes| bytes.to_string()));
+    words.extend(opts.stages.iter().map(StageSpec::launch_token));
+    words.join(" ")
+}
+
+/// Asks the agent for `DATA status` and refuses unless the data disk is `formatted` or `mounted` (ADR 0007 section
+/// 5): jails and the snapshot store live on it.
+async fn check_data_disk(target: &Target, config: &ServerConfig) -> Result<(), String> {
+    let mut agent = proxy::open_upstream(target, config).await?;
+    let greeting = proxy::read_line_bounded(&mut agent, MAX_LINE, Some(HANDSHAKE_TIMEOUT))
+        .await
+        .map_err(|err| format!("agent greeting: {err}"))?;
+    if !greeting.starts_with(&greeting_prefix()) {
+        return Err(format!("unexpected agent greeting {greeting:?}"));
+    }
+    proxy::write_line(&mut agent, "DATA status", Some(HANDSHAKE_TIMEOUT)).await?;
+    let head = proxy::read_line_bounded(&mut agent, MAX_LINE, Some(HANDSHAKE_TIMEOUT))
+        .await
+        .map_err(|err| format!("DATA status: {err}"))?;
+    let count = match head.split(' ').collect::<Vec<_>>().as_slice() {
+        ["DATA", _, n] => n.parse::<usize>().ok().filter(|n| *n <= MAX_DATA_LINES),
+        _ => None,
+    }
+    .ok_or_else(|| format!("DATA status: unexpected reply {head:?}"))?;
+    let mut state = String::new();
+    for _ in 0..count {
+        let line = proxy::read_line_bounded(&mut agent, MAX_LINE, Some(HANDSHAKE_TIMEOUT))
+            .await
+            .map_err(|err| format!("DATA status: {err}"))?;
+        if line.starts_with("DATA ") && state.is_empty() {
+            state = line;
+        }
+    }
+    if data_disk_in_use(&state) {
+        Ok(())
+    } else {
+        Err(format!(
+            "the System VM's data disk is not in use ({}); vesperd microVMs keep their jails and the snapshot store on it",
+            if state.is_empty() { "no DATA line".to_string() } else { state }
+        ))
+    }
+}
+
 /// One `LAUNCHAPI` exchange; `Ok(Err(line))` is an `ERR busy` reply worth retrying.
 async fn launch_once(
     opts: &Options,
@@ -135,14 +195,12 @@ async fn launch_once(
     if !greeting.starts_with(&greeting_prefix()) {
         return Err(format!("unexpected agent greeting {greeting:?}"));
     }
-    let request = match opts.memory_max {
-        Some(bytes) => format!("LAUNCHAPI {} {bytes}", opts.id),
-        None => format!("LAUNCHAPI {}", opts.id),
-    };
+    let request = launch_request(opts);
     proxy::write_line(&mut lease, &request, Some(HANDSHAKE_TIMEOUT)).await?;
-    let reply = proxy::read_line_bounded(&mut lease, MAX_LINE, Some(READY_TIMEOUT))
+    let wait = if opts.stages.is_empty() { READY_TIMEOUT } else { READY_TIMEOUT + STAGE_ALLOWANCE };
+    let reply = proxy::read_line_bounded(&mut lease, MAX_LINE, Some(wait))
         .await
-        .map_err(|err| format!("{request}: {err}"))?;
+        .map_err(|err| format!("LAUNCHAPI {}: {err}", opts.id))?;
     if reply == format!("ERR busy {}", opts.id) {
         return Ok(Err(reply));
     }
@@ -214,6 +272,7 @@ pub async fn run(opts: Options, socket: &Path) -> Result<(), String> {
     let mut int = signal(SignalKind::interrupt()).map_err(|err| format!("register SIGINT: {err}"))?;
     // Held for the life of the process; no microVM is launched for a socket another vesperd serves.
     let _lock = proxy::claim_socket(socket)?;
+    check_data_disk(&target, &config).await?;
 
     let (lease, ready) = launch(&opts, &target, &config).await?;
     let (mut lease_read, mut lease_write) = tokio::io::split(lease);

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # GH #164: the System VM's persistent data disk. Proves that images, containers and volumes survive a reboot, that
-# a disk is formatted only on first use, and that a disk with another label is never formatted. Restarts the System
+# a disk is formatted only on first use, that a disk with another label is never formatted, and that a reboot keeps
+# the vesperd snapshot store but sweeps vesperd jails (ADR 0007 slice 5). Restarts the System
 # VM itself (twice with the default disk, twice with a scratch disk) and leaves it running on the default disk.
 # Needs `make systemvm-prepare`, `make docker-up` (the proxy survives the restarts) and network access for one pull.
 set -uo pipefail
@@ -26,6 +27,7 @@ reboot() {
   bash scripts/systemvm/up.sh >/dev/null 2>&1 || return 1
   sed -n 's/.*"status":"ready","elapsed_ms":\([0-9]*\).*/\1/p' run/systemvm/vmlauncher.log | tail -1
 }
+vv() { cargo run -q --bin systemvmctl -- control vesperd "$@" 2>&1; }
 in_vm() { "${DOCKER}" run --rm --privileged --pid=host "${IMAGE}" nsenter -t 1 -m sh -c "$1" 2>&1; }
 
 # 1. The default disk is formatted or mounted, and the state directories live on it.
@@ -40,7 +42,23 @@ binds="$(in_vm 'for d in /var/lib/docker /var/lib/containerd /var/lib/vesper/roo
 stamp="persist-$(date +%s)"
 "${DOCKER}" run --rm -v vesper-data-probe:/v "${IMAGE}" sh -c "echo ${stamp} > /v/stamp" >/dev/null 2>&1
 "${DOCKER}" create --name vesper-data-probe "${IMAGE}" echo hello >/dev/null 2>&1
+# A store file copied out of a running vesperd jail, and a jail with no record (what a crash would leave).
+cargo build -q --bin vesperd >/dev/null 2>&1
+vdir="${ROOT_DIR}/run/vesperd-suite"; mkdir -p "${vdir}"; chmod 700 "${vdir}"
+vv store-rm vesper-data-store >/dev/null; vv test-age vesper-data-orphan 3600 >/dev/null; vv reap >/dev/null
+target/debug/vesperd --backend systemvm --id vesper-data-store --socket "${vdir}/data.sock" >/dev/null 2>&1 &
+vpid=$!; for _ in $(seq 1 100); do [ -S "${vdir}/data.sock" ] && break; sleep 0.2; done
+staged="$(target/debug/vesperd stage --id vesper-data-store jail:/initrd.gz store:vesper-data-store 2>&1)"
+kill -TERM "${vpid}" 2>/dev/null; wait "${vpid}" 2>/dev/null
+orphan="$(vv test-orphan vesper-data-orphan)"
 ms="$(reboot "${ROOT_DIR}/run/systemvm/data.img")"; st="$(data_state)"; docker_ready
+stored="$(vv store-list | grep '^STORE vesper-data-store ')"; jails="$(vv list | grep -c '^JAIL ')"
+if [ -n "${stored}" ] && [ "${jails}" = 0 ] && case "${staged}" in STAGED*) true ;; *) false ;; esac; then
+  record vesperd_store_survives_jails_swept true "before: ${staged}; ${orphan}; after the reboot: ${stored}; ${jails} vesperd jails"
+else
+  record vesperd_store_survives_jails_swept false "before: ${staged}; ${orphan}; after: store='${stored}' jails=${jails}"
+fi
+vv store-rm vesper-data-store >/dev/null
 case "${st}" in *"DATA mounted /dev/"*) record data_disk_not_reformatted true "${st}" ;; *) record data_disk_not_reformatted false "second boot: ${st}" ;; esac
 "${DOCKER}" image inspect "${IMAGE}" >/dev/null 2>&1 && record image_survives_reboot true "${IMAGE} present after reboot without a pull" || record image_survives_reboot false "${IMAGE} missing after reboot"
 out="$("${DOCKER}" start -a vesper-data-probe 2>&1)"

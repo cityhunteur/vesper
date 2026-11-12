@@ -53,7 +53,7 @@ Non-goals:
 
 This section records how far the code is from this design. The requirements in the later sections still stand.
 
-Every status label in this document is a snapshot at `9c5a865`, except the baseline-revision labels that GH #162 refreshed, the System VM storage labels that GH #164 refreshed and the `vesperd` backend labels that GH #156 (ADR 0007 slice 4) refreshed on 2026-11-12. The [parity matrix](firecracker-feature-parity.md) and the [milestone log](../progress/symphony-milestones.md) hold the running status; the labels are refreshed when the design is next revised.
+Every status label in this document is a snapshot at `9c5a865`, except the baseline-revision labels that GH #162 refreshed, the System VM storage labels that GH #164 refreshed and the `vesperd` backend and snapshot labels that GH #156 (ADR 0007 slices 4 and 5) refreshed on 2026-11-12. The [parity matrix](firecracker-feature-parity.md) and the [milestone log](../progress/symphony-milestones.md) hold the running status; the labels are refreshed when the design is next revised.
 
 ### Labels
 
@@ -89,7 +89,7 @@ The order is decision D-008, as amended by D-015 and D-017. Two time-boxed items
 | --- | --- | --- | --- | --- | --- |
 | Prototype: a share path into a microVM (done 2026-11-11, GH #159) | Outcome **partial** (D-020): NFSv3 from userspace `unfs3` over a TAP device. | TD-049 | — | Done. Deviations are recorded in D-020; adoption is GH #160. | The `unfs3` dependency (GH #160). |
 | Parity reference (time-boxed, D-017) | It is the other half of the Phase 2 gate, and no later step produces it before step 3 needs it. | CE-0003, CE-0001 | None. | The binary and the lock name one Firecracker revision (done 2026-11-11, GH #162; CE-0002 closed). A Linux baseline is captured on any aarch64 KVM host at the pinned revision (CE-0003). The upstream suite has been tried in the System VM and the result is recorded (CE-0001). | Nothing; a change of the pinned revision follows [baseline-governance.md](../process/baseline-governance.md). |
-| 1. Connect `vesperd` to Backend A (in progress: ADR 0007 slices 1 to 4 done 2026-11-12) | It is the unmet Phase 2 deliverable. Until it exists the public API never drives a real microVM, and goal 1 is unproven. | GH #156, TD-045 | An ADR that settles the open questions of the [backend ownership contract](#backend-ownership-contract) (D-013, D-017): done, [ADR 0007](../design-docs/adr/0007-vesperd-to-backend-a.md) (D-022). A restriction on what the vsock bridge reaches, because this step puts a relay to Firecracker behind the bridge (TD-027, D-018): done. An owner-only default socket for `vesperd` (TD-050): done. Where snapshots persist (TD-025): ADR 0007 slice 5. | A Firecracker API client creates, starts, pauses, resumes, snapshots and stops a jailed microVM in the System VM through `vesperd`, and a suite records it. | Any new listener, on macOS or in the System VM (D-013). |
+| 1. Connect `vesperd` to Backend A (in progress: ADR 0007 slices 1 to 5 done 2026-11-12) | It is the unmet Phase 2 deliverable. Until it exists the public API never drives a real microVM, and goal 1 is unproven. | GH #156, TD-045 | An ADR that settles the open questions of the [backend ownership contract](#backend-ownership-contract) (D-013, D-017): done, [ADR 0007](../design-docs/adr/0007-vesperd-to-backend-a.md) (D-022). A restriction on what the vsock bridge reaches, because this step puts a relay to Firecracker behind the bridge (TD-027, D-018): done. An owner-only default socket for `vesperd` (TD-050): done. Where snapshots persist (TD-025): done, a store on the data disk (ADR 0007 slice 5, TD-053). | A Firecracker API client creates, starts, pauses, resumes, snapshots and stops a jailed microVM in the System VM through `vesperd`, and a suite records it. | Any new listener, on macOS or in the System VM (D-013). |
 | 2. Run Docker containers in microVMs | It is the unmet Phase 3 exit criterion for dockerd. Without it the Phase 4 suites prove the Docker path, not this design. | GH #53 | Shares over NFS from `unfs3` (GH #160, D-020). A network device for each microVM (TD-032). No full root-drive copy per task (TD-035). Persistent System VM storage (TD-025). | `docker run` from macOS starts a microVM, and the Phase 4 suites pass against microVM containers, within the outcome the prototype recorded. | Nothing further, unless the prototype ends in the fallback or in a partial outcome. |
 | 3. Phase 5: Backend B | It removes the dependency on nested virtualisation. | GH #56 | Step 1. The parity reference and the differential harness (GH #87). A design for the boundary between the shim and Backend B (D-017). | The [Phase 5 exit criterion](#phase-5-exit-criterion). | Not known yet. |
 
@@ -185,7 +185,7 @@ The table lists the components as built at `9c5a865`.
 This is the target design. **Provisional** (D-013 as amended by D-017; an ADR under GH #156 confirms or replaces it).
 
 * `vesperd` is the only public control-plane endpoint, and raw backend sockets are never public ([AGENTS.md](../../AGENTS.md), invariant 1). It is authoritative for the microVMs created through it.
-* For Backend A, `vesperd` drives stock Firecracker inside the System VM. MicroVM execution and data plane stay inside the System VM. **Not met** (TD-045, GH #156): `vesperd --backend systemvm` relays each socket to one jailed Firecracker ([ADR 0007](../design-docs/adr/0007-vesperd-to-backend-a.md), `make systemvm-vesperd-suite`), but staging and snapshot load wait for slice 5, and the default backend still answers every route from memory.
+* For Backend A, `vesperd` drives stock Firecracker inside the System VM. MicroVM execution and data plane stay inside the System VM. **Not met** (TD-045, GH #156): `vesperd --backend systemvm` relays each socket to one jailed Firecracker on the data disk, stages files into its jail and keeps snapshots in a store ([ADR 0007](../design-docs/adr/0007-vesperd-to-backend-a.md), `make systemvm-vesperd-suite`, `make systemvm-snapshot-suite`), but the default backend still answers every route from memory, and the behaviour-matrix replay through `vesperd` is slice 6.
 * The current seam between the shim and a backend is the `backend.Backend` interface in `shim/internal/backend`. It is shaped by Backend A and is not a stable boundary. For Backend A the shim implements it by calling `vesper-microvm` in the System VM, with no call to `vesperd`. The shim owns the microVMs it creates.
 * For Backend B, `vesperd` executes microVMs on macOS. How a containerd task in the System VM reaches a microVM on macOS is not designed (D-017).
 
@@ -326,13 +326,13 @@ A macOS user can start and stop Vesper and run a trivial container, even if the 
 
 * Nested virtualisation enabled on machines that support it.
 * `firecracker` and `jailer` running inside the System VM.
-* A backend flow from `vesperd` to the Firecracker API for the lifecycle primitives `CreateVM`, `StartVM`, `PauseVM`, `ResumeVM`, `StopVM` and `DeleteVM` ([Backend ownership contract](#backend-ownership-contract)). **Not met** (TD-045): `vesperd --backend systemvm` covers create, start, pause, resume and stop (`make systemvm-vesperd-suite`); staging, snapshot load and the data-disk jails are ADR 0007 slice 5.
+* A backend flow from `vesperd` to the Firecracker API for the lifecycle primitives `CreateVM`, `StartVM`, `PauseVM`, `ResumeVM`, `StopVM` and `DeleteVM` ([Backend ownership contract](#backend-ownership-contract)). **Not met** (TD-045): `vesperd --backend systemvm` covers create, start, pause, resume and stop (`make systemvm-vesperd-suite`) and a snapshot load into a new process (`make systemvm-snapshot-suite`, ADR 0007 slice 5); the default backend is still the in-memory model, and `DeleteVM` is the end of the `vesperd` process.
 * A rootfs flow in the style of firecracker-containerd: OCI image → ext4 root drive → microVM boot → runc inside the microVM runs the container. **Meets the requirement** ([ADR 0006](../design-docs/adr/0006-guest-exec-via-runc-delegation.md), `make systemvm-rootfs-suite`).
 
 #### Phase 2 verification
 
 * The upstream Firecracker integration suite runs against Firecracker inside the System VM, with the pass set defined in [Parity harness](#parity-harness).
-* Snapshot tests on upstream semantics confirm a create and load cycle. ([GitHub][7]) **Not met** (CE-0001): the local checks create one full snapshot and never load one.
+* Snapshot tests on upstream semantics confirm a create and load cycle. ([GitHub][7]) **Not met** (CE-0001): `make systemvm-snapshot-suite` runs one full cycle through `vesperd` (pause, create, copy into the store, stop; a new process stages the snapshot, loads and resumes it, and the guest's in-memory token survives; ADR 0007 slice 5), but the upstream snapshot tests have no pass set.
 * MicroVM boot time and create rate are measured against the [performance thresholds](#performance-thresholds). ([GitHub][8])
 
 #### Phase 2 exit criterion
@@ -443,7 +443,7 @@ Each row is a check that must pass before the feature area counts as done.
 | Storage | fio read and write patterns | Not met | TD-033 |
 | Storage | Recovery after a sudden stop and a simulated macOS crash | Not met | TD-047 |
 | Storage | Rate limiter: token bucket behaviour matches Firecracker’s model ([GitHub][1]) | Not met | TD-047 |
-| Snapshots | Full restore; diff chain restore; snapshot under network and disk load; rejection of an incompatible version, a corrupted memory file and an invalid state file | Not met | TD-045 |
+| Snapshots | Full restore; diff chain restore; snapshot under network and disk load; rejection of an incompatible version, a corrupted memory file and an invalid state file | Not met: a full restore into a new process passes (`make systemvm-snapshot-suite`); the diff chain, the loads under network and disk load and the rejections are not tested | CE-0001, CE-0008 |
 | Logging and metrics | Behaviour when the pipes are full, including the lost-log counters ([GitHub][8]) | Not met | TD-047 |
 | Security | Jailer equivalence on macOS: the microVM process is sandboxed, file access is limited to its bundle, network is denied unless configured | Not met | TD-046, TD-047 |
 | Security | Review of the [threat table](#threats) against Firecracker’s containment model ([GitHub][1]) | Not met | TD-051 |
@@ -527,7 +527,7 @@ Vesper must match Firecracker’s snapshot semantics: full and diff snapshots, a
 
 Virtualization.framework save state cannot provide this ([Risks and limits](#risks-and-limits)).
 
-* Backend A uses stock Firecracker snapshots. **Not met** (TD-045, TD-042): neither `vesperd` nor the shim reaches them.
+* Backend A uses stock Firecracker snapshots. **Meets the requirement** for `vesperd --backend systemvm` (ADR 0007 slice 5, `make systemvm-snapshot-suite`), with one deviation: a create onto a file that `--stage` linked from the store fails (CE-0008). **Not met** for the shim (TD-042).
 * Backend B implements Firecracker’s snapshot format: it serialises device models and vCPU state, saves microVM memory, and for a diff snapshot finds dirty pages by comparing pages with the parent snapshot. **Not met** (GH #56).
 * Dirty-page tracking in place of that comparison, if Hypervisor.framework allows it. **Deferred** (until step 2 of [Next work](#next-work) is done).
 

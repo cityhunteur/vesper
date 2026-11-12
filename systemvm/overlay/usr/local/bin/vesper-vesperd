@@ -1,22 +1,40 @@
 #!/bin/sh
-# Vesper Backend A for vesperd (ADR 0007, slice 3): one jailed Firecracker per lease, built from API requests.
-# The agent runs `launch` for LAUNCHAPI and `connect` for FCAPI with `exec`, so stdin and stdout are the vsock
-# connection itself. Every other subcommand is reached through the agent's buffered VESPERD verb.
-# usage: vesper-vesperd launch ID [CEILING]   LAUNCHAPI: start Firecracker unconfigured under the jailer (uid 20000,
-#                                             --parent-cgroup vesperd, memory.max=CEILING bytes); reply
-#                                             READY ID pid=N firecracker_version=V once the API socket exists, or
-#                                             ERR <reason> and close. After READY the connection is the lease: on its
-#                                             end of file, or when Firecracker exits, the microVM is stopped and its
-#                                             jail, cgroup and record removed, then the connection is closed.
+# Vesper Backend A for vesperd (ADR 0007, slices 3 and 5): one jailed Firecracker per lease, built from API requests,
+# with jails and a snapshot store on the data disk. The agent runs `launch` for LAUNCHAPI and `connect` for FCAPI
+# with `exec`, so stdin and stdout are the vsock connection itself. Every other subcommand is reached through the
+# agent's buffered VESPERD verb.
+# usage: vesper-vesperd launch ID [CEILING] [stage=SRC:DEST]...
+#                                             LAUNCHAPI: start Firecracker unconfigured under the jailer (uid 20000,
+#                                             --parent-cgroup vesperd, memory.max=CEILING bytes) in a fresh jail on the
+#                                             data disk, after staging each SRC (share:/PATH or store:NAME) to the jail
+#                                             path DEST (store:*.mem and store:*.vmstate are hard-linked, root-owned and
+#                                             read-only; everything else is copied); reply READY ID pid=N
+#                                             firecracker_version=V once the API socket exists, or ERR <reason> and
+#                                             close. After READY the connection is the lease: on its end of file, or when
+#                                             Firecracker exits, the microVM is stopped and its jail, cgroup and record
+#                                             removed, then the connection is closed.
 #        vesper-vesperd connect ID            FCAPI: reply OK, then relay bytes to ID's API socket (socat, chrooted
 #                                             into the jail root); ERR <reason> and close when ID is not a ready
 #                                             vesperd microVM.
+#        vesper-vesperd stage ID|- SRC DEST   copy SRC (share:/PATH, store:NAME or jail:/PATH in ID's jail) to DEST (a
+#                                             path in ID's jail or store:NAME) while ID runs; jail-side reads and writes
+#                                             run as vesperd-jail (uid 20000); never links, never overwrites; checks the
+#                                             free-space reserve first. STAGED SRC DEST copy bytes=N | ERR <reason>
+#        vesper-vesperd store-list            STORE NAME bytes=N links=L lines, then FREE avail=N reserve=N
+#        vesper-vesperd store-rm NAME         REMOVED NAME | ERR <reason>
+#        vesper-vesperd sweep                 boot sweep (vesper-data mount): remove every jail without a record and
+#                                             every unfinished store copy; SWEPT jails=N partial=M
+#        vesper-vesperd setup-user            create the vesperd-jail user and group (uid and gid 20000, no login
+#                                             shell) if missing (the reaper service, at boot); USER vesperd-jail 20000
 #        vesper-vesperd reap                  one reaper pass: REAPED ID reason=… | KEPT ID reason=… lines, then
 #                                             REAP reaped=N kept=M
 #        vesper-vesperd reap-loop SECONDS     a reaper pass every SECONDS, forever (the vesper-vesperd-reaper service)
 #        vesper-vesperd status ID             RUNNING ID pid=N holder=P | STARTING ID holder=P | ABSENT ID |
 #                                             DIRTY ID <record|jail|cgroup|process>…
 #        vesper-vesperd isolation ID          JSON with uid, chroot, cgroup and seccomp checks of ID's Firecracker
+#        vesper-vesperd files ID              FILE PATH uid=U mode=M links=L bytes=N per regular file in ID's jail
+#                                             (read as uid 20000)
+#        vesper-vesperd memory ID             MEMORY ID current=N peak=N max=N anon=N file=N (ID's cgroup)
 #        vesper-vesperd list                  LEASE ID holder=P:S conn=P:S fc=P:S lines, then a JAIL ID line per jail
 #        vesper-vesperd log ID [N]            last N lines of ID's serial console
 #        vesper-vesperd kill-holder ID        SIGKILL the lease shell (KILLED-HOLDER ID pid=N); tests the reaper
@@ -25,8 +43,14 @@
 #                                             been reused by another process (FORGED ID holder=P)
 #        vesper-vesperd test-orphan ID        test hook: create a jail with no record (ORPHAN ID)
 #        vesper-vesperd test-age ID SECONDS   test hook: backdate ID's jail directory (AGED ID seconds=N)
+#        vesper-vesperd test-plant ID         test hook, as a compromised Firecracker would: /planted-link -> /etc/shadow,
+#                                             /planted-dir -> the store, and /planted-root (root-owned, mode 0600) in
+#                                             ID's jail (PLANTED ID)
+#        vesper-vesperd test-reserve BYTES|clear  test hook: override the free-space reserve until reboot (RESERVE …)
 #        vesper-vesperd test-container-vsock  run a default and an unconfined Docker container that open AF_VSOCK;
 #                                             VSOCK default=denied|allowed … and VSOCK unconfined=… lines
+#        vesper-vesperd jail-stat|jail-read|jail-write ROOT PATH [BYTES]
+#                                             internal: the uid 20000 side of stage; refused for any other uid
 # Values (docs/exec-plans/active/2026-11-12-GH156-vesperd-backend-a.md gives the reason for each):
 set -u
 FC_DIR=/var/lib/vesper/firecracker
@@ -34,22 +58,32 @@ FC=$FC_DIR/firecracker
 JAILER=$FC_DIR/jailer
 MV=/usr/local/bin/vesper-microvm
 MVM=/var/lib/vesper/microvm
-BASE=/srv/vesperd                 # --chroot-base-dir; slice 5 moves it to the data disk
+DATA=/var/lib/vesper/state       # bind-mounted onto the data disk by vesper-data; jails and store share this mount
+BASE=$DATA/vesperd/jailer         # --chroot-base-dir
 JAILS=$BASE/firecracker           # <chroot base>/<exec file name>/<id>/root
+STORE=$DATA/vesperd/store         # files that outlive a microVM; root-owned, read-only, one trust domain
 CG=/sys/fs/cgroup/vesperd         # --parent-cgroup vesperd
 STATE=/run/vesper/vesperd
 LEASES=$STATE/leases              # one record per id: "holder=<pid>:<start> conn=<pid>:<start> fc=<pid>:<start>"
 LOCK=$STATE/lock                  # one flock serialises reaping, jail creation and teardown
+STORE_LOCK=$STATE/store.lock      # one flock serialises copies (and their reserve checks) and store removals
+RESERVE_OVERRIDE=$STATE/reserve   # test-reserve writes it; tmpfs, so a reboot clears it
 LOGS=/var/log/vesperd
 JUID=20000
 JGID=20000
-DEFAULT_CEILING=671088640         # memory.max default, 640 MiB, as the shim; slice 5 measures it
+JUSER=vesperd-jail                # the uid 20000 user that jail-side reads and writes run as
+DEFAULT_CEILING=671088640         # memory.max default, 640 MiB (measured in slice 5)
 MIN_CEILING=134217728             # 128 MiB: Firecracker plus the smallest guest
 LAUNCH_WAIT_S=10                  # wait for the API socket after the jailer starts
 STOP_GRACE_S=3                    # SIGTERM to SIGKILL
 LEASE_POLL_S=1                    # lease end of file and Firecracker exit are noticed within this
 GRACE_S=60                        # a jail without a record is spared this long
 SOCAT_T=86400                     # socat -t: keep relaying after a half-close (GH #167)
+MAX_STAGES=16                     # stage= tokens per LAUNCHAPI
+MAX_PATH=1024                     # bytes in a jail or share path
+MAX_NAME=128                      # bytes in a store name
+# The free-space reserve is the System VM's MemTotal: after any copy the data disk still holds one more full
+# snapshot memory file of the largest guest a ceiling allows.
 
 valid_id() { # the jailer's rule: 1 to 64 letters, digits and hyphens
   case "${1:-}" in ''|*[!A-Za-z0-9-]*) return 1 ;; esac
@@ -80,8 +114,13 @@ is_fc_for() { # PID ID -> 0 when PID is a Firecracker running as uid 20000 with 
 }
 fc_by_id() { pgrep -u "$JUID" -f "firecracker --id $1 " 2>/dev/null | head -1; }
 
-ensure_dirs() {
-  mkdir -p "$LEASES" "$JAILS" "$LOGS" && chmod 0700 "$STATE" "$LEASES" && chmod 0755 "$BASE" "$JAILS"
+ensure_dirs() { # the tmpfs side; the data-disk side is data_dirs
+  mkdir -p "$LEASES" "$LOGS" && chmod 0700 "$STATE" "$LEASES"
+}
+data_ok() { awk -v d="$DATA" '$2 == d && $3 == "ext4" {f=1} END {exit !f}' /proc/mounts; }
+data_dirs() { # jails and store on the data disk; refused when the disk is not in use (ADR 0007 section 5)
+  data_ok || return 1
+  mkdir -p "$JAILS" "$STORE" && chmod 0755 "$DATA/vesperd" "$BASE" "$JAILS" && chmod 0700 "$STORE"
 }
 lock() { exec 9>"$LOCK" && flock 9; }
 unlock() { flock -u 9 2>/dev/null; exec 9>&-; }
@@ -165,6 +204,245 @@ reap_pass() { # (caller holds the lock)
   echo "REAP reaped=$reaped kept=$kept"
 }
 
+# ---- staging and the store (ADR 0007 section 1, slice 5) -------------------------------------------------
+# Paths are absolute, made of letters, digits and . _ + , @ = - between single slashes, with no . or .. component
+# and no trailing slash; that keeps them safe in the agent's word splitting and in su's command line.
+valid_path() {
+  case "${1:-}" in /*) ;; *) return 1 ;; esac
+  case "$1" in *[!A-Za-z0-9._+,@=/-]*|*/|*//*|*/./*|*/../*|*/.|*/..) return 1 ;; esac
+  [ "${#1}" -le "$MAX_PATH" ]
+}
+valid_name() { # a store name; names starting with a dot are the store's unfinished copies
+  case "${1:-}" in ''|.*|*[!A-Za-z0-9._+,@=-]*) return 1 ;; esac
+  [ "${#1}" -le "$MAX_NAME" ]
+}
+user_ok() { grep -q "^$JUSER:x:$JUID:$JGID:" /etc/passwd; }
+setup_user() {
+  grep -q "^$JUSER:" /etc/group || addgroup -S -g "$JGID" "$JUSER" || { echo "ERR addgroup $JUSER"; return 1; }
+  grep -q "^$JUSER:" /etc/passwd || adduser -S -D -H -u "$JUID" -G "$JUSER" -s /sbin/nologin -h / -g "vesperd jail" "$JUSER" \
+    || { echo "ERR adduser $JUSER"; return 1; }
+  user_ok || { echo "ERR $JUSER exists with another uid or gid"; return 1; }
+  echo "USER $JUSER $JUID"
+}
+# Runs a jail-side subcommand of this script as uid 20000 (busybox su; the user has no login shell, so -s).
+as_jail() { su -s /bin/sh "$JUSER" -c 'exec /usr/local/bin/vesper-vesperd "$@"' vesper-vesperd "$@"; }
+
+reserve_bytes() {
+  r=$(cat "$RESERVE_OVERRIDE" 2>/dev/null)
+  digits "$r" && { echo "$r"; return; }
+  awk '/^MemTotal:/{print $2 * 1024}' /proc/meminfo
+}
+avail_bytes() { df -k "$DATA" | awk 'NR==2 {print $4 * 1024}'; }
+# BYTES: refuse a copy of BYTES that would leave less than the reserve free on the data disk.
+reserve_check() {
+  a=$(avail_bytes); r=$(reserve_bytes)
+  digits "$a" || { echo "free space unknown"; return 1; }
+  [ $((a - $1)) -ge "$r" ] || { echo "reserve: copying $1 bytes would leave $((a - $1)) of the $r-byte free-space reserve (avail $a)"; return 1; }
+}
+store_lock() { exec 8>"$STORE_LOCK" && flock 8; }
+store_unlock() { flock -u 8 2>/dev/null; exec 8>&-; }
+
+# root side: a regular file under a virtio-fs share mount, no symlink below the mount point -> its size
+share_file() {
+  p=$1; m=""
+  for mp in $(awk '$3 == "virtiofs" {print $2}' /proc/mounts); do
+    case "$p" in "$mp"/*) [ "${#mp}" -gt "${#m}" ] && m=$mp ;; esac
+  done
+  [ -n "$m" ] || { echo "$p is not inside a configured share"; return 1; }
+  cur=$m; rest=${p#"$m"/}
+  while :; do
+    comp=${rest%%/*}; cur="$cur/$comp"
+    [ -L "$cur" ] && { echo "$p: symlink at $cur"; return 1; }
+    [ "$rest" = "$comp" ] && break
+    [ -d "$cur" ] || { echo "$p: $cur is not a directory"; return 1; }
+    rest=${rest#*/}
+  done
+  [ -f "$cur" ] || { echo "$p is not a regular file"; return 1; }
+  stat -c %s "$cur"
+}
+store_file() { # NAME -> its size
+  f="$STORE/$1"
+  { [ -f "$f" ] && [ ! -L "$f" ]; } || { echo "no store file $1"; return 1; }
+  stat -c %s "$f"
+}
+
+# uid 20000 side. ROOT is a jail root; PATH is a valid path inside it. Every component below ROOT is checked not
+# to be a symlink, as this user; the opens run as this user too, so a symlink that appears after the check can
+# only reach what uid 20000 may open anyway (not the System VM's root-only files).
+jail_guard() { # ROOT PATH
+  [ "$(id -u)" = "$JUID" ] || { echo "ERR jail-side subcommands run as uid $JUID only"; exit 2; }
+  case "$1" in "$JAILS"/*/root) valid_id "$(basename "$(dirname "$1")")" || { echo "ERR bad jail root"; exit 2; } ;; *) echo "ERR bad jail root"; exit 2 ;; esac
+  valid_path "${2:-}" || { echo "ERR bad path"; exit 2; }
+}
+jail_walk() { # ROOT PATH read|write -> sets J_FILE
+  cur=$1; rest=${2#/}
+  while :; do
+    comp=${rest%%/*}; cur="$cur/$comp"
+    [ -L "$cur" ] && { echo "ERR symlink at ${cur#"$1"}"; exit 1; }
+    [ "$rest" = "$comp" ] && break
+    if [ ! -e "$cur" ] && [ "$3" = write ]; then mkdir "$cur" || { echo "ERR mkdir ${cur#"$1"}"; exit 1; }; fi
+    [ -d "$cur" ] && [ ! -L "$cur" ] || { echo "ERR ${cur#"$1"} is not a directory"; exit 1; }
+    rest=${rest#*/}
+  done
+  if [ "$3" = read ]; then [ -f "$cur" ] || { echo "ERR $2 is not a regular file"; exit 1; }
+  else { [ -e "$cur" ] || [ -L "$cur" ]; } && { echo "ERR $2 exists"; exit 1; }; fi
+  J_FILE=$cur
+}
+jail_stat() { jail_guard "$@"; jail_walk "$1" "$2" read; s=$(stat -c %s "$J_FILE") || exit 1; echo "SIZE $s"; }
+jail_read() { # ROOT PATH BYTES: exactly BYTES bytes of the file to stdout
+  jail_guard "$@"; digits "${3:-}" || { echo "ERR bad size" >&2; exit 2; }
+  jail_walk "$1" "$2" read >&2
+  [ -r "$J_FILE" ] || { echo "ERR $2: permission denied for uid $(id -u)" >&2; exit 1; }
+  exec head -c "$3" < "$J_FILE"
+}
+jail_write() { # ROOT PATH BYTES: stdin to a new file (O_EXCL, never through a symlink), exactly BYTES bytes
+  jail_guard "$@"; digits "${3:-}" || { echo "ERR bad size"; exit 2; }
+  jail_walk "$1" "$2" write
+  set -C
+  head -c "$3" > "$J_FILE" || { echo "ERR write $2"; exit 1; }
+  got=$(stat -c %s "$J_FILE")
+  [ "$got" = "$3" ] || { rm -f "$J_FILE"; echo "ERR $2: wrote $got of $3 bytes"; exit 1; }
+  echo "WROTE $3"
+}
+
+# SRC and DEST as given; ROOT is the jail root (empty when neither side is a jail); prints a reason on failure.
+# Callers hold the store lock. Copies only.
+copy_one() { # SRC DEST ROOT
+  src=$1; dest=$2; root=$3; err=""
+  case "$src" in
+    share:*) size=$(share_file "${src#share:}") || { echo "$size"; return 1; } ;;
+    store:*) size=$(store_file "${src#store:}") || { echo "$size"; return 1; } ;;
+    jail:*) out=$(as_jail jail-stat "$root" "${src#jail:}") || { echo "${out#ERR }"; return 1; }; size=${out#SIZE } ;;
+  esac
+  digits "$size" || { echo "size of $src unknown"; return 1; }
+  why=$(reserve_check "$size") || { echo "$why"; return 1; }
+  case "$dest" in
+    store:*)
+      name=${dest#store:}; tmp="$STORE/.partial.$$"
+      [ -e "$STORE/$name" ] && { echo "store:$name exists"; return 1; }
+      rm -f "$tmp"
+      case "$src" in
+        share:*) (umask 077; head -c "$size" < "${src#share:}" > "$tmp") ;;
+        jail:*) err=$( { (umask 077; as_jail jail-read "$root" "${src#jail:}" "$size" > "$tmp"); } 2>&1 ) ;;
+      esac
+      [ -n "${err:-}" ] && { rm -f "$tmp"; echo "${err#ERR }" | head -1; return 1; }
+      got=$(stat -c %s "$tmp" 2>/dev/null)
+      [ "$got" = "$size" ] || { rm -f "$tmp"; echo "copied ${got:-0} of $size bytes from $src"; return 1; }
+      chmod 0444 "$tmp" && mv -f "$tmp" "$STORE/$name" || { rm -f "$tmp"; echo "store:$name: rename failed"; return 1; }
+      ;;
+    *)
+      case "$src" in
+        share:*) out=$(head -c "$size" < "${src#share:}" 2>/dev/null | as_jail jail-write "$root" "$dest" "$size") ;;
+        store:*) out=$(head -c "$size" < "$STORE/${src#store:}" 2>/dev/null | as_jail jail-write "$root" "$dest" "$size") ;;
+      esac || { echo "${out#ERR }"; return 1; }
+      ;;
+  esac
+  echo "$size"
+}
+# Checks the forms of SRC and DEST; prints a reason on failure.
+stage_forms() { # SRC DEST
+  case "$1" in
+    share:*) valid_path "${1#share:}" || { echo "bad SRC $1: share: needs an absolute path of letters, digits and ._+,@=- with no . or .. component"; return 1; } ;;
+    store:*) valid_name "${1#store:}" || { echo "bad SRC $1: bad store name"; return 1; } ;;
+    jail:*) valid_path "${1#jail:}" || { echo "bad SRC $1: jail: needs an absolute path of letters, digits and ._+,@=- with no . or .. component"; return 1; } ;;
+    *) echo "bad SRC $1: use share:/PATH, store:NAME or jail:/PATH"; return 1 ;;
+  esac
+  case "$2" in
+    store:*) valid_name "${2#store:}" || { echo "bad DEST $2: bad store name"; return 1; } ;;
+    /*) valid_path "$2" || { echo "bad DEST $2: a jail path is absolute, of letters, digits and ._+,@=-, with no . or .. component"; return 1; } ;;
+    *) echo "bad DEST $2: use /PATH in the jail or store:NAME"; return 1 ;;
+  esac
+  case "$1 $2" in
+    "store:"*" store:"*) echo "store to store is not a stage"; return 1 ;;
+    "jail:"*" /"*) echo "jail to jail is not a stage"; return 1 ;;
+  esac
+}
+
+stage() { # ID|- SRC DEST: while the microVM runs; copies only
+  [ "$#" -eq 3 ] || { echo "ERR usage: stage ID|- SRC DEST"; return 2; }
+  sid=$1; src=$2; dest=$3
+  why=$(stage_forms "$src" "$dest") || { echo "ERR $why"; return 2; }
+  user_ok || { echo "ERR no $JUSER user"; return 1; }
+  data_dirs || { echo "ERR data disk not in use"; return 1; }
+  root=""
+  case "$src $dest" in
+    jail:*|*" /"*)
+      valid_id "$sid" || { echo "ERR bad id"; return 2; }
+      { read_record "$sid" && proc_alive "$H_PID" "$H_START"; } || { echo "ERR no vesperd microVM $sid"; return 1; }
+      root="$JAILS/$sid/root"; [ -d "$root" ] || { echo "ERR no jail for $sid"; return 1; } ;;
+    *) [ "$sid" = - ] || valid_id "$sid" || { echo "ERR bad id"; return 2; } ;;
+  esac
+  store_lock
+  out=$(copy_one "$src" "$dest" "$root"); rc=$?
+  store_unlock
+  [ "$rc" = 0 ] || { echo "ERR $out"; return 1; }
+  echo "STAGED $src $dest copy bytes=$out"
+}
+
+# LAUNCHAPI's stage= tokens, into the fresh jail ROOT before the jailer starts: store:*.mem and store:*.vmstate are
+# hard-linked (they stay root-owned and read-only), everything else is copied. Prints a reason on failure.
+launch_stage() { # ROOT SPEC...
+  lroot=$1; shift
+  for spec in "$@"; do
+    s=${spec#stage=}; scheme=${s%%:*}; rest=${s#*:}; src="$scheme:${rest%%:*}"; dest=${rest#*:}
+    [ "$rest" != "$s" ] && [ "$dest" != "$rest" ] || { echo "stage $s: use SRC:DEST"; return 1; }
+    why=$(stage_forms "$src" "$dest") || { echo "stage $s: $why"; return 1; }
+    case "$src $dest" in
+      jail:*) echo "stage $s: jail: sources need a running microVM (vesperd stage)"; return 1 ;;
+      *" store:"*) echo "stage $s: --stage writes into the jail; use vesperd stage for store:"; return 1 ;;
+    esac
+    case "$src" in
+      store:*.mem|store:*.vmstate)
+        name=${src#store:}; f="$STORE/$name"
+        { [ -f "$f" ] && [ ! -L "$f" ]; } || { echo "stage $s: no store file $name"; return 1; }
+        d=$lroot; rest=${dest#/}
+        while [ "${rest#*/}" != "$rest" ]; do # parent directories; the jail is fresh, so root may create them
+          d="$d/${rest%%/*}"; rest=${rest#*/}
+          [ -L "$d" ] && { echo "stage $s: symlink in $dest"; return 1; }
+          [ -d "$d" ] || { mkdir "$d" && chown "$JUID:$JGID" "$d"; } || { echo "stage $s: mkdir"; return 1; }
+        done
+        [ -e "$lroot$dest" ] && { echo "stage $s: $dest exists"; return 1; }
+        chown 0:0 "$f" && chmod 0444 "$f" && ln "$f" "$lroot$dest" || { echo "stage $s: link failed"; return 1; } ;;
+      *)
+        store_lock
+        out=$(copy_one "$src" "$dest" "$lroot"); rc=$?
+        store_unlock
+        [ "$rc" = 0 ] || { echo "stage $s: $out"; return 1; } ;;
+    esac
+  done
+}
+
+store_list() {
+  data_dirs || { echo "ERR data disk not in use"; return 1; }
+  for f in "$STORE"/*; do
+    [ -f "$f" ] || continue
+    echo "STORE ${f##*/} bytes=$(stat -c %s "$f") links=$(stat -c %h "$f")"
+  done
+  echo "FREE avail=$(avail_bytes) reserve=$(reserve_bytes)"
+}
+store_rm() {
+  [ "$#" -eq 1 ] && valid_name "$1" || { echo "ERR usage: store-rm NAME"; return 2; }
+  data_dirs || { echo "ERR data disk not in use"; return 1; }
+  store_lock
+  if [ -f "$STORE/$1" ] && [ ! -L "$STORE/$1" ]; then rm -f "$STORE/$1"; store_unlock; echo "REMOVED $1"
+  else store_unlock; echo "ERR no store file $1"; return 1; fi
+}
+sweep() { # at boot no record survives (they are in tmpfs), so every jail goes; a running caller keeps live ones
+  ensure_dirs; data_dirs || { echo "SWEPT jails=0 partial=0 (no data disk)"; return 0; }
+  lock; n=0
+  for jail in "$JAILS"/*; do
+    [ -d "$jail" ] || continue
+    rid=${jail##*/}
+    [ -e "$LEASES/$rid" ] && continue
+    rm -rf "$jail"; n=$((n + 1))
+  done
+  unlock
+  store_lock; p=0
+  for f in "$STORE"/.partial.*; do [ -e "$f" ] || continue; rm -f "$f"; p=$((p + 1)); done
+  store_unlock
+  echo "SWEPT jails=$n partial=$p"
+}
+
 # ---- LAUNCHAPI ---------------------------------------------------------------------------------------------
 OWN=0; LID=""; SPID=""
 lease_exit() {
@@ -183,14 +461,18 @@ lease_exit() {
 launch_fail() { echo "ERR $*"; exit 1; }
 
 launch() {
-  [ "$#" -le 2 ] || { echo "ERR usage: LAUNCHAPI <id> [ceiling]"; return 2; }
-  LID=${1:-}; ceiling=${2:-$DEFAULT_CEILING}
+  LID=${1:-}; shift 2>/dev/null
   valid_id "$LID" || { echo "ERR bad id"; return 2; }
-  digits "$ceiling" || { echo "ERR bad ceiling"; return 2; }
+  ceiling=$DEFAULT_CEILING
+  case "${1:-}" in stage=*|'') ;; *) ceiling=$1; shift; digits "$ceiling" || { echo "ERR bad ceiling"; return 2; } ;; esac
+  [ "$#" -le "$MAX_STAGES" ] || { echo "ERR at most $MAX_STAGES stage= tokens"; return 2; }
+  for spec in "$@"; do case "$spec" in stage=*) ;; *) echo "ERR usage: LAUNCHAPI <id> [ceiling] [stage=SRC:DEST]..."; return 2 ;; esac; done
   max=$(awk '/^MemTotal:/{print $2 * 1024}' /proc/meminfo)
   { [ "$ceiling" -ge "$MIN_CEILING" ] && [ "$ceiling" -le "$max" ]; } || { echo "ERR ceiling out of range $MIN_CEILING..$max"; return 2; }
   [ -x "$JAILER" ] && [ -x "$FC" ] || { echo "ERR firecracker missing"; return 1; }
   ensure_dirs || { echo "ERR state directories"; return 1; }
+  data_dirs || { echo "ERR data disk not in use"; return 1; }
+  user_ok || { echo "ERR no $JUSER user"; return 1; }
   ver=$("$FC" --version 2>/dev/null | head -1 | sed -n 's/^Firecracker v\([0-9][0-9.]*\).*/\1/p')
   [ -n "$ver" ] || { echo "ERR firecracker version unknown"; return 1; }
   MY_START=$(start_of $$) || { echo "ERR own start time"; return 1; }
@@ -212,6 +494,12 @@ launch() {
   cp "$MVM/Image" "$root/Image" && cp "$MVM/initrd.gz" "$root/initrd.gz" && chmod 0644 "$root/Image" "$root/initrd.gz" \
     || launch_fail "stage kernel"
   chown "$JUID:$JGID" "$root"
+  # Staging runs before Firecracker exists in this jail, outside the lock (the record keeps the reaper off it).
+  if [ "$#" -gt 0 ]; then
+    unlock
+    why=$(launch_stage "$root" "$@") || launch_fail "$why"
+    lock
+  fi
   log="$LOGS/$LID.log"
   : > "$log"
   setsid "$JAILER" --id "$LID" --exec-file "$FC" --uid "$JUID" --gid "$JGID" --chroot-base-dir "$BASE" \
@@ -327,7 +615,7 @@ test_forge_start() {
 
 test_orphan() {
   sid=${1:-}; valid_id "$sid" || { echo "ERR bad id"; return 2; }
-  ensure_dirs; lock
+  ensure_dirs; data_dirs || { echo "ERR data disk not in use"; return 1; }; lock
   if [ -e "$LEASES/$sid" ] || [ -e "$JAILS/$sid" ]; then unlock; echo "ERR busy $sid"; return 1; fi
   mkdir -p "$JAILS/$sid/root"
   unlock
@@ -338,6 +626,41 @@ test_age() {
   sid=${1:-}; s=${2:-}; valid_id "$sid" && digits "$s" || { echo "ERR usage: test-age ID SECONDS"; return 2; }
   [ -d "$JAILS/$sid" ] || { echo "ERR no jail for $sid"; return 1; }
   touch -d "@$(( $(now_s) - s ))" "$JAILS/$sid" && echo "AGED $sid seconds=$s"
+}
+
+files() { # FILE lines for ID's jail, listed as uid 20000 (root does not walk a jail Firecracker has run in)
+  sid=${1:-}; valid_id "$sid" || { echo "ERR bad id"; return 2; }
+  [ -d "$JAILS/$sid/root" ] || { echo "ERR no jail for $sid"; return 1; }
+  as_jail jail-files "$JAILS/$sid/root"
+}
+jail_files() {
+  [ "$(id -u)" = "$JUID" ] || { echo "ERR jail-side subcommands run as uid $JUID only"; exit 2; }
+  case "${1:-}" in "$JAILS"/*/root) ;; *) echo "ERR bad jail root"; exit 2 ;; esac
+  find "$1" -xdev -type f 2>/dev/null | while IFS= read -r f; do
+    echo "FILE ${f#"$1"} $(stat -c 'uid=%u mode=%a links=%h bytes=%s' "$f")"
+  done
+}
+
+memory() { # ID's cgroup: memory.current, memory.peak, memory.max and memory.stat's anon and file, in bytes
+  sid=${1:-}; valid_id "$sid" || { echo "ERR bad id"; return 2; }
+  c="$CG/$sid"; [ -d "$c" ] || { echo "ERR no cgroup for $sid"; return 1; }
+  echo "MEMORY $sid current=$(cat "$c/memory.current") peak=$(cat "$c/memory.peak" 2>/dev/null || echo -) max=$(cat "$c/memory.max") $(awk '$1=="anon"||$1=="file"||$1=="shmem"{printf "%s=%s ", $1, $2}' "$c/memory.stat")"
+}
+
+test_plant() {
+  sid=${1:-}; valid_id "$sid" || { echo "ERR bad id"; return 2; }
+  r="$JAILS/$sid/root"; [ -d "$r" ] || { echo "ERR no jail for $sid"; return 1; }
+  # What a compromised Firecracker could leave (two symlinks), and what a lost race could point an open at (a
+  # root-only file); a test hook, so root writes into the jail here.
+  ln -sfn /etc/shadow "$r/planted-link" && ln -sfn "$STORE" "$r/planted-dir" \
+    && (umask 077; echo secret > "$r/planted-root") && chown 0:0 "$r/planted-root" && echo "PLANTED $sid"
+}
+test_reserve() {
+  case "${1:-}" in
+    clear) rm -f "$RESERVE_OVERRIDE"; echo "RESERVE bytes=$(reserve_bytes) (default)" ;;
+    *) digits "${1:-}" || { echo "ERR usage: test-reserve BYTES|clear"; return 2; }
+       ensure_dirs; echo "$1" > "$RESERVE_OVERRIDE"; echo "RESERVE bytes=$1 avail=$(avail_bytes)" ;;
+  esac
 }
 
 test_container_vsock() {
@@ -396,5 +719,18 @@ case "$cmd" in
   test-orphan) test_orphan "$@" ;;
   test-age) test_age "$@" ;;
   test-container-vsock) test_container_vsock ;;
-  *) echo "ERR usage: vesper-vesperd launch|connect|reap|reap-loop|status|isolation|list|log|kill-holder|kill-fc|test-*"; exit 2 ;;
+  stage) stage "$@" ;;
+  store-list) store_list ;;
+  store-rm) store_rm "$@" ;;
+  sweep) sweep ;;
+  setup-user) setup_user ;;
+  files) files "$@" ;;
+  memory) memory "$@" ;;
+  test-plant) test_plant "$@" ;;
+  test-reserve) test_reserve "$@" ;;
+  jail-stat) jail_stat "$@" ;;
+  jail-read) jail_read "$@" ;;
+  jail-write) jail_write "$@" ;;
+  jail-files) jail_files "$@" ;;
+  *) echo "ERR usage: vesper-vesperd launch|connect|stage|store-list|store-rm|sweep|setup-user|reap|reap-loop|status|isolation|files|memory|list|log|kill-holder|kill-fc|test-*"; exit 2 ;;
 esac

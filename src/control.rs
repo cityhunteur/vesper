@@ -6,9 +6,14 @@
 //! agent (`systemvm/overlay/usr/local/bin/vesper-agent`) speaks a line protocol, version 1.
 
 mod launchapi;
+mod stage;
 mod suites;
 pub use launchapi::{
     http_request, parse_http_response, parse_ready, read_http_response, valid_microvm_id, HttpResponse, Ready,
+};
+pub use stage::{
+    check_pair, data_disk_in_use, needs_id, parse_store_list, valid_stage_path, valid_store_name, StageDest, StageSource,
+    StageSpec, StoreEntry, MAX_STAGES, MAX_STAGE_PATH, MAX_STORE_NAME,
 };
 pub use suites::*;
 

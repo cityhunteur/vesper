@@ -1,6 +1,8 @@
-use clap::{Parser, ValueEnum};
+use clap::{Parser, Subcommand, ValueEnum};
 use std::path::{Path, PathBuf};
 
+#[path = "vesperd/stage.rs"]
+mod stage;
 #[path = "vesperd/systemvm.rs"]
 mod systemvm;
 
@@ -12,9 +14,38 @@ enum Backend {
     Systemvm,
 }
 
+/// `vesperd stage` and `vesperd store` (ADR 0007 section 1): files for `--backend systemvm` microVMs.
+#[derive(Subcommand, Debug)]
+enum Command {
+    /// Copy SRC to DEST while a microVM runs. SRC: share:/PATH (inside a configured share), store:NAME or
+    /// jail:/PATH (in the microVM's jail). DEST: /PATH in the jail or store:NAME. Never links, never overwrites.
+    Stage {
+        /// The microVM whose jail SRC or DEST names (needed when either is in the jail).
+        #[arg(long)]
+        id: Option<String>,
+        src: String,
+        dest: String,
+    },
+    /// List or remove files in the snapshot store shared by the macOS user's vesperd microVMs.
+    Store {
+        #[command(subcommand)]
+        action: StoreAction,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum StoreAction {
+    /// `STORE NAME bytes=N links=L` per file, then `FREE avail=N reserve=N` (bytes on the data disk).
+    List,
+    /// Remove one store file; a microVM that has it linked keeps its own link.
+    Rm { name: String },
+}
+
 #[derive(Parser, Debug)]
 #[command(name = "vesperd")]
 struct Args {
+    #[command(subcommand)]
+    command: Option<Command>,
     #[arg(long, value_enum, default_value_t = Backend::Model)]
     backend: Backend,
     /// The microVM id (`--backend systemvm`): 1 to 64 letters, digits and hyphens, as Firecracker's `--id`.
@@ -23,14 +54,19 @@ struct Args {
     /// `memory.max` in bytes for the microVM's cgroup (`--backend systemvm`); default: the agent's 640 MiB.
     #[arg(long)]
     memory_max: Option<u64>,
-    /// System VM launch config that names the bridge socket and agent port (`--backend systemvm`).
-    #[arg(long, default_value = "build/systemvm/launch-config.json")]
+    /// Stage a file into the fresh jail before Firecracker starts (`--backend systemvm`; repeatable, at most 16):
+    /// share:/PATH:/DEST or store:NAME:/DEST. Store files named *.mem or *.vmstate are hard-linked, root-owned
+    /// and read-only; everything else is copied.
+    #[arg(long = "stage", value_name = "SRC:DEST")]
+    stage: Vec<String>,
+    /// System VM launch config that names the bridge socket and agent port (`--backend systemvm`, `stage`, `store`).
+    #[arg(long, global = true, default_value = "build/systemvm/launch-config.json")]
     launch_config: String,
-    /// Bridge socket, overriding the launch config (`--backend systemvm`).
-    #[arg(long)]
+    /// Bridge socket, overriding the launch config (`--backend systemvm`, `stage`, `store`).
+    #[arg(long, global = true)]
     bridge: Option<String>,
-    /// Agent vsock port, overriding the launch config (`--backend systemvm`).
-    #[arg(long)]
+    /// Agent vsock port, overriding the launch config (`--backend systemvm`, `stage`, `store`).
+    #[arg(long, global = true)]
     agent_port: Option<u32>,
     /// API socket. Default: `vesperd.sock` in an owner-only runtime directory, the first of
     /// `$XDG_RUNTIME_DIR/vesper`, `$TMPDIR/vesper` and `$HOME/.vesper/run` (TD-050).
@@ -51,14 +87,17 @@ struct Args {
 
 #[tokio::main]
 async fn main() {
-    if let Err(err) = run().await {
+    let args = Args::parse();
+    if let Some(command) = &args.command {
+        std::process::exit(stage::run(&args, command));
+    }
+    if let Err(err) = run(args).await {
         eprintln!("vesperd failed: {err}");
         std::process::exit(1);
     }
 }
 
-async fn run() -> Result<(), String> {
-    let args = Args::parse();
+async fn run(args: Args) -> Result<(), String> {
 
     vesper::platform::validate_entitlements_file(
         args.entitlements_file.as_deref().map(Path::new),
@@ -69,8 +108,8 @@ async fn run() -> Result<(), String> {
         let options = systemvm::Options::from_args(&args)?;
         return systemvm::run(options, &socket_path(&args)?).await;
     }
-    if args.id.is_some() || args.memory_max.is_some() || args.bridge.is_some() || args.agent_port.is_some() {
-        return Err("--id, --memory-max, --bridge and --agent-port apply to --backend systemvm".to_string());
+    if args.id.is_some() || args.memory_max.is_some() || args.bridge.is_some() || args.agent_port.is_some() || !args.stage.is_empty() {
+        return Err("--id, --memory-max, --stage, --bridge and --agent-port apply to --backend systemvm".to_string());
     }
 
     let lock = vesper::baseline::load(&args.baseline_lock)?;
