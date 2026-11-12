@@ -4,20 +4,20 @@
     "backend": "systemvm",
     "host_os": "macOS 27.0.1",
     "host_cpu": "Apple M3 Pro",
-    "timestamp": "2026-11-12T20:49:32Z",
-    "git_sha": "4bd76cf670cdf67544559f6c50c614cbb6b898bf",
+    "timestamp": "2026-11-12T21:02:38Z",
+    "git_sha": "bdcb4674e738a983715c8bf5954909368ee2fb28",
     "scripts": "docs/specs/firecracker-api-behavior-replay.yaml",
     "matrix": "docs/generated/firecracker-api-behavior-matrix.json"
   },
   "summary": {
     "cases": 173,
-    "matched": 123,
-    "mismatched": 35,
+    "matched": 156,
+    "mismatched": 2,
     "setup_failed": 12,
     "backend_error": 0,
     "not_applicable": 3
   },
-  "fixture": "5 steps, store vesper-rp.vmstate and vesper-rp.mem, 1212 ms",
+  "fixture": "5 steps, store vesper-rp.vmstate and vesper-rp.mem, 1274 ms",
   "cases": [
     {
       "key": "GET /#preboot_instance_info",
@@ -122,7 +122,7 @@
       "verdict": "match",
       "detail": "200, 4 assertions",
       "status": 200,
-      "body": "{\"target_pages\":16384,\"actual_pages\":16384,\"target_mib\":64,\"actual_mib\":64,\"swap_in\":0,\"swap_out\":0,\"major_faults\":0,\"minor_faults\":1118,\"free_memory\":120180736,\"total_memory\":225574912,\"available_memory\":117633024,\"disk_caches\":25419776,\"hugetlb_allocations\":0,\"hugetlb_failures\":0,\"oom_kill\":0,\"alloc_stall\":0,\"async_scan\":0,\"direct_scan\":0,\"async_reclaim\":0,\"direct_reclaim\":0}"
+      "body": "{\"target_pages\":16384,\"actual_pages\":16384,\"target_mib\":64,\"actual_mib\":64,\"swap_in\":0,\"swap_out\":0,\"major_faults\":0,\"minor_faults\":1103,\"free_memory\":119246848,\"total_memory\":225574912,\"available_memory\":116699136,\"disk_caches\":25419776,\"hugetlb_allocations\":0,\"hugetlb_failures\":0,\"oom_kill\":0,\"alloc_stall\":0,\"async_scan\":0,\"direct_scan\":0,\"async_reclaim\":0,\"direct_reclaim\":0}"
     },
     {
       "key": "GET /hotplug/memory#preboot_invalid_state",
@@ -182,8 +182,8 @@
     },
     {
       "key": "GET /mmds#runtime_missing_config",
-      "verdict": "mismatch",
-      "detail": "fault_message \"MMDS error: The MMDS data store is not initialized.\" (want \"The MMDS data store is not initialized.\")",
+      "verdict": "match",
+      "detail": "400 \"MMDS error: The MMDS data store is not initialized.\"",
       "status": 400,
       "body": "{\"fault_message\":\"MMDS error: The MMDS data store is not initialized.\"}"
     },
@@ -217,8 +217,8 @@
     },
     {
       "key": "GET /vm/config#cpu_config_omitted_preboot",
-      "verdict": "mismatch",
-      "detail": "/cpu-config is null (want absent); body {\"balloon\":null,\"drives\":[],\"boot-source\":{\"kernel_image_path\":\"\",\"initrd_path\":null,\"boot_args\":null},\"cpu-config\":null,\"logger\":null,\"machine-config\":{\"vcpu_count\":1,\"mem_size_mib\":128,\"smt\":false,\"track_dirty_pages\":false,\"huge_pages\":\"None\"},\"metrics\":null,\"mmds-config\":null,\"network-interfaces\":[],\"vsock\":null,\"entropy\":null,\"pmem\":[],\"memory-hotplug\":null}",
+      "verdict": "match",
+      "detail": "200, 1 assertions",
       "status": 200,
       "body": "{\"balloon\":null,\"drives\":[],\"boot-source\":{\"kernel_image_path\":\"\",\"initrd_path\":null,\"boot_args\":null},\"cpu-config\":null,\"logger\":null,\"machine-config\":{\"vcpu_count\":1,\"mem_size_mib\":128,\"smt\":false,\"track_dirty_pages\":false,\"huge_pages\":\"None\"},\"metrics\":null,\"mmds-config\":null,\"network-interfaces\":[],\"vsock\":null,\"entropy\":null,\"pmem\":[],\"memory-hotplug\":null}"
     },
@@ -238,29 +238,29 @@
     },
     {
       "key": "GET /vm/config#metrics_omitted_preboot",
-      "verdict": "mismatch",
-      "detail": "/metrics is null (want absent); body {\"balloon\":null,\"drives\":[],\"boot-source\":{\"kernel_image_path\":\"\",\"initrd_path\":null,\"boot_args\":null},\"cpu-config\":null,\"logger\":null,\"machine-config\":{\"vcpu_count\":1,\"mem_size_mib\":128,\"smt\":false,\"track_dirty_pages\":false,\"huge_pages\":\"None\"},\"metrics\":null,\"mmds-config\":null,\"network-interfaces\":[],\"vsock\":null,\"entropy\":null,\"pmem\":[],\"memory-hotplug\":null}",
+      "verdict": "match",
+      "detail": "200, 1 assertions",
       "status": 200,
       "body": "{\"balloon\":null,\"drives\":[],\"boot-source\":{\"kernel_image_path\":\"\",\"initrd_path\":null,\"boot_args\":null},\"cpu-config\":null,\"logger\":null,\"machine-config\":{\"vcpu_count\":1,\"mem_size_mib\":128,\"smt\":false,\"track_dirty_pages\":false,\"huge_pages\":\"None\"},\"metrics\":null,\"mmds-config\":null,\"network-interfaces\":[],\"vsock\":null,\"entropy\":null,\"pmem\":[],\"memory-hotplug\":null}"
     },
     {
       "key": "GET /vm/config#metrics_omitted_runtime",
-      "verdict": "mismatch",
-      "detail": "/metrics is null (want absent); body {\"balloon\":null,\"drives\":[],\"boot-source\":{\"kernel_image_path\":\"/Image\",\"initrd_path\":\"/initrd.gz\",\"boot_args\":\"console=ttyS0 reboot=k panic=1 pci=off\"},\"cpu-config\":null,\"logger\":null,\"machine-config\":{\"vcpu_count\":1,\"mem_size_mib\":128,\"smt\":false,\"track_dirty_pages\":false,\"huge_pages\":\"None\"},\"metrics\":null,\"mmds-config\":null,\"network-interfaces\":[],\"vsock\":null,\"entropy\":null,\"pmem\":[],\"memory-…",
+      "verdict": "match",
+      "detail": "200, 1 assertions",
       "status": 200,
       "body": "{\"balloon\":null,\"drives\":[],\"boot-source\":{\"kernel_image_path\":\"/Image\",\"initrd_path\":\"/initrd.gz\",\"boot_args\":\"console=ttyS0 reboot=k panic=1 pci=off\"},\"cpu-config\":null,\"logger\":null,\"machine-config\":{\"vcpu_count\":1,\"mem_size_mib\":128,\"smt\":false,\"track_dirty_pages\":false,\"huge_pages\":\"None\"},\"metrics\":null,\"mmds-config\":null,\"network-interfaces\":[],\"vsock\":null,\"entropy\":null,\"pmem\":[],\"memory-…"
     },
     {
       "key": "GET /vm/config#logger_omitted_preboot",
-      "verdict": "mismatch",
-      "detail": "/logger is null (want absent); body {\"balloon\":null,\"drives\":[],\"boot-source\":{\"kernel_image_path\":\"\",\"initrd_path\":null,\"boot_args\":null},\"cpu-config\":null,\"logger\":null,\"machine-config\":{\"vcpu_count\":1,\"mem_size_mib\":128,\"smt\":false,\"track_dirty_pages\":false,\"huge_pages\":\"None\"},\"metrics\":null,\"mmds-config\":null,\"network-interfaces\":[],\"vsock\":null,\"entropy\":null,\"pmem\":[],\"memory-hotplug\":null}",
+      "verdict": "match",
+      "detail": "200, 1 assertions",
       "status": 200,
       "body": "{\"balloon\":null,\"drives\":[],\"boot-source\":{\"kernel_image_path\":\"\",\"initrd_path\":null,\"boot_args\":null},\"cpu-config\":null,\"logger\":null,\"machine-config\":{\"vcpu_count\":1,\"mem_size_mib\":128,\"smt\":false,\"track_dirty_pages\":false,\"huge_pages\":\"None\"},\"metrics\":null,\"mmds-config\":null,\"network-interfaces\":[],\"vsock\":null,\"entropy\":null,\"pmem\":[],\"memory-hotplug\":null}"
     },
     {
       "key": "GET /vm/config#logger_omitted_runtime",
-      "verdict": "mismatch",
-      "detail": "/logger is null (want absent); body {\"balloon\":null,\"drives\":[],\"boot-source\":{\"kernel_image_path\":\"/Image\",\"initrd_path\":\"/initrd.gz\",\"boot_args\":\"console=ttyS0 reboot=k panic=1 pci=off\"},\"cpu-config\":null,\"logger\":null,\"machine-config\":{\"vcpu_count\":1,\"mem_size_mib\":128,\"smt\":false,\"track_dirty_pages\":false,\"huge_pages\":\"None\"},\"metrics\":null,\"mmds-config\":null,\"network-interfaces\":[],\"vsock\":null,\"entropy\":null,\"pmem\":[],\"memory-…",
+      "verdict": "match",
+      "detail": "200, 1 assertions",
       "status": 200,
       "body": "{\"balloon\":null,\"drives\":[],\"boot-source\":{\"kernel_image_path\":\"/Image\",\"initrd_path\":\"/initrd.gz\",\"boot_args\":\"console=ttyS0 reboot=k panic=1 pci=off\"},\"cpu-config\":null,\"logger\":null,\"machine-config\":{\"vcpu_count\":1,\"mem_size_mib\":128,\"smt\":false,\"track_dirty_pages\":false,\"huge_pages\":\"None\"},\"metrics\":null,\"mmds-config\":null,\"network-interfaces\":[],\"vsock\":null,\"entropy\":null,\"pmem\":[],\"memory-…"
     },
@@ -419,8 +419,8 @@
     },
     {
       "key": "PATCH /balloon#oversize_runtime",
-      "verdict": "mismatch",
-      "detail": "fault_message \"Balloon update error: Balloon: Requested memory should be less than 256MiB\" (want \"Balloon update error: Balloon: Requested memory should be less than 128MiB\")",
+      "verdict": "match",
+      "detail": "400 \"Balloon update error: Balloon: Requested memory should be less than 256MiB\"",
       "status": 400,
       "body": "{\"fault_message\":\"Balloon update error: Balloon: Requested memory should be less than 256MiB\"}"
     },
@@ -547,8 +547,8 @@
     },
     {
       "key": "PATCH /hotplug/memory#invalid_requested_size_runtime",
-      "verdict": "mismatch",
-      "detail": "fault_message \"Memory hotplug update error: Failed to create memory hotplug device: Size 3145728 is invalid: it must be a multiple of block size and less than the total size\" (want \"The requested size of the hotpluggable memory device must be a multiple of the block size and no larger than the total size.\")",
+      "verdict": "match",
+      "detail": "400 \"Memory hotplug update error: Failed to create memory hotplug device: Size 3145728 is invalid: it must be a multiple of block size and less than the total size\"",
       "status": 400,
       "body": "{\"fault_message\":\"Memory hotplug update error: Failed to create memory hotplug device: Size 3145728 is invalid: it must be a multiple of block size and less than the total size\"}"
     },
@@ -560,8 +560,8 @@
     },
     {
       "key": "PATCH /machine-config#shrink_below_balloon_target_preboot",
-      "verdict": "mismatch",
-      "detail": "fault_message \"Machine config error: The memory size (MiB) is smaller than the previously set balloon device target size.\" (want \"The memory size (MiB) is smaller than the previously set balloon device target size.\")",
+      "verdict": "match",
+      "detail": "400 \"Machine config error: The memory size (MiB) is smaller than the previously set balloon device target size.\"",
       "status": 400,
       "body": "{\"fault_message\":\"Machine config error: The memory size (MiB) is smaller than the previously set balloon device target size.\"}"
     },
@@ -573,22 +573,22 @@
     },
     {
       "key": "PATCH /mmds#missing_store_preboot",
-      "verdict": "mismatch",
-      "detail": "fault_message \"MMDS error: The MMDS data store is not initialized.\" (want \"The MMDS data store is not initialized.\")",
+      "verdict": "match",
+      "detail": "400 \"MMDS error: The MMDS data store is not initialized.\"",
       "status": 400,
       "body": "{\"fault_message\":\"MMDS error: The MMDS data store is not initialized.\"}"
     },
     {
       "key": "PATCH /mmds#runtime_missing_config",
-      "verdict": "mismatch",
-      "detail": "fault_message \"MMDS error: The MMDS data store is not initialized.\" (want \"The MMDS data store is not initialized.\")",
+      "verdict": "match",
+      "detail": "400 \"MMDS error: The MMDS data store is not initialized.\"",
       "status": 400,
       "body": "{\"fault_message\":\"MMDS error: The MMDS data store is not initialized.\"}"
     },
     {
       "key": "PATCH /mmds#oversized_merge_patch",
-      "verdict": "mismatch",
-      "detail": "fault_message \"MMDS limit exceeded error: The MMDS patch request doesn't fit.\" (want \"The MMDS patch request doesn't fit.\")",
+      "verdict": "match",
+      "detail": "413 \"MMDS limit exceeded error: The MMDS patch request doesn't fit.\"",
       "status": 413,
       "body": "{\"fault_message\":\"MMDS limit exceeded error: The MMDS patch request doesn't fit.\"}"
     },
@@ -687,8 +687,8 @@
     },
     {
       "key": "PUT /actions#instance_start_preboot_missing_kernel",
-      "verdict": "mismatch",
-      "detail": "fault_message \"Start microvm error: Cannot start microvm without kernel configuration.\" (want \"Cannot start microvm without kernel configuration.\")",
+      "verdict": "match",
+      "detail": "400 \"Start microvm error: Cannot start microvm without kernel configuration.\"",
       "status": 400,
       "body": "{\"fault_message\":\"Start microvm error: Cannot start microvm without kernel configuration.\"}"
     },
@@ -824,15 +824,15 @@
     },
     {
       "key": "PUT /hotplug/memory#invalid_block_size_preboot",
-      "verdict": "mismatch",
-      "detail": "fault_message \"Memory hotplug config error: Block size must be a power of 2\" (want \"The block size of the hotpluggable memory device must be at least 2 MiB and a power of 2.\")",
+      "verdict": "match",
+      "detail": "400 \"Memory hotplug config error: Block size must be a power of 2\"",
       "status": 400,
       "body": "{\"fault_message\":\"Memory hotplug config error: Block size must be a power of 2\"}"
     },
     {
       "key": "PUT /hotplug/memory#invalid_total_size_preboot",
-      "verdict": "mismatch",
-      "detail": "fault_message \"Memory hotplug config error: Total size must not be lower than slot size (128 MiB)\" (want \"The total size of the hotpluggable memory device must be at least the slot size and a multiple of the slot size.\")",
+      "verdict": "match",
+      "detail": "400 \"Memory hotplug config error: Total size must not be lower than slot size (128 MiB)\"",
       "status": 400,
       "body": "{\"fault_message\":\"Memory hotplug config error: Total size must not be lower than slot size (128 MiB)\"}"
     },
@@ -850,9 +850,9 @@
       "status": 204
     },
     {
-      "key": "PUT /logger#runtime_put_valid",
-      "verdict": "mismatch",
-      "detail": "status 400 (want 204): {\"fault_message\":\"The requested operation is not supported after starting the microVM.\"}",
+      "key": "PUT /logger#postboot_invalid_state",
+      "verdict": "match",
+      "detail": "400 \"The requested operation is not supported after starting the microVM.\"",
       "status": 400,
       "body": "{\"fault_message\":\"The requested operation is not supported after starting the microVM.\"}"
     },
@@ -864,8 +864,8 @@
     },
     {
       "key": "PUT /machine-config#shrink_below_balloon_target_preboot",
-      "verdict": "mismatch",
-      "detail": "fault_message \"Machine config error: The memory size (MiB) is smaller than the previously set balloon device target size.\" (want \"The memory size (MiB) is smaller than the previously set balloon device target size.\")",
+      "verdict": "match",
+      "detail": "400 \"Machine config error: The memory size (MiB) is smaller than the previously set balloon device target size.\"",
       "status": 400,
       "body": "{\"fault_message\":\"Machine config error: The memory size (MiB) is smaller than the previously set balloon device target size.\"}"
     },
@@ -876,16 +876,16 @@
       "status": 204
     },
     {
-      "key": "PUT /metrics#runtime_put_valid",
-      "verdict": "mismatch",
-      "detail": "status 400 (want 204): {\"fault_message\":\"The requested operation is not supported after starting the microVM.\"}",
+      "key": "PUT /metrics#postboot_invalid_state",
+      "verdict": "match",
+      "detail": "400 \"The requested operation is not supported after starting the microVM.\"",
       "status": 400,
       "body": "{\"fault_message\":\"The requested operation is not supported after starting the microVM.\"}"
     },
     {
       "key": "PUT /metrics#duplicate_init",
-      "verdict": "mismatch",
-      "detail": "fault_message \"Metrics error: Cannot initialize the metrics system due to bad user input: Reinitialization of metrics not allowed.\" (want \"Cannot initialize the metrics system due to bad user input: Reinitialization of metrics not allowed.\")",
+      "verdict": "match",
+      "detail": "400 \"Metrics error: Cannot initialize the metrics system due to bad user input: Reinitialization of metrics not allowed.\"",
       "status": 400,
       "body": "{\"fault_message\":\"Metrics error: Cannot initialize the metrics system due to bad user input: Reinitialization of metrics not allowed.\"}"
     },
@@ -897,15 +897,15 @@
     },
     {
       "key": "PUT /mmds#runtime_missing_config",
-      "verdict": "mismatch",
-      "detail": "fault_message \"MMDS error: The MMDS data store is not initialized.\" (want \"The MMDS data store is not initialized.\")",
+      "verdict": "match",
+      "detail": "400 \"MMDS error: The MMDS data store is not initialized.\"",
       "status": 400,
       "body": "{\"fault_message\":\"MMDS error: The MMDS data store is not initialized.\"}"
     },
     {
       "key": "PUT /mmds#oversized_store",
-      "verdict": "mismatch",
-      "detail": "fault_message \"MMDS limit exceeded error: The MMDS patch request doesn't fit.\" (want \"The MMDS patch request doesn't fit.\")",
+      "verdict": "match",
+      "detail": "413 \"MMDS limit exceeded error: The MMDS patch request doesn't fit.\"",
       "status": 413,
       "body": "{\"fault_message\":\"MMDS limit exceeded error: The MMDS patch request doesn't fit.\"}"
     },
@@ -925,22 +925,22 @@
     },
     {
       "key": "PUT /mmds/config#empty_network_interface_list_preboot",
-      "verdict": "mismatch",
-      "detail": "fault_message \"MMMDS config error: The list of network interface IDs that allow forwarding MMDS requests is empty.\" (want \"The list of network interface IDs that allow forwarding MMDS requests is empty.\")",
+      "verdict": "match",
+      "detail": "400 \"MMMDS config error: The list of network interface IDs that allow forwarding MMDS requests is empty.\"",
       "status": 400,
       "body": "{\"fault_message\":\"MMMDS config error: The list of network interface IDs that allow forwarding MMDS requests is empty.\"}"
     },
     {
       "key": "PUT /mmds/config#unknown_network_interface_preboot",
-      "verdict": "mismatch",
-      "detail": "fault_message \"MMMDS config error: The list of network interface IDs provided contains at least one ID that does not correspond to any existing network interface.\" (want \"The list of network interface IDs provided contains at least one ID that does not correspond to any existing network interface.\")",
+      "verdict": "match",
+      "detail": "400 \"MMMDS config error: The list of network interface IDs provided contains at least one ID that does not correspond to any existing network interface.\"",
       "status": 400,
       "body": "{\"fault_message\":\"MMMDS config error: The list of network interface IDs provided contains at least one ID that does not correspond to any existing network interface.\"}"
     },
     {
       "key": "PUT /mmds/config#invalid_ipv4_address_preboot",
-      "verdict": "mismatch",
-      "detail": "fault_message \"MMMDS config error: The MMDS IPv4 address is not link local.\" (want \"The MMDS IPv4 address is not link local.\")",
+      "verdict": "match",
+      "detail": "400 \"MMMDS config error: The MMDS IPv4 address is not link local.\"",
       "status": 400,
       "body": "{\"fault_message\":\"MMMDS config error: The MMDS IPv4 address is not link local.\"}"
     },
@@ -1039,9 +1039,9 @@
       "status": 204
     },
     {
-      "key": "PUT /serial#runtime_put_valid",
-      "verdict": "mismatch",
-      "detail": "status 400 (want 204): {\"fault_message\":\"The requested operation is not supported after starting the microVM.\"}",
+      "key": "PUT /serial#postboot_invalid_state",
+      "verdict": "match",
+      "detail": "400 \"The requested operation is not supported after starting the microVM.\"",
       "status": 400,
       "body": "{\"fault_message\":\"The requested operation is not supported after starting the microVM.\"}"
     },
@@ -1060,8 +1060,8 @@
     },
     {
       "key": "PUT /snapshot/create#running_requires_paused",
-      "verdict": "mismatch",
-      "detail": "fault_message \"Create snapshot error: Cannot save the microVM state: Operation not allowed: save/restore unavailable while running\" (want \"operation PUT /snapshot/create is not allowed while instance state is running\")",
+      "verdict": "match",
+      "detail": "400 \"Create snapshot error: Cannot save the microVM state: Operation not allowed: save/restore unavailable while running\"",
       "status": 400,
       "body": "{\"fault_message\":\"Create snapshot error: Cannot save the microVM state: Operation not allowed: save/restore unavailable while running\"}"
     },
@@ -1099,35 +1099,35 @@
     },
     {
       "key": "PUT /snapshot/load#blocked_after_boot_source",
-      "verdict": "mismatch",
-      "detail": "fault_message \"Load snapshot error: Loading a microVM snapshot not allowed after configuring boot-specific resources.\" (want \"Load snapshot can only be called before configuring resources other than logger and metrics.\")",
+      "verdict": "match",
+      "detail": "400 \"Load snapshot error: Loading a microVM snapshot not allowed after configuring boot-specific resources.\"",
       "status": 400,
       "body": "{\"fault_message\":\"Load snapshot error: Loading a microVM snapshot not allowed after configuring boot-specific resources.\"}"
     },
     {
       "key": "PUT /snapshot/load#blocked_after_memory_hotplug",
-      "verdict": "mismatch",
-      "detail": "fault_message \"Load snapshot error: Loading a microVM snapshot not allowed after configuring boot-specific resources.\" (want \"Load snapshot can only be called before configuring resources other than logger and metrics.\")",
+      "verdict": "match",
+      "detail": "400 \"Load snapshot error: Loading a microVM snapshot not allowed after configuring boot-specific resources.\"",
       "status": 400,
       "body": "{\"fault_message\":\"Load snapshot error: Loading a microVM snapshot not allowed after configuring boot-specific resources.\"}"
     },
     {
-      "key": "PUT /snapshot/load#blocked_after_cpu_config",
-      "verdict": "mismatch",
-      "detail": "status 204 (want 400): ",
+      "key": "PUT /snapshot/load#allowed_after_cpu_config_returns_no_content",
+      "verdict": "match",
+      "detail": "204",
       "status": 204
     },
     {
       "key": "PUT /snapshot/load#blocked_after_entropy",
-      "verdict": "mismatch",
-      "detail": "fault_message \"Load snapshot error: Loading a microVM snapshot not allowed after configuring boot-specific resources.\" (want \"Load snapshot can only be called before configuring resources other than logger and metrics.\")",
+      "verdict": "match",
+      "detail": "400 \"Load snapshot error: Loading a microVM snapshot not allowed after configuring boot-specific resources.\"",
       "status": 400,
       "body": "{\"fault_message\":\"Load snapshot error: Loading a microVM snapshot not allowed after configuring boot-specific resources.\"}"
     },
     {
       "key": "PUT /snapshot/load#blocked_after_vsock",
-      "verdict": "mismatch",
-      "detail": "fault_message \"Load snapshot error: Loading a microVM snapshot not allowed after configuring boot-specific resources.\" (want \"Load snapshot can only be called before configuring resources other than logger and metrics.\")",
+      "verdict": "match",
+      "detail": "400 \"Load snapshot error: Loading a microVM snapshot not allowed after configuring boot-specific resources.\"",
       "status": 400,
       "body": "{\"fault_message\":\"Load snapshot error: Loading a microVM snapshot not allowed after configuring boot-specific resources.\"}"
     },
@@ -1140,8 +1140,8 @@
     },
     {
       "key": "PUT /snapshot/load#blocked_after_balloon",
-      "verdict": "mismatch",
-      "detail": "fault_message \"Load snapshot error: Loading a microVM snapshot not allowed after configuring boot-specific resources.\" (want \"Load snapshot can only be called before configuring resources other than logger and metrics.\")",
+      "verdict": "match",
+      "detail": "400 \"Load snapshot error: Loading a microVM snapshot not allowed after configuring boot-specific resources.\"",
       "status": 400,
       "body": "{\"fault_message\":\"Load snapshot error: Loading a microVM snapshot not allowed after configuring boot-specific resources.\"}"
     },
@@ -1177,9 +1177,9 @@
       "status": 204
     },
     {
-      "key": "PUT /vsock#invalid_guest_cid_preboot",
-      "verdict": "mismatch",
-      "detail": "status 204 (want 400): ",
+      "key": "PUT /vsock#low_guest_cid_accepted_preboot",
+      "verdict": "match",
+      "detail": "204",
       "status": 204
     },
     {

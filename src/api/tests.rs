@@ -710,7 +710,7 @@ async fn updates_balloon_target_after_boot_and_rejects_oversized_runtime_target(
     assert_eq!(oversized_payload.code, "InvalidRequest");
     assert_eq!(
         oversized_payload.fault_message,
-        balloon_update_too_large_message(DEFAULT_MEM_SIZE_MIB)
+        balloon_update_too_large_message(129)
     );
 }
 
@@ -1454,7 +1454,7 @@ async fn stores_memory_hotplug_config_and_exports_runtime_status() {
         .unwrap();
     let initial_vm_config_payload: serde_json::Value =
         serde_json::from_slice(&initial_vm_config_body).unwrap();
-    assert!(initial_vm_config_payload.get("memory-hotplug").is_none());
+    assert!(initial_vm_config_payload["memory-hotplug"].is_null());
 
     let put_response = router
         .clone()
@@ -2057,7 +2057,7 @@ async fn stores_cpu_config_without_exporting_it() {
         .unwrap();
     let initial_vm_config_payload: serde_json::Value =
         serde_json::from_slice(&initial_vm_config_body).unwrap();
-    assert!(initial_vm_config_payload.get("cpu-config").is_none());
+    assert!(initial_vm_config_payload["cpu-config"].is_null());
 
     let cpu_config_response = router
             .clone()
@@ -2090,7 +2090,7 @@ async fn stores_cpu_config_without_exporting_it() {
         .await
         .unwrap();
     let vm_config_payload: serde_json::Value = serde_json::from_slice(&vm_config_body).unwrap();
-    assert!(vm_config_payload.get("cpu-config").is_none());
+    assert!(vm_config_payload["cpu-config"].is_null());
 }
 
 #[tokio::test]
@@ -2169,7 +2169,7 @@ async fn rejects_invalid_memory_hotplug_payloads() {
     assert_eq!(payload.code, "InvalidRequest");
     assert_eq!(
         payload.fault_message,
-        INVALID_MEMORY_HOTPLUG_TOTAL_SIZE_MESSAGE
+        "Memory hotplug config error: Total size must be a multiple of slot size (128 MiB)"
     );
 }
 
@@ -2514,8 +2514,8 @@ async fn initializes_metrics_once_and_omits_runtime_export() {
         .await
         .unwrap();
     let vm_config_payload: serde_json::Value = serde_json::from_slice(&vm_config_body).unwrap();
-    assert!(vm_config_payload.get("logger").is_none());
-    assert!(vm_config_payload.get("metrics").is_none());
+    assert!(vm_config_payload["logger"].is_null());
+    assert!(vm_config_payload["metrics"].is_null());
 }
 
 #[tokio::test]
@@ -2748,7 +2748,8 @@ async fn stores_vsock_config_and_omits_deprecated_export_field() {
 }
 
 #[tokio::test]
-async fn rejects_invalid_vsock_guest_cid() {
+async fn accepts_low_vsock_guest_cid_as_firecracker_does() {
+    // Firecracker v1.16.0 checks no minimum guest CID (D-026, Backend A replay).
     let router = test_state().router();
 
     let response = router
@@ -2764,11 +2765,7 @@ async fn rejects_invalid_vsock_guest_cid() {
         )
         .await
         .unwrap();
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let payload: ErrorEnvelope = serde_json::from_slice(&body).unwrap();
-    assert_eq!(payload.code, "InvalidRequest");
-    assert_eq!(payload.fault_message, INVALID_VSOCK_GUEST_CID_MESSAGE);
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
 }
 
 #[tokio::test]
@@ -3020,7 +3017,7 @@ async fn drive_stub_rejects_missing_backing_files() {
         .await
         .unwrap();
     let vm_config_payload: serde_json::Value = serde_json::from_slice(&vm_config_body).unwrap();
-    assert!(vm_config_payload["drives"].is_null());
+    assert!(vm_config_payload["drives"].as_array().is_some_and(Vec::is_empty));
 }
 
 #[tokio::test]
@@ -3662,9 +3659,9 @@ async fn postboot_device_puts_report_pci_not_enabled() {
     assert_eq!(payload["fault_message"], PMEM_ID_PATH_MISMATCH_MESSAGE);
 
     let vm_config = get_json(&router, "/vm/config").await;
-    assert!(vm_config["drives"].is_null());
-    assert!(vm_config["network-interfaces"].is_null());
-    assert!(vm_config["pmem"].is_null());
+    assert!(vm_config["drives"].as_array().is_some_and(Vec::is_empty));
+    assert!(vm_config["network-interfaces"].as_array().is_some_and(Vec::is_empty));
+    assert!(vm_config["pmem"].as_array().is_some_and(Vec::is_empty));
 }
 
 #[tokio::test]
@@ -3694,7 +3691,7 @@ async fn network_put_validates_mtu_bounds() {
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(payload["fault_message"], "invalid JSON payload");
-    assert!(get_json(&router, "/vm/config").await["network-interfaces"].is_null());
+    assert!(get_json(&router, "/vm/config").await["network-interfaces"].as_array().is_some_and(Vec::is_empty));
 
     for (iface, tap, mtu) in [("eth0", "tap0", 68), ("eth1", "tap1", 65535)] {
         let (status, _) = send_json(
@@ -4341,7 +4338,8 @@ async fn rejects_vsock_after_start() {
 }
 
 #[tokio::test]
-async fn allows_serial_after_start() {
+async fn refuses_serial_after_start() {
+    // Firecracker v1.16.0 refuses ConfigureSerial after boot (D-026, Backend A replay).
     let router = test_state().router();
     let kernel = NamedTempFile::new().unwrap();
 
@@ -4382,11 +4380,16 @@ async fn allows_serial_after_start() {
         )
         .await
         .unwrap();
-    assert_eq!(serial_response.status(), StatusCode::NO_CONTENT);
+    assert_eq!(serial_response.status(), StatusCode::BAD_REQUEST);
+    let body = to_bytes(serial_response.into_body(), usize::MAX).await.unwrap();
+    let payload: ErrorEnvelope = serde_json::from_slice(&body).unwrap();
+    assert_eq!(payload.code, "InvalidState");
+    assert_eq!(payload.fault_message, ACTION_NOT_SUPPORTED_POSTBOOT_MESSAGE);
 }
 
 #[tokio::test]
-async fn allows_logger_and_metrics_after_start() {
+async fn refuses_logger_and_metrics_after_start() {
+    // Firecracker v1.16.0 refuses ConfigureLogger and ConfigureMetrics after boot (D-026).
     let router = test_state().router();
     let kernel = NamedTempFile::new().unwrap();
     let tempdir = tempfile::tempdir().unwrap();
@@ -4435,7 +4438,10 @@ async fn allows_logger_and_metrics_after_start() {
             )
             .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let payload: ErrorEnvelope = serde_json::from_slice(&body).unwrap();
+        assert_eq!(payload.fault_message, ACTION_NOT_SUPPORTED_POSTBOOT_MESSAGE);
     }
 }
 
@@ -4648,7 +4654,8 @@ async fn snapshot_load_rejects_memory_hotplug_configuration() {
 }
 
 #[tokio::test]
-async fn snapshot_load_rejects_cpu_config_configuration() {
+async fn snapshot_load_allowed_after_cpu_config() {
+    // `set_custom_cpu_template` does not set Firecracker's `boot_path` (D-026).
     let router = test_state().router();
 
     let put_response = router
@@ -4680,11 +4687,7 @@ async fn snapshot_load_rejects_cpu_config_configuration() {
         )
         .await
         .unwrap();
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let payload: ErrorEnvelope = serde_json::from_slice(&body).unwrap();
-    assert_eq!(payload.code, "InvalidState");
-    assert_eq!(payload.fault_message, SNAPSHOT_LOAD_RESOURCE_GUARD_MESSAGE);
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
 }
 
 #[tokio::test]

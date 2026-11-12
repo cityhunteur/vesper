@@ -39,13 +39,12 @@ const ACTION_NOT_SUPPORTED_POSTBOOT_MESSAGE: &str =
 const ACTION_NOT_SUPPORTED_PREBOOT_MESSAGE: &str =
     "The requested operation is not supported before starting the microVM.";
 const SEND_CTRL_ALT_DEL_AARCH64_MESSAGE: &str = "SendCtrlAltDel does not supported on aarch64.";
-const MISSING_KERNEL_CONFIG_MESSAGE: &str = "Cannot start microvm without kernel configuration.";
-const INVALID_VSOCK_GUEST_CID_MESSAGE: &str = "Guest CID must be greater than or equal to 3.";
-const METRICS_ALREADY_INITIALIZED_MESSAGE: &str = "Cannot initialize the metrics system due to bad user input: Reinitialization of metrics not allowed.";
+const MISSING_KERNEL_CONFIG_MESSAGE: &str = "Start microvm error: Cannot start microvm without kernel configuration.";
+const METRICS_ALREADY_INITIALIZED_MESSAGE: &str = "Metrics error: Cannot initialize the metrics system due to bad user input: Reinitialization of metrics not allowed.";
 const SNAPSHOT_CREATE_REQUIRES_PAUSED_MESSAGE: &str =
-    "operation PUT /snapshot/create is not allowed while instance state is running";
+    "Create snapshot error: Cannot save the microVM state: Operation not allowed: save/restore unavailable while running";
 const SNAPSHOT_LOAD_RESOURCE_GUARD_MESSAGE: &str =
-    "Load snapshot can only be called before configuring resources other than logger and metrics.";
+    "Load snapshot error: Loading a microVM snapshot not allowed after configuring boot-specific resources.";
 const SNAPSHOT_LOAD_MISSING_MEMORY_SOURCE_MESSAGE: &str = "An error occurred when deserializing the json body of a request: missing field: either `mem_backend` or `mem_file_path` is required.";
 const SNAPSHOT_LOAD_TOO_MANY_MEMORY_SOURCES_MESSAGE: &str = "An error occurred when deserializing the json body of a request: too many fields: either `mem_backend` or `mem_file_path` exclusively is required.";
 const BALLOON_NOT_CONFIGURED_MESSAGE: &str = "Balloon config error: No balloon device found.";
@@ -77,19 +76,14 @@ const BALLOON_STATS_DISABLED_MESSAGE: &str =
 const BALLOON_STATS_STATE_CHANGE_MESSAGE: &str =
     "Balloon update error: Balloon: Statistics cannot be enabled/disabled after activation.";
 const MACHINE_CONFIG_INCOMPATIBLE_BALLOON_SIZE_MESSAGE: &str =
-    "The memory size (MiB) is smaller than the previously set balloon device target size.";
+    "Machine config error: The memory size (MiB) is smaller than the previously set balloon device target size.";
 const MEMORY_HOTPLUG_NOT_CONFIGURED_MESSAGE: &str = "Memory hotplug device is not configured.";
-const INVALID_MEMORY_HOTPLUG_BLOCK_SIZE_MESSAGE: &str =
-    "The block size of the hotpluggable memory device must be at least 2 MiB and a power of 2.";
-const INVALID_MEMORY_HOTPLUG_SLOT_SIZE_MESSAGE: &str = "The slot size of the hotpluggable memory device must be at least 128 MiB and a multiple of the block size.";
-const INVALID_MEMORY_HOTPLUG_TOTAL_SIZE_MESSAGE: &str = "The total size of the hotpluggable memory device must be at least the slot size and a multiple of the slot size.";
-const INVALID_MEMORY_HOTPLUG_REQUESTED_SIZE_MESSAGE: &str = "The requested size of the hotpluggable memory device must be a multiple of the block size and no larger than the total size.";
-const MMDS_NOT_INITIALIZED_MESSAGE: &str = "The MMDS data store is not initialized.";
-const MMDS_DATA_STORE_LIMIT_EXCEEDED_MESSAGE: &str = "The MMDS patch request doesn't fit.";
+const MMDS_NOT_INITIALIZED_MESSAGE: &str = "MMDS error: The MMDS data store is not initialized.";
+const MMDS_DATA_STORE_LIMIT_EXCEEDED_MESSAGE: &str = "MMDS limit exceeded error: The MMDS patch request doesn't fit.";
 const MMDS_EMPTY_NETWORK_INTERFACE_LIST_MESSAGE: &str =
-    "The list of network interface IDs that allow forwarding MMDS requests is empty.";
-const MMDS_INVALID_IPV4_ADDRESS_MESSAGE: &str = "The MMDS IPv4 address is not link local.";
-const MMDS_INVALID_NETWORK_INTERFACE_ID_MESSAGE: &str = "The list of network interface IDs provided contains at least one ID that does not correspond to any existing network interface.";
+    "MMMDS config error: The list of network interface IDs that allow forwarding MMDS requests is empty.";
+const MMDS_INVALID_IPV4_ADDRESS_MESSAGE: &str = "MMMDS config error: The MMDS IPv4 address is not link local.";
+const MMDS_INVALID_NETWORK_INTERFACE_ID_MESSAGE: &str = "MMMDS config error: The list of network interface IDs provided contains at least one ID that does not correspond to any existing network interface.";
 const MMDS_DATA_STORE_LIMIT_BYTES: usize = 51_200;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -895,37 +889,30 @@ struct FirecrackerVersionResponse {
     firecracker_version: String,
 }
 
+/// `GET /vm/config` in Firecracker's shape (`VmmConfig` in `resources.rs` at the pinned revision): every key is
+/// present in this order, empty ones as `null` or `[]`; Firecracker never exports the CPU template, the logger or
+/// the metrics configuration, and leaves the serial configuration out.
 #[derive(Debug, Serialize)]
 struct FullVmConfigurationResponse {
+    balloon: Option<BalloonDeviceConfig>,
+    drives: Vec<DriveConfigRequest>,
     #[serde(rename = "boot-source")]
     boot_source: BootSourceConfig,
     #[serde(rename = "cpu-config")]
-    #[serde(skip_serializing_if = "Option::is_none")]
     cpu_config: Option<CpuConfig>,
+    logger: Option<()>,
     #[serde(rename = "machine-config")]
     machine_config: MachineConfig,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    balloon: Option<BalloonDeviceConfig>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    #[serde(default)]
-    drives: Vec<DriveConfigRequest>,
-    #[serde(rename = "network-interfaces")]
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    #[serde(default)]
-    network_interfaces: Vec<NetworkInterfaceConfigRequest>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    #[serde(default)]
-    pmem: Vec<PmemConfigRequest>,
+    metrics: Option<()>,
     #[serde(rename = "mmds-config")]
-    #[serde(skip_serializing_if = "Option::is_none")]
     mmds_config: Option<MmdsConfig>,
-    #[serde(rename = "memory-hotplug")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    memory_hotplug: Option<MemoryHotplugConfig>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    entropy: Option<EntropyDeviceConfig>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "network-interfaces")]
+    network_interfaces: Vec<NetworkInterfaceConfigRequest>,
     vsock: Option<VsockConfig>,
+    entropy: Option<EntropyDeviceConfig>,
+    pmem: Vec<PmemConfigRequest>,
+    #[serde(rename = "memory-hotplug")]
+    memory_hotplug: Option<MemoryHotplugConfig>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq, Serialize)]
@@ -1492,6 +1479,8 @@ fn full_vm_config_response(state: &Arc<AppState>) -> Response {
         Json(FullVmConfigurationResponse {
             boot_source,
             cpu_config: None,
+            logger: None,
+            metrics: None,
             machine_config: config,
             balloon,
             drives,
@@ -1736,17 +1725,7 @@ fn handle_put_vsock(
         }
     };
 
-    if payload.guest_cid < 3 {
-        return error_response(
-            &state.firecracker_revision,
-            StatusCode::BAD_REQUEST,
-            "InvalidRequest",
-            INVALID_VSOCK_GUEST_CID_MESSAGE,
-            template,
-            method.as_str(),
-        );
-    }
-
+    // Firecracker v1.16.0 does not check a minimum guest CID (`vmm_config/vsock.rs`).
     *state
         .vsock_config
         .write()
@@ -1874,7 +1853,7 @@ fn handle_patch_balloon(
             &state.firecracker_revision,
             StatusCode::BAD_REQUEST,
             "InvalidRequest",
-            &balloon_update_too_large_message(machine_config.mem_size_mib),
+            &balloon_update_too_large_message(payload.amount_mib),
             template,
             method.as_str(),
         );
@@ -2467,7 +2446,7 @@ fn handle_patch_memory_hotplug(
             &state.firecracker_revision,
             StatusCode::BAD_REQUEST,
             "InvalidRequest",
-            message,
+            &message,
             template,
             method.as_str(),
         );
@@ -2502,7 +2481,7 @@ fn handle_put_memory_hotplug(
             &state.firecracker_revision,
             StatusCode::BAD_REQUEST,
             "InvalidRequest",
-            message,
+            &message,
             template,
             method.as_str(),
         );
@@ -2662,14 +2641,7 @@ fn snapshot_load_has_blocking_config(state: &Arc<AppState>) -> bool {
         return true;
     }
 
-    if state
-        .cpu_config
-        .read()
-        .expect("cpu config lock poisoned while reading")
-        .is_some()
-    {
-        return true;
-    }
+    // `PUT /cpu-config` does not set Firecracker's `boot_path` (`set_custom_cpu_template`), so it does not block a load.
 
     if *state
         .machine_config
@@ -2920,43 +2892,45 @@ fn apply_json_merge_patch(target: &mut Value, patch: &Value) {
     }
 }
 
-fn validate_memory_hotplug_config(config: &MemoryHotplugConfig) -> Result<(), &'static str> {
-    if config.block_size_mib < DEFAULT_MEMORY_HOTPLUG_BLOCK_SIZE_MIB
-        || !config.block_size_mib.is_power_of_two()
-    {
-        return Err(INVALID_MEMORY_HOTPLUG_BLOCK_SIZE_MESSAGE);
-    }
-
-    if config.slot_size_mib < DEFAULT_MEMORY_HOTPLUG_SLOT_SIZE_MIB
-        || config.slot_size_mib % config.block_size_mib != 0
-    {
-        return Err(INVALID_MEMORY_HOTPLUG_SLOT_SIZE_MESSAGE);
-    }
-
-    if config.total_size_mib < config.slot_size_mib
-        || config.total_size_mib % config.slot_size_mib != 0
-    {
-        return Err(INVALID_MEMORY_HOTPLUG_TOTAL_SIZE_MESSAGE);
-    }
-
-    Ok(())
+/// Firecracker's `MemoryHotplugConfig::validate` (`vmm_config/memory_hotplug.rs` at the pinned revision): the same
+/// order and the same `displaydoc` texts, behind `VmmActionError::MemoryHotplugConfig`.
+fn validate_memory_hotplug_config(config: &MemoryHotplugConfig) -> Result<(), String> {
+    let why = if config.block_size_mib < DEFAULT_MEMORY_HOTPLUG_BLOCK_SIZE_MIB {
+        format!("Block size must not be lower than {DEFAULT_MEMORY_HOTPLUG_BLOCK_SIZE_MIB} MiB")
+    } else if !config.block_size_mib.is_power_of_two() {
+        "Block size must be a power of 2".to_string()
+    } else if config.slot_size_mib < DEFAULT_MEMORY_HOTPLUG_SLOT_SIZE_MIB {
+        format!("Slot size must not be lower than {DEFAULT_MEMORY_HOTPLUG_SLOT_SIZE_MIB} MiB")
+    } else if config.slot_size_mib % config.block_size_mib != 0 {
+        format!("Slot size must be a multiple of block size ({} MiB)", config.block_size_mib)
+    } else if config.total_size_mib < config.slot_size_mib {
+        format!("Total size must not be lower than slot size ({} MiB)", config.slot_size_mib)
+    } else if config.total_size_mib % config.slot_size_mib != 0 {
+        format!("Total size must be a multiple of slot size ({} MiB)", config.slot_size_mib)
+    } else {
+        return Ok(());
+    };
+    Err(format!("Memory hotplug config error: {why}"))
 }
 
+/// Firecracker's `VirtioMem::update_requested_size` checks (`devices/virtio/mem/device.rs`): a multiple of the block
+/// size and no larger than the region; the size in the message is in bytes.
 fn validate_memory_hotplug_size_update(
     config: &MemoryHotplugConfig,
     payload: &MemoryHotplugSizeUpdate,
-) -> Result<(), &'static str> {
-    if payload.requested_size_mib > config.total_size_mib
-        || payload.requested_size_mib % config.block_size_mib != 0
-    {
-        return Err(INVALID_MEMORY_HOTPLUG_REQUESTED_SIZE_MESSAGE);
+) -> Result<(), String> {
+    if payload.requested_size_mib % config.block_size_mib != 0 || payload.requested_size_mib > config.total_size_mib {
+        let bytes = (payload.requested_size_mib as u64) << 20;
+        return Err(format!(
+            "Memory hotplug update error: Failed to create memory hotplug device: Size {bytes} is invalid: it must be a multiple of block size and less than the total size"
+        ));
     }
-
     Ok(())
 }
 
-fn balloon_update_too_large_message(mem_size_mib: usize) -> String {
-    format!("Balloon update error: Balloon: Requested memory should be less than {mem_size_mib}MiB")
+/// Firecracker quotes the requested amount, not the guest memory (`balloon/device.rs`, `TooMuchMemoryRequested`).
+fn balloon_update_too_large_message(amount_mib: u32) -> String {
+    format!("Balloon update error: Balloon: Requested memory should be less than {amount_mib}MiB")
 }
 
 fn balloon_stats_response_for(amount_mib: u32) -> BalloonStatsResponse {

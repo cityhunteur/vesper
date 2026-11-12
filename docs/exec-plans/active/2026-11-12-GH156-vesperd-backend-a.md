@@ -70,9 +70,15 @@ socket, sees `GET /` return `Running`, and shows that each teardown path leaves 
       (`src/control/suites/replay.rs`, `systemvmctl control replay-suite`, `make systemvm-replay-suite`), the guest
       balloon and virtio-mem drivers, the published report `docs/generated/backend-a-behavior-replay.json`; CE-0009,
       CE-0010, TD-058, D-026.
-- [ ] Slice 6a: commit, push, CI green, GH #156 comment.
-- [ ] Slice 6b: correct the 33 captures Backend A and the pinned source contradict, and the model to match; replay
-      both backends again (D-026).
+- [x] (2026-11-12) Slice 6a: merged as PR #181 (`bdcb467`), CI green, GH #156 updated.
+- [x] (2026-11-12) Slice 6b: 35 captures corrected (the 33 plus the two snapshot-load refusals Backend A cannot
+      reach without a network interface, same source line), evidence
+      `run/GH-156/api/slice6b-backend-a-replay-corrections.md`; the model follows: message prefixes, Firecracker's
+      memory-hotplug validation order and texts, the balloon message quoting the request, `PUT /logger`, `/metrics`
+      and `/serial` pre-boot only, no minimum `guest_cid`, `PUT /cpu-config` not blocking a load, and `GET /vm/config`
+      in Firecracker's shape (all 13 keys, `null` or `[]` when empty). Replay: model 170 of 170 applicable; Backend A
+      156 match, 14 CE-0010, 3 not applicable.
+- [ ] Slice 6b: commit, push, CI green, GH #156 comment.
 - [ ] Owner approval of CE-0009 and CE-0010; then GH #156 can close.
 
 ## Surprises & Discoveries

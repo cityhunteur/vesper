@@ -476,7 +476,7 @@ cases:
   # PUT /logger
   'PUT /logger#put_valid_any':
     request: 'PUT /logger {"log_path":"{root}/tmp/fc.log","level":"Info"}'
-  'PUT /logger#runtime_put_valid':
+  'PUT /logger#postboot_invalid_state':
     setup: ['@boot']
     request: 'PUT /logger {"log_path":"{root}/tmp/fc.log","level":"Info"}'
 
@@ -490,7 +490,7 @@ cases:
   # PUT /metrics
   'PUT /metrics#put_valid_any':
     request: 'PUT /metrics {"metrics_path":"{root}/tmp/fc.metrics"}'
-  'PUT /metrics#runtime_put_valid':
+  'PUT /metrics#postboot_invalid_state':
     setup: ['@boot']
     request: 'PUT /metrics {"metrics_path":"{root}/tmp/fc.metrics"}'
   'PUT /metrics#duplicate_init':
@@ -561,7 +561,7 @@ cases:
   # PUT /serial
   'PUT /serial#put_valid_any':
     request: 'PUT /serial {"serial_out_path":"{root}/tmp/serial.out"}'
-  'PUT /serial#runtime_put_valid':
+  'PUT /serial#postboot_invalid_state':
     setup: ['@boot']
     request: 'PUT /serial {"serial_out_path":"{root}/tmp/serial.out"}'
   'PUT /serial#put_with_rate_limiter_any':
@@ -599,7 +599,7 @@ cases:
     snapshot: true
     setup: ['@hotplug']
     request: 'PUT /snapshot/load {"snapshot_path":"{root}/snap/vm.vmstate","mem_backend":{"backend_type":"File","backend_path":"{root}/snap/vm.mem"}}'
-  'PUT /snapshot/load#blocked_after_cpu_config':
+  'PUT /snapshot/load#allowed_after_cpu_config_returns_no_content':
     snapshot: true
     setup: ['@cpu_config']
     request: 'PUT /snapshot/load {"snapshot_path":"{root}/snap/vm.vmstate","mem_backend":{"backend_type":"File","backend_path":"{root}/snap/vm.mem"}}'
@@ -636,7 +636,7 @@ cases:
   # PUT /vsock
   'PUT /vsock#put_valid_preboot':
     request: 'PUT /vsock {"guest_cid":5,"uds_path":"{root}/tmp/vesper-vsock.sock"}'
-  'PUT /vsock#invalid_guest_cid_preboot':
+  'PUT /vsock#low_guest_cid_accepted_preboot':
     request: 'PUT /vsock {"guest_cid":2,"uds_path":"{root}/tmp/vesper-vsock.sock"}'
   'PUT /vsock#postboot_invalid_state':
     setup: ['@boot']

@@ -575,9 +575,10 @@
           "status_code": 400,
           "outcome": "error_envelope",
           "code": "InvalidRequest",
-          "message": "The MMDS data store is not initialized.",
+          "message": "MMDS error: The MMDS data store is not initialized.",
           "evidence_files": [
-            "run/WOR-20/api/step7-upstream-mmds-baseline.md"
+            "run/GH-156/api/slice6b-backend-a-replay-corrections.md",
+            "docs/generated/backend-a-behavior-replay.json"
           ]
         }
       ],
@@ -697,11 +698,13 @@
           "body_assertions": [
             {
               "pointer": "/cpu-config",
-              "kind": "absent"
+              "kind": "type",
+              "value_type": "null"
             }
           ],
           "evidence_files": [
-            "run/WOR-20/api/step122-upstream-vm-config-cpu-config-absent-capture-baseline.md"
+            "run/GH-156/api/slice6b-backend-a-replay-corrections.md",
+            "docs/generated/backend-a-behavior-replay.json"
           ]
         },
         {
@@ -745,11 +748,13 @@
           "body_assertions": [
             {
               "pointer": "/metrics",
-              "kind": "absent"
+              "kind": "type",
+              "value_type": "null"
             }
           ],
           "evidence_files": [
-            "run/WOR-20/api/step124-upstream-vm-config-metrics-absent-capture-baseline.md"
+            "run/GH-156/api/slice6b-backend-a-replay-corrections.md",
+            "docs/generated/backend-a-behavior-replay.json"
           ]
         },
         {
@@ -761,11 +766,13 @@
           "body_assertions": [
             {
               "pointer": "/metrics",
-              "kind": "absent"
+              "kind": "type",
+              "value_type": "null"
             }
           ],
           "evidence_files": [
-            "run/WOR-20/api/step135-upstream-vm-config-metrics-runtime-omission-baseline.md"
+            "run/GH-156/api/slice6b-backend-a-replay-corrections.md",
+            "docs/generated/backend-a-behavior-replay.json"
           ]
         },
         {
@@ -777,11 +784,13 @@
           "body_assertions": [
             {
               "pointer": "/logger",
-              "kind": "absent"
+              "kind": "type",
+              "value_type": "null"
             }
           ],
           "evidence_files": [
-            "run/WOR-20/api/step125-upstream-vm-config-logger-absent-capture-baseline.md"
+            "run/GH-156/api/slice6b-backend-a-replay-corrections.md",
+            "docs/generated/backend-a-behavior-replay.json"
           ]
         },
         {
@@ -793,11 +802,13 @@
           "body_assertions": [
             {
               "pointer": "/logger",
-              "kind": "absent"
+              "kind": "type",
+              "value_type": "null"
             }
           ],
           "evidence_files": [
-            "run/WOR-20/api/step133-upstream-vm-config-logger-runtime-omission-baseline.md"
+            "run/GH-156/api/slice6b-backend-a-replay-corrections.md",
+            "docs/generated/backend-a-behavior-replay.json"
           ]
         },
         {
@@ -1380,13 +1391,14 @@
         {
           "id": "oversize_runtime",
           "arch": "any",
-          "when": "Patch balloon target above the configured 128MiB guest memory after boot",
+          "when": "Patch balloon target to 256 MiB after boot on a 128 MiB guest (the message quotes the requested size)",
           "status_code": 400,
           "outcome": "error_envelope",
           "code": "InvalidRequest",
-          "message": "Balloon update error: Balloon: Requested memory should be less than 128MiB",
+          "message": "Balloon update error: Balloon: Requested memory should be less than 256MiB",
           "evidence_files": [
-            "run/WOR-20/api/step10-upstream-balloon-runtime-update-baseline.md"
+            "run/GH-156/api/slice6b-backend-a-replay-corrections.md",
+            "docs/generated/backend-a-behavior-replay.json"
           ]
         }
       ],
@@ -1648,14 +1660,14 @@
         {
           "id": "invalid_requested_size_runtime",
           "arch": "any",
-          "when": "Resize hotpluggable memory after boot with `requested_size_mib` that is not aligned to the configured block size",
+          "when": "Resize hotpluggable memory after boot with `requested_size_mib` 3, not a multiple of the 2 MiB block size",
           "status_code": 400,
           "outcome": "error_envelope",
           "code": "InvalidRequest",
-          "message": "The requested size of the hotpluggable memory device must be a multiple of the block size and no larger than the total size.",
+          "message": "Memory hotplug update error: Failed to create memory hotplug device: Size 3145728 is invalid: it must be a multiple of block size and less than the total size",
           "evidence_files": [
-            "run/WOR-20/api/step6-upstream-hotplug-baseline.md",
-            "run/WOR-20/api/step147-upstream-hotplug-invalid-requested-size-baseline.md"
+            "run/GH-156/api/slice6b-backend-a-replay-corrections.md",
+            "docs/generated/backend-a-behavior-replay.json"
           ]
         }
       ],
@@ -1685,9 +1697,10 @@
           "status_code": 400,
           "outcome": "error_envelope",
           "code": "InvalidRequest",
-          "message": "The memory size (MiB) is smaller than the previously set balloon device target size.",
+          "message": "Machine config error: The memory size (MiB) is smaller than the previously set balloon device target size.",
           "evidence_files": [
-            "run/WOR-20/api/step9-upstream-balloon-config-baseline.md"
+            "run/GH-156/api/slice6b-backend-a-replay-corrections.md",
+            "docs/generated/backend-a-behavior-replay.json"
           ]
         }
       ],
@@ -1717,9 +1730,10 @@
           "status_code": 400,
           "outcome": "error_envelope",
           "code": "InvalidRequest",
-          "message": "The MMDS data store is not initialized.",
+          "message": "MMDS error: The MMDS data store is not initialized.",
           "evidence_files": [
-            "run/WOR-20/api/step7-upstream-mmds-baseline.md"
+            "run/GH-156/api/slice6b-backend-a-replay-corrections.md",
+            "docs/generated/backend-a-behavior-replay.json"
           ]
         },
         {
@@ -1729,9 +1743,10 @@
           "status_code": 400,
           "outcome": "error_envelope",
           "code": "InvalidRequest",
-          "message": "The MMDS data store is not initialized.",
+          "message": "MMDS error: The MMDS data store is not initialized.",
           "evidence_files": [
-            "run/WOR-20/api/step7-upstream-mmds-baseline.md"
+            "run/GH-156/api/slice6b-backend-a-replay-corrections.md",
+            "docs/generated/backend-a-behavior-replay.json"
           ]
         },
         {
@@ -1741,9 +1756,10 @@
           "status_code": 413,
           "outcome": "error_envelope",
           "code": "PayloadTooLarge",
-          "message": "The MMDS patch request doesn't fit.",
+          "message": "MMDS limit exceeded error: The MMDS patch request doesn't fit.",
           "evidence_files": [
-            "run/WOR-20/api/step7-upstream-mmds-baseline.md"
+            "run/GH-156/api/slice6b-backend-a-replay-corrections.md",
+            "docs/generated/backend-a-behavior-replay.json"
           ]
         }
       ],
@@ -1949,9 +1965,10 @@
           "status_code": 400,
           "outcome": "error_envelope",
           "code": "InvalidRequest",
-          "message": "Cannot start microvm without kernel configuration.",
+          "message": "Start microvm error: Cannot start microvm without kernel configuration.",
           "evidence_files": [
-            "run/WOR-20/api/step29-upstream-actions-baseline.md"
+            "run/GH-156/api/slice6b-backend-a-replay-corrections.md",
+            "docs/generated/backend-a-behavior-replay.json"
           ]
         },
         {
@@ -2247,27 +2264,27 @@
         {
           "id": "invalid_block_size_preboot",
           "arch": "any",
-          "when": "Store memory hotplug configuration before boot with `block_size_mib` below the pinned minimum and not a power of two",
+          "when": "Store memory hotplug configuration before boot with `block_size_mib` 3, not a power of 2",
           "status_code": 400,
           "outcome": "error_envelope",
           "code": "InvalidRequest",
-          "message": "The block size of the hotpluggable memory device must be at least 2 MiB and a power of 2.",
+          "message": "Memory hotplug config error: Block size must be a power of 2",
           "evidence_files": [
-            "run/WOR-20/api/step6-upstream-hotplug-baseline.md",
-            "run/WOR-20/api/step146-upstream-hotplug-invalid-block-size-baseline.md"
+            "run/GH-156/api/slice6b-backend-a-replay-corrections.md",
+            "docs/generated/backend-a-behavior-replay.json"
           ]
         },
         {
           "id": "invalid_total_size_preboot",
           "arch": "any",
-          "when": "Store memory hotplug configuration before boot with `total_size_mib` smaller than the default slot size and not aligned to the slot-size multiple rule",
+          "when": "Store memory hotplug configuration before boot with `total_size_mib` 100, below the default 128 MiB slot size",
           "status_code": 400,
           "outcome": "error_envelope",
           "code": "InvalidRequest",
-          "message": "The total size of the hotpluggable memory device must be at least the slot size and a multiple of the slot size.",
+          "message": "Memory hotplug config error: Total size must not be lower than slot size (128 MiB)",
           "evidence_files": [
-            "run/WOR-20/api/step6-upstream-hotplug-baseline.md",
-            "run/WOR-20/api/step145-upstream-hotplug-invalid-total-size-baseline.md"
+            "run/GH-156/api/slice6b-backend-a-replay-corrections.md",
+            "docs/generated/backend-a-behavior-replay.json"
           ]
         },
         {
@@ -2288,7 +2305,7 @@
     {
       "method": "PUT",
       "path": "/logger",
-      "semantics": "Any",
+      "semantics": "PB",
       "behavior_path": "concrete_handler",
       "capture_state": "captured_in_repo",
       "cases": [
@@ -2303,13 +2320,16 @@
           ]
         },
         {
-          "id": "runtime_put_valid",
+          "id": "postboot_invalid_state",
           "arch": "any",
-          "when": "Store logger configuration after boot with a valid request body",
-          "status_code": 204,
-          "outcome": "no_content",
+          "when": "Store logger configuration after boot",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidState",
+          "message": "The requested operation is not supported after starting the microVM.",
           "evidence_files": [
-            "run/WOR-20/api/step107-upstream-logger-runtime-baseline.md"
+            "run/GH-156/api/slice6b-backend-a-replay-corrections.md",
+            "docs/generated/backend-a-behavior-replay.json"
           ]
         }
       ],
@@ -2339,9 +2359,10 @@
           "status_code": 400,
           "outcome": "error_envelope",
           "code": "InvalidRequest",
-          "message": "The memory size (MiB) is smaller than the previously set balloon device target size.",
+          "message": "Machine config error: The memory size (MiB) is smaller than the previously set balloon device target size.",
           "evidence_files": [
-            "run/WOR-20/api/step9-upstream-balloon-config-baseline.md"
+            "run/GH-156/api/slice6b-backend-a-replay-corrections.md",
+            "docs/generated/backend-a-behavior-replay.json"
           ]
         }
       ],
@@ -2350,7 +2371,7 @@
     {
       "method": "PUT",
       "path": "/metrics",
-      "semantics": "Any",
+      "semantics": "PB",
       "behavior_path": "concrete_handler",
       "capture_state": "captured_in_repo",
       "cases": [
@@ -2365,13 +2386,16 @@
           ]
         },
         {
-          "id": "runtime_put_valid",
+          "id": "postboot_invalid_state",
           "arch": "any",
-          "when": "Store metrics configuration after boot with a valid request body",
-          "status_code": 204,
-          "outcome": "no_content",
+          "when": "Store metrics configuration after boot",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidState",
+          "message": "The requested operation is not supported after starting the microVM.",
           "evidence_files": [
-            "run/WOR-20/api/step109-upstream-metrics-runtime-baseline.md"
+            "run/GH-156/api/slice6b-backend-a-replay-corrections.md",
+            "docs/generated/backend-a-behavior-replay.json"
           ]
         },
         {
@@ -2381,9 +2405,10 @@
           "status_code": 400,
           "outcome": "error_envelope",
           "code": "InvalidRequest",
-          "message": "Cannot initialize the metrics system due to bad user input: Reinitialization of metrics not allowed.",
+          "message": "Metrics error: Cannot initialize the metrics system due to bad user input: Reinitialization of metrics not allowed.",
           "evidence_files": [
-            "run/WOR-20/api/step70-upstream-metrics-reinit-baseline.md"
+            "run/GH-156/api/slice6b-backend-a-replay-corrections.md",
+            "docs/generated/backend-a-behavior-replay.json"
           ]
         }
       ],
@@ -2413,21 +2438,23 @@
           "status_code": 400,
           "outcome": "error_envelope",
           "code": "InvalidRequest",
-          "message": "The MMDS data store is not initialized.",
+          "message": "MMDS error: The MMDS data store is not initialized.",
           "evidence_files": [
-            "run/WOR-20/api/step7-upstream-mmds-baseline.md"
+            "run/GH-156/api/slice6b-backend-a-replay-corrections.md",
+            "docs/generated/backend-a-behavior-replay.json"
           ]
         },
         {
           "id": "oversized_store",
           "arch": "any",
-          "when": "Replace the MMDS store with a JSON document that exceeds the datastore size limit",
+          "when": "Replace the MMDS store with a JSON document under the HTTP payload limit whose serialized form exceeds the datastore size limit",
           "status_code": 413,
           "outcome": "error_envelope",
           "code": "PayloadTooLarge",
-          "message": "The MMDS patch request doesn't fit.",
+          "message": "MMDS limit exceeded error: The MMDS patch request doesn't fit.",
           "evidence_files": [
-            "run/WOR-20/api/step7-upstream-mmds-baseline.md"
+            "run/GH-156/api/slice6b-backend-a-replay-corrections.md",
+            "docs/generated/backend-a-behavior-replay.json"
           ]
         }
       ],
@@ -2469,9 +2496,10 @@
           "status_code": 400,
           "outcome": "error_envelope",
           "code": "InvalidRequest",
-          "message": "The list of network interface IDs that allow forwarding MMDS requests is empty.",
+          "message": "MMMDS config error: The list of network interface IDs that allow forwarding MMDS requests is empty.",
           "evidence_files": [
-            "run/WOR-20/api/step72-upstream-mmds-config-empty-network-list-baseline.md"
+            "run/GH-156/api/slice6b-backend-a-replay-corrections.md",
+            "docs/generated/backend-a-behavior-replay.json"
           ]
         },
         {
@@ -2481,9 +2509,10 @@
           "status_code": 400,
           "outcome": "error_envelope",
           "code": "InvalidRequest",
-          "message": "The list of network interface IDs provided contains at least one ID that does not correspond to any existing network interface.",
+          "message": "MMMDS config error: The list of network interface IDs provided contains at least one ID that does not correspond to any existing network interface.",
           "evidence_files": [
-            "run/WOR-20/api/step73-upstream-mmds-config-unknown-interface-baseline.md"
+            "run/GH-156/api/slice6b-backend-a-replay-corrections.md",
+            "docs/generated/backend-a-behavior-replay.json"
           ]
         },
         {
@@ -2493,9 +2522,10 @@
           "status_code": 400,
           "outcome": "error_envelope",
           "code": "InvalidRequest",
-          "message": "The MMDS IPv4 address is not link local.",
+          "message": "MMMDS config error: The MMDS IPv4 address is not link local.",
           "evidence_files": [
-            "run/WOR-20/api/step7-upstream-mmds-baseline.md"
+            "run/GH-156/api/slice6b-backend-a-replay-corrections.md",
+            "docs/generated/backend-a-behavior-replay.json"
           ]
         }
       ],
@@ -2672,7 +2702,7 @@
     {
       "method": "PUT",
       "path": "/serial",
-      "semantics": "Any",
+      "semantics": "PB",
       "behavior_path": "concrete_handler",
       "capture_state": "captured_in_repo",
       "cases": [
@@ -2687,13 +2717,16 @@
           ]
         },
         {
-          "id": "runtime_put_valid",
+          "id": "postboot_invalid_state",
           "arch": "any",
-          "when": "Store serial configuration after boot with a valid request body",
-          "status_code": 204,
-          "outcome": "no_content",
+          "when": "Store serial configuration after boot",
+          "status_code": 400,
+          "outcome": "error_envelope",
+          "code": "InvalidState",
+          "message": "The requested operation is not supported after starting the microVM.",
           "evidence_files": [
-            "run/WOR-20/api/step108-upstream-serial-runtime-baseline.md"
+            "run/GH-156/api/slice6b-backend-a-replay-corrections.md",
+            "docs/generated/backend-a-behavior-replay.json"
           ]
         },
         {
@@ -2735,9 +2768,10 @@
           "status_code": 400,
           "outcome": "error_envelope",
           "code": "InvalidState",
-          "message": "operation PUT /snapshot/create is not allowed while instance state is running",
+          "message": "Create snapshot error: Cannot save the microVM state: Operation not allowed: save/restore unavailable while running",
           "evidence_files": [
-            "run/WOR-20/api/step34-upstream-snapshot-create-paused-baseline.md"
+            "run/GH-156/api/slice6b-backend-a-replay-corrections.md",
+            "docs/generated/backend-a-behavior-replay.json"
           ]
         },
         {
@@ -2814,9 +2848,10 @@
           "status_code": 400,
           "outcome": "error_envelope",
           "code": "InvalidState",
-          "message": "Load snapshot can only be called before configuring resources other than logger and metrics.",
+          "message": "Load snapshot error: Loading a microVM snapshot not allowed after configuring boot-specific resources.",
           "evidence_files": [
-            "run/WOR-20/api/step35-upstream-snapshot-load-boot-source-baseline.md"
+            "run/GH-156/api/slice6b-backend-a-replay-corrections.md",
+            "docs/generated/backend-a-behavior-replay.json"
           ]
         },
         {
@@ -2826,21 +2861,21 @@
           "status_code": 400,
           "outcome": "error_envelope",
           "code": "InvalidState",
-          "message": "Load snapshot can only be called before configuring resources other than logger and metrics.",
+          "message": "Load snapshot error: Loading a microVM snapshot not allowed after configuring boot-specific resources.",
           "evidence_files": [
-            "run/WOR-20/api/step36-upstream-snapshot-load-memory-hotplug-baseline.md"
+            "run/GH-156/api/slice6b-backend-a-replay-corrections.md",
+            "docs/generated/backend-a-behavior-replay.json"
           ]
         },
         {
-          "id": "blocked_after_cpu_config",
+          "id": "allowed_after_cpu_config_returns_no_content",
           "arch": "any",
-          "when": "Load a snapshot after configuring custom CPU state",
-          "status_code": 400,
-          "outcome": "error_envelope",
-          "code": "InvalidState",
-          "message": "Load snapshot can only be called before configuring resources other than logger and metrics.",
+          "when": "Load a snapshot after storing a custom CPU configuration, which does not block a load",
+          "status_code": 204,
+          "outcome": "no_content",
           "evidence_files": [
-            "run/WOR-20/api/step66-upstream-snapshot-load-cpu-config-baseline.md"
+            "run/GH-156/api/slice6b-backend-a-replay-corrections.md",
+            "docs/generated/backend-a-behavior-replay.json"
           ]
         },
         {
@@ -2850,9 +2885,10 @@
           "status_code": 400,
           "outcome": "error_envelope",
           "code": "InvalidState",
-          "message": "Load snapshot can only be called before configuring resources other than logger and metrics.",
+          "message": "Load snapshot error: Loading a microVM snapshot not allowed after configuring boot-specific resources.",
           "evidence_files": [
-            "run/WOR-20/api/step69-upstream-snapshot-load-entropy-baseline.md"
+            "run/GH-156/api/slice6b-backend-a-replay-corrections.md",
+            "docs/generated/backend-a-behavior-replay.json"
           ]
         },
         {
@@ -2862,9 +2898,10 @@
           "status_code": 400,
           "outcome": "error_envelope",
           "code": "InvalidState",
-          "message": "Load snapshot can only be called before configuring resources other than logger and metrics.",
+          "message": "Load snapshot error: Loading a microVM snapshot not allowed after configuring boot-specific resources.",
           "evidence_files": [
-            "run/WOR-20/api/step67-upstream-snapshot-load-vsock-baseline.md"
+            "run/GH-156/api/slice6b-backend-a-replay-corrections.md",
+            "docs/generated/backend-a-behavior-replay.json"
           ]
         },
         {
@@ -2874,9 +2911,10 @@
           "status_code": 400,
           "outcome": "error_envelope",
           "code": "InvalidState",
-          "message": "Load snapshot can only be called before configuring resources other than logger and metrics.",
+          "message": "Load snapshot error: Loading a microVM snapshot not allowed after configuring boot-specific resources.",
           "evidence_files": [
-            "run/WOR-20/api/step68-upstream-snapshot-load-mmds-baseline.md"
+            "run/GH-156/api/slice6b-backend-a-replay-corrections.md",
+            "docs/generated/backend-a-behavior-replay.json"
           ]
         },
         {
@@ -2886,9 +2924,10 @@
           "status_code": 400,
           "outcome": "error_envelope",
           "code": "InvalidState",
-          "message": "Load snapshot can only be called before configuring resources other than logger and metrics.",
+          "message": "Load snapshot error: Loading a microVM snapshot not allowed after configuring boot-specific resources.",
           "evidence_files": [
-            "run/WOR-20/api/step37-upstream-snapshot-load-balloon-baseline.md"
+            "run/GH-156/api/slice6b-backend-a-replay-corrections.md",
+            "docs/generated/backend-a-behavior-replay.json"
           ]
         },
         {
@@ -2898,9 +2937,10 @@
           "status_code": 400,
           "outcome": "error_envelope",
           "code": "InvalidState",
-          "message": "Load snapshot can only be called before configuring resources other than logger and metrics.",
+          "message": "Load snapshot error: Loading a microVM snapshot not allowed after configuring boot-specific resources.",
           "evidence_files": [
-            "run/WOR-20/api/step38-upstream-snapshot-load-network-interface-baseline.md"
+            "run/GH-156/api/slice6b-backend-a-replay-corrections.md",
+            "docs/generated/backend-a-behavior-replay.json"
           ]
         },
         {
@@ -2956,15 +2996,14 @@
           ]
         },
         {
-          "id": "invalid_guest_cid_preboot",
+          "id": "low_guest_cid_accepted_preboot",
           "arch": "any",
-          "when": "Store vsock configuration before boot with `guest_cid` below the pinned minimum",
-          "status_code": 400,
-          "outcome": "error_envelope",
-          "code": "InvalidRequest",
-          "message": "Guest CID must be greater than or equal to 3.",
+          "when": "Store vsock configuration before boot with `guest_cid` 2, which Firecracker does not check",
+          "status_code": 204,
+          "outcome": "no_content",
           "evidence_files": [
-            "run/WOR-20/api/step71-upstream-vsock-invalid-cid-baseline.md"
+            "run/GH-156/api/slice6b-backend-a-replay-corrections.md",
+            "docs/generated/backend-a-behavior-replay.json"
           ]
         },
         {
