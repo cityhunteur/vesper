@@ -38,7 +38,7 @@ and `systemvmctl` keep governance honest. Backend A runs Firecracker microVMs in
 | Building and running locally | [DEVELOPMENT.md](docs/DEVELOPMENT.md) |
 | Writing or running tests | [TESTING.md](docs/TESTING.md) |
 | Diagnosing a failure | [OBSERVABILITY.md](docs/OBSERVABILITY.md), [RELIABILITY.md](docs/RELIABILITY.md) |
-| Touching entitlements, sockets or dependencies | [SECURITY.md](docs/SECURITY.md) |
+| Touching entitlements, sockets, dependencies or licences | [SECURITY.md](docs/SECURITY.md), [LICENSE](LICENSE), [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) (`make third-party-notices`), [CONTRIBUTING.md](CONTRIBUTING.md) |
 | Looking for cleanup work or known gaps | [Tech debt](docs/exec-plans/tech-debt-tracker.md), [quality score](docs/QUALITY_SCORE.md) |
 | Executing a tracked issue end to end | [harness-engineering.md](docs/process/harness-engineering.md), [milestone log](docs/progress/symphony-milestones.md) |
 

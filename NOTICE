@@ -1,0 +1,10 @@
+Vesper
+Copyright (c) 2026 Pravin Goomannee
+
+Licensed under the Business Source License 1.1 (see LICENSE). On the Change Date each version converts to the
+Apache License, Version 2.0.
+
+This product includes the Firecracker OpenAPI definition, Copyright 2017-2020 Amazon.com, Inc. or its affiliates,
+licensed under the Apache License, Version 2.0 (third_party/firecracker/LICENSE and third_party/firecracker/NOTICE).
+
+Third-party components and their licences are listed in THIRD_PARTY_NOTICES.md.

@@ -1,0 +1,38 @@
+name: Bug report
+description: Something does not work, or differs from Firecracker on Linux
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+      description: For a parity difference, say what Firecracker on Linux does at the pinned revision.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      render: shell
+    validations:
+      required: true
+  - type: input
+    id: commit
+    attributes:
+      label: Vesper commit
+      placeholder: git rev-parse HEAD
+    validations:
+      required: true
+  - type: input
+    id: host
+    attributes:
+      label: Mac model and macOS version
+      placeholder: e.g. MacBook Pro M3 Pro, macOS 27.0
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: vesperd output, run/systemvm/boot.log, or suite output.
+      render: text

@@ -27,6 +27,7 @@ of the GA API surface; they support development, CI, and tracker hygiene.
 ### Subdirectories
 
 - [ci](./ci/README.md): `validate-entitlements.sh` lints the two macOS entitlement plists (`make validate-entitlements`).
+- [licenses](./licenses/README.md): `third_party_notices.py` writes and checks `THIRD_PARTY_NOTICES.md` (`make third-party-notices`, `make third-party-notices-check`).
 - [harness](./harness/README.md): four Python sensors (`check_docs.py`, `check_structure.py`, `compute_quality_score.py`, `janitor_scan.py`) and two Bash bundle helpers (`init_issue_run.sh`, `collect_verification_bundle.sh`).
 - [macos](./macos/README.md): `dev-up.sh` / `dev-down.sh` build and run `vesperd` and `vesper-proxy` under `run/` (`make dev-up`, `make dev-down`); `build-vmlauncher.sh` builds and signs the Swift launcher (`make vmlauncher-build`).
 - [systemvm](./systemvm/README.md): `fetch-image.sh` (+ `unpack-zboot.py`), `build-image.sh`, `generate-launch-config.sh`, `boot-smoke.sh` wrap `cargo run --bin systemvmctl` and the launcher (`make systemvm-fetch`, `make systemvm-build`, `make systemvm-launch-config`, `make systemvm-boot-smoke`).
