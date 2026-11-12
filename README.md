@@ -115,9 +115,10 @@ Normative design references are `docs/specs/design-v0.md` and
 
 ## Global Side Effects
 
-- `vesperd` creates the parent directory of `--socket`
-  (default `/tmp/vesperd.sock`), removes any existing file there, binds a
-  `UnixListener`, and chmods it to `0o660`.
+- `vesperd` binds `--socket` (default `vesperd.sock` in an owner-only runtime directory (the first of `$XDG_RUNTIME_DIR/vesper`, `$TMPDIR/vesper` and `$HOME/.vesper/run`, created with mode 0700)) with mode
+  `0o600`. It refuses a directory writable by group or others, holds
+  `<socket>.lock` while it runs, refuses a path another process is serving or
+  that is not a socket, and removes only a stale socket (TD-050).
 - `vesper-proxy` and `proxy::run_server` bind the `--listen` Unix socket
   (default `/tmp/vesper/docker.sock`), remove a pre-existing socket file, and
   dial `unix://`, `tcp://`, or `vsock://<cid>:<port>` upstreams; the vsock

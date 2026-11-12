@@ -25,10 +25,10 @@ Vesper’s security model is part of its parity contract. Treat this file as the
 - `vesperd` is the public control-plane endpoint.
 - `vesper-proxy` may expose a host-visible socket only for the intended Docker or container runtime UX.
 - Raw Firecracker and raw containerd sockets stay private to the System VM.
-- Shipped defaults (`src/bin/vesperd.rs`, `src/bin/vesper-proxy.rs`): `vesperd` binds `/tmp/vesperd.sock` with mode
-  `0o660`; `vesper-proxy` listens on `/tmp/vesper/docker.sock` with mode `0o600` (`--listen-mode`) and dials
+- Shipped defaults (`src/bin/vesperd.rs`, `src/bin/vesper-proxy.rs`): `vesperd` binds `vesperd.sock` in an owner-only runtime directory (the first of `$XDG_RUNTIME_DIR/vesper`, `$TMPDIR/vesper` and `$HOME/.vesper/run`, created with mode 0700) with mode `0o600`, refuses a socket directory writable by group or others, and never removes a
+  socket another process is serving (TD-050, resolved 2026-11-12); `vesper-proxy` listens on `/tmp/vesper/docker.sock` with mode `0o600` (`--listen-mode`) and dials
   `vsock://3:2375`, which is bridged through a host Unix socket `/tmp/vesper/vsock/<cid>.sock` with a `CONNECT
-  <port>` preface. Those are world-writable temp directories; `make dev-up`, `make systemvm-up` and `make docker-up`
+  <port>` preface. The `vesper-proxy` defaults are world-writable temp directories; `make dev-up`, `make systemvm-up` and `make docker-up`
   use `run/` instead, and packaged builds must pass explicit paths.
 - Host-visible sockets with the System VM running (`make systemvm-up && make docker-up`), all under `run/` and
   owner-only: `run/vesper/docker.sock` (the Docker ingress, served by `vesper-proxy`) and `run/systemvm/vsock/3.sock`

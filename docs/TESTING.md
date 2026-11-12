@@ -17,6 +17,7 @@ the broader suite. `cargo test` was run successfully on 2026-11-05.
 | Unit | Yes | `#[cfg(test)]` modules in `src/*.rs`; API handler tests in `src/api/tests.rs` | Rust test harness, `tokio::test` for proxy, `tempfile` | `cargo test --lib` | nothing |
 | Component | Yes (router level) | `src/api/tests.rs`, `tests/api_contract.rs` drive the axum router with `tower::ServiceExt::oneshot` | Rust, `tower` | `cargo test --test api_contract` | nothing |
 | Integration | Partial | `tests/contract_golden.rs` loads the vendored swagger and golden JSON from disk | Rust | `cargo test --test contract_golden` | repo checkout |
+| Process (vesperd socket) | Yes | `tests/vesperd_socket.rs` starts the `vesperd` binary: owner-only default directory and socket, a second `vesperd` refused, a live or non-socket path never removed, a stale socket replaced, a shared directory refused (TD-050) | Rust | `cargo test --test vesperd_socket` | nothing |
 | Contract | Yes | `contractgen --mode check`, `tests/api_contract.rs`, generated matrix validation | Rust binaries | `make contract-test`, `make surface-matrix-check`, `make behavior-matrix-check` | nothing |
 | End-to-end | **Not implemented** | design-v0 describes Docker-replacement e2e; no code | n/a | n/a | a System VM launcher (TD-005) |
 | Performance | **Not implemented** | design-v0 describes regression and perf gates; no code | n/a | n/a | n/a |
