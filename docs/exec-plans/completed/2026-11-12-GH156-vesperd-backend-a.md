@@ -78,8 +78,8 @@ socket, sees `GET /` return `Running`, and shows that each teardown path leaves 
       and `/serial` pre-boot only, no minimum `guest_cid`, `PUT /cpu-config` not blocking a load, and `GET /vm/config`
       in Firecracker's shape (all 13 keys, `null` or `[]` when empty). Replay: model 170 of 170 applicable; Backend A
       156 match, 14 CE-0010, 3 not applicable.
-- [ ] Slice 6b: commit, push, CI green, GH #156 comment.
-- [ ] Owner approval of CE-0009 and CE-0010; then GH #156 can close.
+- [x] (2026-11-12) Slice 6b: merged as PR #182 (`e5895f6`), CI green, GH #156 updated.
+- [x] (2026-11-12) Owner approved CE-0009 and CE-0010 as written; GH #156 closed.
 
 ## Surprises & Discoveries
 
@@ -318,6 +318,15 @@ the reaper interval is the `vesper-vesperd-reaper` service's argument.
 | Default `memory.max`, measured | 640 MiB kept | Decision Log; measurements in Surprises and Outcomes. Per microVM, outside the cgroup: about 2.9 MiB RSS (0.6 MiB PSS) for the lease (socat and shell) and about 3.8 MiB RSS (1.2 MiB PSS) per open connection (socat and the chrooted socat); on the data disk, 44 MB of kernel and initramfs copies per jail (TD-056). | 5 |
 
 ## Outcomes & Retrospective
+
+Plan complete, 2026-11-12. All six slices merged (PRs #169, #171, #176, #177, #179, #181, #182), each with green
+CI. A Firecracker client can point at a `vesperd --backend systemvm` socket on macOS, configure, boot, pause,
+snapshot, load and stop a stock Firecracker v1.16.0 microVM, and get Firecracker's own responses. The behaviour matrix
+is now an executed oracle: 156 of its 173 cases match on Backend A, 14 need a network interface (CE-0010, TD-058) and
+3 are x86_64-only; the model matches all applicable cases in CI. Retrospective: the matrix had been written from
+reading source and was wrong in 35 places, which only running the real binary showed (D-026); the guest image
+lacked the balloon and virtio-mem drivers, which no earlier suite exercised. Open follow-ups: TD-053, TD-055 to
+TD-058, the Linux reference run (D-024).
 
 Slice 5, 2026-11-12, MacBook Pro M3 Pro, one System VM boot sequence from `make systemvm-overlay` on this branch,
 with `VESPER_SHARES=$PWD/run/vesperd-share` (`make data-disk-suite` reboots four times and leaves the last boot

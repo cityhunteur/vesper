@@ -51,7 +51,7 @@
 #                                             VSOCK default=denied|allowed … and VSOCK unconfined=… lines
 #        vesper-vesperd jail-stat|jail-read|jail-write ROOT PATH [BYTES]
 #                                             internal: the uid 20000 side of stage; refused for any other uid
-# Values (docs/exec-plans/active/2026-11-12-GH156-vesperd-backend-a.md gives the reason for each):
+# Values (docs/exec-plans/completed/2026-11-12-GH156-vesperd-backend-a.md gives the reason for each):
 set -u
 FC_DIR=/var/lib/vesper/firecracker
 FC=$FC_DIR/firecracker

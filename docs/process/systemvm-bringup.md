@@ -511,7 +511,7 @@ SIGKILL) and removes the jail, the cgroup `/sys/fs/cgroup/vesperd/<id>` and the 
 `FCAPI <id>` replies `OK` and relays bytes to the API socket. `VESPERD <args…>` runs the helper's inspection
 commands (`status`, `isolation`, `files`, `memory`, `list`, `log`, `reap`), `stage`, `store-list`, `store-rm`, and test hooks with the buffered reply of the other guest
 tools. The `vesper-vesperd-reaper` service runs a reaper pass every 10 s. Values and their reasons are in the
-[ExecPlan](../exec-plans/active/2026-11-12-GH156-vesperd-backend-a.md#values).
+[ExecPlan](../exec-plans/completed/2026-11-12-GH156-vesperd-backend-a.md#values).
 
 `make systemvm-launchapi-suite` (`systemvmctl control launchapi-suite`) boots a microVM through the API (`PUT
 /machine-config`, `PUT /boot-source`, `PUT /actions` `InstanceStart`) and checks `GET /` before and after, the
@@ -529,7 +529,7 @@ the bridge path and agent port from `build/systemvm/launch-config.json` (or `--b
 names the vendored swagger's `info.version` (1.16.0). `ERR busy <id>` is retried for 15 s, one reaper interval
 plus a teardown, then refused. It then binds the socket (0600) and relays each client connection over its own bridge
 connection (`CONNECT 1024`, the greeting, `FCAPI <id>`, `OK`) with `proxy::serve`. The bounds and their reasons are
-in the [ExecPlan](../exec-plans/active/2026-11-12-GH156-vesperd-backend-a.md#values); CE-0007 records what a client
+in the [ExecPlan](../exec-plans/completed/2026-11-12-GH156-vesperd-backend-a.md#values); CE-0007 records what a client
 can observe.
 
     make systemvm-up

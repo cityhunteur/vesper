@@ -12,7 +12,7 @@
 //! `vesperd`'s own failures are refused or closed connections with no body; every HTTP byte comes from Firecracker.
 //!
 //! The values and the reason for each are in the ExecPlan
-//! (`docs/exec-plans/active/2026-11-12-GH156-vesperd-backend-a.md`, Values); compat exception CE-0007 records the
+//! (`docs/exec-plans/completed/2026-11-12-GH156-vesperd-backend-a.md`, Values); compat exception CE-0007 records the
 //! ones a client can observe.
 
 use std::path::{Path, PathBuf};
