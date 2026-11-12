@@ -164,7 +164,7 @@ The overlay starts `networking` (`eth0` by DHCP), `containerd` and `dockerd` aft
 detached `vesper-services` unit, under OpenRC's `supervise-daemon`, with cgroup v2 mounted (`cgroups` in sysinit,
 `rc_cgroup_mode="unified"`); because the unit is detached, the login prompt (the boot-time measure) waits for
 neither DHCP nor the daemons, while the probe and `HEALTH` wait for `/run/vesper/services-ready`. The agent's `HEALTH` reports `containerd_ok` (`ctr version`) and `docker_ok` with the
-server version. `make systemvm-services-suite` (`systemvmctl control services-suite`) runs the GH #14 checklist
+server version. `make systemvm-services-suite` (`systemvmctl control services-suite`) checks that `vesper-services` loaded `tun` at boot (`/dev/net/tun`, reported as `tun` in `HEALTH`; GH #173), then runs the GH #14 checklist
 for each service: healthy at boot, `KILL` (SIGKILL), recovery judged by `HEALTH` within 60 s, and
 `/var/log/<svc>.log` plus `supervise-daemon` lines in `/var/log/messages` as evidence; it writes
 `run/systemvm/services-report.json`. On 2026-11-06 (M3): both recovered in under 600 ms; the login prompt stays

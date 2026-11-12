@@ -133,6 +133,14 @@ pub fn run_services_suite(
     let Some(mut session) = session else {
         return SuiteReport { bridge_path: endpoint.bridge_path.display().to_string(), port: endpoint.port, steps, passed: false };
     };
+    // TAP devices for microVM networks (TD-032) and the upstream suite (GH #173) need the tun module at boot.
+    step(&mut steps, "tun_loaded_at_boot", || {
+        let health = session.health()?;
+        match health.get("tun").and_then(|v| v.as_bool()) {
+            Some(true) => Ok(((), "/dev/net/tun exists after boot".to_string())),
+            _ => Err(format!("/dev/net/tun missing after boot; health {health}")),
+        }
+    });
     for service in services {
         let service = *service;
         let before = step(&mut steps, &format!("{service}_healthy_at_boot"), || {
@@ -171,7 +179,7 @@ pub fn run_services_suite(
             Ok(((), format!("{startups} startup lines in {service}.log, {respawns} supervise-daemon lines for {service} in messages")))
         });
     }
-    let passed = steps.iter().all(|s| s.ok) && steps.len() == 1 + services.len() * 4;
+    let passed = steps.iter().all(|s| s.ok) && steps.len() == 2 + services.len() * 4;
     SuiteReport { bridge_path: endpoint.bridge_path.display().to_string(), port: endpoint.port, steps, passed }
 }
 
