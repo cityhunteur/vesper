@@ -106,6 +106,8 @@ exceptions:
     expiry_date: "2027-03-31"
     target_release: parity-ga
     status: open
+    approved_by: cityhunteur
+    approved_on: "2026-11-12"
     description: >-
       vesperd --stage (ADR 0007 section 5, slice 5) hard-links a snapshot memory or vmstate file from the
       store into a fresh jail, owned by root and read-only, so that one store copy serves several restores
