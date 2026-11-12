@@ -1,0 +1,19 @@
+name: Feature request
+description: Propose a capability or a parity gap to close
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: Name the Firecracker route, behaviour or Docker workflow if it applies.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered

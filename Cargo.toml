@@ -2,6 +2,11 @@
 name = "vesper"
 version = "0.1.0"
 edition = "2024"
+description = "Firecracker-compatible microVM control plane for macOS on Apple silicon"
+license = "BUSL-1.1"
+repository = "https://github.com/cityhunteur/vesper"
+readme = "README.md"
+publish = false
 
 [dependencies]
 axum = "0.8"
