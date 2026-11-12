@@ -57,11 +57,10 @@ Not started.
 - Prior run: [GH #166 plan](../completed/2026-11-12-GH166-upstream-suite-trial.md), failure classes and the harness
   deviations. Its local helpers in `run/GH-166/` hold macOS paths and System VM workarounds and must not run on Linux.
 - Upstream: `tools/devtool`, `tests/README.md`, `tests/pytest.ini`, `.buildkite/pipeline_release_qa.py` at `d83d72b`.
-- Cloud: project `pg-lab-1`; Compute calls by short-lived impersonation of
-  `vesper-parity@pg-lab-1.iam.gserviceaccount.com` (role `roles/compute.instanceAdmin.v1`, project-wide) from Cloud
-  Shell under the owner's personal account. No keys, no API keys, never the local work identity. Budget
-  `4ff2f590-05cd-407a-b9f2-0bc0774c4fc0` (GBP 60, project filter, credits excluded, alerts 50/80/100 %) and the
-  account budget stay; neither stops a machine.
+- Cloud: the owner's lab project. Compute calls use short-lived impersonation of a dedicated service account
+  (role `roles/compute.instanceAdmin.v1`) from Cloud Shell under the owner's personal account; no keys, no API keys.
+  A project budget (GBP 60, credits excluded, alerts at 50/80/100 %) stays in place and does not stop a machine.
+  Project and account identifiers are kept outside the repository; `PROJECT` and `SA` below stand for them.
 
 ## Plan of Work
 
@@ -74,11 +73,11 @@ egress about 5 GB about $0.60; about $24.50 before tax, about $29.50 with 20 % V
 
 ## Concrete Steps
 
-A. In Cloud Shell (personal account), all with `--project=pg-lab-1 --impersonate-service-account=vesper-parity@pg-lab-1.iam.gserviceaccount.com`:
+A. In Cloud Shell (personal account), all with `--project=$PROJECT --impersonate-service-account=$SA`:
 
     gcloud auth list --filter=status:ACTIVE --format='value(account)'
     gcloud compute machine-types list --filter='name~c4a.*metal' --zones=europe-west4-a,europe-west4-b,europe-west4-c
-    gcloud alpha services quota list --service=compute.googleapis.com --consumer=projects/pg-lab-1 \
+    gcloud alpha services quota list --service=compute.googleapis.com --consumer=projects/$PROJECT \
         --filter='metric~C4A OR metric~CPUS_ALL_REGIONS'
 
   and verify the budget. Image: an arm64 image with the IDPF driver that bare metal requires (check the OS details
