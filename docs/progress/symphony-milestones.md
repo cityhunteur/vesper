@@ -6,6 +6,19 @@ last_reviewed: 2026-11-11
 
 # Symphony milestones
 
+### 2026-11-12 — GH-166 — upstream Firecracker suite in the System VM (feasibility)
+- GitHub issue: #166 (CE-0001); follow-ups #172, #173
+- PR: see the issue
+- Commit: see the issue
+- Phase: 2
+- Parity unit: none (time-boxed trial). Finds whether Firecracker's upstream integration suite can run against Backend A and how the D-014 pass set is produced
+- Result: keep
+- Verification bundle: none; evidence in `run/GH-166/` (local, not tracked), per-test table `results/combined-classified.tsv`
+- Council summary: not run (no product change)
+- Harness update: none in the repository; the trial's harness is to be scripted in GH #172
+- Remaining risks: 56 unexplained failures need a Linux aarch64 run (CE-0003) to classify; two 10-hour hangs show the per-test timeout does not work; `tun` is not loaded at boot (#173); no userfaultfd in the System VM kernel (TD-054)
+- Truthful project state after this milestone: the suite runs unmodified in the System VM at v1.16.0 and 755 of 980 selected tests pass; no committed Backend A run and no pass set exist yet, so the Phase 2 stage gate is still not met (CE-0001)
+
 ### 2026-11-11 — GH-159 — prototype of a share path into a microVM (outcome partial)
 - GitHub issue: #159 (TD-049); follow-up #160
 - PR: see the issue

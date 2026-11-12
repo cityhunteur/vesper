@@ -9,11 +9,15 @@ exceptions:
     approved_by: cityhunteur
     approved_on: "2026-11-08"
     description: >-
-      The upstream Firecracker pytest integration suite is not executed against Backend A yet; parity
-      confidence comes from the API conformance subset in vesper-fcparity (version, instance state, machine
-      and VM config, pause/resume, full snapshot while paused, deterministic 400 faults, SIGTERM stop) run
-      against the stock release binary inside the System VM. Resolve by running the upstream suite at the
-      pinned revision inside the System VM (the Phase 2 stage gate; decision D-014 defines the pass set).
+      The upstream Firecracker pytest integration suite has no pass set and no committed Backend A run.
+      A feasibility run on 2026-11-12 (GH #166) ran it unmodified in the System VM at the pinned v1.16.0:
+      755 of 980 functional and security tests passed, 96 skipped for architecture or kernel reasons, and
+      129 failed, errored or hung. Of those, 58 are environment (Apple virtual CPU cache topology, SSB
+      reporting, no userfaultfd in the Alpine kernel, no DMI, timing under nested virtualisation), 8 a test
+      assumption about the CPU model, 7 a harness gap, and 56 unexplained (52 a VMM memory overshoot of up to
+      0.84 MiB over the 5 MiB test threshold). Parity confidence otherwise comes from the vesper-fcparity
+      subset. Resolve by producing the pass set on Linux aarch64 (CE-0003), scripting the Backend A run with
+      a comparator (GH #172), and recording one exception per failure class (decision D-023).
   - id: CE-0002
     owner: cityhunteur
     issue: 21
