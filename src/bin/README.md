@@ -13,7 +13,7 @@ errors to stderr and exits with code 1 on failure.
 ## Interface
 
 - `vesperd.rs:main` (binary `vesperd`, `#[tokio::main]`). Flags: `--socket`
-  (default `/tmp/vesperd.sock`), `--baseline-lock`
+  (default `vesperd.sock` in `$XDG_RUNTIME_DIR/vesper`, `$TMPDIR/vesper` or `$HOME/.vesper/run`, mode 0700; socket 0600; `default_socket`, `claim_socket`), `--baseline-lock`
   (default `docs/specs/design-v0.baselines.lock.yaml`), `--swagger`
   (default `third_party/firecracker/firecracker.yaml`),
   `--surface-stub-matrix`

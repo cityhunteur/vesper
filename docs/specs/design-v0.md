@@ -558,7 +558,7 @@ The components on macOS must treat every byte from the System VM as untrusted (D
 * The `vesperd` API socket and the Docker-compatible socket are local endpoints restricted to their owner:
 
   * In the development loop both are Unix sockets under `run/`, restricted by file mode. **Meets the requirement** ([SECURITY.md](../SECURITY.md#trust-boundaries)).
-  * The shipped default of `vesperd`. **Not met** (TD-050): `/tmp/vesperd.sock` with mode 0660.
+  * The shipped default of `vesperd`. **Meets the requirement** (TD-050, resolved 2026-11-12): an owner-only socket (0600) in an owner-only runtime directory (0700).
 * Access attempts by another uid or gid are rejected and audited. **Not met** (TD-007): the kernel refuses them through the file mode; nothing in Vesper rejects or records them.
 * The vsock bridge limits what a client can reach, by a port allow-list or a check of the peer. **Not met** (TD-027). This gap closes before step 1 of [Next work](#next-work), because step 1 puts a relay to Firecracker behind the bridge (D-018).
 * Control messages are versioned and validated against a schema, and replies are bounded. **Not met** (TD-026): the protocol carries a version number only.
