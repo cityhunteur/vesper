@@ -124,6 +124,8 @@ exceptions:
     expiry_date: "2027-03-31"
     target_release: parity-ga
     status: open
+    approved_by: cityhunteur
+    approved_on: "2026-11-12"
     description: >-
       On vesperd --backend systemvm (ADR 0007), every path in an API request (kernel_image_path, initrd_path,
       path_on_host, snapshot_path, mem_backend.backend_path, mem_file_path, log_path, metrics_path,
@@ -141,6 +143,8 @@ exceptions:
     expiry_date: "2027-03-31"
     target_release: parity-ga
     status: open
+    approved_by: cityhunteur
+    approved_on: "2026-11-12"
     description: >-
       A vesperd microVM cannot have a network interface: PUT /network-interfaces/{iface_id} with any
       host_dev_name returns Firecracker's own 400 "Network config error: Could not create the network device:
