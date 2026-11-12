@@ -53,8 +53,18 @@ socket, sees `GET /` return `Running`, and shows that each teardown path leaves 
 - [x] (2026-11-12) Slice 4: `make systemvm-vesperd-suite` (`src/control/suites/vesperd.rs`), 18/18 on an M3 Pro;
       CE-0007; the parity baseline republished with CE-0007 open; regression suites pass (Outcomes).
 - [ ] Slice 4: commit, push, CI green, GH #156 comment with the SHA and both verifications (the lead commits).
-- [ ] Slice 5: chroot base `/var/lib/vesper/state/vesperd/jailer`, boot sweep, `vesperd-jail` user, `--stage`,
-      `vesperd stage`, `vesperd store`, the snapshot cycle, measured memory ceiling.
+- [x] (2026-11-12) Slice 5: chroot base `/var/lib/vesper/state/vesperd/jailer` and store
+      `/var/lib/vesper/state/vesperd/store` on the data disk, `LAUNCHAPI` refusing without it, the boot sweep in
+      `vesper-data mount`, the `vesperd-jail` user (`setup-user`, the reaper service's `start_pre`), `stage`,
+      `store-list`, `store-rm`, `files`, `memory` and the hooks `test-plant` and `test-reserve` in `vesper-vesperd`;
+      `vesper_mark=1` and `vesper_fill_mib=N` in the microVM init.
+- [x] (2026-11-12) Slice 5: `src/control/stage.rs` (forms, client calls), `vesperd --stage`, `vesperd stage`,
+      `vesperd store list|rm` (`src/bin/vesperd/stage.rs`), the `DATA status` check (the slice 4 deferral);
+      `tests/vesperd_systemvm.rs` 11 tests (5 new) against the fake agent.
+- [x] (2026-11-12) Slice 5: `make systemvm-snapshot-suite` (`src/control/suites/snapshot.rs`, 23 steps) and the
+      `make data-disk-suite` step `vesperd_store_survives_jails_swept`; CE-0008 opened, CE-0007 updated with the
+      measurement; regression suites and parity baseline (Outcomes).
+- [ ] Slice 5: commit, push, CI green, GH #156 comment with the SHA and both verifications (the lead commits).
 - [ ] Slice 6: behaviour-matrix replay through `vesperd` on Backend A.
 
 ## Surprises & Discoveries
@@ -111,12 +121,39 @@ socket, sees `GET /` return `Running`, and shows that each teardown path leaves 
   suite: `unexpected: run/vesperd-suite/kill.sock`. The suite now removes that stale file and checks that no socket
   is left in its directory; a later `vesperd` on the path would replace it (slice 1).
 
+- Observation: busybox `su -s /bin/sh vesperd-jail -c 'CMD' ARG0 ARGS` as root runs CMD as uid and gid 20000 for a
+  user whose shell is `/sbin/nologin` (an item the ADR left for slice 5); `$0` and `$@` carry the arguments, stdin and
+  stdout pass through, and the exit code is CMD's.
+  Evidence: in the System VM, `su -s /bin/sh vesperd-jail -c 'id; cat -- "$1"' a0 /etc/shadow` printed `uid=20000`
+  and `cat: can't open '/etc/shadow': Permission denied`, rc 1; `-c "exit 7"` gave rc 7.
+- Observation: a file staged into a running jail is visible to Firecracker, and links made before the jailer starts
+  are too (an item the ADR left for slice 5). Evidence: suite step `boot_with_both_drives`: `PUT /drives` of a file
+  staged at start and of one staged while Firecracker ran both return 204 (Firecracker opens the file there).
+- Observation: `link(2)` between the store and a jail works, since both are under the `/var/lib/vesper/state` bind
+  mount; `EXDEV` across mount points was not provoked, because the design never needs it. Evidence: step
+  `new_vesperd_stages_by_link` (`links=2`).
+- Observation: page cache of files a microVM writes is charged to its cgroup and reclaimed under `memory.max` (an item
+  the ADR left for slice 5). A `PUT /snapshot/create` of a 640 MiB guest with 512 MiB dirtied, under the 640 MiB
+  default, held `anon` at 608 MiB and drove `memory.current` to the limit while the kernel wrote back and reclaimed
+  the memory file's pages; it took 1.2 to 1.7 s and did not OOM. A guest that dirties past the limit (704 MiB guest,
+  600 MiB dirtied) is killed by the memcg OOM killer (`oom_memcg=/vesperd/meas-8`), and `vesperd` exits 1 when the
+  lease closes. Evidence: manual runs on 2026-11-12 (`memory ID` before and after) and suite step
+  `measure_create_at_default_ceiling`; `dmesg` for the OOM.
+- Observation: the guest's initramfs root is a tmpfs capped at half the guest's memory, so `vesper_fill_mib` writes
+  into a tmpfs of its own. A guest kernel with less than about 112 MiB left after the fill panics with "System is
+  deadlocked on memory" (512 MiB guest, 448 MiB fill). Evidence: manual runs on 2026-11-12.
+- Observation: Firecracker's memory file is written in full, not sparse: 256 MiB guest, 268435456 bytes; 640 MiB
+  guest, 671088640 bytes. Copying the 256 MiB file into the store as uid 20000 through a pipe took 0.73 to 0.93 s.
+- Observation: a restored guest on the serial console of the new microVM continues from the snapshot: the same
+  token, ticks 4 and 5 after tick 3, and the kernel's `random: crng reseeded due to virtual machine fork`.
+
 ## Decision Log
 
 - Decision: slice 3 keeps the chroot base for `vesperd` microVMs on tmpfs, at `/srv/vesperd`, apart from the
   shim's `/srv/jailer`. Rationale: the ADR's implementation table puts the data-disk base and the boot sweep in
   slice 5, with staging and snapshots, which are what need it; a tmpfs base needs no boot sweep. The jailer was
-  shown to work on the data disk (Surprises). Date/Author: 2026-11-12, slice 3 agent.
+  shown to work on the data disk (Surprises). Date/Author: 2026-11-12, slice 3 agent. Superseded by slice 5, which
+  moved the base to `/var/lib/vesper/state/vesperd/jailer`.
 - Decision: `FCAPI` runs `socat … UNIX-CONNECT:/run/firecracker.socket,chroot-early=<jail root>` rather than
   connecting to a path relative to the jail directory. Rationale: this answers the 108-byte `sun_path` limit, since
   the path inside the jail is 23 bytes whatever the chroot base and id (the slice 5 base with a 64-character id is
@@ -175,6 +212,61 @@ socket, sees `GET /` return `Running`, and shows that each teardown path leaves 
 - Decision: the `DATA status` check before start (ADR §5) is left to slice 5. Rationale: it guards the chroot base on
   the data disk, which slice 5 introduces; slice 4 jails are still in tmpfs. Date/Author: 2026-11-12, slice 4 agent.
 
+- Decision: the `stage` interfaces reach the System VM as `stage=SRC:DEST` tokens on `LAUNCHAPI` (for `--stage`)
+  and as `VESPERD stage|store-list|store-rm` (for `vesperd stage` and `vesperd store`), not as new verbs. Rationale:
+  `--stage` must run in the fresh jail before the jailer starts, which only `LAUNCHAPI` sees (the jail is created
+  under its lock); the running-microVM operations have the buffered reply shape that `VESPERD` already gives; no new
+  listener or host socket. The ADR named `MICROVM stage`; `vesper-microvm` is the shim's tool, so the `vesperd`
+  helper owns these. Date/Author: 2026-11-12, slice 5 agent.
+- Decision: `SRC:DEST` grammar. `SRC` is `share:/PATH`, `store:NAME` or `jail:/PATH`; `DEST` is `/PATH` or
+  `store:NAME`. Paths are absolute, of letters, digits and `._+,@=-` between single slashes, no `.` or `..`
+  component, at most 1024 bytes; names are 1 to 128 of the same characters without `/`, not starting with a dot.
+  Rationale: the agent splits its line on white space and expands globs, and `su -c` takes a shell string, so a
+  path must be one safe word; no colon in a path makes `SRC:DEST` unambiguous (the second colon ends `SRC`). A share
+  path with a space or a colon cannot be staged; copy it inside the share first. Date/Author: 2026-11-12, slice 5
+  agent.
+- Decision: `--stage` writes only into the jail and takes `share:` or `store:`; `vesperd stage` takes any `SRC`, any
+  `DEST`, refuses store to store and jail to jail, and needs `--id` only when a side is in the jail. Store files named
+  `*.mem` or `*.vmstate` are linked by `--stage`; everything else is copied. Rationale: the ADR links only the
+  snapshot memory and vmstate files, and the name is the one thing `--stage` can see; a writable drive named `*.mem`
+  is linked read-only and Firecracker then fails to open it for writing, which is safe. Date/Author: 2026-11-12, slice 5
+  agent.
+- Decision: neither form overwrites: a jail file is created with `set -C` (`O_EXCL`), and a store name that exists is
+  refused (`vesperd store rm` first). Rationale: `O_EXCL` also refuses a symlink as the last component, so no
+  overwrite path through a planted link exists; the store is shared, so silent replacement would surprise another
+  microVM's user. Date/Author: 2026-11-12, slice 5 agent.
+- Decision: jail-side work runs as uid 20000 by re-entering `vesper-vesperd` through `su` (`jail-stat`, `jail-read`,
+  `jail-write`, `jail-files`, each refused for any other uid), and the symlink checks of jail paths run there too.
+  Rationale: one copy of the checks; root never opens or walks a jail path. Root reads share files (after the
+  symlink check below the mount point) and store files. Date/Author: 2026-11-12, slice 5 agent.
+- Decision: the free-space reserve is the System VM's `MemTotal` (2 GiB) and is checked before every `stage` copy,
+  into the store or a jail, under the store lock with the copy itself. Rationale: the largest memory file one
+  microVM can write is its ceiling, at most `MemTotal`, so after any copy the disk still holds one more full
+  snapshot; the ext4 root reserve (5 %) stays for dockerd and containerd, which write as root. Copies into jails count
+  because they fill the same disk. Date/Author: 2026-11-12, slice 5 agent.
+- Decision: `--stage` copies run outside the `LAUNCHAPI` lock (the record, written before the jail, keeps the reaper
+  away), and `vesperd` waits 30 s plus 120 s for `READY` when it sends `stage=` tokens. Rationale: a copy of a large
+  drive must not block other launches and the reaper; the measured copy rate (about 270 MB/s) moves about 30 GiB in
+  120 s. Date/Author: 2026-11-12, slice 5 agent.
+- Decision: the boot sweep runs in `vesper-data mount`, after the bind mounts and only on a fresh mount; it removes
+  every jail without a record (none survives a boot, since records are in tmpfs) and every `.partial.*` store file.
+  Rationale: the disk is mounted in the background after networking, and `LAUNCHAPI` refuses until it is, so no
+  launch can race the sweep. Date/Author: 2026-11-12, slice 5 agent.
+- Decision: the default ceiling stays 640 MiB, and the per-request ceiling stays 120 s. Rationale: with jails on ext4
+  the memory file's page cache is reclaimable, so a 640 MiB guest with 512 MiB dirtied snapshots under the limit in
+  1.2 to 1.7 s (2.4 s worst seen, a 576 MiB guest); 120 s is about 50 times that, and lowering it would buy nothing
+  measurable. The 640 MiB default no longer needs to hold a memory file in tmpfs, so a larger guest fits than in
+  slice 4; the ceiling is still the shim's, and TD-056 holds the shared budget. Date/Author: 2026-11-12, slice 5
+  agent.
+- Decision: a separate `make systemvm-snapshot-suite` rather than more steps in the vesperd suite. Rationale: it
+  needs a share in the launch config, which the vesperd suite does not, and it runs in about 30 s while the vesperd
+  suite waits 2.5 min for its idle timeout; each suite keeps one precondition. The reboot proof is a step of `make
+  data-disk-suite`, which already reboots. Date/Author: 2026-11-12, slice 5 agent.
+- Decision: the observable guest state is a random token the guest keeps in memory and prints with a tick every
+  second on its serial console (`vesper_mark=1`); a restored guest must print the same token with later ticks.
+  Rationale: the token exists only in guest memory, so the new process can print it only from the snapshot; the
+  serial console is how the other suites observe the guest. Date/Author: 2026-11-12, slice 5 agent.
+
 ### Values
 
 Each value is set where it is used. The guest values are constants at the top of
@@ -190,7 +282,7 @@ the reaper interval is the `vesper-vesperd-reaper` service's argument.
 | Wait for the API socket after the jailer starts | 10 s | The socket appeared 0.2 s after the jailer started (cached kernel and initramfs); the first launch after boot, which builds them, took 1.4 s in total. | 3 |
 | Stop grace, SIGTERM to SIGKILL | 3 s | A teardown took about 0.5 s; an unconfigured or idle Firecracker exits on SIGTERM at once. The lock is held during teardown, so the grace bounds how long other launches wait. | 3 |
 | Lease poll | 1 s | Firecracker's exit and the client's end of file are noticed within 1 s (measured: the lease closed 1015 ms after Firecracker was killed). Each poll forks `timeout` and `head`. | 3 |
-| Default `memory.max` (`LAUNCHAPI` ceiling) | 671088640 bytes (640 MiB), accepted range 128 MiB to the System VM's `MemTotal` | The shim's value, which leaves room for a 256 MiB guest and a full snapshot's memory file in a tmpfs jail. The ADR measures the default in slice 5. | 3; measured in 5 |
+| Default `memory.max` (`LAUNCHAPI` ceiling) | 671088640 bytes (640 MiB), accepted range 128 MiB to the System VM's `MemTotal` | The shim's value. Slice 5 measured it with jails on the data disk and kept it (Decision Log). | 3; measured in 5 |
 | `pids.max` | 256 | The shim's value. | 3 |
 | `sun_path` over 108 bytes | `FCAPI` chroots socat into the jail root (`chroot-early`) and connects to `/run/firecracker.socket` | See the Decision Log. | 3 |
 | Line limit of the host client | 8 KiB per line; 1 MiB per HTTP body in the suite's helper | `READY`, `OK` and `ERR` are short fixed forms; Firecracker's bodies are a few KiB. The agent discards what a client writes on a lease, so the lease buffers nothing. | 3 (suite); `vesperd`'s own limits in 4 |
@@ -199,13 +291,41 @@ the reaper interval is the `vesper-vesperd-reaper` service's argument.
 | Line limit for greeting, `OK`, `READY` and `ERR` | 1 KiB | The longest is `READY` with a 64-character id, about 120 bytes. | 4 |
 | Relay read buffer | 8 KiB per direction | The size `copy_bidirectional` uses for `vesper-proxy`; Firecracker's request bodies are at most 51200 bytes. There is no total byte limit; a 4 MiB transfer passes in the unit tests. | 4 |
 | Idle timeout | 120 s | Firecracker has none (Surprises), so any value is a difference (CE-0007); a client that reconnects is unaffected. Each open connection holds an agent shell and a socat in the System VM; 120 s frees them after a client stops using them, and is above common HTTP client idle pools (Go's 90 s). Measured: closed after 120000 ms with no bytes. | 4 |
-| Per-request ceiling | 120 s | The slowest measured synchronous operation is `PUT /snapshot/create` of a 512 MiB guest, 223 ms (Surprises); `InstanceStart` took 7 to 27 ms. 120 s is over 500 times that, to cover guests with dirty memory and the data-disk jails of slice 5, which were not measured. Slice 5 measures again at its memory ceiling. | 4; measured again in 5 |
+| Per-request ceiling | 120 s | Slice 4: `PUT /snapshot/create` of a 512 MiB guest that touched little memory, on tmpfs, 223 ms. Slice 5, jails on the data disk, guest memory dirtied with `vesper_fill_mib`, default 640 MiB `memory.max`: 256 MiB guest 156 to 309 ms; 512 MiB guest with 400 MiB dirtied 1.24 s; 576/464 2.44 s; 608/480 1.32 s; 640/512 1.25 to 1.75 s. 120 s is about 50 times the slowest; kept (Decision Log). | 4; measured again in 5 |
 | Connection cap | 16 per `vesperd` | Decision Log. Three default-size microVMs (the most the System VM holds at 640 MiB) need 3 × (16 + 1 lease) = 51 agent handlers, under `max-children` 64. | 4 |
 | Reused-id wait (`ERR busy` retries) | 15 s, retried every 1 s, then refuse | ADR §4: at least one reaper interval (10 s), plus a teardown (3 s grace and removal). Measured: refused after 15.2 s while the first `vesperd` kept serving. | 4 |
 | Teardown wait after closing the lease | 20 s | A teardown took 8 to 56 ms through `vesperd` and about 0.5 s in slice 3; 20 s is the slice 3 suite's `TEARDOWN_TIMEOUT`. Past it `vesperd` exits 1 with a message. | 4 |
-| `stage` checks, store free-space reserve | not set | Staging and the store are slice 5. | 5 |
+| `stage` path and name forms | absolute paths of `[A-Za-z0-9._+,@=-]` between single slashes, no `.` or `..`, at most 1024 bytes; store names of the same characters, 1 to 128, no leading dot | Decision Log. | 5 |
+| `stage=` tokens per `LAUNCHAPI` | 16 | A snapshot needs two files plus its drives; 16 keeps the `LAUNCHAPI` line under about 33 KiB. | 5 |
+| Store free-space reserve | the System VM's `MemTotal` (2068926464 bytes today); `test-reserve` overrides it until reboot | Decision Log. | 5 |
+| `READY` wait with `--stage` | 30 s + 120 s | Decision Log. | 5 |
+| `vesperd stage` and `vesperd store` read timeout | 600 s | The agent replies after the copy; the slowest measured copy (256 MiB) took under 1 s. | 5 |
+| `DATA status` reply | at most 4 lines of 1 KiB, 5 s per read | `vesper-data status` prints one line. | 5 |
+| Default `memory.max`, measured | 640 MiB kept | Decision Log; measurements in Surprises and Outcomes. Per microVM, outside the cgroup: about 2.9 MiB RSS (0.6 MiB PSS) for the lease (socat and shell) and about 3.8 MiB RSS (1.2 MiB PSS) per open connection (socat and the chrooted socat); on the data disk, 44 MB of kernel and initramfs copies per jail (TD-056). | 5 |
 
 ## Outcomes & Retrospective
+
+Slice 5, 2026-11-12, MacBook Pro M3 Pro, one System VM boot sequence from `make systemvm-overlay` on this branch,
+with `VESPER_SHARES=$PWD/run/vesperd-share` (`make data-disk-suite` reboots four times and leaves the last boot
+running; every other suite ran on that last boot):
+
+| Check | Result |
+|---|---|
+| `cargo test` | 302 passed, 0 failed: 162 library unit tests (4 new in `control::stage`), `api_contract` 122, `contract_golden` 1, `vesperd_socket` 6, `vesperd_systemvm` 11 (5 new); contract, matrix, entitlement, `compatexctl`, `check_docs.py` and `check_structure.py` (no errors) pass |
+| `make data-disk-suite` | 10/10, including the new `vesperd_store_survives_jails_swept` |
+| `make systemvm-launchapi-suite` | 20/20 |
+| `make systemvm-vesperd-suite` | 18/18 |
+| `make systemvm-snapshot-suite` (new) | 23/23 (also 23/23 on an earlier boot); the 640 MiB create took 1.2 to 1.7 s |
+| `make ctr-conformance` | 74/74 |
+| `make docker-conformance` | 26/26 |
+| `make systemvm-parity-baseline PARITY_FLAGS=--publish` | passed; `docs/specs/backend-a-parity-baseline.json` lists CE-0008; `make parity-baseline-check` valid |
+
+Gaps left by slice 5: `run_snapshot_suite` has no fake-agent unit test; the TOCTOU between a jail-side check and its
+open is closed only by uid 20000's rights, and whether Firecracker's seccomp filter lets it create symlinks is not
+checked; share files are read as root; the reserve is not checked before Firecracker's own snapshot writes and does
+not see the macOS volume's free space (TD-053); a share path with a space or a colon cannot be staged; the
+create-over-link refusal (CE-0008) has no owner approval yet; no compat exception records that request paths are jail
+paths (the ADR lists it among the exceptions before a parity claim); `EXDEV` across mounts was not provoked.
 
 Slice 4, 2026-11-12, MacBook Pro M3 Pro, macOS 27.0.1, one System VM boot from `make systemvm-overlay` (unchanged
 in slice 4) on this branch:
@@ -227,7 +347,7 @@ Gaps left by slice 4: the per-request ceiling is set from a guest that touches l
 Firecracker closes connections past its 10 at once; the agent's `max-children` (64) is shared by every `vesperd`, so
 more than three microVMs with full connection pools can make new connections wait and then be closed; the version
 mismatch and the `ERR busy` retry are proven only against the fake agent; `run_vesperd_suite` has no fake-agent unit
-test (the slice 3 suite has one); the `DATA status` check is slice 5.
+test (the slice 3 suite has one); the `DATA status` check is slice 5 (done there).
 
 Slice 3, 2026-11-12, MacBook Pro M3 Pro, macOS 27.0, System VM from `make systemvm-overlay` on this branch:
 
@@ -314,7 +434,26 @@ Slice 4, in the order it was built:
    `make systemvm-vesperd-suite`.
 4. CE-0007; the parity baseline republished; the documentation listed under Validation and Acceptance.
 
-Slices 5 and 6 follow the ADR's table; each gets its own section in this plan when it starts.
+Slice 5, in the order it was built:
+
+1. `vesper-vesperd`: `BASE` and `STORE` under `/var/lib/vesper/state/vesperd`; `data_ok` and `data_dirs` (`LAUNCHAPI`
+   refuses without the data disk); `setup-user` and `user_ok`; the staging block (`valid_path`, `valid_name`,
+   `share_file`, `store_file`, `jail_guard`, `jail_walk`, `jail-stat`, `jail-read`, `jail-write`, `copy_one`,
+   `stage_forms`, `stage`, `launch_stage`, `reserve_check`, the store lock); `store-list`, `store-rm`, `sweep`,
+   `files`, `memory`, `test-plant`, `test-reserve`; `launch` parses `[ceiling] [stage=…]…` and stages into the fresh
+   jail between the kernel copy and the jailer. `vesper-data mount` runs `sweep`; the reaper service's `start_pre`
+   runs `setup-user`; `vesper-microvm-init` gains `vesper_fill_mib` and `vesper_mark`; `vesper-agent`'s header.
+2. `src/control/stage.rs` (registered in `check_structure.py`): the forms and `Session::stage`, `store_list`,
+   `store_rm`. `src/bin/vesperd.rs`: the `stage` and `store` subcommands, `--stage`, global connection flags.
+   `src/bin/vesperd/stage.rs`: the subcommands. `src/bin/vesperd/systemvm.rs`: `bridge_and_port`, `check_data_disk`,
+   `launch_request`, the longer `READY` wait.
+3. `tests/vesperd_systemvm.rs`: the fake agent answers `DATA status` and `VESPERD`, and records every request.
+4. `src/control/suites/snapshot.rs` (registered), `systemvmctl control snapshot-suite`, `make systemvm-up-snapshot`
+   and `make systemvm-snapshot-suite`; the vesperd suite's helpers became `pub(super)` with `spawn_with` and
+   `start_with`. `scripts/systemvm/data-disk-suite.sh`: step `vesperd_store_survives_jails_swept`.
+5. CE-0008, CE-0007's text, the parity baseline, and the documents listed under Validation and Acceptance.
+
+Slice 6 follows the ADR's table and gets its own section when it starts.
 
 ## Concrete Steps
 
@@ -341,8 +480,18 @@ Slice 4:
     make systemvm-launchapi-suite ctr-conformance
     make docker-up && make docker-conformance
 
+Slice 5 (the share must be in the launch config; `make data-disk-suite` keeps `VESPER_SHARES` for its reboots):
+
+    export VESPER_SHARES="$PWD/run/vesperd-share"
+    make systemvm-up-snapshot && make docker-up
+    make data-disk-suite               # includes vesperd_store_survives_jails_swept
+    make systemvm-snapshot-suite
+    # ok   guest_state_survives: the guest kept token … in memory and counts on: tick 3 before the snapshot, …
+    # snapshot suite passed (report: run/systemvm/snapshot-report.json)
+    make systemvm-launchapi-suite systemvm-vesperd-suite ctr-conformance docker-conformance
+
 Single commands for diagnosis: `cargo run --bin systemvmctl -- control vesperd list|status ID|isolation ID|log ID
-|reap`.
+|reap|files ID|memory ID|store-list`, `cargo run --bin vesperd -- store list`.
 
 ## Validation and Acceptance
 
@@ -369,6 +518,14 @@ checks report no errors. The owning documents are `src/README.md`, `src/bin/READ
 `docs/TESTING.md`, `docs/process/systemvm-bringup.md`, `ARCHITECTURE.md`, design-v0 and the tech-debt rows TD-045 and
 TD-048.
 
+Slice 5 is accepted when `cargo test` passes (including `control::stage` and the 11 tests of
+`tests/vesperd_systemvm.rs`), `make systemvm-snapshot-suite` reports 23 of 23 and `passed: true` in
+`run/systemvm/snapshot-report.json`, `make data-disk-suite` passes with `vesperd_store_survives_jails_swept`, the slice
+3 and 4 suites, `make ctr-conformance` (74/74) and `make docker-conformance` still pass on the same boot,
+`compatexctl` accepts CE-0008, the parity baseline is republished and valid, and both harness checks report no
+errors. The owning documents are those of slice 4, `systemvm/overlay/README.md`, `scripts/systemvm/README.md` and the
+tech-debt rows TD-025, TD-045, TD-053 and TD-056.
+
 ## Idempotence and Recovery
 
 Every suite step starts by ageing and reaping leftovers of its own ids, so the suite can be rerun after a failure.
@@ -376,6 +533,12 @@ Every suite step starts by ageing and reaping leftovers of its own ids, so the s
 removed with `control vesperd kill-holder ID` and the next reaper pass, or with `test-age ID 3600` and `reap` for a
 jail without a record. `make systemvm-down` removes everything, because the slice 3 jails, records and logs are in
 tmpfs. Rolling back slice 3 is reverting its commit and rebuilding the overlay; nothing persistent changes.
+
+Since slice 5 the jails and the store are on the data disk. A reboot (`make systemvm-down && make systemvm-up`)
+removes every jail; store files stay until `vesperd store rm NAME`. The snapshot suite removes its own store names
+at start and end, and clears its reserve override (`test-reserve clear`; a reboot clears it too). Rolling back slice
+5 leaves `/var/lib/vesper/state/vesperd` on the disk; remove it with `vesperd store rm` for each file before
+reverting, or delete the directory from the System VM.
 
 ## Artifacts and Notes
 
@@ -419,5 +582,36 @@ read_line_bounded, write_line}`; `ServerConfig { …, preface: Option<Preface>, 
 [--swagger] [--vesperd] [--workdir]`. No new crates; no guest change. No new crates, no
 new guest packages: the guest side uses busybox `sh`, `flock`, `setsid`, `timeout`, `pgrep -u`, `stat`, `touch -d`
 and the pinned socat 1.8.1.3.
+
+Slice 5 interfaces, exactly as built:
+
+    vesperd --backend systemvm --id ID [--stage SRC:DEST]...   SRC share:/PATH | store:NAME; DEST /PATH (at most 16)
+    vesperd stage [--id ID] SRC DEST                             SRC share:/PATH | store:NAME | jail:/PATH;
+                                                                 DEST /PATH | store:NAME
+    vesperd store list                                           STORE NAME bytes=N links=L …, FREE avail=N reserve=N
+    vesperd store rm NAME                                        REMOVED NAME
+    exit codes of stage and store: 0 done; 1 refused or failed in the System VM, or unreachable; 2 a bad form,
+    refused before connecting (`vesperd stage: <reason>` on stderr)
+
+    LAUNCHAPI <id> [ceiling] [stage=SRC:DEST]...  -> as slice 3; new ERR reasons: `data disk not in use`, `no
+                                                     vesperd-jail user`, `at most 16 stage= tokens`, `usage: …`,
+                                                     `stage SRC:DEST: <reason>`
+    VESPERD stage ID|- SRC DEST  -> STAGED SRC DEST copy bytes=N | ERR <reason>
+    VESPERD store-list           -> STORE NAME bytes=N links=L lines, then FREE avail=N reserve=N
+    VESPERD store-rm NAME        -> REMOVED NAME | ERR no store file NAME
+    VESPERD sweep|setup-user|files ID|memory ID|test-plant ID|test-reserve BYTES|clear
+
+`stage` reasons, each prefixed `ERR`: `usage: stage ID|- SRC DEST`, `bad SRC …`, `bad DEST …`, `store to store is
+not a stage`, `jail to jail is not a stage`, `bad id`, `no vesperd microVM ID`, `no jail for ID`, `no vesperd-jail
+user`, `data disk not in use`, `PATH is not inside a configured share`, `PATH: symlink at PATH`, `PATH: … is not a
+directory`, `PATH is not a regular file`, `no store file NAME`, `symlink at /P` (jail side), `/P is not a regular
+file`, `/P exists`, `/P: permission denied for uid 20000`, `store:NAME exists`, `reserve: copying N bytes would
+leave A of the R-byte free-space reserve (avail V)`, `copied N of M bytes from SRC`.
+
+Rust: `vesper::control::{StageSource, StageDest, StageSpec, StoreEntry, valid_stage_path, valid_store_name,
+check_pair, needs_id, parse_store_list, data_disk_in_use, MAX_STAGES, MAX_STAGE_PATH, MAX_STORE_NAME}`,
+`Session::{stage, store_list, store_rm}`, `run_snapshot_suite`, `SnapshotRun`, `prepare_workdir`. No new crates, no
+new guest packages: the guest side adds busybox `su`, `addgroup`, `adduser`, `head -c`, `stat -c`, `find -xdev`,
+`ln`, `df -k` and `set -C`, all in Alpine 3.22's busybox 1.37.0.
 
 Tech-debt rows opened with this plan (ADR 0007 "on acceptance"): TD-056 (no shared memory budget across the two owners), TD-057 (no reattach). The third the ADR names, no network interfaces on `vesperd` microVMs, is covered by TD-032 (no microVM has a network device).

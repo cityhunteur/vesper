@@ -90,12 +90,29 @@ exceptions:
       waiting is closed, with no bytes, after 120 s without a byte; Firecracker keeps an idle connection
       open (micro_http has no idle timeout; measured: a direct connection still answered after 125 s).
       (2) A connection whose request has had no reply byte for 120 s is closed with no bytes; Firecracker
-      answers however long the operation takes (the slowest measured, PUT /snapshot/create of a 512 MiB
-      guest, took 223 ms). vesperd infers which side spoke last, so pipelined requests can hit the ceiling
+      answers however long the operation takes (the slowest measured, PUT /snapshot/create of a 640 MiB
+      guest with 512 MiB of it dirtied, under the default 640 MiB memory.max and onto the data disk, took
+      1.2 to 2.4 s; slice 5). vesperd infers which side spoke last, so pipelined requests can hit the ceiling
       or escape the idle timeout. (3) More than 16 concurrent connections are closed at once with no bytes;
       Firecracker accepts 10 and answers the 11th to 16th with its own 503 "Too many open connections",
       which vesperd passes through. (4) vesperd's own failures are connection-level: when the bridge, the
       agent or FCAPI fails or does not answer within 5 s, the client connection is closed with no bytes
       where Firecracker would have answered. Every HTTP byte on the socket is Firecracker's own. Resolve
-      by measuring the slowest operation at the slice 5 memory ceiling and confirming or removing each
-      bound at the parity-GA review.
+      by confirming or removing each bound at the parity-GA review; the 120 s ceiling is about 50 times
+      the slowest create measured at the default memory ceiling.
+  - id: CE-0008
+    owner: cityhunteur
+    issue: 156
+    expiry_date: "2027-03-31"
+    target_release: parity-ga
+    status: open
+    description: >-
+      vesperd --stage (ADR 0007 section 5, slice 5) hard-links a snapshot memory or vmstate file from the
+      store into a fresh jail, owned by root and read-only, so that one store copy serves several restores
+      and a microVM cannot change it. Firecracker's PUT /snapshot/create opens its targets for writing with
+      truncation (src/vmm/src/persist.rs at the pinned v1.16.0), so a create onto such a linked path fails
+      with Firecracker's own 400 "Cannot perform open on the snapshot backing file: Permission denied (os
+      error 13)" (or "memory backing file"), where upstream would overwrite the file. A create onto any other
+      path in the jail behaves as upstream. Measured by make systemvm-snapshot-suite, step
+      create_onto_linked_file_fails. Resolve by accepting it at the parity-GA review (a client writes a new
+      snapshot to new paths), or by copying instead of linking.

@@ -1,6 +1,7 @@
 //! `vesperd --backend systemvm` against a fake bridge and agent (ADR 0007 slice 4). These tests start the real binary:
 //! the `LAUNCHAPI` lease, the version check against the pinned swagger, the `FCAPI` relay, the lease closing from
-//! the System VM side, and SIGTERM closing the lease.
+//! the System VM side, and SIGTERM closing the lease. Slice 5 adds the `DATA status` check before the launch,
+//! `--stage` tokens on `LAUNCHAPI`, and `vesperd stage` and `vesperd store`, each refused locally for a bad form.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::fs::PermissionsExt;
@@ -27,6 +28,10 @@ struct Agent {
     /// Set by the agent when the client (vesperd) closed the lease.
     client_closed_lease: bool,
     launches: u32,
+    /// The state in `DATA status`; empty means `mounted`.
+    data: String,
+    /// Every line after the greeting, in order.
+    requests: Vec<String>,
 }
 
 fn fake_agent(dir: &Path, version: &str) -> (PathBuf, Arc<Mutex<Agent>>) {
@@ -57,7 +62,25 @@ fn serve_one(stream: UnixStream, agent: Arc<Mutex<Agent>>) {
     if reader.read_line(&mut line).unwrap_or(0) == 0 {
         return;
     }
-    if line == "LAUNCHAPI vm-1\n" {
+    agent.lock().unwrap().requests.push(line.trim_end().to_string());
+    if line == "DATA status\n" {
+        let state = agent.lock().unwrap().data.clone();
+        let state = if state.is_empty() { "mounted /dev/vdb used=1 avail=2".to_string() } else { state };
+        let _ = writer.write_all(format!("DATA 0 1\nDATA {state}\n").as_bytes());
+        return;
+    }
+    if let Some(args) = line.trim_end().strip_prefix("VESPERD ") {
+        let reply = match args.split(' ').collect::<Vec<_>>().as_slice() {
+            ["stage", "vm-1", src, dest] => format!("VESPERD 0 1\nSTAGED {src} {dest} copy bytes=7\n"),
+            ["stage", _, _, _] => "VESPERD 1 1\nERR no vesperd microVM\n".to_string(),
+            ["store-list"] => "VESPERD 0 2\nSTORE a.mem bytes=7 links=1\nFREE avail=100 reserve=50\n".to_string(),
+            ["store-rm", "a.mem"] => "VESPERD 0 1\nREMOVED a.mem\n".to_string(),
+            _ => "VESPERD 1 1\nERR no store file\n".to_string(),
+        };
+        let _ = writer.write_all(reply.as_bytes());
+        return;
+    }
+    if line.starts_with("LAUNCHAPI vm-1") {
         let version = {
             let mut a = agent.lock().unwrap();
             a.launches += 1;
@@ -284,4 +307,107 @@ fn bad_arguments_are_refused() {
     assert!(run(&["--backend", "systemvm", "--bridge", "x/3.sock"]).contains("needs --id"));
     assert!(run(&["--backend", "systemvm", "--id", "../x", "--bridge", "x/3.sock"]).contains("letters, digits and hyphens"));
     assert!(run(&["--id", "vm-1"]).contains("apply to --backend systemvm"));
+}
+
+fn cli(dir: &Path, bridge: &Path, args: &[&str]) -> (i32, String, String) {
+    let out = Command::new(env!("CARGO_BIN_EXE_vesperd"))
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .args(args)
+        .arg("--bridge")
+        .arg(bridge)
+        .env("XDG_RUNTIME_DIR", dir)
+        .output()
+        .unwrap();
+    (out.status.code().unwrap_or(-1), String::from_utf8_lossy(&out.stdout).into_owned(), String::from_utf8_lossy(&out.stderr).into_owned())
+}
+
+#[test]
+fn a_data_disk_not_in_use_is_refused_before_any_launch() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (bridge, agent) = fake_agent(tmp.path(), "1.16.0");
+    agent.lock().unwrap().data = "absent".to_string();
+    let mut v = spawn(tmp.path(), &bridge, &[]);
+    let (status, err) = wait_exit(&mut v, Duration::from_secs(10));
+    assert!(!status.success());
+    assert!(err.contains("data disk is not in use (DATA absent)"), "stderr: {err}");
+    let a = agent.lock().unwrap();
+    assert_eq!((a.launches, a.requests.as_slice()), (0, &["DATA status".to_string()][..]), "no LAUNCHAPI without the data disk");
+    assert!(!v.socket.exists());
+}
+
+#[test]
+fn stage_flags_ride_on_launchapi_in_order() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (bridge, agent) = fake_agent(tmp.path(), "1.16.0");
+    let v = spawn(
+        tmp.path(),
+        &bridge,
+        &["--memory-max", "268435456", "--stage", "store:a.mem:/snap.mem", "--stage", "share:/Users/me/vm/d.img:/d.img"],
+    );
+    wait_listening(&v);
+    let a = agent.lock().unwrap();
+    assert_eq!(a.requests[0], "DATA status");
+    assert_eq!(a.requests[1], "LAUNCHAPI vm-1 268435456 stage=store:a.mem:/snap.mem stage=share:/Users/me/vm/d.img:/d.img");
+}
+
+#[test]
+fn a_bad_stage_flag_launches_nothing() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (bridge, agent) = fake_agent(tmp.path(), "1.16.0");
+    for (flag, why) in [
+        ("share:/Users/me/../etc/shadow:/x", "no . or .. component"),
+        ("jail:/a:/b", "need a running microVM"),
+        ("store:a.mem:store:b", "--stage writes into the jail"),
+        ("store:a.mem", "use SRC:DEST"),
+    ] {
+        let mut v = spawn(tmp.path(), &bridge, &["--stage", flag]);
+        let (status, err) = wait_exit(&mut v, Duration::from_secs(10));
+        assert!(!status.success() && err.contains(why), "{flag}: {err}");
+    }
+    let many: Vec<&str> = std::iter::repeat(["--stage", "store:a.mem:/a.mem"]).take(17).flatten().collect();
+    let mut v = spawn(tmp.path(), &bridge, &many);
+    let (status, err) = wait_exit(&mut v, Duration::from_secs(10));
+    assert!(!status.success() && err.contains("at most 16"), "{err}");
+    assert!(agent.lock().unwrap().requests.is_empty(), "nothing reaches the agent");
+}
+
+#[test]
+fn stage_and_store_subcommands_send_one_vesperd_line() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (bridge, agent) = fake_agent(tmp.path(), "1.16.0");
+    let (code, out, err) = cli(tmp.path(), &bridge, &["stage", "--id", "vm-1", "jail:/snap.mem", "store:a.mem"]);
+    assert_eq!((code, out.as_str()), (0, "STAGED jail:/snap.mem store:a.mem copy bytes=7\n"), "{err}");
+    let (code, _, err) = cli(tmp.path(), &bridge, &["stage", "--id", "vm-2", "store:a.mem", "/a.mem"]);
+    assert_eq!(code, 1, "a refusal in the System VM exits 1");
+    assert!(err.contains("vesperd stage: no vesperd microVM"), "{err}");
+    let (code, out, _) = cli(tmp.path(), &bridge, &["store", "list"]);
+    assert_eq!((code, out.as_str()), (0, "STORE a.mem bytes=7 links=1\nFREE avail=100 reserve=50\n"));
+    let (code, out, _) = cli(tmp.path(), &bridge, &["store", "rm", "a.mem"]);
+    assert_eq!((code, out.as_str()), (0, "REMOVED a.mem\n"));
+    let (code, _, err) = cli(tmp.path(), &bridge, &["store", "rm", "b"]);
+    assert!(code == 1 && err.contains("no store file"), "{err}");
+    assert_eq!(
+        agent.lock().unwrap().requests,
+        ["VESPERD stage vm-1 jail:/snap.mem store:a.mem", "VESPERD stage vm-2 store:a.mem /a.mem", "VESPERD store-list", "VESPERD store-rm a.mem", "VESPERD store-rm b"]
+    );
+}
+
+#[test]
+fn bad_stage_and_store_arguments_never_reach_the_agent() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (bridge, agent) = fake_agent(tmp.path(), "1.16.0");
+    for (args, why) in [
+        (&["stage", "store:a.mem", "/a.mem"][..], "pass --id"),
+        (&["stage", "--id", "../x", "store:a", "/a"][..], "letters, digits and hyphens"),
+        (&["stage", "--id", "vm-1", "store:a", "store:b"][..], "store to store"),
+        (&["stage", "--id", "vm-1", "jail:/a", "/b"][..], "jail to jail"),
+        (&["stage", "--id", "vm-1", "share:/a b", "/b"][..], "bad SRC"),
+        (&["stage", "--id", "vm-1", "share:/a", "relative"][..], "bad DEST"),
+        (&["store", "rm", ".partial.1"][..], "bad store name"),
+        (&["--backend", "systemvm", "store", "list"][..], "do not apply here"),
+    ] {
+        let (code, _, err) = cli(tmp.path(), &bridge, args);
+        assert!(code == 2 && err.contains(why), "{args:?}: exit {code}: {err}");
+    }
+    assert!(agent.lock().unwrap().requests.is_empty());
 }

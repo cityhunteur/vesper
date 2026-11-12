@@ -22,9 +22,9 @@ pub const VESPERD_REQUEST_CEILING: Duration = Duration::from_secs(120);
 /// `vesperd`'s wait on `ERR busy` before it refuses a reused id.
 const REUSE_WAIT: Duration = Duration::from_secs(15);
 /// The first launch after boot builds the microVM kernel and initramfs.
-const START_TIMEOUT: Duration = Duration::from_secs(60);
-const TEARDOWN_TIMEOUT: Duration = Duration::from_secs(30);
-const BOOT_ARGS: &str = "console=ttyS0 reboot=k panic=1 pci=off rdinit=/init";
+pub(super) const START_TIMEOUT: Duration = Duration::from_secs(60);
+pub(super) const TEARDOWN_TIMEOUT: Duration = Duration::from_secs(30);
+pub(super) const BOOT_ARGS: &str = "console=ttyS0 reboot=k panic=1 pci=off rdinit=/init";
 /// micro_http's reply to a connection beyond its 10 (`SERVER_FULL_ERROR_MESSAGE`, micro-http 876f3fe).
 const FIRECRACKER_SERVER_FULL: &[u8] =
     b"HTTP/1.1 503\r\nServer: Firecracker API\r\nConnection: close\r\nContent-Length: 40\r\n\r\n{ \"error\": \"Too many open connections\" }";
@@ -37,9 +37,9 @@ pub struct VesperdRun {
     pub extra_args: Vec<String>,
 }
 
-struct Vesperd {
-    child: Child,
-    socket: PathBuf,
+pub(super) struct Vesperd {
+    pub(super) child: Child,
+    pub(super) socket: PathBuf,
 }
 
 impl Drop for Vesperd {
@@ -51,11 +51,17 @@ impl Drop for Vesperd {
 
 impl VesperdRun {
     fn spawn(&self, id: &str, socket: &str) -> Result<Vesperd, String> {
+        self.spawn_with(id, socket, &[])
+    }
+
+    /// `spawn` with more flags, for example `--stage`.
+    pub(super) fn spawn_with(&self, id: &str, socket: &str, flags: &[String]) -> Result<Vesperd, String> {
         let socket = self.workdir.join(socket);
         let child = Command::new(&self.binary)
             .args(["--backend", "systemvm", "--id", id, "--socket"])
             .arg(&socket)
             .args(&self.extra_args)
+            .args(flags)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -66,8 +72,13 @@ impl VesperdRun {
     /// Starts `vesperd` and waits until its socket accepts a connection; returns it, its first line of output
     /// (`vesperd listening on … Firecracker <v> pid <n>`) and the time taken.
     fn start(&self, id: &str, socket: &str) -> Result<(Vesperd, String, Duration), String> {
+        self.start_with(id, socket, &[])
+    }
+
+    /// `start` with more flags, for example `--stage`.
+    pub(super) fn start_with(&self, id: &str, socket: &str, flags: &[String]) -> Result<(Vesperd, String, Duration), String> {
         let started = Instant::now();
-        let mut v = self.spawn(id, socket)?;
+        let mut v = self.spawn_with(id, socket, flags)?;
         loop {
             if UnixStream::connect(&v.socket).is_ok() {
                 let mut line = String::new();
@@ -87,7 +98,7 @@ impl VesperdRun {
     }
 }
 
-fn stderr(v: &mut Vesperd) -> String {
+pub(super) fn stderr(v: &mut Vesperd) -> String {
     let mut err = String::new();
     if let Some(mut pipe) = v.child.stderr.take() {
         let _ = pipe.read_to_string(&mut err);
@@ -96,7 +107,7 @@ fn stderr(v: &mut Vesperd) -> String {
 }
 
 /// Waits for `vesperd` to exit; returns its exit code (`None` for a signal), stderr and the time taken.
-fn wait_exit(v: &mut Vesperd, within: Duration) -> Result<(Option<i32>, String, Duration), String> {
+pub(super) fn wait_exit(v: &mut Vesperd, within: Duration) -> Result<(Option<i32>, String, Duration), String> {
     let started = Instant::now();
     loop {
         if let Some(status) = v.child.try_wait().map_err(|err| err.to_string())? {
@@ -109,7 +120,7 @@ fn wait_exit(v: &mut Vesperd, within: Duration) -> Result<(Option<i32>, String, 
     }
 }
 
-fn signal(v: &Vesperd, name: &str) -> Result<(), String> {
+pub(super) fn signal(v: &Vesperd, name: &str) -> Result<(), String> {
     let status = Command::new("kill").args([&format!("-{name}"), &v.child.id().to_string()]).status().map_err(|e| e.to_string())?;
     if !status.success() {
         return Err(format!("kill -{name} {} failed", v.child.id()));
@@ -118,30 +129,30 @@ fn signal(v: &Vesperd, name: &str) -> Result<(), String> {
 }
 
 /// One keep-alive client connection to a `vesperd` socket.
-struct Client {
+pub(super) struct Client {
     reader: BufReader<UnixStream>,
-    writer: UnixStream,
+    pub(super) writer: UnixStream,
 }
 
 impl Client {
-    fn connect(socket: &Path) -> Result<Client, String> {
+    pub(super) fn connect(socket: &Path) -> Result<Client, String> {
         let stream = UnixStream::connect(socket).map_err(|err| format!("connect {}: {err}", socket.display()))?;
         stream.set_read_timeout(Some(Duration::from_secs(60))).map_err(|e| e.to_string())?;
         let writer = stream.try_clone().map_err(|e| e.to_string())?;
         Ok(Client { reader: BufReader::new(stream), writer })
     }
 
-    fn raw(&mut self, request: &[u8]) -> Result<Vec<u8>, String> {
+    pub(super) fn raw(&mut self, request: &[u8]) -> Result<Vec<u8>, String> {
         self.writer.write_all(request).and_then(|_| self.writer.flush()).map_err(|err| format!("write request: {err}"))?;
         read_http_response(&mut self.reader)
     }
 
-    fn call(&mut self, method: &str, path: &str, body: Option<&str>) -> Result<HttpResponse, String> {
+    pub(super) fn call(&mut self, method: &str, path: &str, body: Option<&str>) -> Result<HttpResponse, String> {
         let raw = self.raw(&http_request(method, path, body)).map_err(|err| format!("{method} {path}: {err}"))?;
         parse_http_response(&raw).map_err(|err| format!("{method} {path}: {err}"))
     }
 
-    fn expect(&mut self, method: &str, path: &str, body: Option<&str>, want: u16) -> Result<String, String> {
+    pub(super) fn expect(&mut self, method: &str, path: &str, body: Option<&str>, want: u16) -> Result<String, String> {
         let response = self.call(method, path, body)?;
         if response.status != want {
             return Err(format!("{method} {path}: status {} (want {want}): {}", response.status, response.body));
@@ -161,7 +172,7 @@ impl Client {
     }
 }
 
-fn state_of(body: &str) -> String {
+pub(super) fn state_of(body: &str) -> String {
     serde_json::from_str::<serde_json::Value>(body)
         .ok()
         .and_then(|v| v["state"].as_str().map(str::to_string))
@@ -287,7 +298,7 @@ pub fn run_vesperd_suite(endpoint: &ControlEndpoint, run: &VesperdRun, id: &str,
                 if took * 10 > VESPERD_REQUEST_CEILING {
                     return Err(format!("PUT /snapshot/create took {} ms, over a tenth of the {} s ceiling", took.as_millis(), VESPERD_REQUEST_CEILING.as_secs()));
                 }
-                Ok(((), format!("PUT /snapshot/create (Full, 256 MiB guest, tmpfs jail) -> 204 in {} ms; ceiling {} s", took.as_millis(), VESPERD_REQUEST_CEILING.as_secs())))
+                Ok(((), format!("PUT /snapshot/create (Full, 256 MiB guest, jail on the data disk) -> 204 in {} ms; ceiling {} s", took.as_millis(), VESPERD_REQUEST_CEILING.as_secs())))
             });
             step(&mut steps, "resume", || {
                 let mut api = Client::connect(&v.socket)?;

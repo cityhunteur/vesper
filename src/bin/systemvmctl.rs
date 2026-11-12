@@ -286,6 +286,23 @@ enum ControlAction {
         #[arg(long, default_value = "run/vesperd-suite")]
         workdir: String,
     },
+    /// Run the ADR 0007 slice 5 checklist (staging rules, the store, the snapshot cycle, the ceiling measurement)
+    /// through `vesperd`; the launch config must share `--share-dir`.
+    SnapshotSuite {
+        #[arg(long, default_value = "run/systemvm/snapshot-report.json")]
+        report: String,
+        #[arg(long, default_value = "vesper-snap")]
+        id: String,
+        /// The vesperd binary to start (`make systemvm-snapshot-suite` builds it).
+        #[arg(long, default_value = "target/debug/vesperd")]
+        vesperd: String,
+        /// Owner-only directory for the suite's vesperd sockets.
+        #[arg(long, default_value = "run/vesperd-suite")]
+        workdir: String,
+        /// A directory inside a share of the launch config (`make systemvm-up-snapshot` shares run/vesperd-share).
+        #[arg(long, default_value = "run/vesperd-share")]
+        share_dir: String,
+    },
     /// Run the GH #18 checklist (launch, jailer isolation, stop, crash, poweroff, cleanup) and write a JSON report.
     MicrovmSuite {
         #[arg(long, default_value = "run/systemvm/microvm-report.json")]
@@ -527,6 +544,31 @@ fn run_control(endpoint: vesper::control::ControlEndpoint, action: ControlAction
                 return Err(format!("vesperd suite failed (report: {report})"));
             }
             println!("vesperd suite passed (report: {report})");
+        }
+        ControlAction::SnapshotSuite { report, id, vesperd, workdir, share_dir } => {
+            control::prepare_workdir(std::path::Path::new(&workdir))?;
+            std::fs::create_dir_all(&share_dir).map_err(|err| format!("create {share_dir}: {err}"))?;
+            let share_dir = std::fs::canonicalize(&share_dir).map_err(|err| format!("{share_dir}: {err}"))?;
+            let run = control::SnapshotRun {
+                vesperd: control::VesperdRun {
+                    binary: vesperd.into(),
+                    workdir: workdir.into(),
+                    extra_args: vec![
+                        "--bridge".to_string(),
+                        endpoint.bridge_path.to_string_lossy().into_owned(),
+                        "--agent-port".to_string(),
+                        endpoint.port.to_string(),
+                    ],
+                },
+                share_dir,
+            };
+            let result = control::run_snapshot_suite(&endpoint, &run, &id);
+            control::write_report(&report, &result)?;
+            print_steps(&result, 320);
+            if !result.passed {
+                return Err(format!("snapshot suite failed (report: {report})"));
+            }
+            println!("snapshot suite passed (report: {report})");
         }
         ControlAction::Data { args } => {
             let mut session = control::connect(&endpoint)?;

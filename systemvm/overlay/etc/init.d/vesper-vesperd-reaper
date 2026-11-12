@@ -1,7 +1,9 @@
 #!/sbin/openrc-run
 # Reaper for vesperd microVMs (ADR 0007): every interval it stops any microVM whose lease holder no longer runs
 # with its recorded start time, and any jail without a record once its grace period has passed. LAUNCHAPI also
-# runs a pass before it creates a jail; one flock serialises the passes, jail creation and teardown.
+# runs a pass before it creates a jail; one flock serialises the passes, jail creation and teardown. Before the
+# first pass it creates the vesperd-jail user (uid and gid 20000, no login shell) that staging runs jail-side
+# reads and writes as (ADR 0007 slice 5).
 description="Vesper reaper for vesperd microVMs"
 supervisor=supervise-daemon
 reap_interval="${VESPER_VESPERD_REAP_INTERVAL:-10}"
@@ -12,4 +14,8 @@ respawn_max=0
 
 depend() {
   need localmount vesper-packages
+}
+
+start_pre() {
+  /usr/local/bin/vesper-vesperd setup-user > /dev/null
 }

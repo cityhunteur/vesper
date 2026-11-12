@@ -19,10 +19,12 @@
 #   ARCH <args...>        -> ARCH <rc> <count> then <count> output lines of `vesper-arch <args>`
 #   DATA <args...>        -> DATA <rc> <count> then <count> output lines of `vesper-data <args>` (GH #164)
 #   VESPERD <args...>     -> VESPERD <rc> <count> then <count> output lines of `vesper-vesperd <args>`, except
-#                            launch and connect (ADR 0007)
-#   LAUNCHAPI <id> [ceiling] -> READY <id> pid=<n> firecracker_version=<v> once the API socket exists, or
-#                            ERR <reason> and close; after READY this connection is the microVM's lease: its end
-#                            of file stops the microVM, and the agent closes it when Firecracker exits (ADR 0007)
+#                            launch and connect (ADR 0007); includes stage, store-list and store-rm (slice 5)
+#   LAUNCHAPI <id> [ceiling] [stage=SRC:DEST]...
+#                         -> READY <id> pid=<n> firecracker_version=<v> once the API socket exists, or
+#                            ERR <reason> and close; each stage= token is staged into the fresh jail first; after
+#                            READY this connection is the microVM's lease: its end of file stops the microVM, and
+#                            the agent closes it when Firecracker exits (ADR 0007)
 #   FCAPI <id>            -> OK, then the connection relays bytes to <id>'s Firecracker API socket; or ERR <reason>
 #                            and close (ADR 0007)
 #   DROP                  -> DROP then the connection is closed (simulates a server-side drop)
