@@ -1,9 +1,37 @@
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use std::path::{Path, PathBuf};
+
+#[path = "vesperd/systemvm.rs"]
+mod systemvm;
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
+enum Backend {
+    /// The in-memory state machine (the default; ADR 0007 keeps it until the relay is proven).
+    Model,
+    /// A byte relay to one jailed Firecracker in the System VM (ADR 0007).
+    Systemvm,
+}
 
 #[derive(Parser, Debug)]
 #[command(name = "vesperd")]
 struct Args {
+    #[arg(long, value_enum, default_value_t = Backend::Model)]
+    backend: Backend,
+    /// The microVM id (`--backend systemvm`): 1 to 64 letters, digits and hyphens, as Firecracker's `--id`.
+    #[arg(long)]
+    id: Option<String>,
+    /// `memory.max` in bytes for the microVM's cgroup (`--backend systemvm`); default: the agent's 640 MiB.
+    #[arg(long)]
+    memory_max: Option<u64>,
+    /// System VM launch config that names the bridge socket and agent port (`--backend systemvm`).
+    #[arg(long, default_value = "build/systemvm/launch-config.json")]
+    launch_config: String,
+    /// Bridge socket, overriding the launch config (`--backend systemvm`).
+    #[arg(long)]
+    bridge: Option<String>,
+    /// Agent vsock port, overriding the launch config (`--backend systemvm`).
+    #[arg(long)]
+    agent_port: Option<u32>,
     /// API socket. Default: `vesperd.sock` in an owner-only runtime directory, the first of
     /// `$XDG_RUNTIME_DIR/vesper`, `$TMPDIR/vesper` and `$HOME/.vesper/run` (TD-050).
     #[arg(long)]
@@ -37,6 +65,14 @@ async fn run() -> Result<(), String> {
         &["com.apple.security.virtualization"],
     )?;
 
+    if args.backend == Backend::Systemvm {
+        let options = systemvm::Options::from_args(&args)?;
+        return systemvm::run(options, &socket_path(&args)?).await;
+    }
+    if args.id.is_some() || args.memory_max.is_some() || args.bridge.is_some() || args.agent_port.is_some() {
+        return Err("--id, --memory-max, --bridge and --agent-port apply to --backend systemvm".to_string());
+    }
+
     let lock = vesper::baseline::load(&args.baseline_lock)?;
     let firecracker_revision = lock
         .baselines
@@ -64,19 +100,10 @@ async fn run() -> Result<(), String> {
     )?;
     let app = app_state.router();
 
-    let socket = match args.socket.as_deref() {
-        Some(path) => PathBuf::from(path),
-        None => default_socket()?,
-    };
+    let socket = socket_path(&args)?;
     // Held for the life of the process: a second vesperd on the same path waits for nothing and fails.
-    let _lock = claim_socket(&socket)?;
-    let listener = tokio::net::UnixListener::bind(&socket)
-        .map_err(|err| format!("bind unix socket {}: {err}", socket.display()))?;
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&socket, std::fs::Permissions::from_mode(0o600))
-            .map_err(|err| format!("set socket permissions {}: {err}", socket.display()))?;
-    }
+    let _lock = vesper::proxy::claim_socket(&socket)?;
+    let listener = bind_owner_only(&socket)?;
 
     println!("vesperd listening on {}", socket.display());
 
@@ -86,6 +113,13 @@ async fn run() -> Result<(), String> {
         .map_err(|err| format!("serve: {err}"))?;
 
     Ok(())
+}
+
+fn socket_path(args: &Args) -> Result<PathBuf, String> {
+    match args.socket.as_deref() {
+        Some(path) => Ok(PathBuf::from(path)),
+        None => default_socket(),
+    }
 }
 
 /// The default socket path: `vesperd.sock` in the first available runtime directory (TD-050).
@@ -105,47 +139,14 @@ fn default_socket() -> Result<PathBuf, String> {
     Ok(base.join("vesperd.sock"))
 }
 
-/// Checks the socket's directory, takes `<socket>.lock`, and removes a stale socket. Refuses when the directory is
-/// writable by group or others, when another vesperd answers on the path, or when the path is not a socket.
-fn claim_socket(socket: &Path) -> Result<std::fs::File, String> {
-    use std::os::unix::fs::{FileTypeExt, PermissionsExt};
-    let parent = socket.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
-    if !parent.exists() {
-        std::fs::create_dir_all(parent).map_err(|err| format!("create socket dir {}: {err}", parent.display()))?;
-        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700))
-            .map_err(|err| format!("set socket dir permissions {}: {err}", parent.display()))?;
-    }
-    let mode = std::fs::metadata(parent)
-        .map_err(|err| format!("socket dir {}: {err}", parent.display()))?
-        .permissions()
-        .mode();
-    if mode & 0o022 != 0 {
-        return Err(format!(
-            "socket dir {} is writable by group or others (mode {:o}); use a private directory",
-            parent.display(),
-            mode & 0o7777
-        ));
-    }
-    let mut lock_path = socket.as_os_str().to_owned();
-    lock_path.push(".lock");
-    let lock = std::fs::OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .write(true)
-        .open(&lock_path)
-        .map_err(|err| format!("open {}: {err}", Path::new(&lock_path).display()))?;
-    lock.try_lock()
-        .map_err(|_| format!("another vesperd holds {}", Path::new(&lock_path).display()))?;
-    if let Ok(meta) = std::fs::symlink_metadata(socket) {
-        if !meta.file_type().is_socket() {
-            return Err(format!("{} exists and is not a socket; refusing to remove it", socket.display()));
-        }
-        if std::os::unix::net::UnixStream::connect(socket).is_ok() {
-            return Err(format!("another process is serving {}", socket.display()));
-        }
-        std::fs::remove_file(socket).map_err(|err| format!("remove stale socket {}: {err}", socket.display()))?;
-    }
-    Ok(lock)
+/// Binds `socket` (after `claim_socket`) and makes it owner-only.
+fn bind_owner_only(socket: &Path) -> Result<tokio::net::UnixListener, String> {
+    use std::os::unix::fs::PermissionsExt;
+    let listener = tokio::net::UnixListener::bind(socket)
+        .map_err(|err| format!("bind unix socket {}: {err}", socket.display()))?;
+    std::fs::set_permissions(socket, std::fs::Permissions::from_mode(0o600))
+        .map_err(|err| format!("set socket permissions {}: {err}", socket.display()))?;
+    Ok(listener)
 }
 
 async fn shutdown_signal() {

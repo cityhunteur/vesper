@@ -513,7 +513,34 @@ three teardown paths, the reaper and the id checks, 20 steps, into `run/systemvm
 2026-11-12 (M3 Pro): 20/20; `READY` 0.2 s after the jailer started (1.4 s on the first launch after boot), teardown
 about 0.5 s after the lease closed, a SIGKILLed lease shell's microVM reaped within one interval.
 
-`vesperd` itself does not use this yet (slice 4). The jails are in tmpfs until slice 5 moves them onto the data disk.
+The jails are in tmpfs until slice 5 moves them onto the data disk.
+
+## `vesperd --backend systemvm` (ADR 0007, slice 4)
+
+`vesperd --backend systemvm --id <id> [--socket PATH] [--memory-max BYTES]` uses the verbs above from macOS. It reads
+the bridge path and agent port from `build/systemvm/launch-config.json` (or `--bridge` and `--agent-port`), takes
+`<socket>.lock` and refuses a live socket, sends `LAUNCHAPI <id> [ceiling]`, and refuses to serve unless `READY`
+names the vendored swagger's `info.version` (1.16.0). `ERR busy <id>` is retried for 15 s, one reaper interval
+plus a teardown, then refused. It then binds the socket (0600) and relays each client connection over its own bridge
+connection (`CONNECT 1024`, the greeting, `FCAPI <id>`, `OK`) with `proxy::serve`. The bounds and their reasons are
+in the [ExecPlan](../exec-plans/active/2026-11-12-GH156-vesperd-backend-a.md#values); CE-0007 records what a client
+can observe.
+
+    make systemvm-up
+    cargo run --bin vesperd -- --backend systemvm --id vm1 --socket run/vm1.sock &
+    curl --unix-socket run/vm1.sock http://localhost/      # {"id":"vm1","state":"Not started",…}
+    curl --unix-socket run/vm1.sock -X PUT http://localhost/boot-source \
+      -d '{"kernel_image_path":"/Image","initrd_path":"/initrd.gz","boot_args":"console=ttyS0 reboot=k panic=1 pci=off rdinit=/init"}'
+    curl --unix-socket run/vm1.sock -X PUT http://localhost/actions -d '{"action_type":"InstanceStart"}'
+    kill %1                                                # SIGTERM: the microVM stops, the socket is removed
+
+Paths in requests are paths inside the jail; `LAUNCHAPI` stages only `/Image` and `/initrd.gz` until slice 5 adds
+staging. `vesperd` lives as long as its microVM: SIGTERM or SIGINT stops the microVM and exits 0; a SIGKILL of
+`vesperd` closes the lease through the kernel, so the agent stops the microVM, but leaves the socket file (the next
+`vesperd` on the path replaces it); when Firecracker exits or the System VM goes away, `vesperd` removes its socket
+and exits 1. `make systemvm-vesperd-suite` (18 steps, `run/systemvm/vesperd-report.json`) checks each of these
+through the socket. On 2026-11-12 (M3 Pro): 18/18; listening 0.4 s after start (1.9 s on the first launch after
+boot), a SIGTERM stop in 56 ms, `vesperd` exiting 1 s after Firecracker was killed (the lease poll).
 
 ## Proxy bridge convention
 

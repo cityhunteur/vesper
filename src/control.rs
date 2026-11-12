@@ -7,7 +7,9 @@
 
 mod launchapi;
 mod suites;
-pub use launchapi::{parse_ready, valid_microvm_id, HttpResponse, Ready};
+pub use launchapi::{
+    http_request, parse_http_response, parse_ready, read_http_response, valid_microvm_id, HttpResponse, Ready,
+};
 pub use suites::*;
 
 use serde::{Deserialize, Serialize};

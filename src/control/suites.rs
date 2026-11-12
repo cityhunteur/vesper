@@ -13,6 +13,8 @@ pub use exec::run_exec_suite;
 mod launchapi;
 pub use launchapi::run_launchapi_suite;
 mod restart;
+mod vesperd;
+pub use vesperd::{run_vesperd_suite, VesperdRun, VESPERD_IDLE_TIMEOUT, VESPERD_REQUEST_CEILING};
 pub use bundle::run_bundle_suite;
 pub use restart::run_restart_suite;
 

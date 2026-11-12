@@ -84,6 +84,7 @@ async fn main() {
             vsock_socket_dir: args.vsock_socket_dir.clone(),
             listen_mode,
             validate_upstream: args.validate_upstream,
+            ..Default::default()
         },
         shutdown,
     )

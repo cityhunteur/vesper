@@ -189,6 +189,28 @@ A default Docker container cannot reach the agent from inside the System VM: Doc
 `seccomp=unconfined` can open the socket, but its connects to CID 1 and 3 fail because no vsock loopback transport
 is loaded; a privileged container that can load kernel modules is not covered.
 
+## `vesperd --backend systemvm` on macOS (ADR 0007, slice 4)
+
+`vesperd --backend systemvm --id <id>` adds one host-visible socket per microVM and no new port, share or
+entitlement. It reaches the System VM only through the existing bridge (`run/systemvm/vsock/3.sock`) and vsock port
+1024, which the allow-list already lists.
+
+- The socket follows slice 1's rules: owner-only directory and mode 0600, `<socket>.lock` held for the life of the
+  process, and refusal to take a socket another process serves. The lock is taken before `LAUNCHAPI`, so a refused
+  second `vesperd` launches nothing. The socket is bound only after `READY` and removed when the lease ends.
+- Any process that can open the socket controls a real microVM. The socket mode is the only access control, as
+  for Firecracker's own API socket.
+- `vesperd` parses only the agent's greeting, `OK`, `READY` and `ERR`, each against a fixed form, in lines of at
+  most 1 KiB read with a 5 s timeout (30 s for `READY`). Relayed bytes are not parsed. Each relay read fills at
+  most 8 KiB, so a compromised System VM that sends without end costs memory for one buffer per connection, not
+  more. At most 16 connections are relayed at once; a connection beyond that is closed with no bytes.
+- An idle timeout (120 s with no request waiting) and a per-request ceiling (120 s without a reply byte) bound how
+  long a stalled peer holds a connection and its agent handler in the System VM. Compat exception CE-0007 records
+  what a client sees.
+- The microVM lives as long as the lease: SIGTERM or SIGINT closes the lease and waits for the agent's teardown,
+  SIGKILL closes it through the kernel, and the agent's close (Firecracker exited, the System VM went away) makes
+  `vesperd` remove its socket and exit non-zero (`make systemvm-vesperd-suite`).
+
 ## Private microVM sessions (ADR 0006)
 
 The shim connects to each jailed Firecracker `v.sock` inside the System VM.

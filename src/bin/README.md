@@ -13,7 +13,9 @@ errors to stderr and exits with code 1 on failure.
 ## Interface
 
 - `vesperd.rs:main` (binary `vesperd`, `#[tokio::main]`). Flags: `--socket`
-  (default `vesperd.sock` in `$XDG_RUNTIME_DIR/vesper`, `$TMPDIR/vesper` or `$HOME/.vesper/run`, mode 0700; socket 0600; `default_socket`, `claim_socket`), `--baseline-lock`
+  (default `vesperd.sock` in `$XDG_RUNTIME_DIR/vesper`, `$TMPDIR/vesper` or `$HOME/.vesper/run`, mode 0700; socket 0600;
+  `default_socket`, `vesper::proxy::claim_socket`, `bind_owner_only`), `--backend model|systemvm` (default `model`),
+  `--baseline-lock`
   (default `docs/specs/design-v0.baselines.lock.yaml`), `--swagger`
   (default `third_party/firecracker/firecracker.yaml`),
   `--surface-stub-matrix`
@@ -23,7 +25,18 @@ errors to stderr and exits with code 1 on failure.
   `vesper::spec::load_routes`, `vesper::spec::load_info_version`,
   `vesper::api_matrix::load_surface_stub_matrix`,
   `vesper::api::AppState::new_with_matrix`, and `AppState::router`.
-  `shutdown_signal` resolves on Ctrl-C or SIGTERM.
+  `shutdown_signal` resolves on Ctrl-C or SIGTERM. `--id`, `--memory-max`, `--bridge` and `--agent-port` are
+  refused without `--backend systemvm`.
+- `vesperd/systemvm.rs` (module `systemvm` of the `vesperd` binary, ADR 0007 slice 4): `--backend systemvm --id ID`
+  (1 to 64 letters, digits and hyphens) with `--memory-max BYTES` (optional `LAUNCHAPI` ceiling), `--launch-config`
+  (default `build/systemvm/launch-config.json`, read for `vsock_bridge_path` and `agent_port`), `--bridge PATH`
+  (overrides it; must be named `<cid>.sock`) and `--agent-port N` (default 1024). `Options::from_args`, `run`.
+  `run` claims the socket, sends `LAUNCHAPI` over `vesper::proxy::open_upstream` and checks `READY` with
+  `vesper::control::parse_ready` against the swagger's `info.version`, binds the socket, then runs
+  `vesper::proxy::serve` with the `FCAPI <id>` preface and the bounds until the lease closes or SIGTERM/SIGINT.
+  Values (each reasoned in the GH #156 ExecPlan): greeting, `OK`, `ERR` and preface writes 5 s; `READY` 30 s; lines
+  1 KiB; relay reads 8 KiB; idle timeout 120 s; per-request ceiling 120 s; 16 connections; `ERR busy` retried for
+  15 s; teardown wait after closing the lease 20 s.
 - `systemvmctl launch-config --share PATH[:ro][:nowatch]` (repeatable; read-write shares get `watch: true` unless `:nowatch`, GH #150) adds `shared_directories` to the written config;
   `systemvmctl launch-config --data-disk PATH` (absolute path to a disk image on macOS, GH #164) sets
   `data_disk_path` and appends `vesper_data=/dev/vdX` to the kernel command line
@@ -92,7 +105,7 @@ errors to stderr and exits with code 1 on failure.
   <args…>` (runs `vesper-rootfs` in the guest), `rootfs-suite --report
   run/systemvm/rootfs-report.json --id vesper-rootfs-test`, `workload
   <args…>` (runs `vesper-workload` in the guest), `workload-suite --report
-  run/systemvm/workload-report.json`, `fcparity <args…>` (runs `vesper-fcparity` in the guest), `ctr <args…>` (runs `vesper-ctr` in the guest), `exec-suite --report run/systemvm/exec-report.json`, `shim-suite --report run/systemvm/shim-report.json`, `bundle-suite --report run/systemvm/bundle-report.json`, `restart-suite --report run/systemvm/restart-report.json`, `vesperd <args…>` (runs `vesper-vesperd` in the guest: status|isolation|list|log|reap|kill-holder|kill-fc ID|test-…), `launchapi-suite --report run/systemvm/launchapi-report.json --id vesper-launchapi --swagger third_party/firecracker/firecracker.yaml` (ADR 0007 slice 3; `READY` must report the swagger's `info.version`),
+  run/systemvm/workload-report.json`, `fcparity <args…>` (runs `vesper-fcparity` in the guest), `ctr <args…>` (runs `vesper-ctr` in the guest), `exec-suite --report run/systemvm/exec-report.json`, `shim-suite --report run/systemvm/shim-report.json`, `bundle-suite --report run/systemvm/bundle-report.json`, `restart-suite --report run/systemvm/restart-report.json`, `vesperd <args…>` (runs `vesper-vesperd` in the guest: status|isolation|list|log|reap|kill-holder|kill-fc ID|test-…), `launchapi-suite --report run/systemvm/launchapi-report.json --id vesper-launchapi --swagger third_party/firecracker/firecracker.yaml` (ADR 0007 slice 3; `READY` must report the swagger's `info.version`), `vesperd-suite --report run/systemvm/vesperd-report.json --id vesper-vesperd --vesperd target/debug/vesperd --workdir run/vesperd-suite` (ADR 0007 slice 4; starts `vesperd --backend systemvm` with the control endpoint's bridge and port),
   `parity-suite --report run/systemvm/parity-suite-report.json --id vesper-parity --perf-cycles 20`, `suite --report
   run/systemvm/control-report.json --keepalive-interval 2 --keepalive-seconds
   20 --payload-bytes 2097152`), `boot-smoke` (`--iterations` 5,
@@ -135,6 +148,10 @@ Subdirectories: none.
 - `vesper-proxy.rs:main`: dial timeout is clamped to at least 1 second; a
   non-octal `--listen-mode` exits 2; with `--validate-upstream` a missing
   upstream socket exits 1 before listening.
+- `vesperd.rs:run` (`--backend systemvm`): the socket lock is taken before `LAUNCHAPI`, so a second `vesperd` on
+  the socket launches nothing; a `READY` version other than the swagger's `info.version` closes the lease and exits
+  1 without binding; `vesperd`'s own failures on a client connection (bridge, agent, `FCAPI`, timeouts, the
+  connection cap) close it with no bytes; every HTTP byte comes from Firecracker.
 - `vesperd.rs:run`: when `--entitlements-file` is given it is validated first
   and must contain `com.apple.security.virtualization` (no check without the
   flag); `AppState` is built only via
@@ -142,10 +159,15 @@ Subdirectories: none.
 
 ## Side Effects
 
-- `vesperd.rs:run` creates the parent directory of `--socket`, removes any
-  existing file at that path, binds a `tokio::net::UnixListener`, chmods the
-  socket to `0o660`, prints `vesperd listening on <socket>`, and serves the
-  router until shutdown.
+- `vesperd.rs:run` creates the parent directory of `--socket` (mode 0700), takes `<socket>.lock`, removes a stale
+  socket (never a live one or a non-socket), binds a `tokio::net::UnixListener`, chmods the socket to `0o600`,
+  prints `vesperd listening on <socket>`, and serves the router until shutdown.
+- `vesperd.rs:run` with `--backend systemvm` starts one microVM in the System VM (`LAUNCHAPI`), holds its lease,
+  opens one bridge connection per client connection (`FCAPI`), and prints `vesperd listening on <socket> (backend
+  systemvm, microVM <id>, Firecracker <v> pid <n>)`. On SIGTERM or SIGINT it closes the lease, which stops the
+  microVM, waits for the agent's teardown, removes the socket and exits 0. When the agent closes the lease
+  (Firecracker exited, the System VM went away) it removes the socket and exits 1. Its status lines never panic on
+  a closed stdout.
 - `vesper-proxy.rs:main` listens on the `--listen` Unix socket and forwards
   to `--upstream` through `vesper::proxy::run_server`.
 - `baselinectl.rs` reads the lock, swagger, capture, and matrix files; writes

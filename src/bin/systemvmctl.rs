@@ -270,6 +270,22 @@ enum ControlAction {
         #[arg(long, default_value = "third_party/firecracker/firecracker.yaml")]
         swagger: String,
     },
+    /// Run the ADR 0007 slice 4 checklist through `vesperd --backend systemvm`'s own socket and write a JSON report.
+    VesperdSuite {
+        #[arg(long, default_value = "run/systemvm/vesperd-report.json")]
+        report: String,
+        #[arg(long, default_value = "vesper-vesperd")]
+        id: String,
+        /// The pinned swagger whose info.version vesperd must report.
+        #[arg(long, default_value = "third_party/firecracker/firecracker.yaml")]
+        swagger: String,
+        /// The vesperd binary to start (`make systemvm-vesperd-suite` builds it).
+        #[arg(long, default_value = "target/debug/vesperd")]
+        vesperd: String,
+        /// Owner-only directory for the suite's vesperd sockets; short, because macOS limits socket paths to 104 bytes.
+        #[arg(long, default_value = "run/vesperd-suite")]
+        workdir: String,
+    },
     /// Run the GH #18 checklist (launch, jailer isolation, stop, crash, poweroff, cleanup) and write a JSON report.
     MicrovmSuite {
         #[arg(long, default_value = "run/systemvm/microvm-report.json")]
@@ -489,6 +505,28 @@ fn run_control(endpoint: vesper::control::ControlEndpoint, action: ControlAction
                 return Err(format!("launchapi suite failed (report: {report})"));
             }
             println!("launchapi suite passed (report: {report})");
+        }
+        ControlAction::VesperdSuite { report, id, swagger, vesperd, workdir } => {
+            let version = vesper::spec::load_info_version(&swagger)?;
+            let run = control::VesperdRun {
+                binary: vesperd.into(),
+                workdir: workdir.into(),
+                extra_args: vec![
+                    "--bridge".to_string(),
+                    endpoint.bridge_path.to_string_lossy().into_owned(),
+                    "--agent-port".to_string(),
+                    endpoint.port.to_string(),
+                    "--swagger".to_string(),
+                    swagger.clone(),
+                ],
+            };
+            let result = control::run_vesperd_suite(&endpoint, &run, &id, &version);
+            control::write_report(&report, &result)?;
+            print_steps(&result, 260);
+            if !result.passed {
+                return Err(format!("vesperd suite failed (report: {report})"));
+            }
+            println!("vesperd suite passed (report: {report})");
         }
         ControlAction::Data { args } => {
             let mut session = control::connect(&endpoint)?;

@@ -34,8 +34,10 @@ request extraction is either a success or a deterministic envelope carrying the 
 revision (the pre-extraction exceptions are listed in Invariant 3; [src/api.rs](src/api.rs),
 [src/bin/vesperd.rs](src/bin/vesperd.rs)). The repository also contains governance
 tooling, a socket proxy, the System VM with its Swift launcher, and the Go containerd shim. Firecracker microVMs run
-in the System VM through the shim and the guest scripts, but not through `vesperd`: the control plane has no backend
-connection yet (TD-045, GH #156), and Docker containers run on runc.
+in the System VM through the shim and the guest scripts, and through `vesperd --backend systemvm`, which relays its
+socket byte for byte to one jailed Firecracker in the System VM ([ADR 0007](docs/design-docs/adr/0007-vesperd-to-backend-a.md)
+slice 4; [src/bin/vesperd/systemvm.rs](src/bin/vesperd/systemvm.rs)). That backend is not the default, cannot yet stage
+files or load a snapshot (TD-045, GH #156), and Docker containers run on runc.
 
 **Intended** (per [design-v0](docs/specs/design-v0.md#backends)): parity is reached through
 staged backends. Backend A (`Vesper-KVMHost`) runs stock Firecracker inside a System VM, a Linux guest booted by
@@ -49,7 +51,9 @@ Those are design-v0 phases that have no code here yet.
 
 ## System context
 
-**Verified** for every edge except the one marked `Intended:`, which is design-only and not exercised by any test.
+**Verified** for every edge. The edge from `vesperd` to the System VM exists only with `--backend systemvm` and is
+exercised by `make systemvm-vesperd-suite`; the three `reads` edges of the swagger's routes, the lock and the matrix
+are the model backend's (the System VM backend reads only the swagger's `info.version` and the launch config).
 
 ```mermaid
 flowchart LR
@@ -59,7 +63,7 @@ flowchart LR
   proxy -- "upstream when started by make dev-up (see Deployment topology)" --> vesperd
   upstream -- "vsock 2375 -> /var/run/docker.sock (make docker-up)" --> sysvm[Linux System VM: dockerd, containerd, vesper-agent]
   launcher[vesper-vmlauncher] -- boots, serves the bridge --> sysvm
-  vesperd -. Intended: Backend A .-> sysvm
+  vesperd -- "--backend systemvm: vsock 1024 via the launcher bridge (LAUNCHAPI lease, one FCAPI relay per client)" --> sysvm
   vesperd -- reads --> spec[third_party/firecracker/firecracker.yaml]
   vesperd -- reads --> lock[docs/specs/design-v0.baselines.lock.yaml]
   vesperd -- reads --> matrix[docs/generated/firecracker-api-surface-stub-matrix.json]
@@ -72,7 +76,7 @@ flowchart LR
 
 | Component | Responsibility | Entry point | Owns data | Source |
 |---|---|---|---|---|
-| `vesperd` | Firecracker-compatible HTTP API and VM state machine (contracts: [src/README.md](src/README.md), [src/bin/README.md](src/bin/README.md); route families in [src/api/README.md](src/api/README.md)) | [src/bin/vesperd.rs](src/bin/vesperd.rs) | In-memory `AppState`; may create log and metrics files and open drive, pmem, kernel and initrd paths during validation | [src/api.rs](src/api.rs) |
+| `vesperd` | Firecracker-compatible HTTP API: the in-memory VM state machine (`--backend model`, the default), or a byte relay to one jailed Firecracker in the System VM (`--backend systemvm`, ADR 0007) (contracts: [src/README.md](src/README.md), [src/bin/README.md](src/bin/README.md); route families in [src/api/README.md](src/api/README.md)) | [src/bin/vesperd.rs](src/bin/vesperd.rs), [src/bin/vesperd/systemvm.rs](src/bin/vesperd/systemvm.rs) | Model: in-memory `AppState`; may create log and metrics files and open drive, pmem, kernel and initrd paths during validation. System VM: none on macOS beyond its socket and `<socket>.lock`; the microVM lives as long as the process | [src/api.rs](src/api.rs); [src/proxy.rs](src/proxy.rs) and [src/control.rs](src/control.rs) for the relay |
 | `vesper-proxy` | Forward a Unix socket to a unix, tcp or vsock upstream | [src/bin/vesper-proxy.rs](src/bin/vesper-proxy.rs) | None | [src/proxy.rs](src/proxy.rs) |
 | `baselinectl` | Parity metadata, surface stub matrix, behavior matrix | [src/bin/baselinectl.rs](src/bin/baselinectl.rs) | `docs/generated/*.json`, `artifacts/parity-metadata.json` | [src/baseline.rs](src/baseline.rs), [src/spec.rs](src/spec.rs), [src/api_matrix.rs](src/api_matrix.rs), [src/api_behavior_matrix.rs](src/api_behavior_matrix.rs) |
 | `compatexctl` | Compat exception registry validation | [src/bin/compatexctl.rs](src/bin/compatexctl.rs) | None | [src/compat.rs](src/compat.rs) |
@@ -85,9 +89,10 @@ launcher is a separate Swift package built by `make vmlauncher-build`.
 
 ## Domain boundaries and dependency rules
 
-**Verified** for single-path `crate::x` and `vesper::x` references in the 22 files enumerated in the `RULES`
+**Verified** for single-path `crate::x` and `vesper::x` references in the 27 files enumerated in the `RULES`
 allowlist of [scripts/harness/check_structure.py](scripts/harness/check_structure.py) (the top-level `src/*.rs`
-modules, the four route-family modules under `src/api/`, the two `src/systemvm/` children and `src/control/suites.rs`), which CI checks. The allowlist is a fixed list, not a
+modules, the four route-family modules under `src/api/`, the two `src/systemvm/` children, `src/proxy/relay.rs`,
+`src/control/launchapi.rs`, `src/control/suites.rs` and its five children), which CI checks. The allowlist is a fixed list, not a
 glob: a new module is unchecked until a `RULES` row is added. Grouped `use crate::{..}` imports, `super::super`
 paths, `src/lib.rs`, the binaries and `tests/` are not checked (TD-018); `src/api/tests.rs` is outside both the
 allowlist and the line budgets (TD-015).
@@ -99,7 +104,7 @@ allowlist and the line budgets (TD-015).
 | 2. Control plane: `api` | State machine, dispatch, deterministic errors | `api` | `api_matrix`, `baseline`, `buildinfo`, `compat`, `platform`, `spec` | mechanical |
 | 2. Control plane: matrices | Generated route matrices | `api_matrix`, `api_behavior_matrix` | `api`, `baseline`, `spec`; `api_behavior_matrix` also `api_matrix` | mechanical |
 | 2. Control plane: families | Extracted route-family handlers | `api/*` | `super` only (no `crate::` references) | mechanical |
-| 3. Runtime adapters | Socket proxying, published ports, System VM artifacts, guest control channel | `proxy`, `ports`, `systemvm` (+ `systemvm/data_disk`, `systemvm/image_lock`, `systemvm/packages`, `super` only), `control` (+ `control/suites`, `control/suites/{bundle,restart,exec}`, `super` only) | `buildinfo`, `platform` (`control`: nothing local) | mechanical |
+| 3. Runtime adapters | Socket proxying, published ports, System VM artifacts, guest control channel | `proxy`, `ports`, `systemvm` (+ `systemvm/data_disk`, `systemvm/image_lock`, `systemvm/packages`, `super` only), `control` (+ `control/launchapi`, `control/suites`, `control/suites/{bundle,restart,exec,launchapi,vesperd}`, `super` only); `proxy` also has `proxy/relay` (`super` only) | `buildinfo`, `platform` (`control`: nothing local) | mechanical |
 | 4. Entry points | `clap` binaries | `src/bin/*` | any library layer | review |
 | 5. Tests and harness | Contract tests, sensors (CI scripts that detect drift), docs, Symphony templates | `tests/`, `src/api/tests.rs`, `scripts/harness/`, `harness/`, `.github/workflows/`, `docs/`, `.symphony/templates/` | may import the library; nothing imports them | review |
 
@@ -142,7 +147,8 @@ control-plane modules.
 - `src/`: the `vesper` library crate. Public modules and their contracts are listed in [src/README.md](src/README.md).
   `src/api.rs` holds `AppState`, the dispatch table and most handlers; `src/api/` holds the extracted route families.
 - `src/bin/`: the six binaries ([src/bin/README.md](src/bin/README.md)).
-- `tests/`: integration suites `api_contract.rs` and `contract_golden.rs` ([docs/TESTING.md](docs/TESTING.md)).
+- `tests/`: integration suites, among them `api_contract.rs`, `contract_golden.rs`, and `vesperd_socket.rs` and
+  `vesperd_systemvm.rs`, which start the `vesperd` binary ([docs/TESTING.md](docs/TESTING.md)).
 - `scripts/`: CI lint, macOS dev loop, System VM wrapper scripts, harness sensors, and `update-issue-checklists.sh`,
   which performs live `gh issue edit` writes to GitHub issues #1 to #40 (no dry run, but idempotent via a body
   marker; [scripts/README.md](scripts/README.md)).
@@ -228,8 +234,39 @@ async worker thread (log and metrics creation, kernel, initrd, drive and pmem va
 so a hung path stalls that thread (TD-024). Startup order in `vesperd` is: validate
 entitlements (only when `--entitlements-file` is given), load the baseline lock and fail if the Firecracker revision
 is blank, load routes and version from the swagger, load the surface stub matrix, build `AppState::new_with_matrix` (which
-validates the matrix against `documented_route_semantics`), create the socket's parent directory and remove any
-stale socket file, bind, then chmod the socket to `0o660`.
+validates the matrix against `documented_route_semantics`), then `proxy::claim_socket` (create the socket's parent
+directory with mode 0700, refuse one writable by group or others, take `<socket>.lock`, refuse a live socket, remove a
+stale one), bind, then chmod the socket to `0o600`.
+
+### API request on `--backend systemvm`
+
+**Verified** by `tests/vesperd_systemvm.rs` (fake agent) and `make systemvm-vesperd-suite` (System VM, 18 steps).
+
+```mermaid
+sequenceDiagram
+  participant C as Client
+  participant V as vesperd (systemvm)
+  participant B as Launcher bridge (3.sock)
+  participant A as vesper-agent (vsock 1024)
+  participant F as Firecracker (jail, uid 20000)
+  V->>V: claim_socket (lock, live-socket refusal)
+  V->>B: CONNECT 1024, then LAUNCHAPI id
+  A->>F: jailer, no config file
+  A-->>V: READY id pid firecracker_version (checked against the swagger)
+  Note over V,A: this connection is the lease for the life of the process
+  V->>V: bind the socket (0600)
+  C->>V: connect
+  V->>B: new connection: CONNECT 1024, greeting, FCAPI id
+  A-->>V: OK, then socat to the API socket in the jail
+  C->>F: HTTP bytes, relayed unchanged both ways
+  F-->>C: Firecracker's own response bytes
+```
+
+`vesperd` parses only the greeting, `OK`, `READY` and `ERR`; on a failure of its own it closes the client connection
+with no bytes. The relay (`proxy::serve` with a `Preface` and `Bounds`) reads at most 8 KiB at a time, closes a
+connection idle for 120 s or a request unanswered for 120 s, and relays at most 16 connections (CE-0007). The lease
+ends the microVM when it closes: SIGTERM or SIGINT closes it and waits for the teardown (exit 0); the agent's close
+(Firecracker exited, the System VM went away) makes `vesperd` remove its socket and exit 1.
 
 ### Proxy connection
 
@@ -321,10 +358,10 @@ or parity documents.
 
 | # | Invariant | Status | Enforced by | Verify with | See |
 |---|---|---|---|---|---|
-| 1a | `vesperd` is the only binary that serves the control-plane API; `vesper-proxy` is the only other host-visible socket and only relays bytes (plus the vsock `CONNECT` preface) | Verified | Review only; no mechanical check (TD-008) | `grep -n 'UnixListener::bind' src/bin/vesperd.rs src/proxy.rs` (expect 1 hit in `vesperd.rs` and 3 in `proxy.rs`, of which the two inside the `#[cfg(test)]` module are test fixtures) | [src/bin/vesperd.rs](src/bin/vesperd.rs), [src/proxy.rs](src/proxy.rs) |
+| 1a | `vesperd` is the only binary that serves the control-plane API; `vesper-proxy` is the only other host-visible socket and only relays bytes (plus the vsock `CONNECT` preface) | Verified | Review only; no mechanical check (TD-008) | `grep -n 'UnixListener::bind' src/bin/vesperd.rs src/proxy.rs` (expect 1 hit in `vesperd.rs`, shared by both backends, and 6 in `proxy.rs`, of which the five inside the `#[cfg(test)]` module are test fixtures) | [src/bin/vesperd.rs](src/bin/vesperd.rs), [src/proxy.rs](src/proxy.rs) |
 | 1b | Raw Firecracker and containerd sockets stay private to the System VM | Partly verified | The guest listens on vsock 1024 (agent), 2375 (Docker relay), 2400 (port relay) and 2401 (share notification sink), none of which is a raw Firecracker or containerd socket; the agent on 1024 does reach jailed Firecracker API sockets through `FCPARITY api` and `FCAPI`, and starts `vesperd` microVMs with `LAUNCHAPI` (ADR 0007 slice 3), so 1024 is a control surface that the bridge allow-list (1024, 2375, 2400, 2401; TD-027) keeps reachable; `make docker-smoke` enumerates host sockets and expects a refused `CONNECT` to a port without a listener | `make systemvm-up && make docker-up && make docker-smoke` (steps `no_raw_host_sockets`, `raw_guest_port_denied`) | [design-v0](docs/specs/design-v0.md#security-model), [docs/SECURITY.md](docs/SECURITY.md) |
 | 2 | Intra-crate single-path references in the 22 `RULES` files follow the layer table | Verified | `RULES` in `check_structure.py`, run by `harness-structure.yml` on `src/**` changes; a new module needs a `RULES` row (TD-018) | `python3 scripts/harness/check_structure.py --root .` | [scripts/harness/check_structure.py](scripts/harness/check_structure.py) |
-| 3 | On the model backend, every error response produced by `handle_all` is an `ErrorEnvelope` with the pinned baseline revision; on the System VM backend (ADR 0007, not built yet) HTTP errors are Firecracker's own, `vesperd`'s own failures are refused or closed connections, and its startup and command-line errors are deterministic. Exceptions before extraction: a body over axum's default 2 MiB limit gets a plain `413`, a body-read failure gets a plain `400`, and a poisoned `RwLock` panics the task (TD-019) | Verified | `AppState::new_with_matrix` rejects a blank revision; `tests/api_contract.rs` asserts envelopes; `rust-tests.yml` runs `cargo test` for every `src/**` change | `make contract-test` | [tests/api_contract.rs](tests/api_contract.rs) |
+| 3 | On the model backend, every error response produced by `handle_all` is an `ErrorEnvelope` with the pinned baseline revision; on the System VM backend (ADR 0007 slice 4; `tests/vesperd_systemvm.rs`, `make systemvm-vesperd-suite` step `firecracker_error_byte_for_byte`) HTTP errors are Firecracker's own, `vesperd`'s own failures are refused or closed connections, and its startup and command-line errors are deterministic. Exceptions before extraction: a body over axum's default 2 MiB limit gets a plain `413`, a body-read failure gets a plain `400`, and a poisoned `RwLock` panics the task (TD-019) | Verified | `AppState::new_with_matrix` rejects a blank revision; `tests/api_contract.rs` asserts envelopes; `rust-tests.yml` runs `cargo test` for every `src/**` change | `make contract-test` | [tests/api_contract.rs](tests/api_contract.rs) |
 | 4 | The golden route list equals `contractgen`'s serialisation of the pinned swagger | Verified | `contractgen --mode check` and `tests/contract_golden.rs` in `contract-tests.yml`; `tests/**` changes are covered by `rust-tests.yml` | `make contract-check` | [tests/contract_golden.rs](tests/contract_golden.rs) |
 | 5 | Generated surface stub and behavior matrices are complete and fresh | Verified | `baselinectl --mode validate-api-matrix` and `validate-api-behavior-matrix` in `rust-tests.yml`; the `validates_repo_generated_*` unit tests also fail under `cargo test` | `make surface-matrix-check`, `make behavior-matrix-check` | [docs/process/baseline-governance.md](docs/process/baseline-governance.md) |
 | 6 | Compat exceptions carry required fields, and none is open past expiry | Verified | On change only: `compatexctl` in `compat-exceptions.yml` when the registry or its code changes; no scheduled run (TD-016) | `cargo run --bin compatexctl -- --registry docs/specs/compat-exceptions.yaml` | [docs/process/compat-exceptions.md](docs/process/compat-exceptions.md) |
