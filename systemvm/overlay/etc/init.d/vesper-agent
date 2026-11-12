@@ -8,7 +8,9 @@ agent_port="${VESPER_AGENT_PORT:-1024}"
 command=/usr/bin/socat
 # -t: after one side half-closes, keep relaying the other direction until it closes too; socat's default
 # ends the connection 0.5 s later (GH #167).
-command_args="-t 86400 VSOCK-LISTEN:${agent_port},reuseaddr,fork EXEC:/usr/local/bin/vesper-agent"
+# max-children: each LAUNCHAPI lease and each FCAPI relay holds one handler for its lifetime, so the handlers
+# are bounded (ADR 0007; the value and its reason are in docs/exec-plans/active/2026-11-12-GH156-vesperd-backend-a.md).
+command_args="-t 86400 VSOCK-LISTEN:${agent_port},reuseaddr,fork,max-children=64 EXEC:/usr/local/bin/vesper-agent"
 respawn_delay=1
 respawn_max=0
 

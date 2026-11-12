@@ -18,6 +18,13 @@
 #   SHARE <args...>       -> SHARE <rc> <count> then <count> output lines of `vesper-share <args>`
 #   ARCH <args...>        -> ARCH <rc> <count> then <count> output lines of `vesper-arch <args>`
 #   DATA <args...>        -> DATA <rc> <count> then <count> output lines of `vesper-data <args>` (GH #164)
+#   VESPERD <args...>     -> VESPERD <rc> <count> then <count> output lines of `vesper-vesperd <args>`, except
+#                            launch and connect (ADR 0007)
+#   LAUNCHAPI <id> [ceiling] -> READY <id> pid=<n> firecracker_version=<v> once the API socket exists, or
+#                            ERR <reason> and close; after READY this connection is the microVM's lease: its end
+#                            of file stops the microVM, and the agent closes it when Firecracker exits (ADR 0007)
+#   FCAPI <id>            -> OK, then the connection relays bytes to <id>'s Firecracker API socket; or ERR <reason>
+#                            and close (ADR 0007)
 #   DROP                  -> DROP then the connection is closed (simulates a server-side drop)
 #   SHUTDOWN              -> BYE then poweroff
 #   QUIT                  -> BYE then the connection is closed
@@ -84,9 +91,13 @@ while IFS= read -r line; do
         echo "LOGS 0"
       fi
       ;;
-    MICROVM|ROOTFS|WORKLOAD|FCPARITY|CTR|SHARE|ARCH|DATA)
+    LAUNCHAPI) shift; exec /usr/local/bin/vesper-vesperd launch "$@" ;;
+    FCAPI) shift; exec /usr/local/bin/vesper-vesperd connect "$@" ;;
+    MICROVM|ROOTFS|WORKLOAD|FCPARITY|CTR|SHARE|ARCH|DATA|VESPERD)
       tool=$1; shift
-      case "$tool" in MICROVM) bin=/usr/local/bin/vesper-microvm ;; ROOTFS) bin=/usr/local/bin/vesper-rootfs ;; WORKLOAD) bin=/usr/local/bin/vesper-workload ;; FCPARITY) bin=/usr/local/bin/vesper-fcparity ;; CTR) bin=/usr/local/bin/vesper-ctr ;; SHARE) bin=/usr/local/bin/vesper-share ;; DATA) bin=/usr/local/bin/vesper-data ;; *) bin=/usr/local/bin/vesper-arch ;; esac
+      case "$tool" in MICROVM) bin=/usr/local/bin/vesper-microvm ;; ROOTFS) bin=/usr/local/bin/vesper-rootfs ;; WORKLOAD) bin=/usr/local/bin/vesper-workload ;; FCPARITY) bin=/usr/local/bin/vesper-fcparity ;; CTR) bin=/usr/local/bin/vesper-ctr ;; SHARE) bin=/usr/local/bin/vesper-share ;; DATA) bin=/usr/local/bin/vesper-data ;; VESPERD) bin=/usr/local/bin/vesper-vesperd ;; *) bin=/usr/local/bin/vesper-arch ;; esac
+      # launch and connect own the connection; they are reached only as LAUNCHAPI and FCAPI.
+      if [ "$tool" = VESPERD ]; then case "${1:-}" in launch|connect) echo "$tool 2 1"; echo "ERR use LAUNCHAPI or FCAPI"; continue ;; esac; fi
       out="$("$bin" "$@" 2>&1)"; rc=$?
       count="$(printf '%s\n' "$out" | grep -c '')"
       [ -z "$out" ] && count=0

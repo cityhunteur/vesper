@@ -24,8 +24,9 @@ JUID=10000
 JGID=10000
 MARKER="VESPER-MICROVM-OK"
 
-# The jailer execs the binary by its chroot-relative name, so match on "firecracker --id <ID> ".
-fcpid() { pgrep -f "firecracker --id $1 " 2>/dev/null | head -1; }
+# The jailer execs the binary by its chroot-relative name, so match on "firecracker --id <ID> ". The uid filter
+# keeps the shim's lookups off vesperd microVMs, which run as uid 20000 and may use the same id (ADR 0007).
+fcpid() { pgrep -u "$JUID" -f "firecracker --id $1 " 2>/dev/null | head -1; }
 now_ms() { awk '{printf "%d", $1 * 1000}' /proc/uptime; }
 logfile() { echo "/var/log/vesper-microvm-$1.log"; }
 

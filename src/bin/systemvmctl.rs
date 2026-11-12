@@ -256,6 +256,20 @@ enum ControlAction {
         #[arg(long, default_value = "run/systemvm/restart-report.json")]
         report: String,
     },
+    /// Run `vesper-vesperd <args>` in the guest (status|isolation|list|log|reap|kill-holder|kill-fc ID|test-…; ADR 0007).
+    Vesperd {
+        args: Vec<String>,
+    },
+    /// Run the ADR 0007 slice 3 checklist (LAUNCHAPI, FCAPI, boot through the API, teardowns, reaper) and write a JSON report.
+    LaunchapiSuite {
+        #[arg(long, default_value = "run/systemvm/launchapi-report.json")]
+        report: String,
+        #[arg(long, default_value = "vesper-launchapi")]
+        id: String,
+        /// The pinned swagger whose info.version READY must report.
+        #[arg(long, default_value = "third_party/firecracker/firecracker.yaml")]
+        swagger: String,
+    },
     /// Run the GH #18 checklist (launch, jailer isolation, stop, crash, poweroff, cleanup) and write a JSON report.
     MicrovmSuite {
         #[arg(long, default_value = "run/systemvm/microvm-report.json")]
@@ -297,6 +311,18 @@ fn control_endpoint(
         .or(cfg_port)
         .unwrap_or(vesper::control::DEFAULT_AGENT_PORT);
     Ok(vesper::control::ControlEndpoint::new(bridge, port))
+}
+
+fn print_steps(result: &vesper::control::SuiteReport, width: usize) {
+    for step in &result.steps {
+        println!(
+            "{} {}: {} ({} ms)",
+            if step.ok { "ok  " } else { "FAIL" },
+            step.name,
+            step.detail.chars().take(width).collect::<String>(),
+            step.elapsed_ms
+        );
+    }
 }
 
 fn run_control(endpoint: vesper::control::ControlEndpoint, action: ControlAction) -> Result<(), String> {
@@ -443,6 +469,27 @@ fn run_control(endpoint: vesper::control::ControlEndpoint, action: ControlAction
                 return Err(format!("vesper-arch exited with {rc}"));
             }
         }
+        ControlAction::Vesperd { args } => {
+            let mut session = control::connect(&endpoint)?;
+            let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+            let (rc, lines) = session.vesperd(&refs)?;
+            for line in &lines {
+                println!("{line}");
+            }
+            if rc != 0 {
+                return Err(format!("vesper-vesperd exited with {rc}"));
+            }
+        }
+        ControlAction::LaunchapiSuite { report, id, swagger } => {
+            let version = vesper::spec::load_info_version(&swagger)?;
+            let result = control::run_launchapi_suite(&endpoint, &id, &version);
+            control::write_report(&report, &result)?;
+            print_steps(&result, 220);
+            if !result.passed {
+                return Err(format!("launchapi suite failed (report: {report})"));
+            }
+            println!("launchapi suite passed (report: {report})");
+        }
         ControlAction::Data { args } => {
             let mut session = control::connect(&endpoint)?;
             let refs: Vec<&str> = args.iter().map(String::as_str).collect();
@@ -496,15 +543,7 @@ fn run_control(endpoint: vesper::control::ControlEndpoint, action: ControlAction
         ControlAction::ShimSuite { report } => {
             let result = control::run_shim_suite(&endpoint);
             control::write_report(&report, &result)?;
-            for step in &result.steps {
-                println!(
-                    "{} {}: {} ({} ms)",
-                    if step.ok { "ok  " } else { "FAIL" },
-                    step.name,
-                    step.detail.chars().take(220).collect::<String>(),
-                    step.elapsed_ms
-                );
-            }
+            print_steps(&result, 220);
             if !result.passed {
                 return Err(format!("shim suite failed (report: {report})"));
             }
@@ -513,15 +552,7 @@ fn run_control(endpoint: vesper::control::ControlEndpoint, action: ControlAction
         ControlAction::BundleSuite { report } => {
             let result = control::run_bundle_suite(&endpoint);
             control::write_report(&report, &result)?;
-            for step in &result.steps {
-                println!(
-                    "{} {}: {} ({} ms)",
-                    if step.ok { "ok  " } else { "FAIL" },
-                    step.name,
-                    step.detail.chars().take(220).collect::<String>(),
-                    step.elapsed_ms
-                );
-            }
+            print_steps(&result, 220);
             if !result.passed {
                 return Err(format!("bundle suite failed (report: {report})"));
             }
@@ -530,15 +561,7 @@ fn run_control(endpoint: vesper::control::ControlEndpoint, action: ControlAction
         ControlAction::RestartSuite { report } => {
             let result = control::run_restart_suite(&endpoint);
             control::write_report(&report, &result)?;
-            for step in &result.steps {
-                println!(
-                    "{} {}: {} ({} ms)",
-                    if step.ok { "ok  " } else { "FAIL" },
-                    step.name,
-                    step.detail.chars().take(220).collect::<String>(),
-                    step.elapsed_ms
-                );
-            }
+            print_steps(&result, 220);
             if !result.passed {
                 return Err(format!("restart suite failed (report: {report})"));
             }

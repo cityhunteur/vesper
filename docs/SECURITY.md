@@ -1,7 +1,7 @@
 ---
 status: verified
 owner: cityhunteur
-last_reviewed: 2026-11-11
+last_reviewed: 2026-11-12
 ---
 
 # Vesper Security Review Map
@@ -152,6 +152,42 @@ a shared volume. The guest formats only a disk in which `blkid` finds nothing, a
 (`systemvm/overlay/usr/local/bin/vesper-data`), so an image with a filesystem named by mistake in `VESPER_DATA_DISK`
 is not erased; a file with no recognisable filesystem or partition table is formatted.
 Deleting the image with the System VM stopped erases all container state; nothing else holds a copy.
+
+## `vesperd` microVMs in the System VM (ADR 0007, slice 3)
+
+Three agent verbs on vsock port 1024 serve `vesperd` microVMs; no new port, socket, share or entitlement is added,
+and the bridge allow-list is unchanged.
+
+- `LAUNCHAPI <id> [ceiling]` starts one stock Firecracker under the jailer with no configuration file: uid and gid
+  20000 (the shim's microVMs run as 10000), cgroup `/sys/fs/cgroup/vesperd/<id>` (`--parent-cgroup vesperd`,
+  `pids.max=256`, `memory.max` from `ceiling`, default 640 MiB, at least 128 MiB and at most the System VM's
+  memory), chroot `/srv/vesperd/firecracker/<id>/root` (tmpfs until slice 5), the prepared kernel and initramfs as
+  `/Image` and `/initrd.gz`. After `READY` the connection is the lease: its end stops the microVM and removes the
+  jail, cgroup and record; Firecracker's exit closes it.
+- `FCAPI <id>` relays bytes to that microVM's API socket. The relay socat chroots into the jail root before it
+  connects (`chroot-early`), so a symlink that a compromised Firecracker plants in its jail, which it owns, cannot
+  lead the root-run socat to a socket outside the jail. It adds nothing `FCPARITY api` could not already do.
+- `VESPERD <args…>` inspects and faults these microVMs for the suite: `status`, `isolation`, `list`, `log`, `reap`,
+  `kill-holder`, `kill-fc` and the test hooks `test-forge-start`, `test-orphan`, `test-age` and
+  `test-container-vsock`. It cannot launch or connect. Like `MICROVM crash`, the hooks need nothing beyond what
+  the agent already is: root in the System VM.
+
+Every id is checked against the jailer's rule (1 to 64 letters, digits and hyphens) before it is joined into a path:
+by `LAUNCHAPI`, `FCAPI`, `VESPERD` and, since slice 3, `FCPARITY`, which earlier joined an unchecked id. The two
+owners avoid collisions by naming, not isolation: `vesper-microvm` finds its processes with `pgrep -u 10000`, so the
+shim never acts on a `vesperd` microVM with the same id, and the `vesperd` tools match uid 20000.
+
+Root reads only one file inside a jail where Firecracker has run: the jailer's `firecracker.pid`, once, when the API
+socket appears and before guest code runs, and only if it is a regular file and names a uid 20000 Firecracker
+with that id. Later lookups use the root-only record `/run/vesper/vesperd/leases/<id>`, which stores each pid with
+its start time, so a reused pid is never signalled. A reaper (`vesper-vesperd-reaper`, every 10 s, and before each
+`LAUNCHAPI`) stops a microVM whose lease shell is gone, and a jail without a record after 60 s; one `flock`
+serialises reaping, jail creation and teardown.
+
+A default Docker container cannot reach the agent from inside the System VM: Docker's default seccomp profile denies
+`socket(AF_VSOCK)` (`make systemvm-launchapi-suite`, step `default_container_cannot_open_vsock`). A container with
+`seccomp=unconfined` can open the socket, but its connects to CID 1 and 3 fail because no vsock loopback transport
+is loaded; a privileged container that can load kernel modules is not covered.
 
 ## Private microVM sessions (ADR 0006)
 
