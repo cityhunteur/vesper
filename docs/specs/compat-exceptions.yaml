@@ -58,3 +58,17 @@ exceptions:
       the microVM, not the in-guest container, is the isolation boundary (no new namespaces, no second
       seccomp profile). Resolve by either honoring a more restrictive requested posture or confirming the
       full-capability model at the parity-GA security review. Needs human approval before GA (unapproved).
+  - id: CE-0006
+    owner: cityhunteur
+    issue: 156
+    expiry_date: "2027-03-31"
+    target_release: parity-ga
+    status: open
+    approved_by: cityhunteur
+    approved_on: "2026-11-12"
+    description: >-
+      The in-memory model backend of vesperd (the default until ADR 0007's System VM backend is proven)
+      returns error bodies with four fields Firecracker does not send: code, path, method and
+      baseline_firecracker_revision, beside Firecracker's fault_message. Clients that compare bodies byte for
+      byte see a difference. Resolve when the System VM backend becomes the default (its errors are
+      Firecracker's own), or by dropping the extra fields from the model backend.

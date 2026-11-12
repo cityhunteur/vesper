@@ -1,12 +1,12 @@
 ---
-status: proposed
+status: accepted
 owner: cityhunteur
-last_reviewed: 2026-11-11
+last_reviewed: 2026-11-12
 ---
 
 # 0007. Connect `vesperd` to Backend A as a relay to one jailed Firecracker per socket
 
-Date: 2026-11-11. Supersedes: none. Superseded by: none.
+Date: 2026-11-11. Accepted by the owner on 2026-11-12, with the three owner points confirmed as written (decision D-022). Supersedes: none. Superseded by: none.
 
 ## Context and problem
 
