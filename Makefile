@@ -5,7 +5,7 @@ CYCLES ?= 50
 .PHONY: build third-party-notices third-party-notices-check test contract-generate contract-check contract-test surface-matrix-generate \
 	surface-matrix-check behavior-matrix-generate behavior-matrix-check \
 	validate-entitlements dev-up dev-down vmlauncher-build systemvm-fetch systemvm-overlay systemvm-prepare systemvm-build systemvm-launch-config \
-	systemvm-boot-smoke systemvm-up systemvm-down systemvm-control-suite systemvm-services-suite systemvm-trivial-image docker-up docker-down docker-smoke docker-conformance ports-suite binds-suite data-disk-suite share-notify-selftest share-watch-selftest systemvm-up-shares dns-suite workflow-suite crossarch-suite ctr-conformance ctr-conformance-check systemvm-reliability systemvm-microvm-suite systemvm-rootfs-suite systemvm-workload-suite systemvm-parity-baseline parity-baseline-check shim-build shim-test systemvm-exec-suite systemvm-shim-suite systemvm-bundle-suite systemvm-restart-suite systemvm-launchapi-suite systemvm-vesperd-suite systemvm-up-snapshot systemvm-snapshot-suite
+	systemvm-boot-smoke systemvm-up systemvm-down systemvm-control-suite systemvm-services-suite systemvm-trivial-image docker-up docker-down docker-smoke docker-conformance ports-suite binds-suite data-disk-suite share-notify-selftest share-watch-selftest systemvm-up-shares dns-suite workflow-suite crossarch-suite ctr-conformance ctr-conformance-check systemvm-reliability systemvm-microvm-suite systemvm-rootfs-suite systemvm-workload-suite systemvm-parity-baseline parity-baseline-check shim-build shim-test systemvm-exec-suite systemvm-shim-suite systemvm-bundle-suite systemvm-restart-suite systemvm-launchapi-suite systemvm-vesperd-suite systemvm-up-snapshot systemvm-snapshot-suite systemvm-replay-suite systemvm-replay-publish behavior-replay-check
 
 build:
 	$(CARGO) build --bins
@@ -122,6 +122,20 @@ systemvm-up-snapshot:
 systemvm-snapshot-suite:
 	$(CARGO) build --bin vesperd
 	$(CARGO) run --bin systemvmctl -- control snapshot-suite
+
+# ADR 0007 slice 6: replay the behaviour matrix through vesperd on Backend A, one microVM per case
+# (needs make systemvm-up-snapshot). The publish target also rewrites the committed report.
+systemvm-replay-suite:
+	$(CARGO) build --bin vesperd
+	$(CARGO) run --bin systemvmctl -- control replay-suite
+
+systemvm-replay-publish:
+	$(CARGO) build --bin vesperd
+	$(CARGO) run --bin systemvmctl -- control replay-suite --publish docs/generated/backend-a-behavior-replay.json
+
+# The replay scripts cover the matrix exactly and reproduce it on the model backend (runs in CI with cargo test).
+behavior-replay-check:
+	$(CARGO) test --test api_replay
 
 parity-baseline-check:
 	python3 -I scripts/systemvm/parity_baseline_report.py --self-test
