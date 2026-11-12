@@ -1,0 +1,643 @@
+# Replay scripts for the behaviour matrix (ADR 0007 slice 6).
+#
+# One script per case of docs/generated/firecracker-api-behavior-matrix.json, keyed `METHOD PATH#case_id`. Each
+# case runs on a fresh microVM: the `setup` steps in order (each must return 2xx), then `request`, whose response is
+# judged against the case. `src/api_replay.rs` reads this file; `make behavior-replay-check` (tests/api_replay.rs)
+# checks that it covers the matrix exactly and replays it on the model; `make systemvm-replay-suite` on Backend A.
+#
+# Step forms: `METHOD /path [JSON]`, `WAIT <ms>`, `@macro`. `{root}` is the case's root: a temporary directory on the
+# model backend and the jail on Backend A (empty, so `{root}/tmp/x` is `/tmp/x` there); it is removed from response
+# bodies before judging. `{pad:N}` is N letters `a`; `{rep:N:TEXT}` is N copies of TEXT.
+#
+# Every case root holds `files`, the kernel at `{root}/Image` and the initramfs at `{root}/initrd.gz`. Cases marked
+# `snapshot: true` also hold the snapshot fixture at `{root}/snap/vm.vmstate` and `{root}/snap/vm.mem`: the
+# `snapshot_fixture` steps run once and leave a paused microVM's snapshot at `{root}/tmp/fixture.vmstate` and
+# `{root}/tmp/fixture.mem`, which the backend gives to those cases.
+
+version: 1
+firecracker_revision: d83d72b710361a10294480131377b1b00b163af8
+
+files:
+  - { path: /tmp/rootfs.ext4, bytes: 1048576 }
+  - { path: /tmp/rootfs-updated.ext4, bytes: 1048576 }
+  - { path: /tmp/data.ext4, bytes: 1048576 }
+  - { path: /tmp/pmem.img, bytes: 2097152 }
+  - { path: /tmp/pmem-empty.img, bytes: 0 }
+  - { path: /tmp/fc.log, bytes: 0 }
+  - { path: /tmp/fc.metrics, bytes: 0 }
+  - { path: /tmp/serial.out, bytes: 0 }
+
+macros:
+  boot_source:
+    - 'PUT /boot-source {"kernel_image_path":"{root}/Image","initrd_path":"{root}/initrd.gz","boot_args":"console=ttyS0 reboot=k panic=1 pci=off"}'
+  start:
+    - 'PUT /actions {"action_type":"InstanceStart"}'
+  boot:
+    - '@boot_source'
+    - '@start'
+  # The balloon and virtio-mem devices activate only when the guest driver probes them, a moment after
+  # InstanceStart; until then Firecracker answers "Device not activated yet" or "Device is not active".
+  boot_settled:
+    - '@boot'
+    - 'WAIT 2000'
+  pause:
+    - 'PATCH /vm {"state":"Paused"}'
+  machine_512:
+    - 'PUT /machine-config {"vcpu_count":1,"mem_size_mib":256}'
+    - 'PATCH /machine-config {"vcpu_count":2,"mem_size_mib":512,"track_dirty_pages":true}'
+  balloon_min:
+    - 'PUT /balloon {"amount_mib":1,"deflate_on_oom":true}'
+  balloon_stats:
+    - 'PUT /balloon {"amount_mib":1,"deflate_on_oom":true,"stats_polling_interval_s":1}'
+  balloon_hinting:
+    - 'PUT /balloon {"amount_mib":1,"deflate_on_oom":true,"free_page_hinting":true}'
+  mmds_store:
+    - 'PUT /mmds {"meta":{"name":"vesper","version":"1"}}'
+  net0:
+    - 'PUT /network-interfaces/eth0 {"iface_id":"eth0","host_dev_name":"tap0","guest_mac":"06:00:ac:10:00:02"}'
+  mmds_config:
+    - 'PUT /mmds/config {"network_interfaces":["eth0"],"version":"V1","ipv4_address":"169.254.169.254"}'
+  rootfs:
+    - 'PUT /drives/rootfs {"drive_id":"rootfs","path_on_host":"{root}/tmp/rootfs.ext4","is_root_device":true,"is_read_only":false}'
+  pmem0:
+    - 'PUT /pmem/pmem0 {"id":"pmem0","path_on_host":"{root}/tmp/pmem.img"}'
+  hotplug:
+    - 'PUT /hotplug/memory {"total_size_mib":1024}'
+  vsock:
+    - 'PUT /vsock {"guest_cid":5,"uds_path":"{root}/tmp/vesper-vsock.sock"}'
+  logger:
+    - 'PUT /logger {"log_path":"{root}/tmp/fc.log","level":"Info"}'
+  metrics:
+    - 'PUT /metrics {"metrics_path":"{root}/tmp/fc.metrics"}'
+  serial:
+    - 'PUT /serial {"serial_out_path":"{root}/tmp/serial.out"}'
+  entropy:
+    - 'PUT /entropy {"rate_limiter":{"bandwidth":{"size":4096,"refill_time":1000,"one_time_burst":512},"ops":{"size":32,"refill_time":100}}}'
+  cpu_config:
+    - 'PUT /cpu-config {}'
+
+snapshot_fixture:
+  - '@vsock'
+  - '@boot'
+  - '@pause'
+  - 'PUT /snapshot/create {"snapshot_type":"Full","snapshot_path":"{root}/tmp/fixture.vmstate","mem_file_path":"{root}/tmp/fixture.mem"}'
+
+cases:
+  # GET /
+  'GET /#preboot_instance_info':
+    request: 'GET /'
+  'GET /#paused_after_snapshot_load':
+    snapshot: true
+    setup: ['PUT /snapshot/load {"snapshot_path":"{root}/snap/vm.vmstate","mem_backend":{"backend_type":"File","backend_path":"{root}/snap/vm.mem"}}']
+    request: 'GET /'
+  'GET /#running_after_snapshot_load_resume':
+    snapshot: true
+    setup: ['PUT /snapshot/load {"snapshot_path":"{root}/snap/vm.vmstate","mem_backend":{"backend_type":"File","backend_path":"{root}/snap/vm.mem"},"resume_vm":true}']
+    request: 'GET /'
+
+  # GET /balloon
+  'GET /balloon#preboot_missing_device':
+    request: 'GET /balloon'
+  'GET /balloon#preboot_configured_defaults':
+    setup: ['@balloon_min']
+    request: 'GET /balloon'
+  'GET /balloon#runtime_missing_device':
+    setup: ['@boot']
+    request: 'GET /balloon'
+  'GET /balloon#runtime_updated_target':
+    setup: ['@balloon_min', '@boot_settled', 'PATCH /balloon {"amount_mib":64}']
+    request: 'GET /balloon'
+
+  # GET /balloon/hinting/status
+  'GET /balloon/hinting/status#preboot_invalid_state':
+    request: 'GET /balloon/hinting/status'
+  'GET /balloon/hinting/status#missing_device_runtime':
+    setup: ['@boot']
+    request: 'GET /balloon/hinting/status'
+  'GET /balloon/hinting/status#hinting_disabled_runtime':
+    setup: ['@balloon_min', '@boot_settled']
+    request: 'GET /balloon/hinting/status'
+  'GET /balloon/hinting/status#idle_status_runtime':
+    setup: ['@balloon_hinting', '@boot_settled']
+    request: 'GET /balloon/hinting/status'
+
+  # GET /balloon/statistics
+  'GET /balloon/statistics#preboot_invalid_state':
+    request: 'GET /balloon/statistics'
+  'GET /balloon/statistics#missing_device_runtime':
+    setup: ['@boot']
+    request: 'GET /balloon/statistics'
+  'GET /balloon/statistics#stats_disabled_runtime':
+    setup: ['@balloon_min', '@boot_settled']
+    request: 'GET /balloon/statistics'
+  'GET /balloon/statistics#enabled_stats_runtime':
+    # A 256 MiB guest, so the balloon can reach its 64 MiB target (a 128 MiB guest stops near 52 MiB).
+    setup: ['PUT /machine-config {"vcpu_count":1,"mem_size_mib":256}', 'PUT /balloon {"amount_mib":64,"deflate_on_oom":true,"stats_polling_interval_s":1}', '@boot_settled', 'WAIT 6000']
+    request: 'GET /balloon/statistics'
+
+  # GET /hotplug/memory
+  'GET /hotplug/memory#preboot_invalid_state':
+    request: 'GET /hotplug/memory'
+  'GET /hotplug/memory#runtime_initial_status':
+    setup: ['@hotplug', '@boot_settled']
+    request: 'GET /hotplug/memory'
+  'GET /hotplug/memory#runtime_updated_requested_size':
+    setup: ['@hotplug', '@boot_settled', 'PATCH /hotplug/memory {"requested_size_mib":512}']
+    request: 'GET /hotplug/memory'
+
+  # GET /machine-config
+  'GET /machine-config#preboot_after_put_patch':
+    setup: ['@machine_512']
+    request: 'GET /machine-config'
+  'GET /machine-config#runtime_after_put_patch':
+    setup: ['@machine_512', '@boot']
+    request: 'GET /machine-config'
+
+  # GET /mmds
+  'GET /mmds#preboot_empty_store':
+    request: 'GET /mmds'
+  'GET /mmds#preboot_initialized_store':
+    setup: ['PUT /mmds {"meta":{"name":"vesper"}}', 'PATCH /mmds {"meta":{"version":"1"}}']
+    request: 'GET /mmds'
+  'GET /mmds#runtime_configured_store':
+    setup: ['@mmds_store', '@net0', '@mmds_config', '@boot']
+    request: 'GET /mmds'
+  'GET /mmds#runtime_missing_config':
+    setup: ['@mmds_store', '@boot']
+    request: 'GET /mmds'
+
+  # GET /version
+  'GET /version#preboot_version_response':
+    request: 'GET /version'
+  'GET /version#runtime_version_response':
+    setup: ['@boot']
+    request: 'GET /version'
+
+  # GET /vm/config
+  'GET /vm/config#machine_config_export_preboot':
+    setup: ['@machine_512']
+    request: 'GET /vm/config'
+  'GET /vm/config#machine_config_export_runtime':
+    setup: ['@machine_512', '@boot']
+    request: 'GET /vm/config'
+  'GET /vm/config#cpu_config_omitted_preboot':
+    setup: ['@cpu_config']
+    request: 'GET /vm/config'
+  'GET /vm/config#serial_omitted_preboot':
+    setup: ['@serial']
+    request: 'GET /vm/config'
+  'GET /vm/config#serial_omitted_runtime':
+    setup: ['@serial', '@boot']
+    request: 'GET /vm/config'
+  'GET /vm/config#metrics_omitted_preboot':
+    setup: ['@metrics']
+    request: 'GET /vm/config'
+  'GET /vm/config#metrics_omitted_runtime':
+    setup: ['@metrics', '@boot']
+    request: 'GET /vm/config'
+  'GET /vm/config#logger_omitted_preboot':
+    setup: ['@logger']
+    request: 'GET /vm/config'
+  'GET /vm/config#logger_omitted_runtime':
+    setup: ['@logger', '@boot']
+    request: 'GET /vm/config'
+  'GET /vm/config#memory_hotplug_export_preboot':
+    setup: ['@hotplug']
+    request: 'GET /vm/config'
+  'GET /vm/config#memory_hotplug_export_runtime':
+    setup: ['@hotplug', '@boot_settled']
+    request: 'GET /vm/config'
+  'GET /vm/config#mmds_config_export_preboot':
+    setup: ['@net0', '@mmds_config']
+    request: 'GET /vm/config'
+  'GET /vm/config#mmds_config_export_runtime':
+    setup: ['@net0', '@mmds_config', '@boot']
+    request: 'GET /vm/config'
+  'GET /vm/config#vsock_export_preboot':
+    setup: ['@vsock']
+    request: 'GET /vm/config'
+  'GET /vm/config#vsock_export_runtime':
+    setup: ['@vsock', '@boot']
+    request: 'GET /vm/config'
+  'GET /vm/config#network_interfaces_export_preboot':
+    setup: ['@net0']
+    request: 'GET /vm/config'
+  'GET /vm/config#network_interfaces_export_runtime':
+    setup: ['@net0', '@boot', 'PATCH /network-interfaces/eth0 {"iface_id":"eth0","rx_rate_limiter":{"bandwidth":{"size":1024,"refill_time":100}}}']
+    request: 'GET /vm/config'
+  'GET /vm/config#balloon_export_preboot':
+    setup: ['@balloon_min']
+    request: 'GET /vm/config'
+  'GET /vm/config#balloon_export_runtime':
+    setup: ['@balloon_min', '@boot_settled']
+    request: 'GET /vm/config'
+  'GET /vm/config#entropy_export_preboot':
+    setup: ['@entropy']
+    request: 'GET /vm/config'
+  'GET /vm/config#entropy_export_runtime':
+    setup: ['@entropy', '@boot']
+    request: 'GET /vm/config'
+  'GET /vm/config#boot_source_export_preboot':
+    setup: ['@boot_source']
+    request: 'GET /vm/config'
+  'GET /vm/config#boot_source_export_runtime':
+    setup: ['@boot']
+    request: 'GET /vm/config'
+  'GET /vm/config#pmem_export_preboot':
+    setup: ['@pmem0']
+    request: 'GET /vm/config'
+  'GET /vm/config#pmem_export_runtime':
+    setup: ['@pmem0', '@boot']
+    request: 'GET /vm/config'
+  'GET /vm/config#drives_export_preboot_root_first':
+    setup: ['PUT /drives/data {"drive_id":"data","path_on_host":"{root}/tmp/data.ext4","is_root_device":false,"is_read_only":false}', '@rootfs']
+    request: 'GET /vm/config'
+  'GET /vm/config#drives_export_preboot_default_cache_type':
+    setup: ['@rootfs']
+    request: 'GET /vm/config'
+  'GET /vm/config#drives_export_runtime_after_patch':
+    setup: ['@rootfs', '@boot', 'PATCH /drives/rootfs {"drive_id":"rootfs","path_on_host":"{root}/tmp/rootfs-updated.ext4"}']
+    request: 'GET /vm/config'
+
+  # PATCH /balloon
+  'PATCH /balloon#preboot_invalid_state':
+    request: 'PATCH /balloon {"amount_mib":1}'
+  'PATCH /balloon#missing_device_runtime':
+    setup: ['@boot']
+    request: 'PATCH /balloon {"amount_mib":1}'
+  'PATCH /balloon#update_existing_runtime':
+    setup: ['@balloon_min', '@boot_settled']
+    request: 'PATCH /balloon {"amount_mib":64}'
+  'PATCH /balloon#oversize_runtime':
+    setup: ['@balloon_min', '@boot_settled']
+    request: 'PATCH /balloon {"amount_mib":256}'
+
+  # PATCH /balloon/hinting/start
+  'PATCH /balloon/hinting/start#preboot_invalid_state':
+    request: 'PATCH /balloon/hinting/start'
+  'PATCH /balloon/hinting/start#missing_device_runtime':
+    setup: ['@boot']
+    request: 'PATCH /balloon/hinting/start'
+  'PATCH /balloon/hinting/start#hinting_disabled_runtime':
+    setup: ['@balloon_min', '@boot_settled']
+    request: 'PATCH /balloon/hinting/start'
+  'PATCH /balloon/hinting/start#start_success_runtime':
+    setup: ['@balloon_hinting', '@boot_settled']
+    request: 'PATCH /balloon/hinting/start'
+
+  # PATCH /balloon/hinting/stop
+  'PATCH /balloon/hinting/stop#preboot_invalid_state':
+    request: 'PATCH /balloon/hinting/stop'
+  'PATCH /balloon/hinting/stop#missing_device_runtime':
+    setup: ['@boot']
+    request: 'PATCH /balloon/hinting/stop'
+  'PATCH /balloon/hinting/stop#hinting_disabled_runtime':
+    setup: ['@balloon_min', '@boot_settled']
+    request: 'PATCH /balloon/hinting/stop'
+  'PATCH /balloon/hinting/stop#stop_success_runtime':
+    setup: ['@balloon_hinting', '@boot_settled']
+    request: 'PATCH /balloon/hinting/stop'
+
+  # PATCH /balloon/statistics
+  'PATCH /balloon/statistics#preboot_invalid_state':
+    request: 'PATCH /balloon/statistics {"stats_polling_interval_s":2}'
+  'PATCH /balloon/statistics#missing_device_runtime':
+    setup: ['@boot']
+    request: 'PATCH /balloon/statistics {"stats_polling_interval_s":2}'
+  'PATCH /balloon/statistics#update_existing_runtime':
+    setup: ['@balloon_stats', '@boot_settled']
+    request: 'PATCH /balloon/statistics {"stats_polling_interval_s":2}'
+  'PATCH /balloon/statistics#disable_runtime':
+    setup: ['@balloon_stats', '@boot_settled']
+    request: 'PATCH /balloon/statistics {"stats_polling_interval_s":0}'
+
+  # PATCH /drives/{drive_id}
+  'PATCH /drives/{drive_id}#preboot_invalid_state':
+    setup: ['@rootfs']
+    request: 'PATCH /drives/rootfs {"drive_id":"rootfs","path_on_host":"{root}/tmp/rootfs-updated.ext4"}'
+  'PATCH /drives/{drive_id}#id_mismatch_runtime':
+    setup: ['@rootfs', '@boot']
+    request: 'PATCH /drives/rootfs {"drive_id":"other","path_on_host":"{root}/tmp/rootfs-updated.ext4"}'
+  'PATCH /drives/{drive_id}#missing_drive_runtime':
+    setup: ['@boot']
+    request: 'PATCH /drives/data {"drive_id":"data","path_on_host":"{root}/tmp/data.ext4"}'
+  'PATCH /drives/{drive_id}#update_existing_runtime':
+    setup: ['@rootfs', '@boot']
+    request: 'PATCH /drives/rootfs {"drive_id":"rootfs","path_on_host":"{root}/tmp/rootfs-updated.ext4"}'
+
+  # PATCH /hotplug/memory
+  'PATCH /hotplug/memory#preboot_invalid_state':
+    request: 'PATCH /hotplug/memory {"requested_size_mib":512}'
+  'PATCH /hotplug/memory#patch_valid_runtime':
+    setup: ['@hotplug', '@boot_settled']
+    request: 'PATCH /hotplug/memory {"requested_size_mib":512}'
+  'PATCH /hotplug/memory#invalid_requested_size_runtime':
+    setup: ['@hotplug', '@boot_settled']
+    request: 'PATCH /hotplug/memory {"requested_size_mib":3}'
+
+  # PATCH /machine-config
+  'PATCH /machine-config#patch_valid_preboot':
+    request: 'PATCH /machine-config {"vcpu_count":2}'
+  'PATCH /machine-config#shrink_below_balloon_target_preboot':
+    setup: ['PUT /balloon {"amount_mib":100,"deflate_on_oom":true}']
+    request: 'PATCH /machine-config {"mem_size_mib":64}'
+
+  # PATCH /mmds
+  'PATCH /mmds#patch_valid_store':
+    setup: ['@mmds_store']
+    request: 'PATCH /mmds {"meta":{"extra":"x"}}'
+  'PATCH /mmds#missing_store_preboot':
+    request: 'PATCH /mmds {"meta":{"extra":"x"}}'
+  'PATCH /mmds#runtime_missing_config':
+    setup: ['@mmds_store', '@boot']
+    request: 'PATCH /mmds {"meta":{"extra":"x"}}'
+  'PATCH /mmds#oversized_merge_patch':
+    setup: ['PUT /mmds {"a":"{pad:30000}"}']
+    request: 'PATCH /mmds {"b":"{pad:30000}"}'
+
+  # PATCH /network-interfaces/{iface_id}
+  'PATCH /network-interfaces/{iface_id}#preboot_invalid_state':
+    request: 'PATCH /network-interfaces/eth0 {"iface_id":"eth0","rx_rate_limiter":{"bandwidth":{"size":1024,"refill_time":100}}}'
+  'PATCH /network-interfaces/{iface_id}#id_mismatch_runtime':
+    setup: ['@boot']
+    request: 'PATCH /network-interfaces/eth0 {"iface_id":"eth1"}'
+  'PATCH /network-interfaces/{iface_id}#missing_interface_runtime':
+    setup: ['@boot']
+    request: 'PATCH /network-interfaces/eth0 {"iface_id":"eth0","rx_rate_limiter":{"bandwidth":{"size":1024,"refill_time":100}}}'
+  'PATCH /network-interfaces/{iface_id}#update_existing_runtime':
+    setup: ['@net0', '@boot']
+    request: 'PATCH /network-interfaces/eth0 {"iface_id":"eth0","rx_rate_limiter":{"bandwidth":{"size":1024,"refill_time":100}}}'
+
+  # PATCH /pmem/{id}
+  'PATCH /pmem/{id}#preboot_invalid_state':
+    setup: ['@pmem0']
+    request: 'PATCH /pmem/pmem0 {"id":"pmem0"}'
+  'PATCH /pmem/{id}#patch_rate_limiter_runtime':
+    setup: ['@pmem0', '@boot']
+    request: 'PATCH /pmem/pmem0 {"id":"pmem0","rate_limiter":{"bandwidth":{"size":1024,"refill_time":100}}}'
+  'PATCH /pmem/{id}#id_mismatch_runtime':
+    setup: ['@boot']
+    request: 'PATCH /pmem/pmem0 {"id":"other"}'
+  'PATCH /pmem/{id}#missing_device_runtime':
+    setup: ['@boot']
+    request: 'PATCH /pmem/pmem0 {"id":"pmem0","rate_limiter":{"bandwidth":{"size":1024,"refill_time":100}}}'
+  'PATCH /pmem/{id}#missing_device_without_rate_limiter_runtime':
+    setup: ['@boot']
+    request: 'PATCH /pmem/pmem0 {"id":"pmem0"}'
+
+  # PATCH /vm
+  'PATCH /vm#pause_preboot':
+    request: 'PATCH /vm {"state":"Paused"}'
+  'PATCH /vm#pause_runtime':
+    setup: ['@boot']
+    request: 'PATCH /vm {"state":"Paused"}'
+  'PATCH /vm#resume_runtime':
+    setup: ['@boot', '@pause']
+    request: 'PATCH /vm {"state":"Resumed"}'
+
+  # PUT /actions
+  'PUT /actions#flush_metrics_preboot':
+    request: 'PUT /actions {"action_type":"FlushMetrics"}'
+  'PUT /actions#flush_metrics_postboot':
+    setup: ['@metrics', '@boot']
+    request: 'PUT /actions {"action_type":"FlushMetrics"}'
+  'PUT /actions#instance_start_preboot_missing_kernel':
+    request: 'PUT /actions {"action_type":"InstanceStart"}'
+  'PUT /actions#instance_start_pmem_missing_backing_file':
+    setup: ['@boot_source', 'PUT /pmem/pmem0 {"id":"pmem0","path_on_host":"{root}/tmp/missing-pmem.img"}']
+    request: 'PUT /actions {"action_type":"InstanceStart"}'
+  'PUT /actions#instance_start_pmem_zero_sized_backing_file':
+    setup: ['@boot_source', 'PUT /pmem/pmem0 {"id":"pmem0","path_on_host":"{root}/tmp/pmem-empty.img"}']
+    request: 'PUT /actions {"action_type":"InstanceStart"}'
+  'PUT /actions#instance_start_postboot':
+    setup: ['@boot']
+    request: 'PUT /actions {"action_type":"InstanceStart"}'
+  'PUT /actions#send_ctrl_alt_del_preboot_x86_64':
+    request: 'PUT /actions {"action_type":"SendCtrlAltDel"}'
+  'PUT /actions#send_ctrl_alt_del_postboot_x86_64':
+    setup: ['@boot']
+    request: 'PUT /actions {"action_type":"SendCtrlAltDel"}'
+  'PUT /actions#send_ctrl_alt_del_aarch64':
+    request: 'PUT /actions {"action_type":"SendCtrlAltDel"}'
+
+  # PUT /balloon
+  'PUT /balloon#put_valid_preboot':
+    request: 'PUT /balloon {"amount_mib":1,"deflate_on_oom":true}'
+  'PUT /balloon#oversize_preboot':
+    request: 'PUT /balloon {"amount_mib":256,"deflate_on_oom":true}'
+
+  # PUT /boot-source
+  'PUT /boot-source#put_valid_preboot':
+    request: 'PUT /boot-source {"kernel_image_path":"{root}/Image","initrd_path":"{root}/initrd.gz","boot_args":"console=ttyS0 reboot=k panic=1 pci=off"}'
+  'PUT /boot-source#postboot_invalid_state':
+    setup: ['@boot']
+    request: 'PUT /boot-source {"kernel_image_path":"{root}/Image","initrd_path":"{root}/initrd.gz","boot_args":"console=ttyS0 reboot=k panic=1 pci=off"}'
+
+  # PUT /cpu-config
+  'PUT /cpu-config#put_valid_preboot':
+    request: 'PUT /cpu-config {}'
+  'PUT /cpu-config#postboot_invalid_state':
+    setup: ['@boot']
+    request: 'PUT /cpu-config {}'
+
+  # PUT /drives/{drive_id}
+  'PUT /drives/{drive_id}#postboot_pci_not_enabled':
+    setup: ['@boot']
+    request: 'PUT /drives/data {"drive_id":"data","path_on_host":"{root}/tmp/data.ext4","is_root_device":false,"is_read_only":false}'
+  'PUT /drives/{drive_id}#put_valid_preboot':
+    request: 'PUT /drives/rootfs {"drive_id":"rootfs","path_on_host":"{root}/tmp/rootfs.ext4","is_root_device":true,"is_read_only":false}'
+  'PUT /drives/{drive_id}#missing_backing_file_preboot':
+    request: 'PUT /drives/rootfs {"drive_id":"rootfs","path_on_host":"/definitely/missing-drive.ext4","is_root_device":true,"is_read_only":false}'
+  'PUT /drives/{drive_id}#pmem_root_conflict_preboot':
+    setup: ['PUT /pmem/pmem0 {"id":"pmem0","path_on_host":"{root}/tmp/pmem.img","root_device":true}']
+    request: 'PUT /drives/rootfs {"drive_id":"rootfs","path_on_host":"{root}/tmp/rootfs.ext4","is_root_device":true,"is_read_only":false}'
+  'PUT /drives/{drive_id}#duplicate_block_root_preboot':
+    setup: ['@rootfs']
+    request: 'PUT /drives/root2 {"drive_id":"root2","path_on_host":"{root}/tmp/data.ext4","is_root_device":true,"is_read_only":false}'
+
+  # PUT /entropy
+  'PUT /entropy#put_valid_preboot':
+    request: 'PUT /entropy {"rate_limiter":{"bandwidth":{"size":4096,"refill_time":1000,"one_time_burst":512},"ops":{"size":32,"refill_time":100}}}'
+  'PUT /entropy#postboot_invalid_state':
+    setup: ['@boot']
+    request: 'PUT /entropy {"rate_limiter":{"bandwidth":{"size":4096,"refill_time":1000,"one_time_burst":512},"ops":{"size":32,"refill_time":100}}}'
+
+  # PUT /hotplug/memory
+  'PUT /hotplug/memory#put_valid_preboot':
+    request: 'PUT /hotplug/memory {"total_size_mib":1024}'
+  'PUT /hotplug/memory#invalid_block_size_preboot':
+    request: 'PUT /hotplug/memory {"total_size_mib":1024,"block_size_mib":3}'
+  'PUT /hotplug/memory#invalid_total_size_preboot':
+    request: 'PUT /hotplug/memory {"total_size_mib":100}'
+  'PUT /hotplug/memory#postboot_invalid_state':
+    setup: ['@boot']
+    request: 'PUT /hotplug/memory {"total_size_mib":1024}'
+
+  # PUT /logger
+  'PUT /logger#put_valid_any':
+    request: 'PUT /logger {"log_path":"{root}/tmp/fc.log","level":"Info"}'
+  'PUT /logger#runtime_put_valid':
+    setup: ['@boot']
+    request: 'PUT /logger {"log_path":"{root}/tmp/fc.log","level":"Info"}'
+
+  # PUT /machine-config
+  'PUT /machine-config#put_valid_preboot':
+    request: 'PUT /machine-config {"vcpu_count":2,"mem_size_mib":256}'
+  'PUT /machine-config#shrink_below_balloon_target_preboot':
+    setup: ['PUT /balloon {"amount_mib":100,"deflate_on_oom":true}']
+    request: 'PUT /machine-config {"vcpu_count":1,"mem_size_mib":64}'
+
+  # PUT /metrics
+  'PUT /metrics#put_valid_any':
+    request: 'PUT /metrics {"metrics_path":"{root}/tmp/fc.metrics"}'
+  'PUT /metrics#runtime_put_valid':
+    setup: ['@boot']
+    request: 'PUT /metrics {"metrics_path":"{root}/tmp/fc.metrics"}'
+  'PUT /metrics#duplicate_init':
+    setup: ['@metrics']
+    request: 'PUT /metrics {"metrics_path":"{root}/tmp/fc.metrics"}'
+
+  # PUT /mmds
+  'PUT /mmds#put_valid_store':
+    request: 'PUT /mmds {"meta":{"name":"vesper","version":"1"}}'
+  'PUT /mmds#runtime_missing_config':
+    setup: ['@boot']
+    request: 'PUT /mmds {"meta":{"name":"vesper","version":"1"}}'
+  'PUT /mmds#oversized_store':
+    # Under the 51200-byte HTTP limit, but `1e2` serializes as `100.0`: about 72 kB in the store (to_vec length).
+    request: 'PUT /mmds {"a":[{rep:12000:1e2,}0]}'
+
+  # PUT /mmds/config
+  'PUT /mmds/config#put_valid_preboot':
+    setup: ['@net0']
+    request: 'PUT /mmds/config {"network_interfaces":["eth0"],"version":"V1","ipv4_address":"169.254.169.254"}'
+  'PUT /mmds/config#postboot_invalid_state':
+    setup: ['@boot']
+    request: 'PUT /mmds/config {"network_interfaces":["eth0"]}'
+  'PUT /mmds/config#empty_network_interface_list_preboot':
+    request: 'PUT /mmds/config {"network_interfaces":[]}'
+  'PUT /mmds/config#unknown_network_interface_preboot':
+    request: 'PUT /mmds/config {"network_interfaces":["eth9"]}'
+  'PUT /mmds/config#invalid_ipv4_address_preboot':
+    request: 'PUT /mmds/config {"network_interfaces":["eth0"],"ipv4_address":"10.0.0.1"}'
+
+  # PUT /network-interfaces/{iface_id}
+  'PUT /network-interfaces/{iface_id}#postboot_pci_not_enabled':
+    setup: ['@boot']
+    request: 'PUT /network-interfaces/eth0 {"iface_id":"eth0","host_dev_name":"tap0","guest_mac":"06:00:ac:10:00:02"}'
+  'PUT /network-interfaces/{iface_id}#id_mismatch_preboot':
+    request: 'PUT /network-interfaces/eth0 {"iface_id":"eth1","host_dev_name":"tap0"}'
+  'PUT /network-interfaces/{iface_id}#put_valid_preboot':
+    request: 'PUT /network-interfaces/eth0 {"iface_id":"eth0","host_dev_name":"tap0","guest_mac":"06:00:ac:10:00:02"}'
+  'PUT /network-interfaces/{iface_id}#duplicate_guest_mac_preboot':
+    setup: ['@net0']
+    request: 'PUT /network-interfaces/eth1 {"iface_id":"eth1","host_dev_name":"tap1","guest_mac":"06:00:ac:10:00:02"}'
+  'PUT /network-interfaces/{iface_id}#duplicate_host_dev_name_preboot':
+    setup: ['@net0']
+    request: 'PUT /network-interfaces/eth1 {"iface_id":"eth1","host_dev_name":"tap0"}'
+  'PUT /network-interfaces/{iface_id}#mtu_below_minimum_preboot':
+    request: 'PUT /network-interfaces/eth0 {"iface_id":"eth0","host_dev_name":"tap0","mtu":67}'
+  'PUT /network-interfaces/{iface_id}#mtu_bounds_preboot':
+    setup: ['PUT /network-interfaces/eth0 {"iface_id":"eth0","host_dev_name":"tap0","mtu":68}']
+    request: 'PUT /network-interfaces/eth1 {"iface_id":"eth1","host_dev_name":"tap1","mtu":65535}'
+
+  # PUT /pmem/{id}
+  'PUT /pmem/{id}#postboot_pci_not_enabled':
+    setup: ['@boot']
+    request: 'PUT /pmem/pmem0 {"id":"pmem0","path_on_host":"{root}/tmp/pmem.img"}'
+  'PUT /pmem/{id}#put_valid_preboot':
+    request: 'PUT /pmem/pmem0 {"id":"pmem0","path_on_host":"{root}/tmp/pmem.img"}'
+  'PUT /pmem/{id}#missing_backing_file_stored':
+    request: 'PUT /pmem/pmem0 {"id":"pmem0","path_on_host":"{root}/tmp/missing-pmem.img"}'
+  'PUT /pmem/{id}#put_with_rate_limiter_preboot':
+    request: 'PUT /pmem/pmem0 {"id":"pmem0","path_on_host":"{root}/tmp/pmem.img","rate_limiter":{"bandwidth":{"size":1024,"refill_time":100},"ops":{"size":10,"refill_time":100}}}'
+  'PUT /pmem/{id}#block_root_conflict_preboot':
+    setup: ['@rootfs']
+    request: 'PUT /pmem/pmem0 {"id":"pmem0","path_on_host":"{root}/tmp/pmem.img","root_device":true}'
+  'PUT /pmem/{id}#duplicate_pmem_root_preboot':
+    setup: ['PUT /pmem/pmem0 {"id":"pmem0","path_on_host":"{root}/tmp/pmem.img","root_device":true}']
+    request: 'PUT /pmem/pmem1 {"id":"pmem1","path_on_host":"{root}/tmp/pmem.img","root_device":true}'
+
+  # PUT /serial
+  'PUT /serial#put_valid_any':
+    request: 'PUT /serial {"serial_out_path":"{root}/tmp/serial.out"}'
+  'PUT /serial#runtime_put_valid':
+    setup: ['@boot']
+    request: 'PUT /serial {"serial_out_path":"{root}/tmp/serial.out"}'
+  'PUT /serial#put_with_rate_limiter_any':
+    request: 'PUT /serial {"serial_out_path":"{root}/tmp/serial.out","rate_limiter":{"size":1024,"refill_time":100}}'
+
+  # PUT /snapshot/create
+  'PUT /snapshot/create#preboot_invalid_state':
+    request: 'PUT /snapshot/create {"snapshot_type":"Full","snapshot_path":"{root}/tmp/s.vmstate","mem_file_path":"{root}/tmp/s.mem"}'
+  'PUT /snapshot/create#running_requires_paused':
+    setup: ['@boot']
+    request: 'PUT /snapshot/create {"snapshot_type":"Full","snapshot_path":"{root}/tmp/s.vmstate","mem_file_path":"{root}/tmp/s.mem"}'
+  'PUT /snapshot/create#paused_returns_no_content':
+    setup: ['@boot', '@pause']
+    request: 'PUT /snapshot/create {"snapshot_type":"Full","snapshot_path":"{root}/tmp/s.vmstate","mem_file_path":"{root}/tmp/s.mem"}'
+
+  # PUT /snapshot/load
+  'PUT /snapshot/load#missing_memory_source':
+    snapshot: true
+    request: 'PUT /snapshot/load {"snapshot_path":"{root}/snap/vm.vmstate"}'
+  'PUT /snapshot/load#too_many_memory_sources':
+    snapshot: true
+    request: 'PUT /snapshot/load {"snapshot_path":"{root}/snap/vm.vmstate","mem_file_path":"{root}/snap/vm.mem","mem_backend":{"backend_type":"File","backend_path":"{root}/snap/vm.mem"}}'
+  'PUT /snapshot/load#allowed_after_logger_metrics_and_serial_returns_no_content':
+    snapshot: true
+    setup: ['@logger', '@metrics', '@serial']
+    request: 'PUT /snapshot/load {"snapshot_path":"{root}/snap/vm.vmstate","mem_backend":{"backend_type":"File","backend_path":"{root}/snap/vm.mem"}}'
+  'PUT /snapshot/load#allowed_with_resume_vm_returns_no_content':
+    snapshot: true
+    request: 'PUT /snapshot/load {"snapshot_path":"{root}/snap/vm.vmstate","mem_backend":{"backend_type":"File","backend_path":"{root}/snap/vm.mem"},"resume_vm":true}'
+  'PUT /snapshot/load#blocked_after_boot_source':
+    snapshot: true
+    setup: ['@boot_source']
+    request: 'PUT /snapshot/load {"snapshot_path":"{root}/snap/vm.vmstate","mem_backend":{"backend_type":"File","backend_path":"{root}/snap/vm.mem"}}'
+  'PUT /snapshot/load#blocked_after_memory_hotplug':
+    snapshot: true
+    setup: ['@hotplug']
+    request: 'PUT /snapshot/load {"snapshot_path":"{root}/snap/vm.vmstate","mem_backend":{"backend_type":"File","backend_path":"{root}/snap/vm.mem"}}'
+  'PUT /snapshot/load#blocked_after_cpu_config':
+    snapshot: true
+    setup: ['@cpu_config']
+    request: 'PUT /snapshot/load {"snapshot_path":"{root}/snap/vm.vmstate","mem_backend":{"backend_type":"File","backend_path":"{root}/snap/vm.mem"}}'
+  'PUT /snapshot/load#blocked_after_entropy':
+    snapshot: true
+    setup: ['@entropy']
+    request: 'PUT /snapshot/load {"snapshot_path":"{root}/snap/vm.vmstate","mem_backend":{"backend_type":"File","backend_path":"{root}/snap/vm.mem"}}'
+  'PUT /snapshot/load#blocked_after_vsock':
+    snapshot: true
+    setup: ['@vsock']
+    request: 'PUT /snapshot/load {"snapshot_path":"{root}/snap/vm.vmstate","mem_backend":{"backend_type":"File","backend_path":"{root}/snap/vm.mem"}}'
+  'PUT /snapshot/load#blocked_after_mmds_config':
+    snapshot: true
+    setup: ['@net0', '@mmds_config']
+    request: 'PUT /snapshot/load {"snapshot_path":"{root}/snap/vm.vmstate","mem_backend":{"backend_type":"File","backend_path":"{root}/snap/vm.mem"}}'
+  'PUT /snapshot/load#blocked_after_balloon':
+    snapshot: true
+    setup: ['@balloon_min']
+    request: 'PUT /snapshot/load {"snapshot_path":"{root}/snap/vm.vmstate","mem_backend":{"backend_type":"File","backend_path":"{root}/snap/vm.mem"}}'
+  'PUT /snapshot/load#blocked_after_network_interface':
+    snapshot: true
+    setup: ['@net0']
+    request: 'PUT /snapshot/load {"snapshot_path":"{root}/snap/vm.vmstate","mem_backend":{"backend_type":"File","backend_path":"{root}/snap/vm.mem"}}'
+  'PUT /snapshot/load#vsock_override_accepted':
+    snapshot: true
+    request: 'PUT /snapshot/load {"snapshot_path":"{root}/snap/vm.vmstate","mem_backend":{"backend_type":"File","backend_path":"{root}/snap/vm.mem"},"vsock_override":{"uds_path":"{root}/tmp/override.sock"}}'
+  'PUT /snapshot/load#clock_realtime_x86_64':
+    snapshot: true
+    request: 'PUT /snapshot/load {"snapshot_path":"{root}/snap/vm.vmstate","mem_backend":{"backend_type":"File","backend_path":"{root}/snap/vm.mem"},"clock_realtime":true}'
+  'PUT /snapshot/load#clock_realtime_aarch64':
+    snapshot: true
+    request: 'PUT /snapshot/load {"snapshot_path":"{root}/snap/vm.vmstate","mem_backend":{"backend_type":"File","backend_path":"{root}/snap/vm.mem"},"clock_realtime":true}'
+
+  # PUT /vsock
+  'PUT /vsock#put_valid_preboot':
+    request: 'PUT /vsock {"guest_cid":5,"uds_path":"{root}/tmp/vesper-vsock.sock"}'
+  'PUT /vsock#invalid_guest_cid_preboot':
+    request: 'PUT /vsock {"guest_cid":2,"uds_path":"{root}/tmp/vesper-vsock.sock"}'
+  'PUT /vsock#postboot_invalid_state':
+    setup: ['@boot']
+    request: 'PUT /vsock {"guest_cid":5,"uds_path":"{root}/tmp/vesper-vsock.sock"}'

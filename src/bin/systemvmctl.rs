@@ -1,5 +1,8 @@
 use clap::{Parser, Subcommand};
 
+#[path = "systemvmctl/replay.rs"]
+mod replay;
+
 const DEFAULT_IMAGE_LOCK: &str = "docs/specs/systemvm-image.lock.yaml";
 const DEFAULT_IMAGE_DIR: &str = "build/systemvm";
 const DEFAULT_PACKAGES_LOCK: &str = "docs/specs/systemvm-packages.lock.yaml";
@@ -303,6 +306,30 @@ enum ControlAction {
         #[arg(long, default_value = "run/vesperd-share")]
         share_dir: String,
     },
+    /// Replay the behaviour matrix through `vesperd` on Backend A (ADR 0007 slice 6): one microVM per case, judged
+    /// against the matrix; the launch config must share `--share-dir`.
+    ReplaySuite {
+        #[arg(long, default_value = "run/systemvm/replay-report.json")]
+        report: String,
+        /// Also write the committed summary (`make systemvm-replay-publish`).
+        #[arg(long)]
+        publish: Option<String>,
+        #[arg(long, default_value = vesper::api_replay::DEFAULT_REPLAY_SCRIPTS_PATH)]
+        scripts: String,
+        #[arg(long, default_value = "docs/generated/firecracker-api-behavior-matrix.json")]
+        matrix: String,
+        /// Only cases whose `METHOD PATH#id` key contains this text.
+        #[arg(long)]
+        filter: Option<String>,
+        #[arg(long, default_value = "vesper-rp")]
+        id: String,
+        #[arg(long, default_value = "target/debug/vesperd")]
+        vesperd: String,
+        #[arg(long, default_value = "run/vesperd-suite")]
+        workdir: String,
+        #[arg(long, default_value = "run/vesperd-share")]
+        share_dir: String,
+    },
     /// Run the GH #18 checklist (launch, jailer isolation, stop, crash, poweroff, cleanup) and write a JSON report.
     MicrovmSuite {
         #[arg(long, default_value = "run/systemvm/microvm-report.json")]
@@ -544,6 +571,26 @@ fn run_control(endpoint: vesper::control::ControlEndpoint, action: ControlAction
                 return Err(format!("vesperd suite failed (report: {report})"));
             }
             println!("vesperd suite passed (report: {report})");
+        }
+        ControlAction::ReplaySuite { report, publish, scripts, matrix, filter, id, vesperd, workdir, share_dir } => {
+            let run = control::ReplayRun {
+                vesperd: control::VesperdRun {
+                    binary: vesperd.into(),
+                    workdir: workdir.clone().into(),
+                    extra_args: vec![
+                        "--bridge".to_string(),
+                        endpoint.bridge_path.to_string_lossy().into_owned(),
+                        "--agent-port".to_string(),
+                        endpoint.port.to_string(),
+                    ],
+                },
+                share_dir: {
+                    std::fs::create_dir_all(&share_dir).map_err(|err| format!("create {share_dir}: {err}"))?;
+                    std::fs::canonicalize(&share_dir).map_err(|err| format!("{share_dir}: {err}"))?
+                },
+            };
+            control::prepare_workdir(std::path::Path::new(&workdir))?;
+            replay::run(&endpoint, &run, &scripts, &matrix, filter.as_deref(), &id, &report, publish.as_deref())?;
         }
         ControlAction::SnapshotSuite { report, id, vesperd, workdir, share_dir } => {
             control::prepare_workdir(std::path::Path::new(&workdir))?;

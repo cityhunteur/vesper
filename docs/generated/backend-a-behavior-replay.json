@@ -1,0 +1,1193 @@
+{
+  "metadata": {
+    "firecracker_revision": "d83d72b710361a10294480131377b1b00b163af8",
+    "backend": "systemvm",
+    "host_os": "macOS 27.0.1",
+    "host_cpu": "Apple M3 Pro",
+    "timestamp": "2026-11-12T20:49:32Z",
+    "git_sha": "4bd76cf670cdf67544559f6c50c614cbb6b898bf",
+    "scripts": "docs/specs/firecracker-api-behavior-replay.yaml",
+    "matrix": "docs/generated/firecracker-api-behavior-matrix.json"
+  },
+  "summary": {
+    "cases": 173,
+    "matched": 123,
+    "mismatched": 35,
+    "setup_failed": 12,
+    "backend_error": 0,
+    "not_applicable": 3
+  },
+  "fixture": "5 steps, store vesper-rp.vmstate and vesper-rp.mem, 1212 ms",
+  "cases": [
+    {
+      "key": "GET /#preboot_instance_info",
+      "verdict": "match",
+      "detail": "200, 4 assertions",
+      "status": 200,
+      "body": "{\"id\":\"vesper-rp-1\",\"state\":\"Not started\",\"vmm_version\":\"1.16.0\",\"app_name\":\"Firecracker\"}"
+    },
+    {
+      "key": "GET /#paused_after_snapshot_load",
+      "verdict": "match",
+      "detail": "200, 1 assertions",
+      "status": 200,
+      "body": "{\"id\":\"vesper-rp-2\",\"state\":\"Paused\",\"vmm_version\":\"1.16.0\",\"app_name\":\"Firecracker\"}"
+    },
+    {
+      "key": "GET /#running_after_snapshot_load_resume",
+      "verdict": "match",
+      "detail": "200, 1 assertions",
+      "status": 200,
+      "body": "{\"id\":\"vesper-rp-3\",\"state\":\"Running\",\"vmm_version\":\"1.16.0\",\"app_name\":\"Firecracker\"}"
+    },
+    {
+      "key": "GET /balloon#preboot_missing_device",
+      "verdict": "match",
+      "detail": "400 \"Balloon config error: No balloon device found.\"",
+      "status": 400,
+      "body": "{\"fault_message\":\"Balloon config error: No balloon device found.\"}"
+    },
+    {
+      "key": "GET /balloon#preboot_configured_defaults",
+      "verdict": "match",
+      "detail": "200, 5 assertions",
+      "status": 200,
+      "body": "{\"amount_mib\":1,\"deflate_on_oom\":true,\"stats_polling_interval_s\":0,\"free_page_hinting\":false,\"free_page_reporting\":false}"
+    },
+    {
+      "key": "GET /balloon#runtime_missing_device",
+      "verdict": "match",
+      "detail": "400 \"Internal VMM error: Failed perform action on device: Device not found\"",
+      "status": 400,
+      "body": "{\"fault_message\":\"Internal VMM error: Failed perform action on device: Device not found\"}"
+    },
+    {
+      "key": "GET /balloon#runtime_updated_target",
+      "verdict": "match",
+      "detail": "200, 2 assertions",
+      "status": 200,
+      "body": "{\"amount_mib\":64,\"deflate_on_oom\":true,\"stats_polling_interval_s\":0,\"free_page_hinting\":false,\"free_page_reporting\":false}"
+    },
+    {
+      "key": "GET /balloon/hinting/status#preboot_invalid_state",
+      "verdict": "match",
+      "detail": "400 \"The requested operation is not supported before starting the microVM.\"",
+      "status": 400,
+      "body": "{\"fault_message\":\"The requested operation is not supported before starting the microVM.\"}"
+    },
+    {
+      "key": "GET /balloon/hinting/status#missing_device_runtime",
+      "verdict": "match",
+      "detail": "400 \"Balloon update error: Failed perform action on device: Device not found\"",
+      "status": 400,
+      "body": "{\"fault_message\":\"Balloon update error: Failed perform action on device: Device not found\"}"
+    },
+    {
+      "key": "GET /balloon/hinting/status#hinting_disabled_runtime",
+      "verdict": "match",
+      "detail": "400 \"Balloon update error: Balloon: Attempting to use hinting when not enabled\"",
+      "status": 400,
+      "body": "{\"fault_message\":\"Balloon update error: Balloon: Attempting to use hinting when not enabled\"}"
+    },
+    {
+      "key": "GET /balloon/hinting/status#idle_status_runtime",
+      "verdict": "match",
+      "detail": "200, 2 assertions",
+      "status": 200,
+      "body": "{\"host_cmd\":0,\"guest_cmd\":null}"
+    },
+    {
+      "key": "GET /balloon/statistics#preboot_invalid_state",
+      "verdict": "match",
+      "detail": "400 \"The requested operation is not supported before starting the microVM.\"",
+      "status": 400,
+      "body": "{\"fault_message\":\"The requested operation is not supported before starting the microVM.\"}"
+    },
+    {
+      "key": "GET /balloon/statistics#missing_device_runtime",
+      "verdict": "match",
+      "detail": "400 \"Internal VMM error: Failed perform action on device: Device not found\"",
+      "status": 400,
+      "body": "{\"fault_message\":\"Internal VMM error: Failed perform action on device: Device not found\"}"
+    },
+    {
+      "key": "GET /balloon/statistics#stats_disabled_runtime",
+      "verdict": "match",
+      "detail": "400 \"Internal VMM error: Balloon: Received stats query when stats are disabled.\"",
+      "status": 400,
+      "body": "{\"fault_message\":\"Internal VMM error: Balloon: Received stats query when stats are disabled.\"}"
+    },
+    {
+      "key": "GET /balloon/statistics#enabled_stats_runtime",
+      "verdict": "match",
+      "detail": "200, 4 assertions",
+      "status": 200,
+      "body": "{\"target_pages\":16384,\"actual_pages\":16384,\"target_mib\":64,\"actual_mib\":64,\"swap_in\":0,\"swap_out\":0,\"major_faults\":0,\"minor_faults\":1118,\"free_memory\":120180736,\"total_memory\":225574912,\"available_memory\":117633024,\"disk_caches\":25419776,\"hugetlb_allocations\":0,\"hugetlb_failures\":0,\"oom_kill\":0,\"alloc_stall\":0,\"async_scan\":0,\"direct_scan\":0,\"async_reclaim\":0,\"direct_reclaim\":0}"
+    },
+    {
+      "key": "GET /hotplug/memory#preboot_invalid_state",
+      "verdict": "match",
+      "detail": "400 \"The requested operation is not supported before starting the microVM.\"",
+      "status": 400,
+      "body": "{\"fault_message\":\"The requested operation is not supported before starting the microVM.\"}"
+    },
+    {
+      "key": "GET /hotplug/memory#runtime_initial_status",
+      "verdict": "match",
+      "detail": "200, 5 assertions",
+      "status": 200,
+      "body": "{\"block_size_mib\":2,\"total_size_mib\":1024,\"slot_size_mib\":128,\"plugged_size_mib\":0,\"requested_size_mib\":0}"
+    },
+    {
+      "key": "GET /hotplug/memory#runtime_updated_requested_size",
+      "verdict": "match",
+      "detail": "200, 5 assertions",
+      "status": 200,
+      "body": "{\"block_size_mib\":2,\"total_size_mib\":1024,\"slot_size_mib\":128,\"plugged_size_mib\":0,\"requested_size_mib\":512}"
+    },
+    {
+      "key": "GET /machine-config#preboot_after_put_patch",
+      "verdict": "match",
+      "detail": "200, 3 assertions",
+      "status": 200,
+      "body": "{\"vcpu_count\":2,\"mem_size_mib\":512,\"smt\":false,\"track_dirty_pages\":true,\"huge_pages\":\"None\"}"
+    },
+    {
+      "key": "GET /machine-config#runtime_after_put_patch",
+      "verdict": "match",
+      "detail": "200, 3 assertions",
+      "status": 200,
+      "body": "{\"vcpu_count\":2,\"mem_size_mib\":512,\"smt\":false,\"track_dirty_pages\":true,\"huge_pages\":\"None\"}"
+    },
+    {
+      "key": "GET /mmds#preboot_empty_store",
+      "verdict": "match",
+      "detail": "200, 1 assertions",
+      "status": 200,
+      "body": "{}"
+    },
+    {
+      "key": "GET /mmds#preboot_initialized_store",
+      "verdict": "match",
+      "detail": "200, 2 assertions",
+      "status": 200,
+      "body": "{\"meta\":{\"name\":\"vesper\",\"version\":\"1\"}}"
+    },
+    {
+      "key": "GET /mmds#runtime_configured_store",
+      "verdict": "setup_failed",
+      "detail": "setup PUT /network-interfaces/eth0: 400 {\"fault_message\":\"Network config error: Could not create the network device: Open tap device failed: Error while creating ifreq structure: Operation not permitted (os error 1). Invalid TUN/TAP Backend provided by tap0. Check our documentation on setting up the network devices.\"}",
+      "status": 400,
+      "body": "{\"fault_message\":\"MMDS error: The MMDS data store is not initialized.\"}"
+    },
+    {
+      "key": "GET /mmds#runtime_missing_config",
+      "verdict": "mismatch",
+      "detail": "fault_message \"MMDS error: The MMDS data store is not initialized.\" (want \"The MMDS data store is not initialized.\")",
+      "status": 400,
+      "body": "{\"fault_message\":\"MMDS error: The MMDS data store is not initialized.\"}"
+    },
+    {
+      "key": "GET /version#preboot_version_response",
+      "verdict": "match",
+      "detail": "200, 1 assertions",
+      "status": 200,
+      "body": "{\"firecracker_version\":\"1.16.0\"}"
+    },
+    {
+      "key": "GET /version#runtime_version_response",
+      "verdict": "match",
+      "detail": "200, 1 assertions",
+      "status": 200,
+      "body": "{\"firecracker_version\":\"1.16.0\"}"
+    },
+    {
+      "key": "GET /vm/config#machine_config_export_preboot",
+      "verdict": "match",
+      "detail": "200, 3 assertions",
+      "status": 200,
+      "body": "{\"balloon\":null,\"drives\":[],\"boot-source\":{\"kernel_image_path\":\"\",\"initrd_path\":null,\"boot_args\":null},\"cpu-config\":null,\"logger\":null,\"machine-config\":{\"vcpu_count\":2,\"mem_size_mib\":512,\"smt\":false,\"track_dirty_pages\":true,\"huge_pages\":\"None\"},\"metrics\":null,\"mmds-config\":null,\"network-interfaces\":[],\"vsock\":null,\"entropy\":null,\"pmem\":[],\"memory-hotplug\":null}"
+    },
+    {
+      "key": "GET /vm/config#machine_config_export_runtime",
+      "verdict": "match",
+      "detail": "200, 3 assertions",
+      "status": 200,
+      "body": "{\"balloon\":null,\"drives\":[],\"boot-source\":{\"kernel_image_path\":\"/Image\",\"initrd_path\":\"/initrd.gz\",\"boot_args\":\"console=ttyS0 reboot=k panic=1 pci=off\"},\"cpu-config\":null,\"logger\":null,\"machine-config\":{\"vcpu_count\":2,\"mem_size_mib\":512,\"smt\":false,\"track_dirty_pages\":true,\"huge_pages\":\"None\"},\"metrics\":null,\"mmds-config\":null,\"network-interfaces\":[],\"vsock\":null,\"entropy\":null,\"pmem\":[],\"memory-h…"
+    },
+    {
+      "key": "GET /vm/config#cpu_config_omitted_preboot",
+      "verdict": "mismatch",
+      "detail": "/cpu-config is null (want absent); body {\"balloon\":null,\"drives\":[],\"boot-source\":{\"kernel_image_path\":\"\",\"initrd_path\":null,\"boot_args\":null},\"cpu-config\":null,\"logger\":null,\"machine-config\":{\"vcpu_count\":1,\"mem_size_mib\":128,\"smt\":false,\"track_dirty_pages\":false,\"huge_pages\":\"None\"},\"metrics\":null,\"mmds-config\":null,\"network-interfaces\":[],\"vsock\":null,\"entropy\":null,\"pmem\":[],\"memory-hotplug\":null}",
+      "status": 200,
+      "body": "{\"balloon\":null,\"drives\":[],\"boot-source\":{\"kernel_image_path\":\"\",\"initrd_path\":null,\"boot_args\":null},\"cpu-config\":null,\"logger\":null,\"machine-config\":{\"vcpu_count\":1,\"mem_size_mib\":128,\"smt\":false,\"track_dirty_pages\":false,\"huge_pages\":\"None\"},\"metrics\":null,\"mmds-config\":null,\"network-interfaces\":[],\"vsock\":null,\"entropy\":null,\"pmem\":[],\"memory-hotplug\":null}"
+    },
+    {
+      "key": "GET /vm/config#serial_omitted_preboot",
+      "verdict": "match",
+      "detail": "200, 1 assertions",
+      "status": 200,
+      "body": "{\"balloon\":null,\"drives\":[],\"boot-source\":{\"kernel_image_path\":\"\",\"initrd_path\":null,\"boot_args\":null},\"cpu-config\":null,\"logger\":null,\"machine-config\":{\"vcpu_count\":1,\"mem_size_mib\":128,\"smt\":false,\"track_dirty_pages\":false,\"huge_pages\":\"None\"},\"metrics\":null,\"mmds-config\":null,\"network-interfaces\":[],\"vsock\":null,\"entropy\":null,\"pmem\":[],\"memory-hotplug\":null}"
+    },
+    {
+      "key": "GET /vm/config#serial_omitted_runtime",
+      "verdict": "match",
+      "detail": "200, 1 assertions",
+      "status": 200,
+      "body": "{\"balloon\":null,\"drives\":[],\"boot-source\":{\"kernel_image_path\":\"/Image\",\"initrd_path\":\"/initrd.gz\",\"boot_args\":\"console=ttyS0 reboot=k panic=1 pci=off\"},\"cpu-config\":null,\"logger\":null,\"machine-config\":{\"vcpu_count\":1,\"mem_size_mib\":128,\"smt\":false,\"track_dirty_pages\":false,\"huge_pages\":\"None\"},\"metrics\":null,\"mmds-config\":null,\"network-interfaces\":[],\"vsock\":null,\"entropy\":null,\"pmem\":[],\"memory-…"
+    },
+    {
+      "key": "GET /vm/config#metrics_omitted_preboot",
+      "verdict": "mismatch",
+      "detail": "/metrics is null (want absent); body {\"balloon\":null,\"drives\":[],\"boot-source\":{\"kernel_image_path\":\"\",\"initrd_path\":null,\"boot_args\":null},\"cpu-config\":null,\"logger\":null,\"machine-config\":{\"vcpu_count\":1,\"mem_size_mib\":128,\"smt\":false,\"track_dirty_pages\":false,\"huge_pages\":\"None\"},\"metrics\":null,\"mmds-config\":null,\"network-interfaces\":[],\"vsock\":null,\"entropy\":null,\"pmem\":[],\"memory-hotplug\":null}",
+      "status": 200,
+      "body": "{\"balloon\":null,\"drives\":[],\"boot-source\":{\"kernel_image_path\":\"\",\"initrd_path\":null,\"boot_args\":null},\"cpu-config\":null,\"logger\":null,\"machine-config\":{\"vcpu_count\":1,\"mem_size_mib\":128,\"smt\":false,\"track_dirty_pages\":false,\"huge_pages\":\"None\"},\"metrics\":null,\"mmds-config\":null,\"network-interfaces\":[],\"vsock\":null,\"entropy\":null,\"pmem\":[],\"memory-hotplug\":null}"
+    },
+    {
+      "key": "GET /vm/config#metrics_omitted_runtime",
+      "verdict": "mismatch",
+      "detail": "/metrics is null (want absent); body {\"balloon\":null,\"drives\":[],\"boot-source\":{\"kernel_image_path\":\"/Image\",\"initrd_path\":\"/initrd.gz\",\"boot_args\":\"console=ttyS0 reboot=k panic=1 pci=off\"},\"cpu-config\":null,\"logger\":null,\"machine-config\":{\"vcpu_count\":1,\"mem_size_mib\":128,\"smt\":false,\"track_dirty_pages\":false,\"huge_pages\":\"None\"},\"metrics\":null,\"mmds-config\":null,\"network-interfaces\":[],\"vsock\":null,\"entropy\":null,\"pmem\":[],\"memory-…",
+      "status": 200,
+      "body": "{\"balloon\":null,\"drives\":[],\"boot-source\":{\"kernel_image_path\":\"/Image\",\"initrd_path\":\"/initrd.gz\",\"boot_args\":\"console=ttyS0 reboot=k panic=1 pci=off\"},\"cpu-config\":null,\"logger\":null,\"machine-config\":{\"vcpu_count\":1,\"mem_size_mib\":128,\"smt\":false,\"track_dirty_pages\":false,\"huge_pages\":\"None\"},\"metrics\":null,\"mmds-config\":null,\"network-interfaces\":[],\"vsock\":null,\"entropy\":null,\"pmem\":[],\"memory-…"
+    },
+    {
+      "key": "GET /vm/config#logger_omitted_preboot",
+      "verdict": "mismatch",
+      "detail": "/logger is null (want absent); body {\"balloon\":null,\"drives\":[],\"boot-source\":{\"kernel_image_path\":\"\",\"initrd_path\":null,\"boot_args\":null},\"cpu-config\":null,\"logger\":null,\"machine-config\":{\"vcpu_count\":1,\"mem_size_mib\":128,\"smt\":false,\"track_dirty_pages\":false,\"huge_pages\":\"None\"},\"metrics\":null,\"mmds-config\":null,\"network-interfaces\":[],\"vsock\":null,\"entropy\":null,\"pmem\":[],\"memory-hotplug\":null}",
+      "status": 200,
+      "body": "{\"balloon\":null,\"drives\":[],\"boot-source\":{\"kernel_image_path\":\"\",\"initrd_path\":null,\"boot_args\":null},\"cpu-config\":null,\"logger\":null,\"machine-config\":{\"vcpu_count\":1,\"mem_size_mib\":128,\"smt\":false,\"track_dirty_pages\":false,\"huge_pages\":\"None\"},\"metrics\":null,\"mmds-config\":null,\"network-interfaces\":[],\"vsock\":null,\"entropy\":null,\"pmem\":[],\"memory-hotplug\":null}"
+    },
+    {
+      "key": "GET /vm/config#logger_omitted_runtime",
+      "verdict": "mismatch",
+      "detail": "/logger is null (want absent); body {\"balloon\":null,\"drives\":[],\"boot-source\":{\"kernel_image_path\":\"/Image\",\"initrd_path\":\"/initrd.gz\",\"boot_args\":\"console=ttyS0 reboot=k panic=1 pci=off\"},\"cpu-config\":null,\"logger\":null,\"machine-config\":{\"vcpu_count\":1,\"mem_size_mib\":128,\"smt\":false,\"track_dirty_pages\":false,\"huge_pages\":\"None\"},\"metrics\":null,\"mmds-config\":null,\"network-interfaces\":[],\"vsock\":null,\"entropy\":null,\"pmem\":[],\"memory-…",
+      "status": 200,
+      "body": "{\"balloon\":null,\"drives\":[],\"boot-source\":{\"kernel_image_path\":\"/Image\",\"initrd_path\":\"/initrd.gz\",\"boot_args\":\"console=ttyS0 reboot=k panic=1 pci=off\"},\"cpu-config\":null,\"logger\":null,\"machine-config\":{\"vcpu_count\":1,\"mem_size_mib\":128,\"smt\":false,\"track_dirty_pages\":false,\"huge_pages\":\"None\"},\"metrics\":null,\"mmds-config\":null,\"network-interfaces\":[],\"vsock\":null,\"entropy\":null,\"pmem\":[],\"memory-…"
+    },
+    {
+      "key": "GET /vm/config#memory_hotplug_export_preboot",
+      "verdict": "match",
+      "detail": "200, 3 assertions",
+      "status": 200,
+      "body": "{\"balloon\":null,\"drives\":[],\"boot-source\":{\"kernel_image_path\":\"\",\"initrd_path\":null,\"boot_args\":null},\"cpu-config\":null,\"logger\":null,\"machine-config\":{\"vcpu_count\":1,\"mem_size_mib\":128,\"smt\":false,\"track_dirty_pages\":false,\"huge_pages\":\"None\"},\"metrics\":null,\"mmds-config\":null,\"network-interfaces\":[],\"vsock\":null,\"entropy\":null,\"pmem\":[],\"memory-hotplug\":{\"total_size_mib\":1024,\"block_size_mib\":2…"
+    },
+    {
+      "key": "GET /vm/config#memory_hotplug_export_runtime",
+      "verdict": "match",
+      "detail": "200, 3 assertions",
+      "status": 200,
+      "body": "{\"balloon\":null,\"drives\":[],\"boot-source\":{\"kernel_image_path\":\"/Image\",\"initrd_path\":\"/initrd.gz\",\"boot_args\":\"console=ttyS0 reboot=k panic=1 pci=off\"},\"cpu-config\":null,\"logger\":null,\"machine-config\":{\"vcpu_count\":1,\"mem_size_mib\":128,\"smt\":false,\"track_dirty_pages\":false,\"huge_pages\":\"None\"},\"metrics\":null,\"mmds-config\":null,\"network-interfaces\":[],\"vsock\":null,\"entropy\":null,\"pmem\":[],\"memory-…"
+    },
+    {
+      "key": "GET /vm/config#mmds_config_export_preboot",
+      "verdict": "setup_failed",
+      "detail": "setup PUT /network-interfaces/eth0: 400 {\"fault_message\":\"Network config error: Could not create the network device: Open tap device failed: Error while creating ifreq structure: Operation not permitted (os error 1). Invalid TUN/TAP Backend provided by tap0. Check our documentation on setting up the network devices.\"}",
+      "status": 200,
+      "body": "{\"balloon\":null,\"drives\":[],\"boot-source\":{\"kernel_image_path\":\"\",\"initrd_path\":null,\"boot_args\":null},\"cpu-config\":null,\"logger\":null,\"machine-config\":{\"vcpu_count\":1,\"mem_size_mib\":128,\"smt\":false,\"track_dirty_pages\":false,\"huge_pages\":\"None\"},\"metrics\":null,\"mmds-config\":null,\"network-interfaces\":[],\"vsock\":null,\"entropy\":null,\"pmem\":[],\"memory-hotplug\":null}"
+    },
+    {
+      "key": "GET /vm/config#mmds_config_export_runtime",
+      "verdict": "setup_failed",
+      "detail": "setup PUT /network-interfaces/eth0: 400 {\"fault_message\":\"Network config error: Could not create the network device: Open tap device failed: Error while creating ifreq structure: Operation not permitted (os error 1). Invalid TUN/TAP Backend provided by tap0. Check our documentation on setting up the network devices.\"}",
+      "status": 200,
+      "body": "{\"balloon\":null,\"drives\":[],\"boot-source\":{\"kernel_image_path\":\"/Image\",\"initrd_path\":\"/initrd.gz\",\"boot_args\":\"console=ttyS0 reboot=k panic=1 pci=off\"},\"cpu-config\":null,\"logger\":null,\"machine-config\":{\"vcpu_count\":1,\"mem_size_mib\":128,\"smt\":false,\"track_dirty_pages\":false,\"huge_pages\":\"None\"},\"metrics\":null,\"mmds-config\":null,\"network-interfaces\":[],\"vsock\":null,\"entropy\":null,\"pmem\":[],\"memory-…"
+    },
+    {
+      "key": "GET /vm/config#vsock_export_preboot",
+      "verdict": "match",
+      "detail": "200, 3 assertions",
+      "status": 200,
+      "body": "{\"balloon\":null,\"drives\":[],\"boot-source\":{\"kernel_image_path\":\"\",\"initrd_path\":null,\"boot_args\":null},\"cpu-config\":null,\"logger\":null,\"machine-config\":{\"vcpu_count\":1,\"mem_size_mib\":128,\"smt\":false,\"track_dirty_pages\":false,\"huge_pages\":\"None\"},\"metrics\":null,\"mmds-config\":null,\"network-interfaces\":[],\"vsock\":{\"guest_cid\":5,\"uds_path\":\"/tmp/vesper-vsock.sock\"},\"entropy\":null,\"pmem\":[],\"memory-hot…"
+    },
+    {
+      "key": "GET /vm/config#vsock_export_runtime",
+      "verdict": "match",
+      "detail": "200, 3 assertions",
+      "status": 200,
+      "body": "{\"balloon\":null,\"drives\":[],\"boot-source\":{\"kernel_image_path\":\"/Image\",\"initrd_path\":\"/initrd.gz\",\"boot_args\":\"console=ttyS0 reboot=k panic=1 pci=off\"},\"cpu-config\":null,\"logger\":null,\"machine-config\":{\"vcpu_count\":1,\"mem_size_mib\":128,\"smt\":false,\"track_dirty_pages\":false,\"huge_pages\":\"None\"},\"metrics\":null,\"mmds-config\":null,\"network-interfaces\":[],\"vsock\":{\"guest_cid\":5,\"uds_path\":\"/tmp/vesper…"
+    },
+    {
+      "key": "GET /vm/config#network_interfaces_export_preboot",
+      "verdict": "setup_failed",
+      "detail": "setup PUT /network-interfaces/eth0: 400 {\"fault_message\":\"Network config error: Could not create the network device: Open tap device failed: Error while creating ifreq structure: Operation not permitted (os error 1). Invalid TUN/TAP Backend provided by tap0. Check our documentation on setting up the network devices.\"}",
+      "status": 200,
+      "body": "{\"balloon\":null,\"drives\":[],\"boot-source\":{\"kernel_image_path\":\"\",\"initrd_path\":null,\"boot_args\":null},\"cpu-config\":null,\"logger\":null,\"machine-config\":{\"vcpu_count\":1,\"mem_size_mib\":128,\"smt\":false,\"track_dirty_pages\":false,\"huge_pages\":\"None\"},\"metrics\":null,\"mmds-config\":null,\"network-interfaces\":[],\"vsock\":null,\"entropy\":null,\"pmem\":[],\"memory-hotplug\":null}"
+    },
+    {
+      "key": "GET /vm/config#network_interfaces_export_runtime",
+      "verdict": "setup_failed",
+      "detail": "setup PUT /network-interfaces/eth0: 400 {\"fault_message\":\"Network config error: Could not create the network device: Open tap device failed: Error while creating ifreq structure: Operation not permitted (os error 1). Invalid TUN/TAP Backend provided by tap0. Check our documentation on setting up the network devices.\"}",
+      "status": 200,
+      "body": "{\"balloon\":null,\"drives\":[],\"boot-source\":{\"kernel_image_path\":\"/Image\",\"initrd_path\":\"/initrd.gz\",\"boot_args\":\"console=ttyS0 reboot=k panic=1 pci=off\"},\"cpu-config\":null,\"logger\":null,\"machine-config\":{\"vcpu_count\":1,\"mem_size_mib\":128,\"smt\":false,\"track_dirty_pages\":false,\"huge_pages\":\"None\"},\"metrics\":null,\"mmds-config\":null,\"network-interfaces\":[],\"vsock\":null,\"entropy\":null,\"pmem\":[],\"memory-…"
+    },
+    {
+      "key": "GET /vm/config#balloon_export_preboot",
+      "verdict": "match",
+      "detail": "200, 5 assertions",
+      "status": 200,
+      "body": "{\"balloon\":{\"amount_mib\":1,\"deflate_on_oom\":true,\"stats_polling_interval_s\":0,\"free_page_hinting\":false,\"free_page_reporting\":false},\"drives\":[],\"boot-source\":{\"kernel_image_path\":\"\",\"initrd_path\":null,\"boot_args\":null},\"cpu-config\":null,\"logger\":null,\"machine-config\":{\"vcpu_count\":1,\"mem_size_mib\":128,\"smt\":false,\"track_dirty_pages\":false,\"huge_pages\":\"None\"},\"metrics\":null,\"mmds-config\":null,\"ne…"
+    },
+    {
+      "key": "GET /vm/config#balloon_export_runtime",
+      "verdict": "match",
+      "detail": "200, 5 assertions",
+      "status": 200,
+      "body": "{\"balloon\":{\"amount_mib\":1,\"deflate_on_oom\":true,\"stats_polling_interval_s\":0,\"free_page_hinting\":false,\"free_page_reporting\":false},\"drives\":[],\"boot-source\":{\"kernel_image_path\":\"/Image\",\"initrd_path\":\"/initrd.gz\",\"boot_args\":\"console=ttyS0 reboot=k panic=1 pci=off\"},\"cpu-config\":null,\"logger\":null,\"machine-config\":{\"vcpu_count\":1,\"mem_size_mib\":128,\"smt\":false,\"track_dirty_pages\":false,\"huge_pa…"
+    },
+    {
+      "key": "GET /vm/config#entropy_export_preboot",
+      "verdict": "match",
+      "detail": "200, 5 assertions",
+      "status": 200,
+      "body": "{\"balloon\":null,\"drives\":[],\"boot-source\":{\"kernel_image_path\":\"\",\"initrd_path\":null,\"boot_args\":null},\"cpu-config\":null,\"logger\":null,\"machine-config\":{\"vcpu_count\":1,\"mem_size_mib\":128,\"smt\":false,\"track_dirty_pages\":false,\"huge_pages\":\"None\"},\"metrics\":null,\"mmds-config\":null,\"network-interfaces\":[],\"vsock\":null,\"entropy\":{\"rate_limiter\":{\"bandwidth\":{\"size\":4096,\"one_time_burst\":512,\"refill_ti…"
+    },
+    {
+      "key": "GET /vm/config#entropy_export_runtime",
+      "verdict": "match",
+      "detail": "200, 5 assertions",
+      "status": 200,
+      "body": "{\"balloon\":null,\"drives\":[],\"boot-source\":{\"kernel_image_path\":\"/Image\",\"initrd_path\":\"/initrd.gz\",\"boot_args\":\"console=ttyS0 reboot=k panic=1 pci=off\"},\"cpu-config\":null,\"logger\":null,\"machine-config\":{\"vcpu_count\":1,\"mem_size_mib\":128,\"smt\":false,\"track_dirty_pages\":false,\"huge_pages\":\"None\"},\"metrics\":null,\"mmds-config\":null,\"network-interfaces\":[],\"vsock\":null,\"entropy\":{\"rate_limiter\":{\"bandw…"
+    },
+    {
+      "key": "GET /vm/config#boot_source_export_preboot",
+      "verdict": "match",
+      "detail": "200, 3 assertions",
+      "status": 200,
+      "body": "{\"balloon\":null,\"drives\":[],\"boot-source\":{\"kernel_image_path\":\"/Image\",\"initrd_path\":\"/initrd.gz\",\"boot_args\":\"console=ttyS0 reboot=k panic=1 pci=off\"},\"cpu-config\":null,\"logger\":null,\"machine-config\":{\"vcpu_count\":1,\"mem_size_mib\":128,\"smt\":false,\"track_dirty_pages\":false,\"huge_pages\":\"None\"},\"metrics\":null,\"mmds-config\":null,\"network-interfaces\":[],\"vsock\":null,\"entropy\":null,\"pmem\":[],\"memory-…"
+    },
+    {
+      "key": "GET /vm/config#boot_source_export_runtime",
+      "verdict": "match",
+      "detail": "200, 3 assertions",
+      "status": 200,
+      "body": "{\"balloon\":null,\"drives\":[],\"boot-source\":{\"kernel_image_path\":\"/Image\",\"initrd_path\":\"/initrd.gz\",\"boot_args\":\"console=ttyS0 reboot=k panic=1 pci=off\"},\"cpu-config\":null,\"logger\":null,\"machine-config\":{\"vcpu_count\":1,\"mem_size_mib\":128,\"smt\":false,\"track_dirty_pages\":false,\"huge_pages\":\"None\"},\"metrics\":null,\"mmds-config\":null,\"network-interfaces\":[],\"vsock\":null,\"entropy\":null,\"pmem\":[],\"memory-…"
+    },
+    {
+      "key": "GET /vm/config#pmem_export_preboot",
+      "verdict": "match",
+      "detail": "200, 2 assertions",
+      "status": 200,
+      "body": "{\"balloon\":null,\"drives\":[],\"boot-source\":{\"kernel_image_path\":\"\",\"initrd_path\":null,\"boot_args\":null},\"cpu-config\":null,\"logger\":null,\"machine-config\":{\"vcpu_count\":1,\"mem_size_mib\":128,\"smt\":false,\"track_dirty_pages\":false,\"huge_pages\":\"None\"},\"metrics\":null,\"mmds-config\":null,\"network-interfaces\":[],\"vsock\":null,\"entropy\":null,\"pmem\":[{\"id\":\"pmem0\",\"path_on_host\":\"/tmp/pmem.img\",\"root_device\":f…"
+    },
+    {
+      "key": "GET /vm/config#pmem_export_runtime",
+      "verdict": "match",
+      "detail": "200, 2 assertions",
+      "status": 200,
+      "body": "{\"balloon\":null,\"drives\":[],\"boot-source\":{\"kernel_image_path\":\"/Image\",\"initrd_path\":\"/initrd.gz\",\"boot_args\":\"console=ttyS0 reboot=k panic=1 pci=off\"},\"cpu-config\":null,\"logger\":null,\"machine-config\":{\"vcpu_count\":1,\"mem_size_mib\":128,\"smt\":false,\"track_dirty_pages\":false,\"huge_pages\":\"None\"},\"metrics\":null,\"mmds-config\":null,\"network-interfaces\":[],\"vsock\":null,\"entropy\":null,\"pmem\":[{\"id\":\"pme…"
+    },
+    {
+      "key": "GET /vm/config#drives_export_preboot_root_first",
+      "verdict": "match",
+      "detail": "200, 2 assertions",
+      "status": 200,
+      "body": "{\"balloon\":null,\"drives\":[{\"drive_id\":\"rootfs\",\"partuuid\":null,\"is_root_device\":true,\"cache_type\":\"Unsafe\",\"is_read_only\":false,\"path_on_host\":\"/tmp/rootfs.ext4\",\"rate_limiter\":null,\"io_engine\":\"Sync\",\"socket\":null},{\"drive_id\":\"data\",\"partuuid\":null,\"is_root_device\":false,\"cache_type\":\"Unsafe\",\"is_read_only\":false,\"path_on_host\":\"/tmp/data.ext4\",\"rate_limiter\":null,\"io_engine\":\"Sync\",\"socket\":nul…"
+    },
+    {
+      "key": "GET /vm/config#drives_export_preboot_default_cache_type",
+      "verdict": "match",
+      "detail": "200, 1 assertions",
+      "status": 200,
+      "body": "{\"balloon\":null,\"drives\":[{\"drive_id\":\"rootfs\",\"partuuid\":null,\"is_root_device\":true,\"cache_type\":\"Unsafe\",\"is_read_only\":false,\"path_on_host\":\"/tmp/rootfs.ext4\",\"rate_limiter\":null,\"io_engine\":\"Sync\",\"socket\":null}],\"boot-source\":{\"kernel_image_path\":\"\",\"initrd_path\":null,\"boot_args\":null},\"cpu-config\":null,\"logger\":null,\"machine-config\":{\"vcpu_count\":1,\"mem_size_mib\":128,\"smt\":false,\"track_dirty…"
+    },
+    {
+      "key": "GET /vm/config#drives_export_runtime_after_patch",
+      "verdict": "match",
+      "detail": "200, 2 assertions",
+      "status": 200,
+      "body": "{\"balloon\":null,\"drives\":[{\"drive_id\":\"rootfs\",\"partuuid\":null,\"is_root_device\":true,\"cache_type\":\"Unsafe\",\"is_read_only\":false,\"path_on_host\":\"/tmp/rootfs-updated.ext4\",\"rate_limiter\":null,\"io_engine\":\"Sync\",\"socket\":null}],\"boot-source\":{\"kernel_image_path\":\"/Image\",\"initrd_path\":\"/initrd.gz\",\"boot_args\":\"console=ttyS0 reboot=k panic=1 pci=off\"},\"cpu-config\":null,\"logger\":null,\"machine-config\":{…"
+    },
+    {
+      "key": "PATCH /balloon#preboot_invalid_state",
+      "verdict": "match",
+      "detail": "400 \"The requested operation is not supported before starting the microVM.\"",
+      "status": 400,
+      "body": "{\"fault_message\":\"The requested operation is not supported before starting the microVM.\"}"
+    },
+    {
+      "key": "PATCH /balloon#missing_device_runtime",
+      "verdict": "match",
+      "detail": "400 \"Balloon update error: Failed perform action on device: Device not found\"",
+      "status": 400,
+      "body": "{\"fault_message\":\"Balloon update error: Failed perform action on device: Device not found\"}"
+    },
+    {
+      "key": "PATCH /balloon#update_existing_runtime",
+      "verdict": "match",
+      "detail": "204",
+      "status": 204
+    },
+    {
+      "key": "PATCH /balloon#oversize_runtime",
+      "verdict": "mismatch",
+      "detail": "fault_message \"Balloon update error: Balloon: Requested memory should be less than 256MiB\" (want \"Balloon update error: Balloon: Requested memory should be less than 128MiB\")",
+      "status": 400,
+      "body": "{\"fault_message\":\"Balloon update error: Balloon: Requested memory should be less than 256MiB\"}"
+    },
+    {
+      "key": "PATCH /balloon/hinting/start#preboot_invalid_state",
+      "verdict": "match",
+      "detail": "400 \"The requested operation is not supported before starting the microVM.\"",
+      "status": 400,
+      "body": "{\"fault_message\":\"The requested operation is not supported before starting the microVM.\"}"
+    },
+    {
+      "key": "PATCH /balloon/hinting/start#missing_device_runtime",
+      "verdict": "match",
+      "detail": "400 \"Balloon update error: Failed perform action on device: Device not found\"",
+      "status": 400,
+      "body": "{\"fault_message\":\"Balloon update error: Failed perform action on device: Device not found\"}"
+    },
+    {
+      "key": "PATCH /balloon/hinting/start#hinting_disabled_runtime",
+      "verdict": "match",
+      "detail": "400 \"Balloon update error: Balloon: Attempting to use hinting when not enabled\"",
+      "status": 400,
+      "body": "{\"fault_message\":\"Balloon update error: Balloon: Attempting to use hinting when not enabled\"}"
+    },
+    {
+      "key": "PATCH /balloon/hinting/start#start_success_runtime",
+      "verdict": "match",
+      "detail": "204",
+      "status": 204
+    },
+    {
+      "key": "PATCH /balloon/hinting/stop#preboot_invalid_state",
+      "verdict": "match",
+      "detail": "400 \"The requested operation is not supported before starting the microVM.\"",
+      "status": 400,
+      "body": "{\"fault_message\":\"The requested operation is not supported before starting the microVM.\"}"
+    },
+    {
+      "key": "PATCH /balloon/hinting/stop#missing_device_runtime",
+      "verdict": "match",
+      "detail": "400 \"Balloon update error: Failed perform action on device: Device not found\"",
+      "status": 400,
+      "body": "{\"fault_message\":\"Balloon update error: Failed perform action on device: Device not found\"}"
+    },
+    {
+      "key": "PATCH /balloon/hinting/stop#hinting_disabled_runtime",
+      "verdict": "match",
+      "detail": "400 \"Balloon update error: Balloon: Attempting to use hinting when not enabled\"",
+      "status": 400,
+      "body": "{\"fault_message\":\"Balloon update error: Balloon: Attempting to use hinting when not enabled\"}"
+    },
+    {
+      "key": "PATCH /balloon/hinting/stop#stop_success_runtime",
+      "verdict": "match",
+      "detail": "204",
+      "status": 204
+    },
+    {
+      "key": "PATCH /balloon/statistics#preboot_invalid_state",
+      "verdict": "match",
+      "detail": "400 \"The requested operation is not supported before starting the microVM.\"",
+      "status": 400,
+      "body": "{\"fault_message\":\"The requested operation is not supported before starting the microVM.\"}"
+    },
+    {
+      "key": "PATCH /balloon/statistics#missing_device_runtime",
+      "verdict": "match",
+      "detail": "400 \"Balloon update error: Failed perform action on device: Device not found\"",
+      "status": 400,
+      "body": "{\"fault_message\":\"Balloon update error: Failed perform action on device: Device not found\"}"
+    },
+    {
+      "key": "PATCH /balloon/statistics#update_existing_runtime",
+      "verdict": "match",
+      "detail": "204",
+      "status": 204
+    },
+    {
+      "key": "PATCH /balloon/statistics#disable_runtime",
+      "verdict": "match",
+      "detail": "400 \"Balloon update error: Balloon: Statistics cannot be enabled/disabled after activation.\"",
+      "status": 400,
+      "body": "{\"fault_message\":\"Balloon update error: Balloon: Statistics cannot be enabled/disabled after activation.\"}"
+    },
+    {
+      "key": "PATCH /drives/{drive_id}#preboot_invalid_state",
+      "verdict": "match",
+      "detail": "400 \"The requested operation is not supported before starting the microVM.\"",
+      "status": 400,
+      "body": "{\"fault_message\":\"The requested operation is not supported before starting the microVM.\"}"
+    },
+    {
+      "key": "PATCH /drives/{drive_id}#id_mismatch_runtime",
+      "verdict": "match",
+      "detail": "400 \"The id from the path does not match the id from the body!\"",
+      "status": 400,
+      "body": "{\"fault_message\":\"The id from the path does not match the id from the body!\"}"
+    },
+    {
+      "key": "PATCH /drives/{drive_id}#missing_drive_runtime",
+      "verdict": "match",
+      "detail": "400 \"Drive config error: Unable to patch the block device: Failed perform action on device: Device not found Please verify the request arguments.\"",
+      "status": 400,
+      "body": "{\"fault_message\":\"Drive config error: Unable to patch the block device: Failed perform action on device: Device not found Please verify the request arguments.\"}"
+    },
+    {
+      "key": "PATCH /drives/{drive_id}#update_existing_runtime",
+      "verdict": "match",
+      "detail": "204",
+      "status": 204
+    },
+    {
+      "key": "PATCH /hotplug/memory#preboot_invalid_state",
+      "verdict": "match",
+      "detail": "400 \"The requested operation is not supported before starting the microVM.\"",
+      "status": 400,
+      "body": "{\"fault_message\":\"The requested operation is not supported before starting the microVM.\"}"
+    },
+    {
+      "key": "PATCH /hotplug/memory#patch_valid_runtime",
+      "verdict": "match",
+      "detail": "204",
+      "status": 204
+    },
+    {
+      "key": "PATCH /hotplug/memory#invalid_requested_size_runtime",
+      "verdict": "mismatch",
+      "detail": "fault_message \"Memory hotplug update error: Failed to create memory hotplug device: Size 3145728 is invalid: it must be a multiple of block size and less than the total size\" (want \"The requested size of the hotpluggable memory device must be a multiple of the block size and no larger than the total size.\")",
+      "status": 400,
+      "body": "{\"fault_message\":\"Memory hotplug update error: Failed to create memory hotplug device: Size 3145728 is invalid: it must be a multiple of block size and less than the total size\"}"
+    },
+    {
+      "key": "PATCH /machine-config#patch_valid_preboot",
+      "verdict": "match",
+      "detail": "204",
+      "status": 204
+    },
+    {
+      "key": "PATCH /machine-config#shrink_below_balloon_target_preboot",
+      "verdict": "mismatch",
+      "detail": "fault_message \"Machine config error: The memory size (MiB) is smaller than the previously set balloon device target size.\" (want \"The memory size (MiB) is smaller than the previously set balloon device target size.\")",
+      "status": 400,
+      "body": "{\"fault_message\":\"Machine config error: The memory size (MiB) is smaller than the previously set balloon device target size.\"}"
+    },
+    {
+      "key": "PATCH /mmds#patch_valid_store",
+      "verdict": "match",
+      "detail": "204",
+      "status": 204
+    },
+    {
+      "key": "PATCH /mmds#missing_store_preboot",
+      "verdict": "mismatch",
+      "detail": "fault_message \"MMDS error: The MMDS data store is not initialized.\" (want \"The MMDS data store is not initialized.\")",
+      "status": 400,
+      "body": "{\"fault_message\":\"MMDS error: The MMDS data store is not initialized.\"}"
+    },
+    {
+      "key": "PATCH /mmds#runtime_missing_config",
+      "verdict": "mismatch",
+      "detail": "fault_message \"MMDS error: The MMDS data store is not initialized.\" (want \"The MMDS data store is not initialized.\")",
+      "status": 400,
+      "body": "{\"fault_message\":\"MMDS error: The MMDS data store is not initialized.\"}"
+    },
+    {
+      "key": "PATCH /mmds#oversized_merge_patch",
+      "verdict": "mismatch",
+      "detail": "fault_message \"MMDS limit exceeded error: The MMDS patch request doesn't fit.\" (want \"The MMDS patch request doesn't fit.\")",
+      "status": 413,
+      "body": "{\"fault_message\":\"MMDS limit exceeded error: The MMDS patch request doesn't fit.\"}"
+    },
+    {
+      "key": "PATCH /network-interfaces/{iface_id}#preboot_invalid_state",
+      "verdict": "match",
+      "detail": "400 \"The requested operation is not supported before starting the microVM.\"",
+      "status": 400,
+      "body": "{\"fault_message\":\"The requested operation is not supported before starting the microVM.\"}"
+    },
+    {
+      "key": "PATCH /network-interfaces/{iface_id}#id_mismatch_runtime",
+      "verdict": "match",
+      "detail": "400 \"The id from the path [eth0] does not match the id from the body [eth1]!\"",
+      "status": 400,
+      "body": "{\"fault_message\":\"The id from the path [eth0] does not match the id from the body [eth1]!\"}"
+    },
+    {
+      "key": "PATCH /network-interfaces/{iface_id}#missing_interface_runtime",
+      "verdict": "match",
+      "detail": "400 \"Network config error: Unable to update the net device: Failed perform action on device: Device not found\"",
+      "status": 400,
+      "body": "{\"fault_message\":\"Network config error: Unable to update the net device: Failed perform action on device: Device not found\"}"
+    },
+    {
+      "key": "PATCH /network-interfaces/{iface_id}#update_existing_runtime",
+      "verdict": "setup_failed",
+      "detail": "setup PUT /network-interfaces/eth0: 400 {\"fault_message\":\"Network config error: Could not create the network device: Open tap device failed: Error while creating ifreq structure: Operation not permitted (os error 1). Invalid TUN/TAP Backend provided by tap0. Check our documentation on setting up the network devices.\"}",
+      "status": 400,
+      "body": "{\"fault_message\":\"Network config error: Unable to update the net device: Failed perform action on device: Device not found\"}"
+    },
+    {
+      "key": "PATCH /pmem/{id}#preboot_invalid_state",
+      "verdict": "match",
+      "detail": "400 \"The requested operation is not supported before starting the microVM.\"",
+      "status": 400,
+      "body": "{\"fault_message\":\"The requested operation is not supported before starting the microVM.\"}"
+    },
+    {
+      "key": "PATCH /pmem/{id}#patch_rate_limiter_runtime",
+      "verdict": "match",
+      "detail": "204",
+      "status": 204
+    },
+    {
+      "key": "PATCH /pmem/{id}#id_mismatch_runtime",
+      "verdict": "match",
+      "detail": "400 \"The id from the path does not match the id from the body!\"",
+      "status": 400,
+      "body": "{\"fault_message\":\"The id from the path does not match the id from the body!\"}"
+    },
+    {
+      "key": "PATCH /pmem/{id}#missing_device_runtime",
+      "verdict": "match",
+      "detail": "400 \"Pmem config error: Unable to patch the pmem device: Failed perform action on device: Device not found Please verify the request arguments.\"",
+      "status": 400,
+      "body": "{\"fault_message\":\"Pmem config error: Unable to patch the pmem device: Failed perform action on device: Device not found Please verify the request arguments.\"}"
+    },
+    {
+      "key": "PATCH /pmem/{id}#missing_device_without_rate_limiter_runtime",
+      "verdict": "match",
+      "detail": "204",
+      "status": 204
+    },
+    {
+      "key": "PATCH /vm#pause_preboot",
+      "verdict": "match",
+      "detail": "400 \"The requested operation is not supported before starting the microVM.\"",
+      "status": 400,
+      "body": "{\"fault_message\":\"The requested operation is not supported before starting the microVM.\"}"
+    },
+    {
+      "key": "PATCH /vm#pause_runtime",
+      "verdict": "match",
+      "detail": "204",
+      "status": 204
+    },
+    {
+      "key": "PATCH /vm#resume_runtime",
+      "verdict": "match",
+      "detail": "204",
+      "status": 204
+    },
+    {
+      "key": "PUT /actions#flush_metrics_preboot",
+      "verdict": "match",
+      "detail": "400 \"The requested operation is not supported before starting the microVM.\"",
+      "status": 400,
+      "body": "{\"fault_message\":\"The requested operation is not supported before starting the microVM.\"}"
+    },
+    {
+      "key": "PUT /actions#flush_metrics_postboot",
+      "verdict": "match",
+      "detail": "204",
+      "status": 204
+    },
+    {
+      "key": "PUT /actions#instance_start_preboot_missing_kernel",
+      "verdict": "mismatch",
+      "detail": "fault_message \"Start microvm error: Cannot start microvm without kernel configuration.\" (want \"Cannot start microvm without kernel configuration.\")",
+      "status": 400,
+      "body": "{\"fault_message\":\"Start microvm error: Cannot start microvm without kernel configuration.\"}"
+    },
+    {
+      "key": "PUT /actions#instance_start_pmem_missing_backing_file",
+      "verdict": "match",
+      "detail": "400 \"Start microvm error: Cannot create pmem device: Error accessing backing file: No such file or directory (os error 2)\"",
+      "status": 400,
+      "body": "{\"fault_message\":\"Start microvm error: Cannot create pmem device: Error accessing backing file: No such file or directory (os error 2)\"}"
+    },
+    {
+      "key": "PUT /actions#instance_start_pmem_zero_sized_backing_file",
+      "verdict": "match",
+      "detail": "400 \"Start microvm error: Cannot create pmem device: Error backing file size is 0\"",
+      "status": 400,
+      "body": "{\"fault_message\":\"Start microvm error: Cannot create pmem device: Error backing file size is 0\"}"
+    },
+    {
+      "key": "PUT /actions#instance_start_postboot",
+      "verdict": "match",
+      "detail": "400 \"The requested operation is not supported after starting the microVM.\"",
+      "status": 400,
+      "body": "{\"fault_message\":\"The requested operation is not supported after starting the microVM.\"}"
+    },
+    {
+      "key": "PUT /actions#send_ctrl_alt_del_preboot_x86_64",
+      "verdict": "not_applicable",
+      "detail": "X86_64 case on aarch64"
+    },
+    {
+      "key": "PUT /actions#send_ctrl_alt_del_postboot_x86_64",
+      "verdict": "not_applicable",
+      "detail": "X86_64 case on aarch64"
+    },
+    {
+      "key": "PUT /actions#send_ctrl_alt_del_aarch64",
+      "verdict": "match",
+      "detail": "400 \"SendCtrlAltDel does not supported on aarch64.\"",
+      "status": 400,
+      "body": "{\"fault_message\":\"SendCtrlAltDel does not supported on aarch64.\"}"
+    },
+    {
+      "key": "PUT /balloon#put_valid_preboot",
+      "verdict": "match",
+      "detail": "204",
+      "status": 204
+    },
+    {
+      "key": "PUT /balloon#oversize_preboot",
+      "verdict": "match",
+      "detail": "400 \"Balloon config error: Amount of pages requested is too large.\"",
+      "status": 400,
+      "body": "{\"fault_message\":\"Balloon config error: Amount of pages requested is too large.\"}"
+    },
+    {
+      "key": "PUT /boot-source#put_valid_preboot",
+      "verdict": "match",
+      "detail": "204",
+      "status": 204
+    },
+    {
+      "key": "PUT /boot-source#postboot_invalid_state",
+      "verdict": "match",
+      "detail": "400 \"The requested operation is not supported after starting the microVM.\"",
+      "status": 400,
+      "body": "{\"fault_message\":\"The requested operation is not supported after starting the microVM.\"}"
+    },
+    {
+      "key": "PUT /cpu-config#put_valid_preboot",
+      "verdict": "match",
+      "detail": "204",
+      "status": 204
+    },
+    {
+      "key": "PUT /cpu-config#postboot_invalid_state",
+      "verdict": "match",
+      "detail": "400 \"The requested operation is not supported after starting the microVM.\"",
+      "status": 400,
+      "body": "{\"fault_message\":\"The requested operation is not supported after starting the microVM.\"}"
+    },
+    {
+      "key": "PUT /drives/{drive_id}#postboot_pci_not_enabled",
+      "verdict": "match",
+      "detail": "400 \"PCI is not enabled\"",
+      "status": 400,
+      "body": "{\"fault_message\":\"PCI is not enabled\"}"
+    },
+    {
+      "key": "PUT /drives/{drive_id}#put_valid_preboot",
+      "verdict": "match",
+      "detail": "204",
+      "status": 204
+    },
+    {
+      "key": "PUT /drives/{drive_id}#missing_backing_file_preboot",
+      "verdict": "match",
+      "detail": "400 \"Drive config error: Unable to create the virtio block device: Virtio backend error: Error manipulating the backing file: No such file or directory (os error 2) /definitely/missing-drive.ext4\"",
+      "status": 400,
+      "body": "{\"fault_message\":\"Drive config error: Unable to create the virtio block device: Virtio backend error: Error manipulating the backing file: No such file or directory (os error 2) /definitely/missing-drive.ext4\"}"
+    },
+    {
+      "key": "PUT /drives/{drive_id}#pmem_root_conflict_preboot",
+      "verdict": "match",
+      "detail": "400 \"Drive config error: Attempt to add block as a root device while the root device defined as a pmem device\"",
+      "status": 400,
+      "body": "{\"fault_message\":\"Drive config error: Attempt to add block as a root device while the root device defined as a pmem device\"}"
+    },
+    {
+      "key": "PUT /drives/{drive_id}#duplicate_block_root_preboot",
+      "verdict": "match",
+      "detail": "400 \"Drive config error: A root block device already exists!\"",
+      "status": 400,
+      "body": "{\"fault_message\":\"Drive config error: A root block device already exists!\"}"
+    },
+    {
+      "key": "PUT /entropy#put_valid_preboot",
+      "verdict": "match",
+      "detail": "204",
+      "status": 204
+    },
+    {
+      "key": "PUT /entropy#postboot_invalid_state",
+      "verdict": "match",
+      "detail": "400 \"The requested operation is not supported after starting the microVM.\"",
+      "status": 400,
+      "body": "{\"fault_message\":\"The requested operation is not supported after starting the microVM.\"}"
+    },
+    {
+      "key": "PUT /hotplug/memory#put_valid_preboot",
+      "verdict": "match",
+      "detail": "204",
+      "status": 204
+    },
+    {
+      "key": "PUT /hotplug/memory#invalid_block_size_preboot",
+      "verdict": "mismatch",
+      "detail": "fault_message \"Memory hotplug config error: Block size must be a power of 2\" (want \"The block size of the hotpluggable memory device must be at least 2 MiB and a power of 2.\")",
+      "status": 400,
+      "body": "{\"fault_message\":\"Memory hotplug config error: Block size must be a power of 2\"}"
+    },
+    {
+      "key": "PUT /hotplug/memory#invalid_total_size_preboot",
+      "verdict": "mismatch",
+      "detail": "fault_message \"Memory hotplug config error: Total size must not be lower than slot size (128 MiB)\" (want \"The total size of the hotpluggable memory device must be at least the slot size and a multiple of the slot size.\")",
+      "status": 400,
+      "body": "{\"fault_message\":\"Memory hotplug config error: Total size must not be lower than slot size (128 MiB)\"}"
+    },
+    {
+      "key": "PUT /hotplug/memory#postboot_invalid_state",
+      "verdict": "match",
+      "detail": "400 \"The requested operation is not supported after starting the microVM.\"",
+      "status": 400,
+      "body": "{\"fault_message\":\"The requested operation is not supported after starting the microVM.\"}"
+    },
+    {
+      "key": "PUT /logger#put_valid_any",
+      "verdict": "match",
+      "detail": "204",
+      "status": 204
+    },
+    {
+      "key": "PUT /logger#runtime_put_valid",
+      "verdict": "mismatch",
+      "detail": "status 400 (want 204): {\"fault_message\":\"The requested operation is not supported after starting the microVM.\"}",
+      "status": 400,
+      "body": "{\"fault_message\":\"The requested operation is not supported after starting the microVM.\"}"
+    },
+    {
+      "key": "PUT /machine-config#put_valid_preboot",
+      "verdict": "match",
+      "detail": "204",
+      "status": 204
+    },
+    {
+      "key": "PUT /machine-config#shrink_below_balloon_target_preboot",
+      "verdict": "mismatch",
+      "detail": "fault_message \"Machine config error: The memory size (MiB) is smaller than the previously set balloon device target size.\" (want \"The memory size (MiB) is smaller than the previously set balloon device target size.\")",
+      "status": 400,
+      "body": "{\"fault_message\":\"Machine config error: The memory size (MiB) is smaller than the previously set balloon device target size.\"}"
+    },
+    {
+      "key": "PUT /metrics#put_valid_any",
+      "verdict": "match",
+      "detail": "204",
+      "status": 204
+    },
+    {
+      "key": "PUT /metrics#runtime_put_valid",
+      "verdict": "mismatch",
+      "detail": "status 400 (want 204): {\"fault_message\":\"The requested operation is not supported after starting the microVM.\"}",
+      "status": 400,
+      "body": "{\"fault_message\":\"The requested operation is not supported after starting the microVM.\"}"
+    },
+    {
+      "key": "PUT /metrics#duplicate_init",
+      "verdict": "mismatch",
+      "detail": "fault_message \"Metrics error: Cannot initialize the metrics system due to bad user input: Reinitialization of metrics not allowed.\" (want \"Cannot initialize the metrics system due to bad user input: Reinitialization of metrics not allowed.\")",
+      "status": 400,
+      "body": "{\"fault_message\":\"Metrics error: Cannot initialize the metrics system due to bad user input: Reinitialization of metrics not allowed.\"}"
+    },
+    {
+      "key": "PUT /mmds#put_valid_store",
+      "verdict": "match",
+      "detail": "204",
+      "status": 204
+    },
+    {
+      "key": "PUT /mmds#runtime_missing_config",
+      "verdict": "mismatch",
+      "detail": "fault_message \"MMDS error: The MMDS data store is not initialized.\" (want \"The MMDS data store is not initialized.\")",
+      "status": 400,
+      "body": "{\"fault_message\":\"MMDS error: The MMDS data store is not initialized.\"}"
+    },
+    {
+      "key": "PUT /mmds#oversized_store",
+      "verdict": "mismatch",
+      "detail": "fault_message \"MMDS limit exceeded error: The MMDS patch request doesn't fit.\" (want \"The MMDS patch request doesn't fit.\")",
+      "status": 413,
+      "body": "{\"fault_message\":\"MMDS limit exceeded error: The MMDS patch request doesn't fit.\"}"
+    },
+    {
+      "key": "PUT /mmds/config#put_valid_preboot",
+      "verdict": "setup_failed",
+      "detail": "setup PUT /network-interfaces/eth0: 400 {\"fault_message\":\"Network config error: Could not create the network device: Open tap device failed: Error while creating ifreq structure: Operation not permitted (os error 1). Invalid TUN/TAP Backend provided by tap0. Check our documentation on setting up the network devices.\"}",
+      "status": 400,
+      "body": "{\"fault_message\":\"MMMDS config error: The list of network interface IDs provided contains at least one ID that does not correspond to any existing network interface.\"}"
+    },
+    {
+      "key": "PUT /mmds/config#postboot_invalid_state",
+      "verdict": "match",
+      "detail": "400 \"The requested operation is not supported after starting the microVM.\"",
+      "status": 400,
+      "body": "{\"fault_message\":\"The requested operation is not supported after starting the microVM.\"}"
+    },
+    {
+      "key": "PUT /mmds/config#empty_network_interface_list_preboot",
+      "verdict": "mismatch",
+      "detail": "fault_message \"MMMDS config error: The list of network interface IDs that allow forwarding MMDS requests is empty.\" (want \"The list of network interface IDs that allow forwarding MMDS requests is empty.\")",
+      "status": 400,
+      "body": "{\"fault_message\":\"MMMDS config error: The list of network interface IDs that allow forwarding MMDS requests is empty.\"}"
+    },
+    {
+      "key": "PUT /mmds/config#unknown_network_interface_preboot",
+      "verdict": "mismatch",
+      "detail": "fault_message \"MMMDS config error: The list of network interface IDs provided contains at least one ID that does not correspond to any existing network interface.\" (want \"The list of network interface IDs provided contains at least one ID that does not correspond to any existing network interface.\")",
+      "status": 400,
+      "body": "{\"fault_message\":\"MMMDS config error: The list of network interface IDs provided contains at least one ID that does not correspond to any existing network interface.\"}"
+    },
+    {
+      "key": "PUT /mmds/config#invalid_ipv4_address_preboot",
+      "verdict": "mismatch",
+      "detail": "fault_message \"MMMDS config error: The MMDS IPv4 address is not link local.\" (want \"The MMDS IPv4 address is not link local.\")",
+      "status": 400,
+      "body": "{\"fault_message\":\"MMMDS config error: The MMDS IPv4 address is not link local.\"}"
+    },
+    {
+      "key": "PUT /network-interfaces/{iface_id}#postboot_pci_not_enabled",
+      "verdict": "match",
+      "detail": "400 \"PCI is not enabled\"",
+      "status": 400,
+      "body": "{\"fault_message\":\"PCI is not enabled\"}"
+    },
+    {
+      "key": "PUT /network-interfaces/{iface_id}#id_mismatch_preboot",
+      "verdict": "match",
+      "detail": "400 \"The id from the path [eth0] does not match the id from the body [eth1]!\"",
+      "status": 400,
+      "body": "{\"fault_message\":\"The id from the path [eth0] does not match the id from the body [eth1]!\"}"
+    },
+    {
+      "key": "PUT /network-interfaces/{iface_id}#put_valid_preboot",
+      "verdict": "mismatch",
+      "detail": "status 400 (want 204): {\"fault_message\":\"Network config error: Could not create the network device: Open tap device failed: Error while creating ifreq structure: Operation not permitted (os error 1). Invalid TUN/TAP Backend provided by tap0. Check our documentation on setting up the network devices.\"}",
+      "status": 400,
+      "body": "{\"fault_message\":\"Network config error: Could not create the network device: Open tap device failed: Error while creating ifreq structure: Operation not permitted (os error 1). Invalid TUN/TAP Backend provided by tap0. Check our documentation on setting up the network devices.\"}"
+    },
+    {
+      "key": "PUT /network-interfaces/{iface_id}#duplicate_guest_mac_preboot",
+      "verdict": "setup_failed",
+      "detail": "setup PUT /network-interfaces/eth0: 400 {\"fault_message\":\"Network config error: Could not create the network device: Open tap device failed: Error while creating ifreq structure: Operation not permitted (os error 1). Invalid TUN/TAP Backend provided by tap0. Check our documentation on setting up the network devices.\"}",
+      "status": 400,
+      "body": "{\"fault_message\":\"Network config error: Could not create the network device: Open tap device failed: Error while creating ifreq structure: Operation not permitted (os error 1). Invalid TUN/TAP Backend provided by tap1. Check our documentation on setting up the network devices.\"}"
+    },
+    {
+      "key": "PUT /network-interfaces/{iface_id}#duplicate_host_dev_name_preboot",
+      "verdict": "setup_failed",
+      "detail": "setup PUT /network-interfaces/eth0: 400 {\"fault_message\":\"Network config error: Could not create the network device: Open tap device failed: Error while creating ifreq structure: Operation not permitted (os error 1). Invalid TUN/TAP Backend provided by tap0. Check our documentation on setting up the network devices.\"}",
+      "status": 400,
+      "body": "{\"fault_message\":\"Network config error: Could not create the network device: Open tap device failed: Error while creating ifreq structure: Operation not permitted (os error 1). Invalid TUN/TAP Backend provided by tap0. Check our documentation on setting up the network devices.\"}"
+    },
+    {
+      "key": "PUT /network-interfaces/{iface_id}#mtu_below_minimum_preboot",
+      "verdict": "mismatch",
+      "detail": "fault_message \"Network config error: Could not create the network device: Open tap device failed: Error while creating ifreq structure: Operation not permitted (os error 1). Invalid TUN/TAP Backend provided by tap0. Check our documentation on setting up the network devices.\" (want \"Network config error: Could not create the network device: MTU 67 is out of range [68, 65535]\")",
+      "status": 400,
+      "body": "{\"fault_message\":\"Network config error: Could not create the network device: Open tap device failed: Error while creating ifreq structure: Operation not permitted (os error 1). Invalid TUN/TAP Backend provided by tap0. Check our documentation on setting up the network devices.\"}"
+    },
+    {
+      "key": "PUT /network-interfaces/{iface_id}#mtu_bounds_preboot",
+      "verdict": "setup_failed",
+      "detail": "setup PUT /network-interfaces/eth0: 400 {\"fault_message\":\"Network config error: Could not create the network device: Open tap device failed: Error while creating ifreq structure: Operation not permitted (os error 1). Invalid TUN/TAP Backend provided by tap0. Check our documentation on setting up the network devices.\"}",
+      "status": 400,
+      "body": "{\"fault_message\":\"Network config error: Could not create the network device: Open tap device failed: Error while creating ifreq structure: Operation not permitted (os error 1). Invalid TUN/TAP Backend provided by tap1. Check our documentation on setting up the network devices.\"}"
+    },
+    {
+      "key": "PUT /pmem/{id}#postboot_pci_not_enabled",
+      "verdict": "match",
+      "detail": "400 \"PCI is not enabled\"",
+      "status": 400,
+      "body": "{\"fault_message\":\"PCI is not enabled\"}"
+    },
+    {
+      "key": "PUT /pmem/{id}#put_valid_preboot",
+      "verdict": "match",
+      "detail": "204",
+      "status": 204
+    },
+    {
+      "key": "PUT /pmem/{id}#missing_backing_file_stored",
+      "verdict": "match",
+      "detail": "204",
+      "status": 204
+    },
+    {
+      "key": "PUT /pmem/{id}#put_with_rate_limiter_preboot",
+      "verdict": "match",
+      "detail": "204",
+      "status": 204
+    },
+    {
+      "key": "PUT /pmem/{id}#block_root_conflict_preboot",
+      "verdict": "match",
+      "detail": "400 \"Pmem config error: Attempt to add pmem as a root device while the root device defined as a block device\"",
+      "status": 400,
+      "body": "{\"fault_message\":\"Pmem config error: Attempt to add pmem as a root device while the root device defined as a block device\"}"
+    },
+    {
+      "key": "PUT /pmem/{id}#duplicate_pmem_root_preboot",
+      "verdict": "match",
+      "detail": "400 \"Pmem config error: A root pmem device already exist\"",
+      "status": 400,
+      "body": "{\"fault_message\":\"Pmem config error: A root pmem device already exist\"}"
+    },
+    {
+      "key": "PUT /serial#put_valid_any",
+      "verdict": "match",
+      "detail": "204",
+      "status": 204
+    },
+    {
+      "key": "PUT /serial#runtime_put_valid",
+      "verdict": "mismatch",
+      "detail": "status 400 (want 204): {\"fault_message\":\"The requested operation is not supported after starting the microVM.\"}",
+      "status": 400,
+      "body": "{\"fault_message\":\"The requested operation is not supported after starting the microVM.\"}"
+    },
+    {
+      "key": "PUT /serial#put_with_rate_limiter_any",
+      "verdict": "match",
+      "detail": "204",
+      "status": 204
+    },
+    {
+      "key": "PUT /snapshot/create#preboot_invalid_state",
+      "verdict": "match",
+      "detail": "400 \"The requested operation is not supported before starting the microVM.\"",
+      "status": 400,
+      "body": "{\"fault_message\":\"The requested operation is not supported before starting the microVM.\"}"
+    },
+    {
+      "key": "PUT /snapshot/create#running_requires_paused",
+      "verdict": "mismatch",
+      "detail": "fault_message \"Create snapshot error: Cannot save the microVM state: Operation not allowed: save/restore unavailable while running\" (want \"operation PUT /snapshot/create is not allowed while instance state is running\")",
+      "status": 400,
+      "body": "{\"fault_message\":\"Create snapshot error: Cannot save the microVM state: Operation not allowed: save/restore unavailable while running\"}"
+    },
+    {
+      "key": "PUT /snapshot/create#paused_returns_no_content",
+      "verdict": "match",
+      "detail": "204",
+      "status": 204
+    },
+    {
+      "key": "PUT /snapshot/load#missing_memory_source",
+      "verdict": "match",
+      "detail": "400 \"An error occurred when deserializing the json body of a request: missing field: either `mem_backend` or `mem_file_path` is required.\"",
+      "status": 400,
+      "body": "{\"fault_message\":\"An error occurred when deserializing the json body of a request: missing field: either `mem_backend` or `mem_file_path` is required.\"}"
+    },
+    {
+      "key": "PUT /snapshot/load#too_many_memory_sources",
+      "verdict": "match",
+      "detail": "400 \"An error occurred when deserializing the json body of a request: too many fields: either `mem_backend` or `mem_file_path` exclusively is required.\"",
+      "status": 400,
+      "body": "{\"fault_message\":\"An error occurred when deserializing the json body of a request: too many fields: either `mem_backend` or `mem_file_path` exclusively is required.\"}"
+    },
+    {
+      "key": "PUT /snapshot/load#allowed_after_logger_metrics_and_serial_returns_no_content",
+      "verdict": "match",
+      "detail": "204",
+      "status": 204
+    },
+    {
+      "key": "PUT /snapshot/load#allowed_with_resume_vm_returns_no_content",
+      "verdict": "match",
+      "detail": "204",
+      "status": 204
+    },
+    {
+      "key": "PUT /snapshot/load#blocked_after_boot_source",
+      "verdict": "mismatch",
+      "detail": "fault_message \"Load snapshot error: Loading a microVM snapshot not allowed after configuring boot-specific resources.\" (want \"Load snapshot can only be called before configuring resources other than logger and metrics.\")",
+      "status": 400,
+      "body": "{\"fault_message\":\"Load snapshot error: Loading a microVM snapshot not allowed after configuring boot-specific resources.\"}"
+    },
+    {
+      "key": "PUT /snapshot/load#blocked_after_memory_hotplug",
+      "verdict": "mismatch",
+      "detail": "fault_message \"Load snapshot error: Loading a microVM snapshot not allowed after configuring boot-specific resources.\" (want \"Load snapshot can only be called before configuring resources other than logger and metrics.\")",
+      "status": 400,
+      "body": "{\"fault_message\":\"Load snapshot error: Loading a microVM snapshot not allowed after configuring boot-specific resources.\"}"
+    },
+    {
+      "key": "PUT /snapshot/load#blocked_after_cpu_config",
+      "verdict": "mismatch",
+      "detail": "status 204 (want 400): ",
+      "status": 204
+    },
+    {
+      "key": "PUT /snapshot/load#blocked_after_entropy",
+      "verdict": "mismatch",
+      "detail": "fault_message \"Load snapshot error: Loading a microVM snapshot not allowed after configuring boot-specific resources.\" (want \"Load snapshot can only be called before configuring resources other than logger and metrics.\")",
+      "status": 400,
+      "body": "{\"fault_message\":\"Load snapshot error: Loading a microVM snapshot not allowed after configuring boot-specific resources.\"}"
+    },
+    {
+      "key": "PUT /snapshot/load#blocked_after_vsock",
+      "verdict": "mismatch",
+      "detail": "fault_message \"Load snapshot error: Loading a microVM snapshot not allowed after configuring boot-specific resources.\" (want \"Load snapshot can only be called before configuring resources other than logger and metrics.\")",
+      "status": 400,
+      "body": "{\"fault_message\":\"Load snapshot error: Loading a microVM snapshot not allowed after configuring boot-specific resources.\"}"
+    },
+    {
+      "key": "PUT /snapshot/load#blocked_after_mmds_config",
+      "verdict": "setup_failed",
+      "detail": "setup PUT /network-interfaces/eth0: 400 {\"fault_message\":\"Network config error: Could not create the network device: Open tap device failed: Error while creating ifreq structure: Operation not permitted (os error 1). Invalid TUN/TAP Backend provided by tap0. Check our documentation on setting up the network devices.\"}",
+      "status": 400,
+      "body": "{\"fault_message\":\"Load snapshot error: Loading a microVM snapshot not allowed after configuring boot-specific resources.\"}"
+    },
+    {
+      "key": "PUT /snapshot/load#blocked_after_balloon",
+      "verdict": "mismatch",
+      "detail": "fault_message \"Load snapshot error: Loading a microVM snapshot not allowed after configuring boot-specific resources.\" (want \"Load snapshot can only be called before configuring resources other than logger and metrics.\")",
+      "status": 400,
+      "body": "{\"fault_message\":\"Load snapshot error: Loading a microVM snapshot not allowed after configuring boot-specific resources.\"}"
+    },
+    {
+      "key": "PUT /snapshot/load#blocked_after_network_interface",
+      "verdict": "setup_failed",
+      "detail": "setup PUT /network-interfaces/eth0: 400 {\"fault_message\":\"Network config error: Could not create the network device: Open tap device failed: Error while creating ifreq structure: Operation not permitted (os error 1). Invalid TUN/TAP Backend provided by tap0. Check our documentation on setting up the network devices.\"}",
+      "status": 400,
+      "body": "{\"fault_message\":\"Load snapshot error: Loading a microVM snapshot not allowed after configuring boot-specific resources.\"}"
+    },
+    {
+      "key": "PUT /snapshot/load#vsock_override_accepted",
+      "verdict": "match",
+      "detail": "204",
+      "status": 204
+    },
+    {
+      "key": "PUT /snapshot/load#clock_realtime_x86_64",
+      "verdict": "not_applicable",
+      "detail": "X86_64 case on aarch64"
+    },
+    {
+      "key": "PUT /snapshot/load#clock_realtime_aarch64",
+      "verdict": "match",
+      "detail": "400 \"Load snapshot error: Failed to restore from snapshot: Failed to build microVM from snapshot: clock_realtime is not supported on aarch64.\"",
+      "status": 400,
+      "body": "{\"fault_message\":\"Load snapshot error: Failed to restore from snapshot: Failed to build microVM from snapshot: clock_realtime is not supported on aarch64.\"}"
+    },
+    {
+      "key": "PUT /vsock#put_valid_preboot",
+      "verdict": "match",
+      "detail": "204",
+      "status": 204
+    },
+    {
+      "key": "PUT /vsock#invalid_guest_cid_preboot",
+      "verdict": "mismatch",
+      "detail": "status 204 (want 400): ",
+      "status": 204
+    },
+    {
+      "key": "PUT /vsock#postboot_invalid_state",
+      "verdict": "match",
+      "detail": "400 \"The requested operation is not supported after starting the microVM.\"",
+      "status": 400,
+      "body": "{\"fault_message\":\"The requested operation is not supported after starting the microVM.\"}"
+    }
+  ]
+}

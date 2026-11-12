@@ -28,7 +28,7 @@ Child contracts:
 
 Public symbols by file:
 
-- `lib.rs`: `pub mod api, api_behavior_matrix, api_matrix, baseline,
+- `lib.rs`: `pub mod api, api_behavior_matrix, api_matrix, api_replay, baseline,
   buildinfo, compat, control, platform, proxy, spec, systemvm`. `systemvm.rs` declares
   the private children `systemvm/bridge.rs`, `systemvm/data_disk.rs`, `systemvm/image_lock.rs` and
   `systemvm/packages.rs` and re-exports them, so every symbol below is reachable as
@@ -77,6 +77,12 @@ Public symbols by file:
   `validate_api_behavior_capture_registry`,
   `DEFAULT_API_BEHAVIOR_MATRIX_PATH`,
   `DEFAULT_API_BEHAVIOR_CAPTURE_REGISTRY_PATH`.
+- `api_replay.rs` (ADR 0007 slice 6): `ReplayScripts`, `ReplayFile`, `CaseScript`, `Step`, `Response`, `Verdict`,
+  `CaseResult`, `ReplaySummary`, `case_key`, `load_replay_scripts`, `validate_replay_scripts`, `expand`,
+  `expand_fixture`, `parse_step`, `applies`, `judge`, `replay`, `summarize`, `DEFAULT_REPLAY_SCRIPTS_PATH`,
+  `MAX_WAIT_MS`, `FIXTURE_STATE`, `FIXTURE_MEM`, `SNAPSHOT_STATE`, `SNAPSHOT_MEM`. It turns the scripts in
+  `docs/specs/firecracker-api-behavior-replay.yaml` into steps and judges a backend's last response against the
+  matrix case; it runs no backend itself.
 - `baseline.rs`: `Lock { version, updated_at, baselines: BTreeMap<String,
   BaselineRef>, reporting: Reporting }`, `BaselineRef { repo, revision }`,
   `Reporting { required_metadata }`, `load(path)`,
@@ -158,6 +164,8 @@ Public symbols by file:
   `VESPERD_IDLE_TIMEOUT` and `VESPERD_REQUEST_CEILING` (both 120 s, the values in `src/bin/vesperd/systemvm.rs`),
   `run_snapshot_suite(&endpoint, &SnapshotRun { vesperd, share_dir }, id)` with `prepare_workdir(dir)` and constants
   `DEFAULT_CEILING_MIB` (640), `MEASURE_GUEST_MIB` (640) and `MEASURE_FILL_MIB` (512),
+  `ReplayRun { vesperd, share_dir }` with `prepare(&endpoint, files) -> ReplaySession`, `make_fixture`, `run_case`
+  and `finish`, `ReplayStep`, `ReplayResponse` and `fixture_names(prefix)` (ADR 0007 slice 6, matrix-agnostic),
   `write_report(path, &report)`; constants
   `AGENT_PROTOCOL_VERSION` (1), `DEFAULT_AGENT_PORT` (1024).
 - `control/launchapi.rs` (ADR 0007 slice 3, `super::` only): `Ready { id, pid, firecracker_version }`,
@@ -447,6 +455,11 @@ Public symbols by file:
   `idle_timeout_closes_only_vesperd_connections` (about 125 s), `same_id_refused`, `sigterm_stops_microvm`,
   `sigkill_removes_microvm`, `firecracker_killed_vesperd_exits` and `nothing_left`; `passed` requires all 18 steps
   ok. It uses the control channel only to inspect and fault the guest.
+- `control/suites/replay.rs:ReplayRun` (ADR 0007 slice 6) writes the replay files into a new
+  `share_dir/replay-<ms>/` (a removed and rewritten share file can read as empty in the System VM), makes the snapshot
+  fixture in its own `vesperd` and copies it into the store with `vesperd stage jail:… store:…`, then runs each case
+  in a fresh `vesperd --backend systemvm --id ID` with every file staged (and the fixture linked when the case needs
+  it), one connection per step, then SIGTERM and `wait_absent`. It never judges; `systemvmctl` does.
 - `control/suites/snapshot.rs:run_snapshot_suite` (ADR 0007 slice 5) ages and reaps its ids (`id-a`, `id-b`, `id-c`,
   `id-m`), clears the reserve override and removes its store names, then runs `handshake`, `data_disk_and_user`,
   `share_files` (writes `d1.img`, `d2.img` and a `link -> /etc/shadow` into `share_dir`), `start_with_share_stage`,

@@ -118,3 +118,41 @@ exceptions:
       path in the jail behaves as upstream. Measured by make systemvm-snapshot-suite, step
       create_onto_linked_file_fails. Resolve by accepting it at the parity-GA review (a client writes a new
       snapshot to new paths), or by copying instead of linking.
+  - id: CE-0009
+    owner: cityhunteur
+    issue: 156
+    expiry_date: "2027-03-31"
+    target_release: parity-ga
+    status: open
+    description: >-
+      On vesperd --backend systemvm (ADR 0007), every path in an API request (kernel_image_path, initrd_path,
+      path_on_host, snapshot_path, mem_backend.backend_path, mem_file_path, log_path, metrics_path,
+      serial_out_path, uds_path, vsock_override.uds_path) names a file in the microVM's jail, not on the macOS
+      host, because Firecracker runs under the jailer inside the System VM. The kernel is /Image and the
+      initramfs /initrd.gz; other files reach the jail only through vesperd --stage, vesperd stage or
+      Firecracker itself (sockets, snapshots, logs). Responses that echo a path echo the jail path. Measured
+      by make systemvm-replay-suite (ADR 0007 slice 6): the 173 behaviour-matrix scripts run with {root}
+      empty, so every path is a jail path, and the paths in GET /vm/config and in error messages match the
+      matrix with the root removed. Resolve by accepting it at the parity-GA review (a Firecracker client
+      that uses the jailer already sends chroot-relative paths), or by translating host paths in vesperd.
+  - id: CE-0010
+    owner: cityhunteur
+    issue: 156
+    expiry_date: "2027-03-31"
+    target_release: parity-ga
+    status: open
+    description: >-
+      A vesperd microVM cannot have a network interface: PUT /network-interfaces/{iface_id} with any
+      host_dev_name returns Firecracker's own 400 "Network config error: Could not create the network device:
+      Open tap device failed: Error while creating ifreq structure: Operation not permitted (os error 1).
+      Invalid TUN/TAP Backend provided by tap0. ...", because the jailed Firecracker runs as uid 20000 without
+      CAP_NET_ADMIN and the jail has no tap device prepared for it. Upstream, with a tap device the jailer
+      user may open, the request returns 204. Everything that needs an interface first follows: MMDS
+      networking configuration, GET /mmds after configuring it, the network-interface rows of GET /vm/config,
+      PATCH of an existing interface, and the duplicate-MAC, duplicate-tap and MTU checks (the MTU check runs
+      after the tap is opened). Requests that fail before the tap is opened (PCI not enabled after boot,
+      path/body id mismatch, a missing interface, MMDS configuration errors) behave as upstream. Measured by
+      make systemvm-replay-suite: 14 of the 173 cases (12 setup failures, 2 mismatches), listed in
+      docs/generated/backend-a-behavior-replay.json. Tracked as TD-058. Resolve by giving vesperd microVMs a
+      tap device created by the System VM before the jailer starts (with a network policy), or by accepting
+      it at the parity-GA review.

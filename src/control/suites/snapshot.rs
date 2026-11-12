@@ -33,7 +33,7 @@ pub struct SnapshotRun {
 }
 
 /// `vesperd stage|store …` with the runner's bridge flags; returns the exit code, stdout and stderr.
-fn cli(run: &VesperdRun, args: &[&str]) -> Result<(i32, String, String), String> {
+pub(super) fn cli(run: &VesperdRun, args: &[&str]) -> Result<(i32, String, String), String> {
     let out = Command::new(&run.binary)
         .args(args)
         .args(&run.extra_args)

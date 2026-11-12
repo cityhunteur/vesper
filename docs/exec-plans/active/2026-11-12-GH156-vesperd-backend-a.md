@@ -45,14 +45,14 @@ socket, sees `GET /` return `Running`, and shows that each teardown path leaves 
       against fake agents.
 - [x] (2026-11-12) Slice 3: runtime proof on an M3 Pro: launchapi suite 20/20; the regression suites listed under
       Validation and Acceptance pass (counts in Outcomes & Retrospective).
-- [ ] Slice 3: commit, push, CI green, GH #156 comment with the SHA and both verifications (the lead commits).
+- [x] (2026-11-12) Slice 3: merged as PR #176 (`4811ca7`), CI green, GH #156 updated.
 - [x] (2026-11-12) Slice 4: `proxy::serve`, `open_upstream`, `claim_socket` (moved from `vesperd`) and
       `src/proxy/relay.rs` (`Preface`, `Bounds`, the bounded relay); `vesperd --backend systemvm` in
       `src/bin/vesperd/systemvm.rs` (lease, version check, reused-id wait, signals); unit tests against a fake
       upstream and process tests against a fake agent (`tests/vesperd_systemvm.rs`).
 - [x] (2026-11-12) Slice 4: `make systemvm-vesperd-suite` (`src/control/suites/vesperd.rs`), 18/18 on an M3 Pro;
       CE-0007; the parity baseline republished with CE-0007 open; regression suites pass (Outcomes).
-- [ ] Slice 4: commit, push, CI green, GH #156 comment with the SHA and both verifications (the lead commits).
+- [x] (2026-11-12) Slice 4: merged as PR #177 (`5cf45f8`), CI green, GH #156 updated.
 - [x] (2026-11-12) Slice 5: chroot base `/var/lib/vesper/state/vesperd/jailer` and store
       `/var/lib/vesper/state/vesperd/store` on the data disk, `LAUNCHAPI` refusing without it, the boot sweep in
       `vesper-data mount`, the `vesperd-jail` user (`setup-user`, the reaper service's `start_pre`), `stage`,
@@ -64,8 +64,16 @@ socket, sees `GET /` return `Running`, and shows that each teardown path leaves 
 - [x] (2026-11-12) Slice 5: `make systemvm-snapshot-suite` (`src/control/suites/snapshot.rs`, 23 steps) and the
       `make data-disk-suite` step `vesperd_store_survives_jails_swept`; CE-0008 opened, CE-0007 updated with the
       measurement; regression suites and parity baseline (Outcomes).
-- [ ] Slice 5: commit, push, CI green, GH #156 comment with the SHA and both verifications (the lead commits).
-- [ ] Slice 6: behaviour-matrix replay through `vesperd` on Backend A.
+- [x] (2026-11-12) Slice 5: merged as PR #179 (`4bd76cf`), CI green, GH #156 updated.
+- [x] (2026-11-12) Slice 6a: replay scripts for all 173 matrix cases (`docs/specs/firecracker-api-behavior-replay.yaml`),
+      `src/api_replay.rs`, the model replay in CI (`tests/api_replay.rs`), the Backend A runner
+      (`src/control/suites/replay.rs`, `systemvmctl control replay-suite`, `make systemvm-replay-suite`), the guest
+      balloon and virtio-mem drivers, the published report `docs/generated/backend-a-behavior-replay.json`; CE-0009,
+      CE-0010, TD-058, D-026.
+- [ ] Slice 6a: commit, push, CI green, GH #156 comment.
+- [ ] Slice 6b: correct the 33 captures Backend A and the pinned source contradict, and the model to match; replay
+      both backends again (D-026).
+- [ ] Owner approval of CE-0009 and CE-0010; then GH #156 can close.
 
 ## Surprises & Discoveries
 
@@ -453,7 +461,53 @@ Slice 5, in the order it was built:
    `start_with`. `scripts/systemvm/data-disk-suite.sh`: step `vesperd_store_survives_jails_swept`.
 5. CE-0008, CE-0007's text, the parity baseline, and the documents listed under Validation and Acceptance.
 
-Slice 6 follows the ADR's table and gets its own section when it starts.
+### Slice 6: behaviour-matrix replay
+
+The matrix records 173 cases as a description, a status and assertions, with no requests, and no test ran them. Slice
+6 gives each case an executable script and runs it on both backends with one oracle:
+
+1. `docs/specs/firecracker-api-behavior-replay.yaml`: per case `setup` steps (each must return 2xx) and the
+   `request` under test; macros (`@boot`, `@boot_settled`, `@net0`, …); `WAIT <ms>`; `{root}`, `{pad:N}` and
+   `{rep:N:TEXT}`; the files every case root holds and a `snapshot_fixture`. Paths are `{root}/…`: a temporary
+   directory on the model, empty on Backend A, so they are jail paths there (CE-0009). The root is removed from
+   response bodies before judging.
+2. `src/api_replay.rs` (layer: `api_behavior_matrix` only): loads and validates the scripts (exact coverage, macro
+   depth, the request is the case's route), expands them, judges a response (status; empty body; `fault_message`
+   exact, plus `code` on the model; JSON-pointer assertions), and `replay()` over a backend callback.
+3. `tests/api_replay.rs`: every case on a fresh model router in CI; all must match (the 3 x86_64 cases are not
+   applicable on an arm64 runner, the 2 aarch64 cases on x86_64).
+4. `src/control/suites/replay.rs` (matrix-agnostic): writes the files into a new share directory per run (a removed
+   and rewritten share file read 0 bytes in the System VM), makes the snapshot fixture once and copies it into the
+   store, then runs each case in its own `vesperd --backend systemvm` with the files and, when marked, the
+   fixture staged; one connection per step; SIGTERM and the jail must be gone. `src/bin/systemvmctl/replay.rs` joins
+   it to the scripts and writes the report; `--publish` writes the committed one with the baseline metadata.
+5. The microVM guest now loads `virtio_balloon` and `virtio_mem`: without them Firecracker's balloon and
+   memory-hotplug devices never activate ("Device not activated yet", "Device is not active").
+
+Triage of the first full run (Backend A, M3 Pro, `d83d72b`), 173 cases: 123 match, 3 not applicable (x86_64), 47
+differ.
+
+- 14 need a network interface (CE-0010, TD-058): 12 setup failures at `PUT /network-interfaces/eth0` and the 2
+  cases whose own request is one (`put_valid_preboot`; `mtu_below_minimum_preboot`, whose MTU check runs after the
+  tap is opened).
+- 33 show the matrix is wrong: Backend A returns the text or rule in the pinned source (`run/GH-166/firecracker` at
+  `d83d72b`), and the captures were written from reading source, never from a running Firecracker.
+  - Missing prefixes from `VmmActionError` (`src/vmm/src/rpc_interface.rs`, `displaydoc`): `MMDS error: ` (4 cases),
+    `MMMDS config error: ` (3; the typo is Firecracker's), `MMDS limit exceeded error: ` (2), `Machine config
+    error: ` (2), `Metrics error: ` (1), `Start microvm error: ` (1).
+  - Different text: snapshot load after configuring a boot resource is "Load snapshot error: Loading a microVM
+    snapshot not allowed after configuring boot-specific resources." (5); snapshot create while running is "Create
+    snapshot error: Cannot save the microVM state: Operation not allowed: save/restore unavailable while running";
+    the memory-hotplug validation texts (3); the balloon runtime limit quotes the requested size ("less than
+    256MiB" for a 256 MiB request; `balloon/device.rs` `update_size`).
+  - Different rules: `PUT /cpu-config` does not block a snapshot load (`set_custom_cpu_template` leaves `boot_path`
+    false); `PUT /logger`, `/metrics` and `/serial` after boot return "not supported after starting the microVM"
+    (3); `PUT /vsock` accepts `guest_cid` 2; `GET /vm/config` writes `"cpu-config":null`, `"logger":null` and
+    `"metrics":null` where the matrix expects the key absent (5; `serial` is absent, as the matrix says).
+- Script fixes found on the way: the MMDS store limit counts the re-serialized length (`to_vec` in
+  `mmds/data_store.rs`), so `PUT /mmds#oversized_store` sends `1e2` 12000 times (48 kB under the 51200-byte HTTP
+  limit, about 72 kB as `100.0`); a 128 MiB guest inflates its balloon only to about 52 MiB, so
+  `enabled_stats_runtime` uses 256 MiB; MAC addresses are lowercase, as Firecracker prints them.
 
 ## Concrete Steps
 

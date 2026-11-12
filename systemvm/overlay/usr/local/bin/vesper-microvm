@@ -57,11 +57,12 @@ prepare() {
       cp -L "$src" "$MVM/initroot$src" || return 1
     done
     for src in $runtime_files; do sha256sum "$MVM/initroot$src"; done | sed "s|$MVM/initroot/||" > "$MVM/initroot/runtime.sha256"
-    # Kernel modules for a root drive (virtio-mmio transport, virtio-blk, ext4 and its deps) from the modloop.
+    # Kernel modules from the modloop: a root drive (virtio-mmio transport, virtio-blk, ext4 and its deps), vsock, and
+    # the balloon and virtio-mem drivers that Firecracker's balloon and memory-hotplug devices need (ADR 0007 slice 6).
     kver=$(uname -r)
     mdir="$MVM/initroot/lib/modules/$kver"
     mkdir -p "$mdir"
-    for rel in kernel/drivers/virtio/virtio_mmio kernel/drivers/block/virtio_blk kernel/crypto/crc32c_generic kernel/lib/libcrc32c kernel/fs/ext4/ext4 kernel/fs/jbd2/jbd2 kernel/fs/mbcache kernel/lib/crc16 kernel/net/vmw_vsock/vsock kernel/net/vmw_vsock/vmw_vsock_virtio_transport_common kernel/net/vmw_vsock/vmw_vsock_virtio_transport; do
+    for rel in kernel/drivers/virtio/virtio_mmio kernel/drivers/block/virtio_blk kernel/crypto/crc32c_generic kernel/lib/libcrc32c kernel/fs/ext4/ext4 kernel/fs/jbd2/jbd2 kernel/fs/mbcache kernel/lib/crc16 kernel/net/vmw_vsock/vsock kernel/net/vmw_vsock/vmw_vsock_virtio_transport_common kernel/net/vmw_vsock/vmw_vsock_virtio_transport kernel/drivers/virtio/virtio_balloon kernel/drivers/virtio/virtio_mem; do
       src=$(ls "/lib/modules/$kver/$rel".ko* 2>/dev/null | head -1)
       [ -n "$src" ] || { echo "ERR module $rel missing from /lib/modules/$kver"; return 1; }
       mkdir -p "$mdir/$(dirname "$rel")"

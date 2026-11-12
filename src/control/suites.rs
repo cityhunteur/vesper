@@ -13,6 +13,8 @@ pub use exec::run_exec_suite;
 mod launchapi;
 pub use launchapi::run_launchapi_suite;
 mod restart;
+mod replay;
+pub use replay::{fixture_names, ReplayResponse, ReplayRun, ReplaySession, ReplayStep};
 mod snapshot;
 pub use snapshot::{prepare_workdir, run_snapshot_suite, SnapshotRun, DEFAULT_CEILING_MIB, MEASURE_FILL_MIB, MEASURE_GUEST_MIB};
 mod vesperd;

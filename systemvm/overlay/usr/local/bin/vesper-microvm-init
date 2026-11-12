@@ -10,6 +10,9 @@ ln -sf pts/ptmx /dev/ptmx
 mount -t cgroup2 cgroup2 /sys/fs/cgroup
 mount --make-rprivate /
 sha256sum -c /runtime.sha256 >/dev/null || { echo VESPER-RUNTIME-DIGEST-FAILED; poweroff -f; }
+# Upstream Firecracker's guest kernels build these in; without them the balloon and memory-hotplug devices never
+# activate and their API requests fail with "Device not activated yet" (ADR 0007 slice 6).
+/bin/busybox modprobe -a virtio_mmio virtio_balloon virtio_mem >/dev/null 2>&1 || echo "VESPER-MODULES-FAILED"
 echo "VESPER-MICROVM-OK"
 if /bin/busybox grep -q vesper_exit=1 /proc/cmdline; then
   /bin/busybox poweroff -f

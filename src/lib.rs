@@ -1,6 +1,7 @@
 pub mod api;
 pub mod api_behavior_matrix;
 pub mod api_matrix;
+pub mod api_replay;
 pub mod baseline;
 pub mod buildinfo;
 pub mod compat;
