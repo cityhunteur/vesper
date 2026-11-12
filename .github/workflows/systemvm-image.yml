@@ -109,6 +109,9 @@ jobs:
             build/systemvm/image-manifest.json
             build/systemvm/launch-config.json
             build/systemvm/localhost.apkovl.tar.gz
+          # The image is rebuilt from the commit and checked reproducible, so old copies are not evidence;
+          # a short retention keeps the repository under its artifact quota (2026-11-12).
+          retention-days: 7
 
   launcher-build:
     # Virtualization.framework helper: build and ad-hoc sign on macOS. GitHub's macOS runners are
