@@ -1,0 +1,400 @@
+#!/bin/sh
+# Vesper Backend A for vesperd (ADR 0007, slice 3): one jailed Firecracker per lease, built from API requests.
+# The agent runs `launch` for LAUNCHAPI and `connect` for FCAPI with `exec`, so stdin and stdout are the vsock
+# connection itself. Every other subcommand is reached through the agent's buffered VESPERD verb.
+# usage: vesper-vesperd launch ID [CEILING]   LAUNCHAPI: start Firecracker unconfigured under the jailer (uid 20000,
+#                                             --parent-cgroup vesperd, memory.max=CEILING bytes); reply
+#                                             READY ID pid=N firecracker_version=V once the API socket exists, or
+#                                             ERR <reason> and close. After READY the connection is the lease: on its
+#                                             end of file, or when Firecracker exits, the microVM is stopped and its
+#                                             jail, cgroup and record removed, then the connection is closed.
+#        vesper-vesperd connect ID            FCAPI: reply OK, then relay bytes to ID's API socket (socat, chrooted
+#                                             into the jail root); ERR <reason> and close when ID is not a ready
+#                                             vesperd microVM.
+#        vesper-vesperd reap                  one reaper pass: REAPED ID reason=… | KEPT ID reason=… lines, then
+#                                             REAP reaped=N kept=M
+#        vesper-vesperd reap-loop SECONDS     a reaper pass every SECONDS, forever (the vesper-vesperd-reaper service)
+#        vesper-vesperd status ID             RUNNING ID pid=N holder=P | STARTING ID holder=P | ABSENT ID |
+#                                             DIRTY ID <record|jail|cgroup|process>…
+#        vesper-vesperd isolation ID          JSON with uid, chroot, cgroup and seccomp checks of ID's Firecracker
+#        vesper-vesperd list                  LEASE ID holder=P:S conn=P:S fc=P:S lines, then a JAIL ID line per jail
+#        vesper-vesperd log ID [N]            last N lines of ID's serial console
+#        vesper-vesperd kill-holder ID        SIGKILL the lease shell (KILLED-HOLDER ID pid=N); tests the reaper
+#        vesper-vesperd kill-fc ID            SIGKILL Firecracker (KILLED-FC ID pid=N); tests the lease
+#        vesper-vesperd test-forge-start ID   test hook: rewrite the holder's recorded start time, as if its pid had
+#                                             been reused by another process (FORGED ID holder=P)
+#        vesper-vesperd test-orphan ID        test hook: create a jail with no record (ORPHAN ID)
+#        vesper-vesperd test-age ID SECONDS   test hook: backdate ID's jail directory (AGED ID seconds=N)
+#        vesper-vesperd test-container-vsock  run a default and an unconfined Docker container that open AF_VSOCK;
+#                                             VSOCK default=denied|allowed … and VSOCK unconfined=… lines
+# Values (docs/exec-plans/active/2026-11-12-GH156-vesperd-backend-a.md gives the reason for each):
+set -u
+FC_DIR=/var/lib/vesper/firecracker
+FC=$FC_DIR/firecracker
+JAILER=$FC_DIR/jailer
+MV=/usr/local/bin/vesper-microvm
+MVM=/var/lib/vesper/microvm
+BASE=/srv/vesperd                 # --chroot-base-dir; slice 5 moves it to the data disk
+JAILS=$BASE/firecracker           # <chroot base>/<exec file name>/<id>/root
+CG=/sys/fs/cgroup/vesperd         # --parent-cgroup vesperd
+STATE=/run/vesper/vesperd
+LEASES=$STATE/leases              # one record per id: "holder=<pid>:<start> conn=<pid>:<start> fc=<pid>:<start>"
+LOCK=$STATE/lock                  # one flock serialises reaping, jail creation and teardown
+LOGS=/var/log/vesperd
+JUID=20000
+JGID=20000
+DEFAULT_CEILING=671088640         # memory.max default, 640 MiB, as the shim; slice 5 measures it
+MIN_CEILING=134217728             # 128 MiB: Firecracker plus the smallest guest
+LAUNCH_WAIT_S=10                  # wait for the API socket after the jailer starts
+STOP_GRACE_S=3                    # SIGTERM to SIGKILL
+LEASE_POLL_S=1                    # lease end of file and Firecracker exit are noticed within this
+GRACE_S=60                        # a jail without a record is spared this long
+SOCAT_T=86400                     # socat -t: keep relaying after a half-close (GH #167)
+
+valid_id() { # the jailer's rule: 1 to 64 letters, digits and hyphens
+  case "${1:-}" in ''|*[!A-Za-z0-9-]*) return 1 ;; esac
+  [ "${#1}" -le 64 ]
+}
+digits() { case "${1:-}" in ''|*[!0-9]*) return 1 ;; esac; }
+now_s() { date +%s; }
+oneline() { tr '\n\r\t' '   ' | sed 's/[^ -~]/?/g' | cut -c1-200; } # busybox tr has no working [:print:] complement
+
+proc_stat() { # PID -> "<state> <starttime>" from /proc/PID/stat (fields 3 and 22); fails when absent
+  digits "${1:-}" || return 1
+  s=$(cat "/proc/$1/stat" 2>/dev/null) || return 1
+  [ -n "$s" ] || return 1
+  s=${s##*) }
+  # shellcheck disable=SC2086
+  set -- $s
+  echo "$1 ${20}"
+}
+start_of() { st=$(proc_stat "$1") || return 1; echo "${st#* }"; }
+proc_alive() { # PID START -> 0 when PID runs and started at START (a reused pid or a zombie is not alive)
+  st=$(proc_stat "${1:-}") || return 1
+  [ "${st% *}" != Z ] && [ "${st#* }" = "${2:-}" ]
+}
+euid_of() { awk '/^Uid:/{print $3}' "/proc/$1/status" 2>/dev/null; }
+is_fc_for() { # PID ID -> 0 when PID is a Firecracker running as uid 20000 with --id ID
+  [ "$(euid_of "$1")" = "$JUID" ] || return 1
+  tr '\0' ' ' < "/proc/$1/cmdline" 2>/dev/null | grep -q -- "firecracker --id $2 "
+}
+fc_by_id() { pgrep -u "$JUID" -f "firecracker --id $1 " 2>/dev/null | head -1; }
+
+ensure_dirs() {
+  mkdir -p "$LEASES" "$JAILS" "$LOGS" && chmod 0700 "$STATE" "$LEASES" && chmod 0755 "$BASE" "$JAILS"
+}
+lock() { exec 9>"$LOCK" && flock 9; }
+unlock() { flock -u 9 2>/dev/null; exec 9>&-; }
+
+H_PID=""; H_START=""; C_PID=""; C_START=""; F_PID=""; F_START=""
+read_record() { # ID -> H_PID H_START C_PID C_START F_PID F_START
+  H_PID=""; H_START=""; C_PID=""; C_START=""; F_PID=""; F_START=""
+  [ -f "$LEASES/$1" ] || return 1
+  for kv in $(cat "$LEASES/$1"); do
+    case "$kv" in
+      holder=*:*) v=${kv#holder=}; H_PID=${v%%:*}; H_START=${v#*:} ;;
+      conn=*:*) v=${kv#conn=}; C_PID=${v%%:*}; C_START=${v#*:} ;;
+      fc=*:*) v=${kv#fc=}; F_PID=${v%%:*}; F_START=${v#*:} ;;
+    esac
+  done
+}
+write_record() { # ID HOLDER CONN FC
+  printf 'holder=%s conn=%s fc=%s\n' "$2" "$3" "$4" > "$LEASES/.$1.tmp" && mv "$LEASES/.$1.tmp" "$LEASES/$1"
+}
+close_conn() { # the agent listener's handler for a lease whose shell is gone: without this socat keeps the vsock
+  # connection open after a SIGKILLed child (seen with socat 1.8.1.3), and the client would never see the lease end.
+  if proc_alive "$C_PID" "$C_START" && [ "$(cat "/proc/$C_PID/comm" 2>/dev/null)" = socat ]; then kill -TERM "$C_PID" 2>/dev/null; fi
+}
+
+leftovers() { # ID -> the names of what is still there, empty when clean
+  out=""
+  [ -e "$LEASES/$1" ] && out="$out record"
+  [ -e "$JAILS/$1" ] && out="$out jail"
+  [ -d "$CG/$1" ] && out="$out cgroup"
+  [ -n "$(fc_by_id "$1")" ] && out="$out process"
+  echo "${out# }"
+}
+
+teardown() { # ID (caller holds the lock) -> CLEAN ID | DIRTY ID <what>
+  tid=$1; fpid=""
+  if read_record "$tid" && [ -n "$F_PID" ] && proc_alive "$F_PID" "$F_START"; then fpid=$F_PID; fi
+  [ -n "$fpid" ] || fpid=$(fc_by_id "$tid")
+  if [ -n "$fpid" ]; then
+    kill -TERM "$fpid" 2>/dev/null
+    i=0; while [ "$i" -lt $((STOP_GRACE_S * 10)) ] && [ -n "$(fc_by_id "$tid")" ]; do sleep 0.1; i=$((i + 1)); done
+    [ -n "$(fc_by_id "$tid")" ] && kill -KILL "$fpid" 2>/dev/null
+    i=0; while [ "$i" -lt 20 ] && [ -n "$(fc_by_id "$tid")" ]; do sleep 0.1; i=$((i + 1)); done
+  fi
+  # rm -rf does not follow symlinks; the jail's mounts live in the jailer's own mount namespace.
+  rm -rf "${JAILS:?}/$tid"
+  i=0; while [ -d "$CG/$tid" ] && [ "$i" -lt 20 ]; do rmdir "$CG/$tid" 2>/dev/null || sleep 0.1; i=$((i + 1)); done
+  rm -f "$LEASES/$tid"
+  left=$(leftovers "$tid")
+  if [ -z "$left" ]; then echo "CLEAN $tid"; else echo "DIRTY $tid $left"; return 1; fi
+}
+
+reap_pass() { # (caller holds the lock)
+  reaped=0; kept=0; now=$(now_s)
+  for rec in "$LEASES"/*; do
+    [ -f "$rec" ] || continue
+    rid=${rec##*/}
+    valid_id "$rid" || { rm -f "$rec"; continue; }
+    read_record "$rid"
+    if proc_alive "$H_PID" "$H_START"; then
+      kept=$((kept + 1)); echo "KEPT $rid reason=holder-alive holder=$H_PID"; continue
+    fi
+    res=$(teardown "$rid"); close_conn; reaped=$((reaped + 1)); echo "REAPED $rid reason=holder-gone holder=$H_PID $res"
+  done
+  for jail in "$JAILS"/*; do
+    [ -d "$jail" ] || continue
+    rid=${jail##*/}
+    valid_id "$rid" || continue
+    [ -e "$LEASES/$rid" ] && continue
+    age=$((now - $(stat -c %Y "$jail" 2>/dev/null || echo "$now")))
+    if [ "$age" -lt "$GRACE_S" ]; then
+      kept=$((kept + 1)); echo "KEPT $rid reason=grace age=$age"; continue
+    fi
+    res=$(teardown "$rid"); reaped=$((reaped + 1)); echo "REAPED $rid reason=no-record age=$age $res"
+  done
+  for cg in "$CG"/*; do
+    [ -d "$cg" ] || continue
+    rid=${cg##*/}
+    valid_id "$rid" || continue
+    [ -e "$LEASES/$rid" ] || [ -e "$JAILS/$rid" ] || rmdir "$cg" 2>/dev/null
+  done
+  echo "REAP reaped=$reaped kept=$kept"
+}
+
+# ---- LAUNCHAPI ---------------------------------------------------------------------------------------------
+OWN=0; LID=""; SPID=""
+lease_exit() {
+  [ "$OWN" = 1 ] || return 0
+  OWN=0
+  unlock; lock
+  # Tear down only while the record is still this shell's: the reaper may have taken it, and a new lease may
+  # hold the id since.
+  if read_record "$LID" && [ "$H_PID" = "$$" ] && [ "$H_START" = "$MY_START" ]; then
+    teardown "$LID" > /dev/null
+  fi
+  unlock
+  [ -n "$SPID" ] && wait "$SPID" 2>/dev/null
+  return 0
+}
+launch_fail() { echo "ERR $*"; exit 1; }
+
+launch() {
+  [ "$#" -le 2 ] || { echo "ERR usage: LAUNCHAPI <id> [ceiling]"; return 2; }
+  LID=${1:-}; ceiling=${2:-$DEFAULT_CEILING}
+  valid_id "$LID" || { echo "ERR bad id"; return 2; }
+  digits "$ceiling" || { echo "ERR bad ceiling"; return 2; }
+  max=$(awk '/^MemTotal:/{print $2 * 1024}' /proc/meminfo)
+  { [ "$ceiling" -ge "$MIN_CEILING" ] && [ "$ceiling" -le "$max" ]; } || { echo "ERR ceiling out of range $MIN_CEILING..$max"; return 2; }
+  [ -x "$JAILER" ] && [ -x "$FC" ] || { echo "ERR firecracker missing"; return 1; }
+  ensure_dirs || { echo "ERR state directories"; return 1; }
+  ver=$("$FC" --version 2>/dev/null | head -1 | sed -n 's/^Firecracker v\([0-9][0-9.]*\).*/\1/p')
+  [ -n "$ver" ] || { echo "ERR firecracker version unknown"; return 1; }
+  MY_START=$(start_of $$) || { echo "ERR own start time"; return 1; }
+  lock
+  reap_pass > /dev/null
+  if [ -e "$LEASES/$LID" ] || [ -e "$JAILS/$LID" ] || [ -d "$CG/$LID" ]; then unlock; echo "ERR busy $LID"; return 1; fi
+  prep=$("$MV" prepare 2>&1) || { unlock; echo "ERR prepare: $(printf '%s' "$prep" | head -1 | oneline)"; return 1; }
+  # The record names this shell before the jail exists, so the reaper can always tell who owns it.
+  ppid=$(awk '/^PPid:/{print $2}' "/proc/$$/status"); pstart=$(start_of "$ppid") || pstart=""
+  [ "$(cat "/proc/$ppid/comm" 2>/dev/null)" = socat ] && [ -n "$pstart" ] && CONN="$ppid:$pstart" || CONN="-:-"
+  write_record "$LID" "$$:$MY_START" "$CONN" "" || { unlock; echo "ERR record"; return 1; }
+  OWN=1
+  trap lease_exit EXIT
+  trap 'exit 129' HUP
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  root="$JAILS/$LID/root"
+  mkdir -p "$root" || launch_fail "jail"
+  cp "$MVM/Image" "$root/Image" && cp "$MVM/initrd.gz" "$root/initrd.gz" && chmod 0644 "$root/Image" "$root/initrd.gz" \
+    || launch_fail "stage kernel"
+  chown "$JUID:$JGID" "$root"
+  log="$LOGS/$LID.log"
+  : > "$log"
+  setsid "$JAILER" --id "$LID" --exec-file "$FC" --uid "$JUID" --gid "$JGID" --chroot-base-dir "$BASE" \
+    --parent-cgroup vesperd --cgroup-version 2 --cgroup pids.max=256 --cgroup "memory.max=$ceiling" \
+    -- --api-sock /run/firecracker.socket > "$log" 2>&1 < /dev/null 9>&- &
+  SPID=$!
+  unlock
+  sock="$root/run/firecracker.socket"
+  i=0
+  while [ "$i" -lt $((LAUNCH_WAIT_S * 10)) ]; do
+    [ -S "$sock" ] && break
+    kill -0 "$SPID" 2>/dev/null || break
+    sleep 0.1; i=$((i + 1))
+  done
+  [ -S "$sock" ] || launch_fail "start failed: $(tail -n 3 "$log" | oneline)"
+  # The jailer writes firecracker.pid before it execs Firecracker; read it before any guest code runs.
+  pf="$root/firecracker.pid"
+  { [ -f "$pf" ] && [ ! -L "$pf" ]; } || launch_fail "no pid file"
+  fpid=$(head -c 16 "$pf" | tr -d '\n')
+  digits "$fpid" && is_fc_for "$fpid" "$LID" || launch_fail "pid file names no Firecracker for $LID"
+  fstart=$(start_of "$fpid") || launch_fail "firecracker exited"
+  lock
+  write_record "$LID" "$$:$MY_START" "$CONN" "$fpid:$fstart" || { unlock; launch_fail "record"; }
+  unlock
+  echo "READY $LID pid=$fpid firecracker_version=$ver"
+  # The lease: end of file from the client, or Firecracker's exit. head -c 1 under timeout returns "rc=0" with
+  # no byte only at end of file; bytes the client sends are discarded.
+  while proc_alive "$fpid" "$fstart"; do
+    r=$( (timeout "$LEASE_POLL_S" head -c 1 2>/dev/null; echo "rc=$?") )
+    [ "$r" = "rc=0" ] && break
+  done
+  exit 0
+}
+
+# ---- FCAPI -------------------------------------------------------------------------------------------------
+connect() {
+  [ "$#" -le 1 ] || { echo "ERR usage: FCAPI <id>"; return 2; }
+  cid=${1:-}
+  valid_id "$cid" || { echo "ERR bad id"; return 2; }
+  read_record "$cid" || { echo "ERR no vesperd microVM $cid"; return 1; }
+  { [ -n "$F_PID" ] && proc_alive "$F_PID" "$F_START"; } || { echo "ERR $cid not ready"; return 1; }
+  [ -S "$JAILS/$cid/root/run/firecracker.socket" ] || { echo "ERR $cid has no API socket"; return 1; }
+  echo OK
+  # chroot-early: socat enters the jail root before it connects, so the path is short (sun_path holds 108
+  # bytes) and a symlink planted in the jail cannot lead outside it.
+  exec socat -t "$SOCAT_T" STDIO "UNIX-CONNECT:/run/firecracker.socket,chroot-early=$JAILS/$cid/root"
+}
+
+# ---- inspection and tests ----------------------------------------------------------------------------------
+status() {
+  sid=${1:-}; valid_id "$sid" || { echo "ERR bad id"; return 2; }
+  if read_record "$sid" && proc_alive "$H_PID" "$H_START"; then
+    if [ -n "$F_PID" ] && proc_alive "$F_PID" "$F_START"; then echo "RUNNING $sid pid=$F_PID holder=$H_PID"
+    else echo "STARTING $sid holder=$H_PID"; fi
+    return 0
+  fi
+  left=$(leftovers "$sid")
+  if [ -z "$left" ]; then echo "ABSENT $sid"; else echo "DIRTY $sid $left"; fi
+}
+
+isolation() {
+  sid=${1:-}; valid_id "$sid" || { echo "ERR bad id"; return 2; }
+  read_record "$sid" && [ -n "$F_PID" ] && proc_alive "$F_PID" "$F_START" || { echo "ERR $sid not running"; return 1; }
+  pid=$F_PID
+  uid=$(euid_of "$pid")
+  cg=$(sed -n 's/^0::\(.*\)$/\1/p' "/proc/$pid/cgroup")
+  sec=$(awk '/^Seccomp:/{print $2}' "/proc/$pid/status")
+  mem=$(cat "$CG/$sid/memory.max" 2>/dev/null || echo none)
+  uid_ok=false; [ "$uid" = "$JUID" ] && uid_ok=true
+  chroot_ok=false
+  if [ -e "/proc/$pid/root/Image" ] && [ ! -e "/proc/$pid/root/etc/alpine-release" ] \
+     && [ "$(readlink "/proc/$pid/ns/mnt")" != "$(readlink /proc/1/ns/mnt)" ]; then chroot_ok=true; fi
+  cg_ok=false; [ "$cg" = "/vesperd/$sid" ] && cg_ok=true
+  sec_ok=false; [ "$sec" = 2 ] && sec_ok=true
+  printf '{"id":"%s","pid":%s,"holder":%s,"uid":%s,"jail":"%s","cgroup":"%s","memory_max":"%s","seccomp_mode":%s,"uid_ok":%s,"chroot_ok":%s,"cgroup_ok":%s,"seccomp_ok":%s}\n' \
+    "$sid" "$pid" "$H_PID" "${uid:-0}" "$JAILS/$sid/root" "$cg" "$mem" "${sec:-0}" "$uid_ok" "$chroot_ok" "$cg_ok" "$sec_ok"
+}
+
+list() {
+  for rec in "$LEASES"/*; do
+    [ -f "$rec" ] || continue
+    read_record "${rec##*/}"
+    echo "LEASE ${rec##*/} holder=$H_PID:$H_START conn=${C_PID:--}:${C_START:--} fc=${F_PID:--}:${F_START:--}"
+  done
+  for jail in "$JAILS"/*; do [ -d "$jail" ] && echo "JAIL ${jail##*/}"; done
+  return 0
+}
+
+vlog() { sid=${1:-}; valid_id "$sid" || { echo "ERR bad id"; return 2; }; n=${2:-20}; digits "$n" || n=20
+  [ -f "$LOGS/$sid.log" ] && tail -n "$n" "$LOGS/$sid.log" || { echo "ERR no log for $sid"; return 1; }; }
+
+kill_holder() {
+  sid=${1:-}; valid_id "$sid" || { echo "ERR bad id"; return 2; }
+  read_record "$sid" && proc_alive "$H_PID" "$H_START" || { echo "ERR $sid has no live holder"; return 1; }
+  kill -KILL "$H_PID" && echo "KILLED-HOLDER $sid pid=$H_PID"
+}
+
+kill_fc() {
+  sid=${1:-}; valid_id "$sid" || { echo "ERR bad id"; return 2; }
+  read_record "$sid" && [ -n "$F_PID" ] && proc_alive "$F_PID" "$F_START" || { echo "ERR $sid not running"; return 1; }
+  kill -KILL "$F_PID" && echo "KILLED-FC $sid pid=$F_PID"
+}
+
+test_forge_start() {
+  sid=${1:-}; valid_id "$sid" || { echo "ERR bad id"; return 2; }
+  lock
+  read_record "$sid" || { unlock; echo "ERR no record for $sid"; return 1; }
+  # Start time 1 (one clock tick after boot) cannot belong to a lease shell; the live pid now looks reused.
+  write_record "$sid" "$H_PID:1" "$C_PID:$C_START" "$F_PID:$F_START"
+  unlock
+  echo "FORGED $sid holder=$H_PID start=1 was=$H_START"
+}
+
+test_orphan() {
+  sid=${1:-}; valid_id "$sid" || { echo "ERR bad id"; return 2; }
+  ensure_dirs; lock
+  if [ -e "$LEASES/$sid" ] || [ -e "$JAILS/$sid" ]; then unlock; echo "ERR busy $sid"; return 1; fi
+  mkdir -p "$JAILS/$sid/root"
+  unlock
+  echo "ORPHAN $sid"
+}
+
+test_age() {
+  sid=${1:-}; s=${2:-}; valid_id "$sid" && digits "$s" || { echo "ERR usage: test-age ID SECONDS"; return 2; }
+  [ -d "$JAILS/$sid" ] || { echo "ERR no jail for $sid"; return 1; }
+  touch -d "@$(( $(now_s) - s ))" "$JAILS/$sid" && echo "AGED $sid seconds=$s"
+}
+
+test_container_vsock() {
+  img=$(/usr/local/bin/vesper-rootfs import-trivial 2>&1 | sed -n 's/^IMPORTED //p')
+  [ -n "$img" ] || { echo "ERR trivial image import failed"; return 1; }
+  # The trivial image has busybox and musl only; lend it the System VM's socat and its libraries read-only.
+  mounts="-v /usr/bin/socat:/usr/bin/socat:ro"
+  for f in $(ldd /usr/bin/socat 2>/dev/null | awk '{for(i=1;i<=NF;i++) if ($i ~ /^\//) print $i}' | sort -u); do
+    mounts="$mounts -v $f:$f:ro"
+  done
+  rc=0
+  for mode in default unconfined; do
+    opt=""; [ "$mode" = unconfined ] && opt="--security-opt seccomp=unconfined"
+    for cid in 1 3; do
+      # shellcheck disable=SC2086
+      full=$(docker run --rm --network none $opt $mounts "$img" /usr/bin/socat -T 2 /dev/null "VSOCK-CONNECT:$cid:1024" 2>&1)
+      drc=$?
+      out=$(printf '%s\n' "$full" | grep 'socat\[' | grep ' E ' | tail -1 | oneline)
+      # denied: socket(AF_VSOCK) itself failed with EPERM (seccomp); allowed: the socket opened and the connect
+      # failed; connected: the connect succeeded; error: the container did not run.
+      case "$out" in
+        *"socket("*"Operation not permitted"*) verdict=denied ;;
+        ?*) verdict=allowed ;;
+        *) if [ "$drc" = 0 ]; then verdict=connected; else verdict=error; out=$(printf '%s' "$full" | tail -1 | oneline); fi ;;
+      esac
+      echo "VSOCK $mode=$verdict cid=$cid detail=${out:-none}"
+      [ "$mode" = default ] && [ "$verdict" != denied ] && rc=1
+    done
+  done
+  return "$rc"
+}
+
+reap_loop() {
+  interval=${1:-10}; digits "$interval" || interval=10
+  ensure_dirs
+  while :; do
+    out=$(lock; reap_pass; unlock)
+    printf '%s\n' "$out" | grep '^REAPED' | while IFS= read -r l; do logger -t vesperd-reaper "$l" 2>/dev/null; done
+    sleep "$interval"
+  done
+}
+
+cmd=${1:-}; shift 2>/dev/null
+case "$cmd" in
+  launch) launch "$@" ;;
+  connect) connect "$@" ;;
+  reap) ensure_dirs; lock; reap_pass; unlock ;;
+  reap-loop) reap_loop "$@" ;;
+  status) status "$@" ;;
+  isolation) isolation "$@" ;;
+  list) list ;;
+  log) vlog "$@" ;;
+  kill-holder) kill_holder "$@" ;;
+  kill-fc) kill_fc "$@" ;;
+  test-forge-start) test_forge_start "$@" ;;
+  test-orphan) test_orphan "$@" ;;
+  test-age) test_age "$@" ;;
+  test-container-vsock) test_container_vsock ;;
+  *) echo "ERR usage: vesper-vesperd launch|connect|reap|reap-loop|status|isolation|list|log|kill-holder|kill-fc|test-*"; exit 2 ;;
+esac

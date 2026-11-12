@@ -5,7 +5,9 @@
 //! to the guest port (`docs/process/systemvm-bringup.md`, "Proxy bridge convention"). The guest
 //! agent (`systemvm/overlay/usr/local/bin/vesper-agent`) speaks a line protocol, version 1.
 
+mod launchapi;
 mod suites;
+pub use launchapi::{parse_ready, valid_microvm_id, HttpResponse, Ready};
 pub use suites::*;
 
 use serde::{Deserialize, Serialize};

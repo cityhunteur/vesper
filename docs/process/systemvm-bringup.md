@@ -1,7 +1,7 @@
 ---
 status: verified
 owner: cityhunteur
-last_reviewed: 2026-11-11
+last_reviewed: 2026-11-12
 ---
 
 # System VM Build and Boot Pipeline (Phase 1)
@@ -148,7 +148,7 @@ produced on developer hardware and attached to the issue (`run/WOR-27/systemvm/`
 writes `run/systemvm/vmlauncher.pid` and `run/systemvm/vmlauncher.log`, and returns once the probe succeeded and
 the bridge socket exists (about 3 s). The launcher serves the lock's `control` bridge at
 `run/systemvm/vsock/3.sock` (mode 0600): a client writes `CONNECT <port>\n` and is relayed to that guest vsock
-port. In the guest, OpenRC supervises `socat VSOCK-LISTEN:1024,fork EXEC:/usr/local/bin/vesper-agent`
+port. In the guest, OpenRC supervises `socat -t 86400 VSOCK-LISTEN:1024,fork,max-children=64 EXEC:/usr/local/bin/vesper-agent`
 (`systemvm/overlay/README.md` documents protocol version 1).
 
 `cargo run --bin systemvmctl -- control [--config build/systemvm/launch-config.json] <handshake|ping|version|
@@ -178,7 +178,7 @@ volumes), `/var/lib/containerd`, and the Vesper state directories `/var/lib/vesp
 `/var/lib/vesper/rootfs-cache` (the microVM root-drive cache), `/var/lib/vesper/workloads` and
 `/var/lib/vesper/state`. What does not: the packages, which are still reinstalled into the tmpfs root on every
 boot, and anything else outside those directories, such as task bundles under `/run/containerd` and the jails
-under `/srv/jailer` (TD-025).
+under `/srv/jailer` and `/srv/vesperd` (TD-025).
 
 - Creation: `make systemvm-launch-config` (`scripts/systemvm/generate-launch-config.sh`, from-lock mode) uses
   `VESPER_DATA_DISK`, default `run/systemvm/data.img`; a relative path is taken from the repository root. A
@@ -375,7 +375,8 @@ Firecracker config (1 vCPU, 256 MiB, no drives, `console=ttyS0 reboot=k panic=1 
 pids.max=256 --cgroup memory.max=671088640 -- --config-file /vm.json --api-sock /run/firecracker.socket` (the
 640 MiB cap leaves room for a full snapshot's memory file in the tmpfs jail, which is charged to the same cgroup), waiting
 for the marker; `isolation ID` reports uid, jail contents, mount namespace, cgroup path and seccomp mode from
-`/proc/<pid>`; `stop`, `crash` (SIGKILL), `cleanup` (kill, remove jail and cgroup, report `CLEAN` or `DIRTY <kind>`),
+`/proc/<pid>`; the manager finds its Firecracker with `pgrep -u 10000 -f "firecracker --id ID "`, so it never acts
+on a `vesperd` microVM with the same id (uid 20000, ADR 0007); `stop`, `crash` (SIGKILL), `cleanup` (kill, remove jail and cgroup, report `CLEAN` or `DIRTY <kind>`),
 `status`, `log`. From the host, `cargo run --bin systemvmctl -- control microvm <args>` runs any of these and
 `make systemvm-microvm-suite` runs the GH #18 checklist (13 steps) and writes `run/systemvm/microvm-report.json`.
 On 2026-11-06 (M3 Pro): launch to marker in about 1.5 s, all isolation checks true, cleanup clean after stop,
@@ -489,6 +490,30 @@ them (`VESPER-VSOCK-OK`); `status ID` shows `vsock=present`. `vesper-microvm --g
 The shim sends OCI configs separately from the ext4 drive and connects three stream ports.
 `make systemvm-exec-suite` checks stdin, separated output, terminal resize, exec and signals.
 The [shim contract](../../shim/README.md) describes lifecycle and protocol details.
+
+## `vesperd` microVMs (ADR 0007, slice 3)
+
+`vesperd`'s backend in the System VM is `vesper-vesperd` (overlay, `usr/local/bin`), reached through three agent
+verbs. `LAUNCHAPI <id> [ceiling]` runs `vesper-microvm prepare`, copies the kernel and initramfs into
+`/srv/vesperd/firecracker/<id>/root` as `/Image` and `/initrd.gz`, and starts `jailer --id <id> --uid 20000 --gid
+20000 --chroot-base-dir /srv/vesperd --parent-cgroup vesperd --cgroup-version 2 --cgroup pids.max=256 --cgroup
+memory.max=<ceiling> -- --api-sock /run/firecracker.socket`, with no configuration file, so the microVM is built from
+API requests. It replies `READY <id> pid=<n> firecracker_version=<v>` once the API socket exists, or `ERR <reason>`
+and closes. The connection is then the lease: when the client closes it, the agent stops Firecracker (SIGTERM, 3 s,
+SIGKILL) and removes the jail, the cgroup `/sys/fs/cgroup/vesperd/<id>` and the record
+`/run/vesper/vesperd/leases/<id>`; when Firecracker exits, the agent does the same and closes the connection.
+`FCAPI <id>` replies `OK` and relays bytes to the API socket. `VESPERD <args…>` runs the helper's inspection
+commands (`status`, `isolation`, `list`, `log`, `reap`) and test hooks with the buffered reply of the other guest
+tools. The `vesper-vesperd-reaper` service runs a reaper pass every 10 s. Values and their reasons are in the
+[ExecPlan](../exec-plans/active/2026-11-12-GH156-vesperd-backend-a.md#values).
+
+`make systemvm-launchapi-suite` (`systemvmctl control launchapi-suite`) boots a microVM through the API (`PUT
+/machine-config`, `PUT /boot-source`, `PUT /actions` `InstanceStart`) and checks `GET /` before and after, the
+three teardown paths, the reaper and the id checks, 20 steps, into `run/systemvm/launchapi-report.json`. On
+2026-11-12 (M3 Pro): 20/20; `READY` 0.2 s after the jailer started (1.4 s on the first launch after boot), teardown
+about 0.5 s after the lease closed, a SIGKILLed lease shell's microVM reaped within one interval.
+
+`vesperd` itself does not use this yet (slice 4). The jails are in tmpfs until slice 5 moves them onto the data disk.
 
 ## Proxy bridge convention
 

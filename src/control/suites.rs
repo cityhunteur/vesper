@@ -10,6 +10,8 @@ use std::time::{Duration, Instant};
 mod bundle;
 mod exec;
 pub use exec::run_exec_suite;
+mod launchapi;
+pub use launchapi::run_launchapi_suite;
 mod restart;
 pub use bundle::run_bundle_suite;
 pub use restart::run_restart_suite;
@@ -169,7 +171,9 @@ pub fn run_services_suite(
             }
         });
         step(&mut steps, &format!("{service}_logs_capture_startup_and_recovery"), || {
-            let lines = session.logs(service, 200)?;
+            // The whole log since boot: other suites on the same boot restart the daemons and push the boot-time
+            // startup line out of a short tail.
+            let lines = session.logs(service, 20_000)?;
             let startups = lines.iter().filter(|l| l.contains("starting containerd") || l.contains("Starting up")).count();
             let messages = session.logs("messages", 200)?;
             let respawns = messages.iter().filter(|l| l.contains("supervise-daemon") && l.contains(service)).count();

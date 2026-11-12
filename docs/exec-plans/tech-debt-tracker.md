@@ -1,7 +1,7 @@
 ---
 status: verified
 owner: cityhunteur
-last_reviewed: 2026-11-11
+last_reviewed: 2026-11-12
 ---
 
 # Tech-debt tracker
@@ -67,6 +67,9 @@ ExecPlan. Add new debt only when it is real and durable; remove an item only whe
 | TD-052 | Two design-v0 criteria have no measurable form: "API socket stable" (Phase 0 exit) and "equivalent behaviour under load and failure" (hard requirement) | docs | A phase or requirement cannot be shown met or unmet | `docs/specs/design-v0.md` (marked "criterion to be defined") | Define each as a named test with a pass condition, or remove the wording with a decision-log entry | low | open |
 | TD-053 | The `vesperd` snapshot store (ADR 0007) is one store on the System VM data disk shared by all of the user's `vesperd` microVMs, with only `vesperd store list|rm` and a free-space reserve; nothing prunes it | runtime | Repeated snapshots fill the data disk that dockerd and containerd also use | ADR 0007 §1 and §5; decision D-022 | Add age or size-based pruning, or a quota per microVM id, once snapshot use is measured | low | open |
 | TD-054 | The System VM kernel (Alpine `virt` 6.12) has no `CONFIG_USERFAULTFD`, and microVMs boot the same kernel | parity | 8 upstream snapshot tests that load with userfaultfd fail on Backend A (GH #166); Firecracker's UFFD-backed snapshot load is unavailable | `run/GH-166/logs/systemvm-uffd-cache.txt` (weak `__arm64_sys_userfaultfd` stub) | Decide between a custom System VM kernel (design-v0 rejects a custom image build, not a kernel; TD-033) and recording UFFD load as an accepted deviation | low | open |
+| TD-055 | The serial console of each microVM is written to a log file in the System VM's tmpfs root (`/var/log/vesperd/<id>.log` for `vesperd` microVMs, `/var/log/vesper-microvm-<id>.log` for the shim's) with no size bound, and the file is kept after teardown | runtime | A guest that writes to its console without end fills the System VM's tmpfs; logs of finished microVMs accumulate until reboot | `systemvm/overlay/usr/local/bin/vesper-vesperd` (`launch`), `systemvm/overlay/usr/local/bin/vesper-microvm` (`launch`); ADR 0007 slice 3 | Cap each log (rotate or truncate to the last N KiB) and remove it with the jail, or send the console to a bounded ring | low | open |
+| TD-056 | The shim's microVMs and `vesperd`'s microVMs share the System VM's memory with no common budget: each has its own per-microVM ceiling (640 MiB by default) but nothing stops the two owners together from overcommitting the 2 GiB System VM | runtime | Enough microVMs from both owners can push the System VM into the OOM killer, which may take dockerd or containerd with it | ADR 0007 §6 (owners partitioned, no shared budget); `vesper-vesperd` and `vesper-microvm` ceilings | Add an admission check against `MemAvailable` at launch, or a parent cgroup over both owners' microVMs, once slice 5 has measured the per-microVM cost | medium | open |
+| TD-057 | A `vesperd` microVM cannot be reattached: when its `vesperd` process or the System VM restarts, the lease ends and the microVM is stopped | runtime | Upgrading or restarting `vesperd`, or restarting the System VM, ends every running `vesperd` microVM | ADR 0007 §4 (the microVM lives as long as its lease; no reattach) | Revisit if a long-lived use needs it; reattach would need the record to outlive the lease and a way to hand a lease to a new `vesperd` | low | open |
 
 **Priority:** P0 = blocks correct agent work or is a correctness or security risk; P1 = repeatedly slows work;
 P2 = worth fixing in a sweep; P3 = nice to have.

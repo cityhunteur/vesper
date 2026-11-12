@@ -144,8 +144,16 @@ Public symbols by file:
   `run_microvm_suite(&endpoint, id)`, `run_rootfs_suite(&endpoint, id)`,
   `run_workload_suite(&endpoint)`, `run_parity_suite(&endpoint, id, perf_cycles)`, `run_shim_suite(&endpoint)`,
   `run_bundle_suite(&endpoint)`, `run_restart_suite(&endpoint)`, `run_exec_suite(&endpoint)`,
+  `run_launchapi_suite(&endpoint, id, expected_version)`,
   `write_report(path, &report)`; constants
   `AGENT_PROTOCOL_VERSION` (1), `DEFAULT_AGENT_PORT` (1024).
+- `control/launchapi.rs` (ADR 0007 slice 3, `super::` only): `Ready { id, pid, firecracker_version }`,
+  `HttpResponse { status, body }`, `parse_ready(line, id)` (exactly `READY <id> pid=<n> firecracker_version=<digits
+  and dots>`; `ERR <reason>` becomes the error), `valid_microvm_id(id)` (1 to 64 ASCII letters, digits, hyphens);
+  `Session::launch_api(id, ceiling, timeout)` (sends `LAUNCHAPI`, waits up to `timeout` for `READY`; the session is
+  then the lease), `Session::fcapi(id)` (`FCAPI`, waits for `OK`), `Session::http(method, path, body)` (one HTTP/1.1
+  exchange on a relayed connection, Content-Length bodies up to 1 MiB, lines up to 8 KiB), `Session::wait_closed(timeout)`
+  (end of file or reset from the agent), `Session::vesperd(args)` (agent `VESPERD`, the buffered guest-tool shape).
 - `systemvm.rs` (manifest, launch config, boot smoke),
   `systemvm/image_lock.rs` (`ImageLock` and everything lock-related) and
   `systemvm/packages.rs` (`PackagesLock { schema_version, branch, arch,
@@ -388,6 +396,17 @@ Public symbols by file:
   `container_delete_after_crash`, `inflight_start_rs3`, `containerd_killed_during_inflight`,
   `inflight_fails_gracefully` (`ctr run --rm` exits non-zero), `inflight_task_reconciled` (whatever remains is
   killed and deleted) and `no_leftovers`; `passed` requires every step ok and at least 16 steps.
+- `control/suites/launchapi.rs:run_launchapi_suite` ages and reaps leftovers of its ids (`id`, `id-fcexit`,
+  `id-reap`, `id-reuse`, `id-orphan`), then runs `handshake`, `launch` (`READY` with `expected_version`, the pinned
+  swagger's `info.version`), `duplicate_id_refused`, `fcapi_get_not_started`, `boot_through_api` (`PUT
+  /machine-config`, `/boot-source`, `/actions` InstanceStart, each 204), `get_root_running`, `guest_boots`
+  (`VESPER-MICROVM-OK` in the console log within 20 s), `jailer_isolation` (uid 20000, cgroup `/vesperd/<id>`,
+  seccomp, chroot), `fcapi_refuses_bad_and_unknown_ids`, `fcparity_refuses_bad_id`, `shim_namespace_separate` (a
+  shim microVM with the same id launched and cleaned without touching the `vesperd` one), `teardown_lease_closed`,
+  `reused_id_after_teardown`, `cleanup_reused_id`, `teardown_firecracker_killed`,
+  `teardown_lease_shell_killed_reaped` (no manual reap: the periodic reaper within 35 s),
+  `reaper_ignores_reused_pid`, `reaper_spares_new_unrecorded_jail`, `default_container_cannot_open_vsock` and
+  `nothing_left`; `passed` requires all 20 steps ok.
 - `systemvm/packages.rs:validate_packages_lock` requires schema `2`,
   non-blank branch and arch, every requested package in the closure,
   packages sorted by name without duplicates, `file ==

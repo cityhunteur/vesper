@@ -181,7 +181,8 @@ try() {
 
 leftovers() {
   what=""
-  n=$(pgrep -f "firecracker --id " 2>/dev/null | wc -l | tr -d ' '); [ "$n" = 0 ] || what="$what firecracker=$n"
+  # uid 10000: the shim's microVMs only; vesperd microVMs run as uid 20000 (ADR 0007).
+  n=$(pgrep -u 10000 -f "firecracker --id " 2>/dev/null | wc -l | tr -d ' '); [ "$n" = 0 ] || what="$what firecracker=$n"
   n=$(pgrep -f containerd-shim-vesper-v2 2>/dev/null | wc -l | tr -d ' '); [ "$n" = 0 ] || what="$what shims=$n"
   n=$(ls -d /srv/jailer/firecracker/*/ 2>/dev/null | wc -l | tr -d ' '); [ "$n" = 0 ] || what="$what jails=$n"
   n=$(ctr_ task ls 2>/dev/null | tail -n +2 | wc -l | tr -d ' '); [ "$n" = 0 ] || what="$what tasks=$n"

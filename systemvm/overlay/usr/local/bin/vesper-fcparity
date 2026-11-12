@@ -15,6 +15,8 @@ FC=/var/lib/vesper/firecracker/firecracker
 JAIL=/srv/jailer/firecracker
 
 now_ms() { awk '{printf "%d\n", $1 * 1000}' /proc/uptime; }
+# The jailer's id rule (1 to 64 letters, digits and hyphens); an id is joined into a jail path (ADR 0007).
+valid_id() { case "${1:-}" in ''|*[!A-Za-z0-9-]*) return 1 ;; esac; [ "${#1}" -le 64 ]; }
 
 complete() { # FILE -> 0 when FILE holds a whole HTTP response (status 204, or body >= Content-Length)
   awk 'BEGIN { cl = -1; st = 0; body = 0; blen = 0 }
@@ -27,6 +29,8 @@ complete() { # FILE -> 0 when FILE holds a whole HTTP response (status 204, or b
 
 api() { # ID METHOD PATH [BODY|-] [TIMEOUT]; keeps the request side open until the response is complete
   id=${1:?}; m=${2:?}; p=${3:?}; b=${4:-}; t=${5:-3}
+  valid_id "$id" || { echo "STATUS 000"; echo "ERR bad id"; return 2; }
+  case "$t" in ''|*[!0-9]*) echo "STATUS 000"; echo "ERR bad timeout"; return 2 ;; esac
   [ "$b" = "-" ] && b=""
   sock="$JAIL/$id/root/run/firecracker.socket"
   [ -S "$sock" ] || { echo "STATUS 000"; echo "ERR no API socket at $sock"; return 1; }
@@ -68,6 +72,7 @@ expect() { # name ID METHOD PATH BODY TIMEOUT want_status [want_substring]
 
 conformance() {
   id=${1:?}
+  valid_id "$id" || { echo "CONFORMANCE passed=0 failed=1 firecracker_version=unknown"; echo "ERR bad id"; return 2; }
   "$MV" cleanup "$id" >/dev/null 2>&1
   binver=$("$FC" --version 2>/dev/null | head -1 | sed -n 's/^Firecracker v\([0-9.]*\).*/\1/p')
   out=$("$MV" launch "$id" 2>&1) || { echo "CONFORMANCE passed=0 failed=1 firecracker_version=${binver:-unknown}"; echo "ERR launch: $(printf '%s' "$out" | head -1)"; return 1; }
