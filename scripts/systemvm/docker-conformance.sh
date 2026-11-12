@@ -105,6 +105,12 @@ out="$(cargo run -q --bin systemvmctl -- control --port 2376 handshake 2>&1)"; r
 [ $rc -ne 0 ] && record raw_guest_port_denied true "guest port 2376 refused: ${out:0:120}" || record raw_guest_port_denied false "unexpected success: ${out}"
 out="$(cargo run -q --bin systemvmctl -- control --port 10010 handshake 2>&1)"; rc=$?
 [ $rc -ne 0 ] && record no_containerd_relay true "no vsock relay to containerd (port 10010 refused)" || record no_containerd_relay false "unexpected success: ${out}"
+# The bridge refuses ports outside its allow-list itself, before any guest connect (TD-027, ADR 0007).
+if grep -q "bridge: port 2376 is not allowed" "${ROOT_DIR}/run/systemvm/vmlauncher.log" 2>/dev/null && grep -q "bridge: port 10010 is not allowed" "${ROOT_DIR}/run/systemvm/vmlauncher.log" 2>/dev/null; then
+  record bridge_allow_list_enforced true "the launcher refused 2376 and 10010 by its allow-list ($(python3 -c 'import json;print(json.load(open("build/systemvm/launch-config.json")).get("bridge_allowed_ports"))'))"
+else
+  record bridge_allow_list_enforced false "no allow-list refusal in run/systemvm/vmlauncher.log"
+fi
 
 cleanup
 passed=true; for s in "${steps[@]}"; do case "$s" in *'"ok":false'*) passed=false;; esac; done

@@ -413,7 +413,7 @@ pub fn launch_config_from_lock(
         .as_ref()
         .map(|media| dir.join(media.file.trim()).display().to_string());
     let bridge = lock.control.as_ref().map(|c| c.bridge_path().display().to_string());
-    default_launch_config(&LaunchInputs {
+    let mut config = default_launch_config(&LaunchInputs {
         kernel_path: &kernel,
         rootfs_path: None,
         initrd_path: Some(&initrd),
@@ -426,7 +426,9 @@ pub fn launch_config_from_lock(
         agent_port: lock.control.as_ref().map(|c| c.agent_port),
         nested_virtualization: Some(&lock.boot.nested_virtualization),
         console_log_path,
-    })
+    })?;
+    super::apply_bridge_allow_list(&mut config);
+    Ok(config)
 }
 
 #[cfg(test)]

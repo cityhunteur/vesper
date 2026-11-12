@@ -57,6 +57,8 @@ struct LaunchConfig: Decodable {
     let shared_directories: [SharedDirectory]?
     /// Persistent data disk image on macOS, attached writable after the boot media and rootfs (GH #164).
     let data_disk_path: String?
+    /// System VM vsock ports the bridge may connect to; every other port is refused (TD-027). Absent means none.
+    let bridge_allowed_ports: [UInt32]?
 }
 
 struct Options {
@@ -477,6 +479,13 @@ final class Launcher: NSObject, VZVirtualMachineDelegate {
                 close(client)
                 return
             }
+            // Deny by default: only the ports the launch config lists (TD-027, ADR 0007).
+            guard (self.config.bridge_allowed_ports ?? []).contains(port) else {
+                FileHandle.standardError.write(
+                    "vesper-vmlauncher: bridge: port \(port) is not allowed\n".data(using: .utf8)!)
+                close(client)
+                return
+            }
             DispatchQueue.main.async {
                 device.connect(toPort: port) { result in
                     switch result {
@@ -674,6 +683,10 @@ if !options.watchDryRun.isEmpty {
     dispatchMain()
 }
 let config = loadConfig(options.configPath)
+// A config written before the bridge allow-list (TD-027) would refuse every port; say so instead.
+if let bridge = config.vsock_bridge_path, !bridge.isEmpty, (config.bridge_allowed_ports ?? []).isEmpty {
+    fail(3, "launch config serves a vsock bridge but lists no bridge_allowed_ports; regenerate it with 'make systemvm-launch-config'")
+}
 guard VZVirtualMachine.isSupported else {
     fail(3, "Virtualization.framework is not supported on this host")
 }

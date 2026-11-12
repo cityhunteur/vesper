@@ -5,9 +5,11 @@ use std::path::{Path, PathBuf};
 
 pub(crate) use crate::platform::NestedPolicy;
 
+mod bridge;
 mod data_disk;
 mod image_lock;
 mod packages;
+pub use bridge::*;
 pub use data_disk::*;
 pub use image_lock::*;
 pub use packages::*;
@@ -134,6 +136,9 @@ pub struct LaunchConfig {
     /// Persistent data disk on macOS, attached writable after the boot media and rootfs (GH #164).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data_disk_path: Option<String>,
+    /// System VM vsock ports the bridge may connect to; every other port is refused (TD-027).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bridge_allowed_ports: Vec<u32>,
 }
 
 /// Console-driven guest probe: log in on the serial console, run commands, expect a pattern, shut down.
@@ -364,6 +369,7 @@ pub fn default_launch_config(inputs: &LaunchInputs<'_>) -> Result<LaunchConfig, 
         console_log_path: inputs.console_log_path.trim().to_string(),
         shared_directories: Vec::new(),
         data_disk_path: None,
+        bridge_allowed_ports: Vec::new(),
     })
 }
 

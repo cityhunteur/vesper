@@ -32,7 +32,7 @@ Vesper’s security model is part of its parity contract. Treat this file as the
   use `run/` instead, and packaged builds must pass explicit paths.
 - Host-visible sockets with the System VM running (`make systemvm-up && make docker-up`), all under `run/` and
   owner-only: `run/vesper/docker.sock` (the Docker ingress, served by `vesper-proxy`) and `run/systemvm/vsock/3.sock`
-  (the launcher's vsock bridge, which reaches any guest vsock port; TD-027). Inside the guest four vsock ports
+  (the launcher's vsock bridge, which connects only to the vsock ports listed in the launch config (`bridge_allowed_ports`: 1024, 2375, 2400, 2401) and refuses every other port (TD-027, resolved 2026-11-12)). Inside the guest four vsock ports
   listen: 1024 (`vesper-agent`), 2375 (relay to `/var/run/docker.sock`), 2400 (published-port relay, guest
   loopback only) and 2401 (share notification sink, below). `containerd.sock` and `docker.sock`
   themselves never leave the guest, and a `CONNECT` to a guest port without a listener is refused.
@@ -130,7 +130,7 @@ atime and mtime rewritten; its contents do not change. The read of the mtime and
 the window behind the two mtime exceptions above.
 
 The sink's `socat` listener runs at most four handlers at a time (`max-children=4`); the launcher holds one
-connection. The port is reachable from the host only through the launcher bridge (TD-027); whoever reaches it
+connection. The port is reachable from the host only through the launcher bridge, whose allow-list includes it (TD-027); whoever reaches it
 can make any path inside a read-write share emit `IN_MODIFY` and nothing more.
 
 The host half is the launcher's share watcher: it reads FSEvents for shares marked `watch` in

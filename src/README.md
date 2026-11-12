@@ -30,7 +30,7 @@ Public symbols by file:
 
 - `lib.rs`: `pub mod api, api_behavior_matrix, api_matrix, baseline,
   buildinfo, compat, control, platform, proxy, spec, systemvm`. `systemvm.rs` declares
-  the private children `systemvm/data_disk.rs`, `systemvm/image_lock.rs` and
+  the private children `systemvm/bridge.rs`, `systemvm/data_disk.rs`, `systemvm/image_lock.rs` and
   `systemvm/packages.rs` and re-exports them, so every symbol below is reachable as
   `vesper::systemvm::*`.
 - `api.rs:ErrorEnvelope` `{ fault_message, code, path, method,
@@ -106,6 +106,10 @@ Public symbols by file:
   (serde default, omitted when empty); `shared_directories_from_specs(&[String])` turns `PATH[:ro][:nowatch]`
   into tags `share0`, `share1`, … and rejects relative paths or non-directories. `watch` (GH #150, serde
   default false) is true for a read-write share unless the spec ends in `:nowatch`; never for `:ro`.
+- `systemvm/bridge.rs` (TD-027, ADR 0007): `LaunchConfig.bridge_allowed_ports` (serde default, omitted when
+  empty); `default_bridge_ports(agent_port)` is the agent port plus `DOCKER_RELAY_PORT` (2375), `PORT_RELAY_PORT`
+  (2400) and `SHARE_NOTIFY_PORT` (2401), sorted and deduplicated; `apply_bridge_allow_list(&mut LaunchConfig)`
+  sets it when the config serves a bridge, and `launch_config_from_lock` calls it.
 - `systemvm/data_disk.rs` (GH #164): `LaunchConfig.data_disk_path` (serde default, omitted when `None`, so
   configs without it still parse); `attach_data_disk(&mut LaunchConfig, path)` sets it and appends
   `vesper_data=<device>` to `kernel_cmdline`, rejecting a relative path or a second disk;
