@@ -21,7 +21,7 @@ new ADR, and the old ADR then links forward to it. The repository had no ADR ser
 | [0005](0005-published-ports-via-vsock-gateway.md) | Published container ports reach localhost through vesper-proxy and a vsock gateway in the System VM | accepted | 2026-11-08 | none |
 | [0006](0006-guest-exec-via-runc-delegation.md) | Guest container execution through runc, driven over vsock | accepted | 2026-11-09 | none |
 | [0007](0007-vesperd-to-backend-a.md) | Connect `vesperd` to Backend A as a relay to one jailed Firecracker per socket | accepted | 2026-11-11 | none |
-| [0008](0008-vesperd-microvm-egress.md) | Egress for `vesperd` microVMs: opt-in NAT, public addresses only | proposed | 2026-11-13 | none |
+| [0008](0008-vesperd-microvm-egress.md) | Egress for `vesperd` microVMs: opt-in NAT to public addresses only | accepted | 2026-11-13 | none |
 
 ## Candidates
 

@@ -6,6 +6,15 @@ mod stage;
 #[path = "vesperd/systemvm.rs"]
 mod systemvm;
 
+/// `--network` for `--backend systemvm` (ADR 0008).
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
+enum Network {
+    /// Taps only, with no uplink (CE-0010).
+    None,
+    /// A veth to the System VM, NATed to public IPv4 only, with DNS through each tap gateway.
+    Nat,
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
 enum Backend {
     /// The in-memory state machine (the default; ADR 0007 keeps it until the relay is proven).
@@ -60,10 +69,17 @@ struct Args {
     #[arg(long = "stage", value_name = "SRC:DEST")]
     stage: Vec<String>,
     /// Create a tap device NAME for the microVM before Firecracker starts (`--backend systemvm`; repeatable, at most
-    /// 8; 1 to 15 letters, digits, _ and -, not starting with -, not lo): it lives in the microVM's own network namespace, is owned by the jailer's uid and has no uplink, so
-    /// `PUT /network-interfaces` with `host_dev_name` NAME succeeds (CE-0010).
-    #[arg(long = "tap", value_name = "NAME")]
+    /// 8; 1 to 15 letters, digits, _ and -, not starting with -, not lo): it lives in the microVM's own network
+    /// namespace and is owned by the jailer's uid, so `PUT /network-interfaces` with `host_dev_name` NAME succeeds
+    /// (CE-0010). With `--network nat`, NAME:ADDR/PREFIX also gives the tap the gateway address its guest routes and
+    /// resolves names through (RFC 1918, prefix length 16 to 30; ADR 0008).
+    #[arg(long = "tap", value_name = "NAME[:ADDR/PREFIX]")]
     tap: Vec<String>,
+    /// The microVM's network (`--backend systemvm`): `none` (the default; taps have no uplink) or `nat` (public IPv4
+    /// only, over TCP, UDP and ICMP echo, plus DNS through the tap gateway; nothing on the System VM, the Mac, the
+    /// LAN, containers or other microVMs; ADR 0008).
+    #[arg(long, value_enum)]
+    network: Option<Network>,
     /// System VM launch config that names the bridge socket and agent port (`--backend systemvm`, `stage`, `store`).
     #[arg(long, global = true, default_value = "build/systemvm/launch-config.json")]
     launch_config: String,
@@ -113,8 +129,8 @@ async fn run(args: Args) -> Result<(), String> {
         let options = systemvm::Options::from_args(&args)?;
         return systemvm::run(options, &socket_path(&args)?).await;
     }
-    if args.id.is_some() || args.memory_max.is_some() || args.bridge.is_some() || args.agent_port.is_some() || !args.stage.is_empty() || !args.tap.is_empty() {
-        return Err("--id, --memory-max, --stage, --tap, --bridge and --agent-port apply to --backend systemvm".to_string());
+    if args.id.is_some() || args.memory_max.is_some() || args.bridge.is_some() || args.agent_port.is_some() || !args.stage.is_empty() || !args.tap.is_empty() || args.network.is_some() {
+        return Err("--id, --memory-max, --stage, --tap, --network, --bridge and --agent-port apply to --backend systemvm".to_string());
     }
 
     let lock = vesper::baseline::load(&args.baseline_lock)?;

@@ -1,10 +1,10 @@
 ---
-status: proposed
+status: accepted
 owner: cityhunteur
 last_reviewed: 2026-11-13
 ---
 
-# 0008. Egress for `vesperd` microVMs: opt-in NAT, public addresses only
+# 0008. Egress for `vesperd` microVMs: opt-in NAT to public addresses only
 
 Date: 2026-11-13. Supersedes: none. Superseded by: none.
 
@@ -20,82 +20,135 @@ What a guest could reach if it had a route, measured on 2026-11-13 in the System
 
 | Destination | Address | What it is |
 |---|---|---|
-| System VM | `192.168.64.2` (eth0), `172.17.0.1` (docker0), `127.0.0.1` | Its own services: dockerd's bridge, containerd, the port relay; the agent itself is on vsock only |
-| macOS host | `192.168.64.1` | The vmnet NAT gateway, the System VM's only DNS resolver, and the host's services on that address |
+| System VM | `eth0` (DHCP from vmnet: `192.168.64.2/24` here), `docker0` `172.17.0.1/16`, `127.0.0.1` | dockerd's bridge, published container ports; the agent itself is on vsock only |
+| macOS host | the vmnet gateway (`192.168.64.1` here) | The NAT gateway, the System VM's only DNS resolver, and the host's services on that address |
 | Containers | `172.17.0.0/16` | Docker's default bridge |
-| Other microVMs | their namespaces | Today unreachable: no namespace is connected to another |
-| The host's LAN and VPNs | RFC 1918, CGNAT, link-local | Reached through the vmnet NAT like any other address |
+| Other microVMs | their namespaces | Unreachable today: no namespace is connected to another |
+| The host's LAN and VPNs | RFC 1918, CGNAT, link-local, and any prefix a VPN routes | Reached through the vmnet NAT like any other address |
 | The internet | public unicast | Reached through the vmnet NAT |
 
 The guest runs untrusted code by design. The threat is a guest that uses the network to reach Vesper's own control
-surfaces, the developer's Mac, the developer's LAN or VPN, or another microVM. Firecracker inside the namespace runs
-as uid 20000 with no capabilities, so it cannot change the namespace's routes or rules.
+surfaces, the developer's Mac, the developer's LAN or VPN, cloud metadata or another microVM, or that exhausts the
+System VM's connection tracking. Firecracker inside the namespace runs as uid 20000 with no capabilities, so it
+cannot change the namespace's routes or rules.
 
 ## Decision
 
-We will keep **no uplink as the default**, and add one opt-in policy, `vesperd --network nat`, that connects the
-lease's own namespace to the System VM through one point-to-point veth pair and masquerades it out of `eth0`. A
-guest on a `nat` microVM may reach **public unicast IPv4 addresses only**, plus DNS on the vmnet gateway, and
-nothing on the System VM, the Mac, the LAN, containers or other microVMs. The filter is a default-deny allow-list,
-enforced twice: in the lease's namespace (where it lives and dies with the lease) and in the System VM's root
-namespace (so one mistake does not open a path). IPv6 is disabled in the namespace. Nothing is published inbound.
+We will keep **no uplink as the default** (`vesperd --network none`), and add one opt-in policy,
+`vesperd --network nat`. Under `nat`, a lease's namespace is joined to the System VM by one point-to-point veth pair
+and masqueraded out of `eth0`. A guest may reach **public unicast IPv4 addresses over TCP, UDP and ICMP echo**, plus
+DNS through its tap gateway, and nothing else. Every rule set is default-deny and is enforced in two places that do
+not depend on each other: the lease's namespace (where it lives and dies with the lease) and the System VM's root
+namespace (in the `raw` and `mangle` tables, which Docker does not manage). IPv6 is off on both sides of the veth.
+Nothing is published inbound.
+
+Council review (Codex, Claude, Antigravity, Opus judge; 2026-11-13) chose this option over the others and found 16
+flaws in the first draft; each is answered below as a rule of the design.
+
+## The policy
+
+**Denied destinations** (RFC 6890 special-purpose IPv4, used word for word by both layers):
+`0.0.0.0/8`, `10.0.0.0/8`, `100.64.0.0/10`, `127.0.0.0/8`, `169.254.0.0/16`, `172.16.0.0/12`, `192.0.0.0/24`,
+`192.0.2.0/24`, `192.88.99.0/24`, `192.168.0.0/16`, `198.18.0.0/15`, `198.51.100.0/24`, `203.0.113.0/24`,
+`224.0.0.0/4`, `240.0.0.0/4` (this includes `255.255.255.255`), and the System VM's own `eth0` subnet whatever DHCP
+gave it.
+
+**Allowed** from a guest, after the deny list: new TCP and UDP flows, and ICMP echo requests; replies to them
+(conntrack `ESTABLISHED,RELATED`). Everything else is dropped, including `INVALID` packets (which NAT does not
+rewrite), other IP protocols (GRE, ESP, SCTP) and other ICMP types.
+
+**DNS.** The guest's resolver is its tap gateway address. The namespace DNATs port 53 (UDP and TCP) on that address
+to the System VM's IPv4 resolver, read from `/etc/resolv.conf` at launch, and that one `address:53` is the only
+private destination either layer accepts. A `nat` launch fails closed when no IPv4 resolver is configured. The
+macOS resolver sees the guest's queries, including names that resolve to private addresses; the address filter
+still blocks those addresses. That disclosure is an accepted risk, recorded in `docs/SECURITY.md`.
+
+**Limits per lease.** At most 1024 tracked flows from one lease (`connlimit`, in both layers), so one guest cannot
+fill the System VM's connection table.
+
+**Not covered.** Address filtering cannot see where macOS sends a public address: a VPN that routes a public prefix
+(for example a corporate `11.0.0.0/8`) is reachable from a `nat` guest. Strict isolation from such routes needs
+enforcement on the Mac or an egress proxy; both are out of scope here and are listed in TD-058.
+
+## How it is built
+
+- `vesperd --network none|nat` (default `none`) adds `net=nat` to `LAUNCHAPI`; `--tap NAME:ADDR/PREFIX` gives the tap
+  its gateway address as the token `tapaddr=NAME:ADDR/PREFIX` (upstream's `ip addr add 172.16.0.1/30 dev tap0`).
+  Under `nat`, only taps with an address are routed. A tap subnet is inside RFC 1918, has a prefix length of 16 to
+  30, and does not overlap another tap's subnet, `eth0`'s subnet, `172.17.0.0/16`, `198.18.0.0/15` or the resolver
+  address; `vesperd` and the guest helper both check it. Every token parser (the ceiling check, `launch_stage`,
+  the token loop) skips tokens it does not own, and an older guest helper refuses the new tokens with an `ERR`.
+- **Addresses.** Veth links come from `198.18.0.0/16` (RFC 2544 benchmarking space; it appears on no network a
+  System VM routes to, and the deny list covers it), one /30 per lease: index `N` gives the root end
+  `198.18.(N/64).((N%64)*4+1)` and the namespace end `+2`. The index is allocated with the helper's lock held, by a
+  rotating cursor over indexes that no `net` file and no live `vpd*` link uses, and is written to the root-only file
+  `/run/vesper/vesperd/net/<id>` before the link exists; the file outlives the lease record until the link is gone.
+- **Names.** The root end is `vpd<N>` and the namespace end is `up.<N>`; tap names cannot contain `.`, so no tap can
+  take the uplink's name. (busybox `ip` ignores `peer name`, so the pair is made inside the fresh namespace, where the
+  only `veth*` link is the peer, which is renamed `vpd<N>` and moved to the root namespace.)
+- **Namespace layer** (created under the lock, before the jailer): `ip_forward=1`, `rp_filter=1`,
+  `accept_redirects=0`, `send_redirects=0`, `disable_ipv6=1` (all and default); `iptables` policies `INPUT`,
+  `FORWARD` and `OUTPUT` `DROP`; `ip6tables` the same. `INPUT` and `OUTPUT` accept `lo` and replies only, so
+  nothing in the namespace (Firecracker included) can open a connection. `FORWARD` drops `INVALID`, accepts replies,
+  accepts `-i <tap> -s <tap subnet> -o up.<N>` to the resolver's port 53 and then, after the deny list and the
+  protocol and `connlimit` rules, TCP, UDP and ICMP echo. `nat` `PREROUTING` DNATs the gateway's port 53;
+  `POSTROUTING` masquerades out of `up.<N>`.
+- **Root layer** (static rules, one set for every lease, installed by the first `nat` launch and checked by every
+  one; a launch fails closed when they are missing and cannot be added):
+  - `raw PREROUTING -i vpd+ ! -s 198.18.0.0/16 -j DROP` and per-veth `rp_filter=1` (spoofing);
+  - `mangle PREROUTING -i vpd+ -j VESPERD-EGRESS`: drop `INVALID`; accept the resolver's port 53; drop the deny list;
+    drop above 1024 flows per source; accept TCP, UDP and ICMP echo; drop the rest. It runs before routing, so it
+    covers traffic to the System VM's own addresses (`INPUT`) as well as forwarded traffic;
+  - `mangle POSTROUTING -o vpd+`: drop anything that is not a reply, so the System VM, containers and other leases
+    cannot open a connection to a lease;
+  - `nat POSTROUTING -s 198.18.0.0/16 -o eth0 -j MASQUERADE`;
+  - `filter DOCKER-USER` accepts `vpd+` to `eth0` and replies back. Docker owns the order of `FORWARD`; if a Docker
+    restart drops these accepts, `nat` microVMs lose connectivity (fail closed), because every drop lives in `raw`
+    and `mangle`;
+  - `ip6tables` `raw PREROUTING -i vpd+` and `mangle POSTROUTING -o vpd+` drop, and `disable_ipv6=1` on each `vpd<N>`
+    before it comes up.
+- **Teardown** deletes `vpd<N>` in the root namespace (which removes both ends) before it unmounts the namespace, and
+  keeps `/run/vesper/vesperd/net/<id>` until the link is gone; `leftovers` and `status` report `veth`. The reaper
+  deletes any `vpd*` link and any `net` file that no live lease claims. A lease's index is free again only when its
+  link is gone.
+- **Observability.** `VESPERD net <id>` prints the policy, the addresses and the per-chain packet counters of both
+  layers; `isolation` adds `ipv6_off` and `egress_ok` (the root rules are in place).
+- **Guest.** The microVM initramfs carries `failover`, `net_failover` and `virtio_net`; the test init can configure
+  `eth0` and run TCP, UDP, spoofed-source and DNS probes, each printed on the console.
+- **Tests.** `make systemvm-egress-suite` (9 steps) judges every verdict from inside a guest, against TCP and UDP
+  listeners on every System VM address, and reads both layers' drop counters; one microVM runs with its namespace
+  layer opened after dockerd was killed and respawned, to show the root layer holds alone.
 
 ## Alternatives considered
 
-1. **No uplink only (today).** The most secure: nothing reachable. It leaves a client that needs a package mirror,
-   a registry or an API with no way to get one, so users would ask for the System VM to be opened by hand, which is
-   worse. Kept as the default.
-2. **Per-lease veth and NAT with a default-deny allow-list (chosen, opt-in).** Each microVM has its own path; no
-   two microVMs share an L2 segment or a namespace; the rules for a lease are removed with its namespace. Costs one
-   veth pair and a handful of rules per lease, and an address pool for the veth links.
-3. **One shared bridge for all microVMs, NATed.** What most Firecracker setups do. Every microVM shares an L2
-   segment, so one guest can ARP-spoof, scan or attack another, and per-microVM filtering needs ebtables. Rejected.
-4. **Userspace networking (passt/pasta, slirp4netns) per microVM, unprivileged.** No kernel routing for the guest at
-   all, which is attractive, but pasta creates and holds its own tap and Firecracker needs a persistent tap it can
-   open, and neither tool is in the pinned package set (a new runtime dependency is an owner decision). Rejected
-   for now; worth revisiting if Firecracker can be given pasta's tap fd.
-5. **Bridged vmnet per microVM on the Mac.** Gives each guest a LAN presence. Needs launcher and entitlement changes
-   and widens what is host-visible (an owner decision by AGENTS.md); it also exposes the LAN directly. Rejected.
+1. **No uplink only.** The most secure: nothing reachable. It leaves a client that needs a package mirror, a
+   registry or an API with no way to get one. Kept as the default.
+2. **Per-lease veth and NAT, default-deny in two layers (chosen, opt-in).** No two microVMs share an L2 segment or a
+   namespace; per-lease rules die with the namespace; the root rules are static and outside Docker's tables.
+3. **One shared bridge for all microVMs, NATed.** Every microVM shares an L2 segment, so one guest can ARP-spoof,
+   scan or attack another. Rejected.
+4. **Userspace networking (passt/pasta, slirp4netns) per microVM.** No kernel routing for the guest, but pasta holds
+   its own tap where Firecracker needs a persistent tap it can open, and neither tool is in the pinned package set
+   (a new runtime dependency is an owner decision). Rejected for now.
+5. **An egress proxy only (HTTP CONNECT).** The guest gets no IP route at all; the proxy resolves names and refuses
+   private answers, which also defeats DNS rebinding. It is the most restrictive design that still gives HTTPS, but
+   it needs a new proxy program on the System VM and breaks every non-HTTP protocol, and it still cannot see VPN
+   routes for public prefixes. Recorded in TD-058 as the next step for strict isolation.
+6. **Bridged vmnet per microVM on the Mac.** Needs launcher and entitlement changes, widens what is host-visible and
+   puts the guest on the LAN. Rejected.
 
 ## Rationale and consequences
 
-Default-deny with a public-only allow-list is the narrowest policy that still lets a guest fetch from the internet.
-Blocking every private, shared and link-local range closes the System VM, the Mac (`192.168.64.0/24`), containers,
-the developer's LAN and VPN (RFC 1918, `100.64.0.0/10`) and cloud metadata addresses (`169.254.0.0/16`) in one
-rule set. A public address can still be one the developer would not want reached (for example their own public
-services); the policy cannot tell, and says so.
-
-DNS: the only resolver the System VM has is the vmnet gateway, `192.168.64.1:53`, so a guest that may use names
-must reach it. Allowing UDP and TCP port 53 to that one address is the single exception to "no private
-addresses". The alternative, public resolvers only, fails on networks that block outbound DNS and leaks queries
-outside the developer's resolver policy. The exception exposes the macOS DNS forwarder to guest queries, including
-names that resolve to private addresses, which the address filter still blocks.
-
-What becomes harder: a guest that needs a private service (a LAN registry, a VPN-only API) cannot reach it under
-`nat`. That is deliberate; a wider policy would be a separate, owner-approved decision.
-
-## Implementation and migration impact
-
-- `vesperd --network none|nat` (default `none`) becomes `net=nat` on `LAUNCHAPI`; `--tap NAME[=ADDR/PREFIX]` gives a
-  tap the gateway address the guest routes through, as upstream's `ip addr add 172.16.0.1/30 dev tap0`. Under `nat`,
-  only taps with an address have a route; tap subnets must be RFC 1918, at most /16 and at least /30, and must not
-  overlap each other.
-- Veth links come from `198.18.0.0/16` (reserved for benchmarking, RFC 2544, so it collides with no real network),
-  one /30 per lease, allocated under the helper's lock and recorded with the lease.
-- In the namespace: forwarding on, `rp_filter` strict, the tap's address, the veth's address and a default route,
-  `MASQUERADE` out of the veth, and a `FORWARD` chain that accepts tap to veth only for allowed destinations and
-  replies back, and drops the rest. `INPUT` from the taps accepts only replies and ICMP errors.
-- In the root namespace: one chain, `VESPERD-EGRESS`, jumped from the top of `FORWARD` (Docker's chains come later
-  and are not touched), that accepts the lease's veth to `eth0` for allowed destinations and replies back, and drops
-  everything else from a vesperd veth; `INPUT` drops everything from a vesperd veth; `MASQUERADE` for
-  `198.18.0.0/16` out of `eth0`.
-- Teardown removes the veth (deleting the namespace removes its end and the root-side peer) and the lease's root
-  rules; the reaper does the same for leftovers.
-- Tests: the vesperd suite boots a `nat` microVM and, from inside the guest, checks that a public address answers
-  and that the System VM, the gateway (other than DNS), docker0, a private address and a second microVM do not.
+Two independent default-deny layers mean one mistake does not open a path: the namespace layer is per lease and has
+no Docker in it; the root layer filters before routing, in tables Docker does not touch. Denying the full
+special-purpose table closes the System VM, the Mac, containers, other leases' veths, the LAN, CGNAT VPNs and
+metadata addresses at once. What becomes harder: a `nat` guest cannot reach a private service (a LAN registry, a
+VPN-only API). A wider policy would be a separate, owner-approved decision.
 
 ## References
 
-- D-027, CE-0010 (closed), TD-058; `docs/SECURITY.md`, "Network interfaces for `vesperd` microVMs".
-- `systemvm/overlay/usr/local/bin/vesper-vesperd` (`netns_up`).
-- Firecracker's network setup guide: `run/GH-166/firecracker/docs/network-setup.md` at `d83d72b`.
+- D-027, D-028, CE-0010 (closed), TD-058; `docs/SECURITY.md`, "Egress for `vesperd` microVMs".
+- `systemvm/overlay/usr/local/bin/vesper-vesperd` (`netns_up`, `nat_up`, `nat_root_rules`, `teardown`, `reap_pass`).
+- Firecracker v1.16.0 network setup guide:
+  <https://github.com/firecracker-microvm/firecracker/blob/d83d72b710361a10294480131377b1b00b163af8/docs/network-setup.md>.
+- RFC 6890 (special-purpose IPv4 address registries), RFC 2544 (`198.18.0.0/15`).
