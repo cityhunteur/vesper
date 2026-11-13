@@ -65,7 +65,8 @@ ps_() {
 logs() {
   name=${1:-}; lf=$(logfile "$name")
   [ -f "$lf" ] || { echo "ERR no log for $name"; return 1; }
-  sed -n '/^VESPER-WORKLOAD-START/,/^VESPER-WORKLOAD-EXIT/p' "$lf" | grep -vE '^VESPER-WORKLOAD-(START|EXIT)'
+  # The console log is bounded (TD-055): the previous file holds the older part, and output beyond both is lost.
+  cat "$lf.1" "$lf" 2>/dev/null | sed -n '/^VESPER-WORKLOAD-START/,/^VESPER-WORKLOAD-EXIT/p' | grep -vE '^VESPER-WORKLOAD-(START|EXIT)'
 }
 
 wait_() {
@@ -97,7 +98,7 @@ rm_() {
   [ -f "$(rec "$name")" ] || { echo "ERR unknown workload $name"; return 1; }
   "$MV" stop "$(mvid "$name")" >/dev/null 2>&1
   "$MV" cleanup "$(mvid "$name")" >/dev/null 2>&1
-  rm -f "${WL:?}/${name:?}.ext4" "$(rec "$name")" "$(logfile "$name")"
+  rm -f "${WL:?}/${name:?}.ext4" "$(rec "$name")" "$(logfile "$name")" "$(logfile "$name").1"
   left=""
   [ -n "$(pgrep -f "firecracker --id $(mvid "$name") " 2>/dev/null)" ] && left="$left process"
   [ -e "/srv/jailer/firecracker/$(mvid "$name")" ] && left="$left jail"

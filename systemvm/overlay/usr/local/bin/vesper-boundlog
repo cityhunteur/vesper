@@ -1,0 +1,14 @@
+#!/bin/sh
+# Bounded console log for a microVM (TD-055): copies stdin to FILE, and when FILE passes MAXBYTES moves it to
+# FILE.1 (replacing the older one) and starts a new FILE. A microVM's console therefore uses at most about twice
+# MAXBYTES of the System VM's tmpfs, whatever the guest writes. Lines longer than 4096 bytes are split, so a guest
+# that never writes a newline cannot grow this process's memory either. Exits at end of file (Firecracker's exit).
+# usage: vesper-boundlog FILE [MAXBYTES]   (MAXBYTES defaults to 1 MiB)
+set -u
+f=${1:?usage: vesper-boundlog FILE [MAXBYTES]}
+max=${2:-1048576}
+case "$max" in ''|*[!0-9]*) echo "vesper-boundlog: bad MAXBYTES $max" >&2; exit 2 ;; esac
+case "$f" in *"'"*|*'"'*|*' '*) echo "vesper-boundlog: unsafe path" >&2; exit 2 ;; esac
+exec fold -b -w 4096 | awk -v f="$f" -v max="$max" '
+  { n += length($0) + 1; print > f; fflush(f)
+    if (n >= max) { close(f); system("mv -f \"" f "\" \"" f ".1\""); n = 0 } }'

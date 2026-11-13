@@ -115,6 +115,14 @@ The design spec remains the normative source for hard targets. For local issue w
 - reserve 200-iteration stage gates for dedicated verification environments,
 - do not infer long-run reliability from a single successful boot.
 
+## Shared System VM bounds (TD-055, TD-056)
+
+Every Firecracker microVM in the System VM, the shim's and `vesperd`'s, is admitted against one memory budget:
+`MemTotal` less a 256 MiB reserve, counted as the sum of the microVMs' `memory.max` ceilings (`vesper-memadmit`). A
+launch over it fails at once with `ERR memory: …` instead of pushing the System VM into the OOM killer, which could
+take dockerd or containerd. Docker containers (runc) are outside the budget, so the reserve is all they are sure of.
+Each microVM's console log is at most 2 MiB (two 1 MiB files). `make systemvm-bounds-suite` checks both.
+
 ## Escalation rule
 
 If a change cannot be made legible with the current artifacts, stop and extend the harness before shipping more code.

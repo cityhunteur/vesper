@@ -7,6 +7,8 @@ use std::path::Path;
 use std::thread;
 use std::time::{Duration, Instant};
 
+mod bounds;
+pub use bounds::run_bounds_suite;
 mod bundle;
 mod egress;
 pub use egress::run_egress_suite;

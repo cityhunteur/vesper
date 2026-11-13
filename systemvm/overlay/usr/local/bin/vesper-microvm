@@ -14,8 +14,10 @@
 #        vesper-microvm isolation ID         JSON with uid, chroot, cgroup and seccomp checks
 #        vesper-microvm stop ID              SIGTERM, wait up to 10 s
 #        vesper-microvm crash ID             SIGKILL (abnormal termination)
-#        vesper-microvm cleanup ID           kill, remove chroot, cgroup and pid file; CLEAN ID or DIRTY ID <what>
-#        vesper-microvm log ID [N]           last N lines of the serial console log
+#        vesper-microvm cleanup ID [--logs]  kill, remove chroot, cgroup and pid file, release the memory budget
+#                                             (and with --logs the console logs); CLEAN ID or DIRTY ID <what>
+#        vesper-microvm log ID [N]           last N lines of the serial console log (at most 1 MiB, plus the previous
+#                                             1 MiB file; vesper-boundlog, TD-055)
 set -u
 FC_DIR=/var/lib/vesper/firecracker
 MVM=/var/lib/vesper/microvm
@@ -29,6 +31,8 @@ MARKER="VESPER-MICROVM-OK"
 fcpid() { pgrep -u "$JUID" -f "firecracker --id $1 " 2>/dev/null | head -1; }
 now_ms() { awk '{printf "%d", $1 * 1000}' /proc/uptime; }
 logfile() { echo "/var/log/vesper-microvm-$1.log"; }
+CEILING=671088640                  # memory.max of each microVM, counted in the shared budget (TD-056)
+LOG_MAX=1048576                    # console log bound: the log plus one previous file (TD-055)
 
 prepare() {
   mkdir -p "$MVM"
@@ -102,6 +106,7 @@ launch() {
   prep=$(prepare) || { echo "$prep"; return 1; }
   if [ -n "$rootfs" ] && [ ! -f "$rootfs" ]; then echo "ERR rootfs $rootfs missing"; return 1; fi
   if [ -n "$(fcpid "$id")" ]; then echo "ERR $id already running"; return 1; fi
+  adm=$(/usr/local/bin/vesper-memadmit acquire shim "$id" "$CEILING") || { echo "$adm" | head -1; return 1; }
   root="$JAIL/firecracker/$id/root"
   rm -rf "$JAIL/firecracker/$id"
   mkdir -p "$root"
@@ -134,13 +139,16 @@ launch() {
   fi
   printf '{"boot-source":{"kernel_image_path":"/Image","initrd_path":"/initrd.gz","boot_args":"console=ttyS0 reboot=k panic=1 pci=off rdinit=/init%s"},"drives":%s,"machine-config":{"vcpu_count":1,"mem_size_mib":256}%s}\n' "$extra" "$drives" "$vsockcfg" > "$root/vm.json"
   chown -R "$JUID:$JGID" "$JAIL/firecracker/$id"
-  lf=$(logfile "$id")
+  lf=$(logfile "$id"); pipe="/var/log/.vesper-microvm-$id.pipe"
+  rm -f "$lf" "$lf.1" "$pipe"
+  mkfifo -m 0600 "$pipe" || { echo "ERR console pipe"; return 1; }
   : > "$lf"
+  /usr/local/bin/vesper-boundlog "$lf" "$LOG_MAX" < "$pipe" &
   start=$(now_ms)
   setsid "$FC_DIR/jailer" --id "$id" --exec-file "$FC_DIR/firecracker" --uid "$JUID" --gid "$JGID" \
-    --chroot-base-dir "$JAIL" --cgroup-version 2 --cgroup pids.max=256 --cgroup memory.max=671088640 \
+    --chroot-base-dir "$JAIL" --cgroup-version 2 --cgroup pids.max=256 --cgroup "memory.max=$CEILING" \
     -- --config-file /vm.json --api-sock /run/firecracker.socket \
-    > "$lf" 2>&1 < /dev/null &
+    > "$pipe" 2>&1 < /dev/null &
   for _ in $(seq 1 120); do
     grep -q "$MARKER" "$lf" && break
     sleep 0.25
@@ -205,6 +213,9 @@ cleanup() {
   id=$1; pid=$(fcpid "$id")
   [ -n "$pid" ] && { kill -KILL "$pid" 2>/dev/null; sleep 0.5; }
   rm -rf "$JAIL/firecracker/$id"
+  rm -f "/var/log/.vesper-microvm-$id.pipe"
+  [ "${2:-}" = --logs ] && rm -f "$(logfile "$id")" "$(logfile "$id").1"
+  /usr/local/bin/vesper-memadmit release shim "$id" 2>/dev/null
   for cg in "/sys/fs/cgroup/firecracker/$id" "/sys/fs/cgroup/$id"; do
     [ -d "$cg" ] && rmdir "$cg" 2>/dev/null
   done
@@ -217,7 +228,7 @@ cleanup() {
   if [ -z "$dirty" ]; then echo "CLEAN $id"; else echo "DIRTY $id$dirty"; return 1; fi
 }
 
-mlog() { id=$1; n=${2:-20}; lf=$(logfile "$id"); [ -f "$lf" ] && tail -n "$n" "$lf" || echo "ERR no log for $id"; }
+mlog() { id=$1; n=${2:-20}; lf=$(logfile "$id"); [ -f "$lf" ] && cat "$lf.1" "$lf" 2>/dev/null | tail -n "$n" || echo "ERR no log for $id"; }
 
 cmd=${1:-}; shift 2>/dev/null
 case "$cmd" in
