@@ -30,7 +30,7 @@ Either way, a new, unexplained failure turns the run red.
 - [x] M4 Runner: `scripts/systemvm/upstream-suite/` and `make systemvm-upstream-suite` (fetch, stage, `tun`, resize,
   run with timeouts, collect, wipe `/srv`, restore)
 - [x] M5 Full run on this host, results classified, the comparator green; evidence under `run/GH-172/`
-- [ ] M6 Docs (TESTING, systemvm-bringup, the parity matrix note, src/bin README), CI green, #172 updated and closed
+- [x] M6 Docs (TESTING, systemvm-bringup, the parity matrix note, src/bin README), CI green, #172 updated and closed
 
 ## Surprises & Discoveries
 
@@ -110,6 +110,12 @@ Either way, a new, unexplained failure turns the run red.
   distinct ones in 14 files and only 33 in all four, so it is not a property of the named tests: a list of test
   names cannot be frozen for it. Fitting has stopped; how the comparator treats this is with the owner.
 
+- 2026-11-13: the fifth full run (`20261113T172619Z`, 4,998 s), judged with the classes, comparator, collector and
+  runner frozen (hashes verified after it), is the first clean run on classes it was not fitted to. Under load 758
+  passed and one result matched no class (`test_reinflate_balloon`, a balloon tolerance assert); rerun alone it
+  passed, so the verdict is 759 passed, 1 of them listed as PASSED-ALONE, and 221 explained (57 in the any-test
+  memory class against a cap of 80). `compare-under-load.*` keeps the first verdict.
+
 ## Decision Log
 
 - 2026-11-13: the comparator is a `baselinectl` mode, not a new binary, because it reads the baseline lock and
@@ -140,6 +146,14 @@ for the seven timing results it showed (see Surprises), explained the other 224:
 assumption and 72 unexplained. Between the two runs 23 tests went from passed to a class and 16 the other way, all in
 the memory-overshoot, SSH, balloon, vsock, vmclock or reboot classes. The run is therefore reproducible in its classes
 but not test for test: timing under nested virtualisation moves a few dozen tests between passed and a class. The `max` caps keep that drift bounded.
+
+Five full runs were needed. Runs 3 and 4, judged with classes frozen, each left results unmatched: a harness
+regression (the `/srv` symlink), then load, which moved the memory overshoot to tests no list had named and added one
+to four one-off timeouts per run. The owner's decision D-031 ended the fitting: the overshoot class matches any test
+within its symptom and a cap, and the runner reruns alone what matches no class. Run 5 (`20261113T172619Z`), frozen,
+was clean: 759 of 980 passed (one on the isolated rerun) and 221 explained. Lesson: a class that names tests for a
+symptom of host load cannot be frozen; bound the symptom and the count, and separate load from defect by rerunning
+without load.
 
 ## Context and Orientation
 

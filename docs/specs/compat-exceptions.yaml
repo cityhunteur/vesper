@@ -17,8 +17,11 @@ exceptions:
       48 environment, 8 test assumption, 72 unexplained, most a VMM memory overshoot or timing under nested
       virtualisation). Because those classes were fitted to that run, a third full run (20261113T133615Z, 757 passed)
       was judged with them frozen: it left 8 unmatched, 4 a harness regression since fixed and 4 load results in
-      tests the classes did not name. The evidence that the classes hold is a fourth full run judged with them,
-      the comparator, the collector and the runner unchanged (run/GH-172/frozen-classes.sha256).
+      tests the classes did not name. A fourth run, frozen again, left 7: the memory overshoot in tests no list
+      named, and two one-off timeouts. Decision D-031 then made the overshoot class match any test (5.00 to 6.99
+      MiB, at most 80) and had the runner rerun alone what matches no class. The fifth full run (20261113T172619Z),
+      judged with classes, comparator, collector and runner frozen (run/GH-172/frozen-classes.sha256), was clean:
+      759 passed, one of them on the isolated rerun, and 221 explained.
       An earlier feasibility run on 2026-11-12 (GH #166) ran it unmodified in the System VM at the pinned v1.16.0:
       755 of 980 functional and security tests passed, 96 skipped for architecture or kernel reasons, and
       129 failed, errored or hung. Of those, 58 are environment (Apple virtual CPU cache topology, SSB

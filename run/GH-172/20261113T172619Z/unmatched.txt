@@ -1,0 +1,1 @@
+integration_tests/functional/test_balloon.py::test_reinflate_balloon[vmlinux-5.10.253-PCI_OFF]
