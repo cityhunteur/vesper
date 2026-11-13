@@ -3,12 +3,14 @@
 # with jails and a snapshot store on the data disk. The agent runs `launch` for LAUNCHAPI and `connect` for FCAPI
 # with `exec`, so stdin and stdout are the vsock connection itself. Every other subcommand is reached through the
 # agent's buffered VESPERD verb.
-# usage: vesper-vesperd launch ID [CEILING] [stage=SRC:DEST]...
+# usage: vesper-vesperd launch ID [CEILING] [stage=SRC:DEST|tap=NAME]...
 #                                             LAUNCHAPI: start Firecracker unconfigured under the jailer (uid 20000,
 #                                             --parent-cgroup vesperd, memory.max=CEILING bytes) in a fresh jail on the
 #                                             data disk, after staging each SRC (share:/PATH or store:NAME) to the jail
 #                                             path DEST (store:*.mem and store:*.vmstate are hard-linked, root-owned and
-#                                             read-only; everything else is copied); reply READY ID pid=N
+#                                             read-only; everything else is copied), in a fresh network namespace
+#                                             (jailer --netns) that holds lo and one tap device per tap=NAME, owned by
+#                                             uid 20000 and up, with no uplink (CE-0010, TD-058); reply READY ID pid=N
 #                                             firecracker_version=V once the API socket exists, or ERR <reason> and
 #                                             close. After READY the connection is the lease: on its end of file, or when
 #                                             Firecracker exits, the microVM is stopped and its jail, cgroup and record
@@ -34,6 +36,8 @@
 #        vesper-vesperd isolation ID          JSON with uid, chroot, cgroup and seccomp checks of ID's Firecracker
 #        vesper-vesperd files ID              FILE PATH uid=U mode=M links=L bytes=N per regular file in ID's jail
 #                                             (read as uid 20000)
+#        vesper-vesperd net ID                LINK NAME state=UP|DOWN owner=U per interface in ID's network
+#                                             namespace, then NETNS ID separate=true|false
 #        vesper-vesperd memory ID             MEMORY ID current=N peak=N max=N anon=N file=N (ID's cgroup)
 #        vesper-vesperd list                  LEASE ID holder=P:S conn=P:S fc=P:S lines, then a JAIL ID line per jail
 #        vesper-vesperd log ID [N]            last N lines of ID's serial console
@@ -80,6 +84,8 @@ LEASE_POLL_S=1                    # lease end of file and Firecracker exit are n
 GRACE_S=60                        # a jail without a record is spared this long
 SOCAT_T=86400                     # socat -t: keep relaying after a half-close (GH #167)
 MAX_STAGES=16                     # stage= tokens per LAUNCHAPI
+MAX_TAPS=8                        # tap= tokens per LAUNCHAPI
+NETNS=$STATE/netns                # one bound network namespace per lease (tmpfs, so a reboot clears it)
 MAX_PATH=1024                     # bytes in a jail or share path
 MAX_NAME=128                      # bytes in a store name
 # The free-space reserve is the System VM's MemTotal: after any copy the data disk still holds one more full
@@ -88,6 +94,10 @@ MAX_NAME=128                      # bytes in a store name
 valid_id() { # the jailer's rule: 1 to 64 letters, digits and hyphens
   case "${1:-}" in ''|*[!A-Za-z0-9-]*) return 1 ;; esac
   [ "${#1}" -le 64 ]
+}
+valid_tap() { # a Linux interface name (IFNAMSIZ 16 with the NUL) of letters, digits, _ and -; never lo
+  case "${1:-}" in ''|lo|*[!A-Za-z0-9_-]*) return 1 ;; esac
+  [ "${#1}" -le 15 ]
 }
 digits() { case "${1:-}" in ''|*[!0-9]*) return 1 ;; esac; }
 now_s() { date +%s; }
@@ -150,6 +160,7 @@ leftovers() { # ID -> the names of what is still there, empty when clean
   [ -e "$LEASES/$1" ] && out="$out record"
   [ -e "$JAILS/$1" ] && out="$out jail"
   [ -d "$CG/$1" ] && out="$out cgroup"
+  [ -e "$NETNS/$1" ] && out="$out netns"
   [ -n "$(fc_by_id "$1")" ] && out="$out process"
   echo "${out# }"
 }
@@ -167,9 +178,34 @@ teardown() { # ID (caller holds the lock) -> CLEAN ID | DIRTY ID <what>
   # rm -rf does not follow symlinks; the jail's mounts live in the jailer's own mount namespace.
   rm -rf "${JAILS:?}/$tid"
   i=0; while [ -d "$CG/$tid" ] && [ "$i" -lt 20 ]; do rmdir "$CG/$tid" 2>/dev/null || sleep 0.1; i=$((i + 1)); done
+  netns_down "$tid"
   rm -f "$LEASES/$tid"
   left=$(leftovers "$tid")
   if [ -z "$left" ]; then echo "CLEAN $tid"; else echo "DIRTY $tid $left"; return 1; fi
+}
+
+# ---- networking (CE-0010, TD-058) -------------------------------------------------------------------------
+# Each lease gets its own network namespace, bound at $NETNS/ID so the jailer can join it (--netns) and teardown can
+# remove it. The jailed Firecracker has no CAP_NET_ADMIN, so it cannot create a tap; it can open one that exists and
+# is owned by uid 20000 (the kernel's tun owner check). The namespace has no uplink: the guest reaches its tap and
+# nothing else, and the System VM's own interfaces stay out of the jail's reach.
+netns_mounted() { awk -v f="$NETNS/$1" '$2 == f && $3 == "nsfs" {m=1} END {exit !m}' /proc/mounts; }
+netns_down() { # ID: unbind and remove; the taps go with the namespace once Firecracker is gone
+  f="$NETNS/$1"
+  netns_mounted "$1" && umount "$f" 2>/dev/null
+  netns_mounted "$1" || rm -f "$f"
+}
+netns_up() { # ID TAP... (caller holds the lock) -> prints a reason on failure
+  nid=$1; shift; f="$NETNS/$nid"
+  mkdir -p "$NETNS" && chmod 0700 "$NETNS" || { echo "netns directory"; return 1; }
+  netns_down "$nid"
+  [ -e "$f" ] && { echo "netns $nid still bound"; return 1; }
+  : > "$f" && unshare --net="$f" true || { rm -f "$f"; echo "netns create failed"; return 1; }
+  out=$(nsenter --net="$f" ip link set lo up 2>&1) || { echo "lo: $(printf '%s' "$out" | oneline)"; return 1; }
+  for t in "$@"; do
+    out=$(nsenter --net="$f" tunctl -t "$t" -u "$JUSER" 2>&1) || { echo "tap $t: $(printf '%s' "$out" | oneline)"; return 1; }
+    out=$(nsenter --net="$f" ip link set "$t" up 2>&1) || { echo "tap $t up: $(printf '%s' "$out" | oneline)"; return 1; }
+  done
 }
 
 reap_pass() { # (caller holds the lock)
@@ -200,6 +236,12 @@ reap_pass() { # (caller holds the lock)
     rid=${cg##*/}
     valid_id "$rid" || continue
     [ -e "$LEASES/$rid" ] || [ -e "$JAILS/$rid" ] || rmdir "$cg" 2>/dev/null
+  done
+  for ns in "$NETNS"/*; do
+    [ -e "$ns" ] || continue
+    rid=${ns##*/}
+    valid_id "$rid" || continue
+    [ -e "$LEASES/$rid" ] || [ -e "$JAILS/$rid" ] || netns_down "$rid"
   done
   echo "REAP reaped=$reaped kept=$kept"
 }
@@ -384,6 +426,7 @@ stage() { # ID|- SRC DEST: while the microVM runs; copies only
 launch_stage() { # ROOT SPEC...
   lroot=$1; shift
   for spec in "$@"; do
+    case "$spec" in tap=*) continue ;; esac
     s=${spec#stage=}; scheme=${s%%:*}; rest=${s#*:}; src="$scheme:${rest%%:*}"; dest=${rest#*:}
     [ "$rest" != "$s" ] && [ "$dest" != "$rest" ] || { echo "stage $s: use SRC:DEST"; return 1; }
     why=$(stage_forms "$src" "$dest") || { echo "stage $s: $why"; return 1; }
@@ -464,9 +507,21 @@ launch() {
   LID=${1:-}; shift 2>/dev/null
   valid_id "$LID" || { echo "ERR bad id"; return 2; }
   ceiling=$DEFAULT_CEILING
-  case "${1:-}" in stage=*|'') ;; *) ceiling=$1; shift; digits "$ceiling" || { echo "ERR bad ceiling"; return 2; } ;; esac
-  [ "$#" -le "$MAX_STAGES" ] || { echo "ERR at most $MAX_STAGES stage= tokens"; return 2; }
-  for spec in "$@"; do case "$spec" in stage=*) ;; *) echo "ERR usage: LAUNCHAPI <id> [ceiling] [stage=SRC:DEST]..."; return 2 ;; esac; done
+  case "${1:-}" in stage=*|tap=*|'') ;; *) ceiling=$1; shift; digits "$ceiling" || { echo "ERR bad ceiling"; return 2; } ;; esac
+  nstage=0; taps=""; ntap=0
+  for spec in "$@"; do
+    case "$spec" in
+      stage=*) nstage=$((nstage + 1)) ;;
+      tap=*)
+        t=${spec#tap=}
+        valid_tap "$t" || { echo "ERR bad tap name ${t:-(empty)}: 1 to 15 letters, digits, _ and -, not lo"; return 2; }
+        case " $taps " in *" $t "*) echo "ERR tap $t given twice"; return 2 ;; esac
+        taps="$taps $t"; ntap=$((ntap + 1)) ;;
+      *) echo "ERR usage: LAUNCHAPI <id> [ceiling] [stage=SRC:DEST|tap=NAME]..."; return 2 ;;
+    esac
+  done
+  [ "$nstage" -le "$MAX_STAGES" ] || { echo "ERR at most $MAX_STAGES stage= tokens"; return 2; }
+  [ "$ntap" -le "$MAX_TAPS" ] || { echo "ERR at most $MAX_TAPS tap= tokens"; return 2; }
   max=$(awk '/^MemTotal:/{print $2 * 1024}' /proc/meminfo)
   { [ "$ceiling" -ge "$MIN_CEILING" ] && [ "$ceiling" -le "$max" ]; } || { echo "ERR ceiling out of range $MIN_CEILING..$max"; return 2; }
   [ -x "$JAILER" ] && [ -x "$FC" ] || { echo "ERR firecracker missing"; return 1; }
@@ -500,10 +555,12 @@ launch() {
     why=$(launch_stage "$root" "$@") || launch_fail "$why"
     lock
   fi
+  # shellcheck disable=SC2086
+  why=$(netns_up "$LID" $taps) || launch_fail "network: $why"
   log="$LOGS/$LID.log"
   : > "$log"
   setsid "$JAILER" --id "$LID" --exec-file "$FC" --uid "$JUID" --gid "$JGID" --chroot-base-dir "$BASE" \
-    --parent-cgroup vesperd --cgroup-version 2 --cgroup pids.max=256 --cgroup "memory.max=$ceiling" \
+    --netns "$NETNS/$LID" --parent-cgroup vesperd --cgroup-version 2 --cgroup pids.max=256 --cgroup "memory.max=$ceiling" \
     -- --api-sock /run/firecracker.socket > "$log" 2>&1 < /dev/null 9>&- &
   SPID=$!
   unlock
@@ -574,8 +631,10 @@ isolation() {
      && [ "$(readlink "/proc/$pid/ns/mnt")" != "$(readlink /proc/1/ns/mnt)" ]; then chroot_ok=true; fi
   cg_ok=false; [ "$cg" = "/vesperd/$sid" ] && cg_ok=true
   sec_ok=false; [ "$sec" = 2 ] && sec_ok=true
-  printf '{"id":"%s","pid":%s,"holder":%s,"uid":%s,"jail":"%s","cgroup":"%s","memory_max":"%s","seccomp_mode":%s,"uid_ok":%s,"chroot_ok":%s,"cgroup_ok":%s,"seccomp_ok":%s}\n' \
-    "$sid" "$pid" "$H_PID" "${uid:-0}" "$JAILS/$sid/root" "$cg" "$mem" "${sec:-0}" "$uid_ok" "$chroot_ok" "$cg_ok" "$sec_ok"
+  net_ok=false
+  [ "$(readlink "/proc/$pid/ns/net")" != "$(readlink /proc/1/ns/net)" ] && netns_mounted "$sid" && net_ok=true
+  printf '{"id":"%s","pid":%s,"holder":%s,"uid":%s,"jail":"%s","cgroup":"%s","memory_max":"%s","seccomp_mode":%s,"uid_ok":%s,"chroot_ok":%s,"cgroup_ok":%s,"seccomp_ok":%s,"netns_ok":%s}\n' \
+    "$sid" "$pid" "$H_PID" "${uid:-0}" "$JAILS/$sid/root" "$cg" "$mem" "${sec:-0}" "$uid_ok" "$chroot_ok" "$cg_ok" "$sec_ok" "$net_ok"
 }
 
 list() {
@@ -639,6 +698,21 @@ jail_files() {
   find "$1" -xdev -type f 2>/dev/null | while IFS= read -r f; do
     echo "FILE ${f#"$1"} $(stat -c 'uid=%u mode=%a links=%h bytes=%s' "$f")"
   done
+}
+
+net() { # ID's network namespace: one LINK line per interface, then whether it differs from the System VM's
+  sid=${1:-}; valid_id "$sid" || { echo "ERR bad id"; return 2; }
+  netns_mounted "$sid" || { echo "ERR no network namespace for $sid"; return 1; }
+  f="$NETNS/$sid"
+  # busybox ip -o link: "N: NAME: <FLAGS> ..."; the tun owner is read from the namespace's own sysfs view.
+  nsenter --net="$f" ip -o link | while IFS= read -r l; do
+    name=${l#*: }; name=${name%%:*}; name=${name%%@*}
+    case "$l" in *"<"*UP*">"*) st=UP ;; *) st=DOWN ;; esac
+    own=$(nsenter --net="$f" unshare -m sh -c "mount --make-rprivate / && mount -t sysfs sysfs /sys 2>/dev/null && cat /sys/class/net/$name/owner 2>/dev/null")
+    echo "LINK $name state=$st owner=${own:--}"
+  done
+  sep=false; [ "$(nsenter --net="$f" readlink /proc/self/ns/net)" != "$(readlink /proc/1/ns/net)" ] && sep=true
+  echo "NETNS $sid separate=$sep"
 }
 
 memory() { # ID's cgroup: memory.current, memory.peak, memory.max and memory.stat's anon and file, in bytes
@@ -726,11 +800,12 @@ case "$cmd" in
   setup-user) setup_user ;;
   files) files "$@" ;;
   memory) memory "$@" ;;
+  net) net "$@" ;;
   test-plant) test_plant "$@" ;;
   test-reserve) test_reserve "$@" ;;
   jail-stat) jail_stat "$@" ;;
   jail-read) jail_read "$@" ;;
   jail-write) jail_write "$@" ;;
   jail-files) jail_files "$@" ;;
-  *) echo "ERR usage: vesper-vesperd launch|connect|stage|store-list|store-rm|sweep|setup-user|reap|reap-loop|status|isolation|files|memory|list|log|kill-holder|kill-fc|test-*"; exit 2 ;;
+  *) echo "ERR usage: vesper-vesperd launch|connect|stage|store-list|store-rm|sweep|setup-user|reap|reap-loop|status|isolation|files|memory|net|list|log|kill-holder|kill-fc|test-*"; exit 2 ;;
 esac

@@ -20,9 +20,10 @@
 #   DATA <args...>        -> DATA <rc> <count> then <count> output lines of `vesper-data <args>` (GH #164)
 #   VESPERD <args...>     -> VESPERD <rc> <count> then <count> output lines of `vesper-vesperd <args>`, except
 #                            launch and connect (ADR 0007); includes stage, store-list and store-rm (slice 5)
-#   LAUNCHAPI <id> [ceiling] [stage=SRC:DEST]...
+#   LAUNCHAPI <id> [ceiling] [stage=SRC:DEST|tap=NAME]...
 #                         -> READY <id> pid=<n> firecracker_version=<v> once the API socket exists, or
-#                            ERR <reason> and close; each stage= token is staged into the fresh jail first; after
+#                            ERR <reason> and close; each stage= token is staged into the fresh jail first, and each
+#                            tap= token is a tap device in the microVM's own network namespace (CE-0010); after
 #                            READY this connection is the microVM's lease: its end of file stops the microVM, and
 #                            the agent closes it when Firecracker exits (ADR 0007)
 #   FCAPI <id>            -> OK, then the connection relays bytes to <id>'s Firecracker API socket; or ERR <reason>

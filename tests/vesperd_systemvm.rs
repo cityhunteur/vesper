@@ -307,6 +307,7 @@ fn bad_arguments_are_refused() {
     assert!(run(&["--backend", "systemvm", "--bridge", "x/3.sock"]).contains("needs --id"));
     assert!(run(&["--backend", "systemvm", "--id", "../x", "--bridge", "x/3.sock"]).contains("letters, digits and hyphens"));
     assert!(run(&["--id", "vm-1"]).contains("apply to --backend systemvm"));
+    assert!(run(&["--tap", "tap0"]).contains("apply to --backend systemvm"));
 }
 
 fn cli(dir: &Path, bridge: &Path, args: &[&str]) -> (i32, String, String) {
@@ -348,6 +349,38 @@ fn stage_flags_ride_on_launchapi_in_order() {
     let a = agent.lock().unwrap();
     assert_eq!(a.requests[0], "DATA status");
     assert_eq!(a.requests[1], "LAUNCHAPI vm-1 268435456 stage=store:a.mem:/snap.mem stage=share:/Users/me/vm/d.img:/d.img");
+}
+
+#[test]
+fn tap_flags_ride_on_launchapi_after_the_stages() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (bridge, agent) = fake_agent(tmp.path(), "1.16.0");
+    let v = spawn(tmp.path(), &bridge, &["--tap", "tap0", "--stage", "store:a.mem:/snap.mem", "--tap", "tap1"]);
+    wait_listening(&v);
+    let a = agent.lock().unwrap();
+    assert_eq!(a.requests[1], "LAUNCHAPI vm-1 stage=store:a.mem:/snap.mem tap=tap0 tap=tap1");
+}
+
+#[test]
+fn a_bad_tap_flag_launches_nothing() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (bridge, agent) = fake_agent(tmp.path(), "1.16.0");
+    for (flags, why) in [
+        (vec!["--tap", "lo"], "not lo"),
+        (vec!["--tap", "tap 0"], "letters, digits"),
+        (vec!["--tap", "a-name-of-16-chr"], "1 to 15"),
+        (vec!["--tap", "tap0", "--tap", "tap0"], "given twice"),
+    ] {
+        let mut v = spawn(tmp.path(), &bridge, &flags);
+        let (status, err) = wait_exit(&mut v, Duration::from_secs(10));
+        assert!(!status.success() && err.contains(why), "{flags:?}: {err}");
+    }
+    let names: Vec<String> = (0..9).map(|i| format!("tap{i}")).collect();
+    let many: Vec<&str> = names.iter().flat_map(|n| ["--tap", n.as_str()]).collect();
+    let mut v = spawn(tmp.path(), &bridge, &many);
+    let (status, err) = wait_exit(&mut v, Duration::from_secs(10));
+    assert!(!status.success() && err.contains("at most 8"), "{err}");
+    assert!(agent.lock().unwrap().requests.is_empty(), "nothing reaches the agent");
 }
 
 #[test]

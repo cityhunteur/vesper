@@ -140,11 +140,11 @@ pub fn run_launchapi_suite(endpoint: &ControlEndpoint, id: &str, expected_versio
         step(&mut steps, "jailer_isolation", || {
             let (rc, lines) = control.vesperd(&["isolation", main])?;
             let json: serde_json::Value = serde_json::from_str(&first(&lines)).map_err(|e| format!("isolation JSON (rc {rc}): {e}: {}", lines.join(" | ")))?;
-            let failed: Vec<&str> = ["uid_ok", "chroot_ok", "cgroup_ok", "seccomp_ok"].into_iter().filter(|k| json[k] != serde_json::Value::Bool(true)).collect();
+            let failed: Vec<&str> = ["uid_ok", "chroot_ok", "cgroup_ok", "seccomp_ok", "netns_ok"].into_iter().filter(|k| json[k] != serde_json::Value::Bool(true)).collect();
             if !failed.is_empty() || json["uid"] != 20000 || json["cgroup"] != format!("/vesperd/{main}") {
                 return Err(format!("isolation checks failed {failed:?}: {}", lines[0]));
             }
-            Ok(((), format!("uid {}, cgroup {}, memory.max {}, seccomp mode {}, jail {}", json["uid"], json["cgroup"], json["memory_max"], json["seccomp_mode"], json["jail"])))
+            Ok(((), format!("uid {}, own network namespace, cgroup {}, memory.max {}, seccomp mode {}, jail {}", json["uid"], json["cgroup"], json["memory_max"], json["seccomp_mode"], json["jail"])))
         });
         step(&mut steps, "fcapi_refuses_bad_and_unknown_ids", || {
             let mut bad = connect(endpoint)?;
@@ -408,7 +408,7 @@ mod tests {
                                 let lines: Vec<String> = match sub.as_str() {
                                     "status" if g.leases.contains(&id) => vec![format!("RUNNING {id} pid=4242 holder=99")],
                                     "status" => vec![format!("ABSENT {id}")],
-                                    "isolation" => vec![format!("{{\"id\":\"{id}\",\"pid\":4242,\"uid\":20000,\"jail\":\"/var/lib/vesper/state/vesperd/jailer/firecracker/{id}/root\",\"cgroup\":\"/vesperd/{id}\",\"memory_max\":\"671088640\",\"seccomp_mode\":2,\"uid_ok\":true,\"chroot_ok\":true,\"cgroup_ok\":true,\"seccomp_ok\":true}}")],
+                                    "isolation" => vec![format!("{{\"id\":\"{id}\",\"pid\":4242,\"uid\":20000,\"jail\":\"/var/lib/vesper/state/vesperd/jailer/firecracker/{id}/root\",\"cgroup\":\"/vesperd/{id}\",\"memory_max\":\"671088640\",\"seccomp_mode\":2,\"uid_ok\":true,\"chroot_ok\":true,\"cgroup_ok\":true,\"seccomp_ok\":true,\"netns_ok\":true}}")],
                                     "log" => vec!["VESPER-MICROVM-OK".to_string()],
                                     "kill-fc" | "kill-holder" | "test-forge-start" => {
                                         g.leases.retain(|l| *l != id);

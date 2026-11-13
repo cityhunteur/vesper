@@ -24,6 +24,8 @@ const REUSE_WAIT: Duration = Duration::from_secs(15);
 /// The first launch after boot builds the microVM kernel and initramfs.
 pub(super) const START_TIMEOUT: Duration = Duration::from_secs(60);
 pub(super) const TEARDOWN_TIMEOUT: Duration = Duration::from_secs(30);
+/// The jailer uid that owns every vesperd microVM's tap devices.
+const JAIL_UID: u32 = 20000;
 pub(super) const BOOT_ARGS: &str = "console=ttyS0 reboot=k panic=1 pci=off rdinit=/init";
 /// micro_http's reply to a connection beyond its 10 (`SERVER_FULL_ERROR_MESSAGE`, micro-http 876f3fe).
 const FIRECRACKER_SERVER_FULL: &[u8] =
@@ -182,8 +184,8 @@ pub(super) fn state_of(body: &str) -> String {
 /// Runs the slice 4 checklist; microVM ids are derived from `id`. `expected_version` is the pinned swagger's.
 pub fn run_vesperd_suite(endpoint: &ControlEndpoint, run: &VesperdRun, id: &str, expected_version: &str) -> SuiteReport {
     let mut steps: Vec<SuiteStep> = Vec::new();
-    let ids = [id.to_string(), format!("{id}-kill"), format!("{id}-fcexit")];
-    let [main, killed, fcexit] = &ids;
+    let ids = [id.to_string(), format!("{id}-kill"), format!("{id}-fcexit"), format!("{id}-net")];
+    let [main, killed, fcexit, net] = &ids;
     let control = step(&mut steps, "handshake", || {
         let session = connect(endpoint)?;
         let detail = format!("protocol {} host {}", session.handshake.protocol_version, session.handshake.hostname);
@@ -399,6 +401,58 @@ pub fn run_vesperd_suite(endpoint: &ControlEndpoint, run: &VesperdRun, id: &str,
         Ok(((), format!("{}; vesperd exited {code:?} after {} ms: {err}; ABSENT {} ms later", first(&lines), took.as_millis(), gone.as_millis())))
     });
 
+    // CE-0010: --tap gives the microVM tap devices in its own network namespace, which the jailed Firecracker
+    // (uid 20000, no CAP_NET_ADMIN) can open; a name not given stays Firecracker's own EPERM error.
+    step(&mut steps, "tap_devices_in_own_netns", || {
+        let flags: Vec<String> = ["--tap", "tap0", "--tap", "tap1"].map(String::from).to_vec();
+        let (mut v, _, _) = run.start_with(net, "net.sock", &flags)?;
+        let checked = (|| -> Result<String, String> {
+            let mut api = Client::connect(&v.socket)?;
+            let eth0 = r#"{"iface_id":"eth0","host_dev_name":"tap0","guest_mac":"06:00:ac:10:00:02"}"#;
+            api.expect("PUT", "/network-interfaces/eth0", Some(eth0), 204)?;
+            api.expect("PUT", "/network-interfaces/eth1", Some(r#"{"iface_id":"eth1","host_dev_name":"tap1"}"#), 204)?;
+            let missing = api.call("PUT", "/network-interfaces/eth2", Some(r#"{"iface_id":"eth2","host_dev_name":"tap9"}"#))?;
+            if missing.status != 400 || !missing.body.contains("Open tap device failed") {
+                return Err(format!("tap9 (not given): {} {}", missing.status, missing.body));
+            }
+            api.expect("PUT", "/mmds/config", Some(r#"{"network_interfaces":["eth0"]}"#), 204)?;
+            api.expect("PUT", "/machine-config", Some(r#"{"vcpu_count":1,"mem_size_mib":256}"#), 204)?;
+            let boot = format!(r#"{{"kernel_image_path":"/Image","initrd_path":"/initrd.gz","boot_args":"{BOOT_ARGS}"}}"#);
+            api.expect("PUT", "/boot-source", Some(&boot), 204)?;
+            api.expect("PUT", "/actions", Some(r#"{"action_type":"InstanceStart"}"#), 204)?;
+            let config = api.expect("GET", "/vm/config", None, 200)?;
+            if !config.contains(r#""host_dev_name":"tap0""#) || !config.contains(r#""host_dev_name":"tap1""#) {
+                return Err(format!("GET /vm/config: {config}"));
+            }
+            let (rc, links) = control.vesperd(&["net", net])?;
+            let want = [
+                format!("LINK tap0 state=UP owner={JAIL_UID}"),
+                format!("LINK tap1 state=UP owner={JAIL_UID}"),
+                format!("NETNS {net} separate=true"),
+            ];
+            if rc != 0 || want.iter().any(|w| !links.contains(w)) || links.iter().any(|l| l.starts_with("LINK tap9")) {
+                return Err(format!("net {net}: rc {rc}: {}", links.join(" | ")));
+            }
+            let (_, iso) = control.vesperd(&["isolation", net])?;
+            if !first(&iso).contains(r#""netns_ok":true"#) {
+                return Err(format!("isolation: {}", first(&iso)));
+            }
+            Ok(format!(
+                "PUT /network-interfaces eth0 (tap0) and eth1 (tap1) -> 204, eth2 (tap9, not given) -> 400 {:?}; PUT /mmds/config, InstanceStart -> 204; {}; netns_ok",
+                missing.body.chars().take(80).collect::<String>(),
+                links.join(", ")
+            ))
+        })();
+        signal(&v, "TERM")?;
+        let (code, err, _) = wait_exit(&mut v, TEARDOWN_TIMEOUT)?;
+        let detail = checked?;
+        if code != Some(0) {
+            return Err(format!("exit {code:?}: {err}"));
+        }
+        let gone = wait_absent(&mut control, net, Duration::from_secs(5))?;
+        Ok(((), format!("{detail}; SIGTERM: ABSENT {net} (network namespace removed) {} ms later", gone.as_millis())))
+    });
+
     step(&mut steps, "nothing_left", || {
         let sockets: Vec<String> = std::fs::read_dir(&run.workdir)
             .map_err(|e| e.to_string())?
@@ -417,6 +471,6 @@ pub fn run_vesperd_suite(endpoint: &ControlEndpoint, run: &VesperdRun, id: &str,
         Ok(((), format!("no lease or jail for {}; no socket in {}", ids.join(", "), run.workdir.display())))
     });
 
-    let passed = steps.iter().all(|s| s.ok) && steps.len() == 18;
+    let passed = steps.iter().all(|s| s.ok) && steps.len() == 19;
     report(endpoint, steps, passed)
 }

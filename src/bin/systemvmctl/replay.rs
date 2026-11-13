@@ -72,7 +72,7 @@ pub fn run(
         return Err(format!("replay scripts:\n  {}", errors.join("\n  ")));
     }
     let files: Vec<(String, u64)> = scripts.files.iter().map(|f| (f.path.clone(), f.bytes)).collect();
-    let mut session = run.prepare(endpoint, &files)?;
+    let mut session = run.prepare(endpoint, &files, &scripts.taps)?;
     let fixture_steps = to_runner(&api_replay::expand_fixture(&scripts, "")?);
     let fixture = run.make_fixture(
             &mut session,

@@ -62,6 +62,19 @@ fn replay_scripts_cover_the_matrix_exactly() {
     assert!(errors.is_empty(), "replay scripts:\n  {}", errors.join("\n  "));
 }
 
+#[test]
+fn every_host_dev_name_is_a_listed_tap() {
+    let mut scripts = api_replay::load_replay_scripts(api_replay::DEFAULT_REPLAY_SCRIPTS_PATH).unwrap();
+    let matrix = vesper::api_behavior_matrix::load_api_behavior_matrix(MATRIX).unwrap();
+    assert!(scripts.taps.iter().any(|t| t == "tap0"), "taps: {:?}", scripts.taps);
+    scripts.taps.retain(|t| t != "tap1");
+    let errors = api_replay::validate_replay_scripts(&scripts, &matrix);
+    assert!(!errors.is_empty() && errors.iter().all(|e| e.contains(r#"host_dev_name "tap1" is not in taps"#)), "{errors:?}");
+    scripts.taps = vec!["tap0".into(), "tap1".into(), "tap0".into(), "lo".into()];
+    let errors = api_replay::validate_replay_scripts(&scripts, &matrix);
+    assert!(errors.iter().any(|e| e.contains("listed twice")) && errors.iter().any(|e| e.contains("not lo")), "{errors:?}");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn every_case_replays_on_the_model() {
     let scripts = api_replay::load_replay_scripts(api_replay::DEFAULT_REPLAY_SCRIPTS_PATH).unwrap();

@@ -37,6 +37,8 @@ pub struct ReplaySession {
     dir: PathBuf,
     stages: Vec<String>,
     snapshot_stages: Vec<String>,
+    /// `--tap` names every case's microVM gets (CE-0010).
+    taps: Vec<String>,
 }
 
 /// The store names of the snapshot fixture for `prefix`.
@@ -49,7 +51,11 @@ impl ReplayRun {
     /// Files are zero-filled; the jail path's components become the file name, so `/tmp/a.img` is `tmp_a.img`. The
     /// directory is new each run because the System VM's view of a share file that was removed and written again
     /// under the same name can be stale (a staged copy read 0 bytes).
-    pub fn prepare(&self, endpoint: &ControlEndpoint, files: &[(String, u64)]) -> Result<ReplaySession, String> {
+    /// Every case's microVM also gets a tap device for each of `taps`.
+    pub fn prepare(&self, endpoint: &ControlEndpoint, files: &[(String, u64)], taps: &[String]) -> Result<ReplaySession, String> {
+        if taps.len() > super::super::MAX_TAPS {
+            return Err(format!("{} taps exceed {}", taps.len(), super::super::MAX_TAPS));
+        }
         let control = connect(endpoint)?;
         let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
         let dir = self.share_dir.join(format!("replay-{stamp}"));
@@ -64,7 +70,7 @@ impl ReplayRun {
         if stages.len() + 2 > super::super::stage::MAX_STAGES {
             return Err(format!("{} files and the snapshot exceed {} stages", stages.len(), super::super::stage::MAX_STAGES));
         }
-        Ok(ReplaySession { control, dir, stages, snapshot_stages: Vec::new() })
+        Ok(ReplaySession { control, dir, stages, snapshot_stages: Vec::new(), taps: taps.to_vec() })
     }
 
     /// Runs `steps` (each must return 2xx) in a microVM `id`, copies the jail files `made` (state, memory) into the
@@ -108,7 +114,8 @@ impl ReplayRun {
         Ok(format!("{} steps, store {state} and {mem}, {} ms", steps.len(), started.elapsed().as_millis()))
     }
 
-    /// Runs one case: starts `vesperd --id ID` with the files (and the snapshot fixture if `snapshot`) staged, sends
+    /// Runs one case: starts `vesperd --id ID` with the files (and the snapshot fixture if `snapshot`) staged and the
+    /// session's taps, sends
     /// the steps, calls `after` with the responses while the microVM still runs, stops `vesperd` and waits for the jail to go.
     pub fn run_case(
         &self,
@@ -126,6 +133,10 @@ impl ReplayRun {
         for stage in session.stages.iter().chain(extra) {
             flags.push("--stage".to_string());
             flags.push(stage.clone());
+        }
+        for tap in &session.taps {
+            flags.push("--tap".to_string());
+            flags.push(tap.clone());
         }
         let socket = format!("{id}.sock");
         let (mut v, _line, _took) = self.vesperd.start_with(id, &socket, &flags)?;
