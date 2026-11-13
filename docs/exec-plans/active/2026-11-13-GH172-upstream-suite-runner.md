@@ -68,6 +68,21 @@ Either way, a new, unexplained failure turns the run red.
   name. The classes gained those tests, two new flaky classes with `max: 1` were added, and the comparator is green
   on the second run. The verdicts at the time are kept as `compare-at-run.*`. Against today's classes the first run
   still fails on its four uffd results, which is the harness gap above.
+- 2026-11-13: a second council review (of the fixes) found the SSB class still explained a report that also named
+  Meltdown, because SSB is always present on this host and a substring cannot exclude a second vulnerability; and
+  the collector cut messages at 2,000 characters, which hid the end of the host checker's report. Classes can now
+  list `vulnerable_allowed`: every CVE or `/sys/.../vulnerabilities` file a report names must be in it, and a
+  truncated message never matches. Messages keep 16,000 characters and end in `[truncated]` when cut. Both runs'
+  results were re-collected from their reports with the fixed collector; outcomes are unchanged.
+- 2026-11-13: the same review found the run lock let a second runner in before the first wrote its pid, and the
+  lock was left behind on an early exit. The lock is now a symlink made with `ln -s $$` (atomic, pid included) and
+  released by a trap set as soon as it is taken; a stale lock is reported, not taken over. 1 of 20 simultaneous
+  starters entered in a local test.
+- 2026-11-13: `test_invalid_bpf` failed with EXDEV in both runs because the framework hard-links
+  `tests/framework/vm_config.json` from the source volume into a jail on the `/srv` volume. That is a harness gap,
+  not an exception, so `/srv` now lives on the source volume's mount (a symlink in each test container).
+- 2026-11-13: the review also pointed out that judging run 2 green after editing the classes from run 2 is circular.
+  The classes are frozen for a third full run, which is the evidence the comparator works on an unseen run.
 
 ## Decision Log
 

@@ -11,8 +11,8 @@ class rate-limiter-balloon-tolerance: 8
 class upstream-platform-skip: 96
 class vmm-memory-overhead: 54
 classes that explained nothing in this run: balloon-stats-not-refreshed, vmclock-gen-counter-flag, vmm-exit-timeout-under-load, vsock-reset-after-snapshot
-UNMATCHED integration_tests/functional/test_uffd.py::test_malicious_handler[vmlinux-6.1.172-PCI_OFF] failed FileNotFoundError: [Errno 2] No such file or directory: '/binaries/examples/uffd_malicious_handler' | FileNotFoundError: [Errno 2] No such file or directory: '/binaries/examples/uffd_malicious_handler'
-UNMATCHED integration_tests/functional/test_uffd.py::test_malicious_handler[vmlinux-6.1.172-PCI_ON] failed FileNotFoundError: [Errno 2] No such file or directory: '/binaries/examples/uffd_malicious_handler' | FileNotFoundError: [Errno 2] No such file or directory: '/binaries/examples/uffd_malicious_handler'
-UNMATCHED integration_tests/functional/test_uffd.py::test_valid_handler[vmlinux-6.1.172-PCI_OFF] failed FileNotFoundError: [Errno 2] No such file or directory: '/binaries/examples/uffd_on_demand_handler' | FileNotFoundError: [Errno 2] No such file or directory: '/binaries/examples/uffd_on_demand_handler'
-UNMATCHED integration_tests/functional/test_uffd.py::test_valid_handler[vmlinux-6.1.172-PCI_ON] failed FileNotFoundError: [Errno 2] No such file or directory: '/binaries/examples/uffd_on_demand_handler' | FileNotFoundError: [Errno 2] No such file or directory: '/binaries/examples/uffd_on_demand_handler'
+UNMATCHED integration_tests/functional/test_uffd.py::test_malicious_handler[vmlinux-6.1.172-PCI_OFF] failed FileNotFoundError: [Errno 2] No such file or directory: '/binaries/examples/uffd_malicious_handler'
+UNMATCHED integration_tests/functional/test_uffd.py::test_malicious_handler[vmlinux-6.1.172-PCI_ON] failed FileNotFoundError: [Errno 2] No such file or directory: '/binaries/examples/uffd_malicious_handler'
+UNMATCHED integration_tests/functional/test_uffd.py::test_valid_handler[vmlinux-6.1.172-PCI_OFF] failed FileNotFoundError: [Errno 2] No such file or directory: '/binaries/examples/uffd_on_demand_handler'
+UNMATCHED integration_tests/functional/test_uffd.py::test_valid_handler[vmlinux-6.1.172-PCI_ON] failed FileNotFoundError: [Errno 2] No such file or directory: '/binaries/examples/uffd_on_demand_handler'
 upstream-compare: 4 result(s) match no exception class

@@ -108,8 +108,14 @@ pub struct Class {
     pub kind: ClassKind,
     /// Node-id patterns (`*` matches any run of characters); a test matches when any pattern does.
     pub nodeid: Vec<String>,
-    /// Message substrings: the message must contain one of them. Required, so that a class names a symptom, not a file.
+    /// Message substrings: the message must contain one of them, or match one of `message_glob`. One of the two is
+    /// required, so that a class names a symptom, not a file.
+    #[serde(default)]
     pub message: Vec<String>,
+    /// Whole-message patterns (`*` matches any run of characters), for a symptom whose only stable part is its shape,
+    /// such as `assert * > *`; a substring there would match most assertion failures in the test.
+    #[serde(default)]
+    pub message_glob: Vec<String>,
     /// Outcomes this class may explain.
     pub outcomes: Vec<String>,
     /// The most tests this class may explain in one run; more is a failure, not an explanation.
@@ -118,6 +124,11 @@ pub struct Class {
     /// The class's symptom does not appear in every run, so explaining nothing on a full run is not a failure.
     #[serde(default)]
     pub flaky: bool,
+    /// For a CPU vulnerability report: the vulnerabilities (CVE ids or `/sys/devices/system/cpu/vulnerabilities`
+    /// names) the class accepts. When set, the message must be complete, must report at least one vulnerability,
+    /// and every vulnerability it reports must be in this list, so a new one fails the run.
+    #[serde(default)]
+    pub vulnerable_allowed: Vec<String>,
     /// The compat exception or tech-debt row that tracks it (`CE-nnnn` or `TD-nnn`).
     pub tracked_by: String,
     pub reason: String,
@@ -137,11 +148,27 @@ impl ClassFile {
             if !seen.insert(c.id.as_str()) {
                 return Err(format!("class {} is listed twice", c.id));
             }
-            if c.nodeid.is_empty() || c.nodeid.iter().any(|p| p.trim().is_empty() || p.chars().all(|ch| ch == '*')) {
-                return Err(format!("class {}: nodeid needs non-blank patterns that name a test (not a bare *)", c.id));
+            // Each pattern names a test file under integration_tests/ and a test in it, so `*::*` cannot match everything.
+            let names_a_test = |p: &str| {
+                p.strip_prefix("integration_tests/")
+                    .and_then(|rest| rest.split_once("::"))
+                    .is_some_and(|(file, _)| file.ends_with(".py") && !file.contains('*'))
+            };
+            if c.nodeid.is_empty() || !c.nodeid.iter().all(|p| names_a_test(p)) {
+                return Err(format!(
+                    "class {}: every nodeid pattern must be integration_tests/<file>.py::<test>, with no * in the file",
+                    c.id
+                ));
             }
-            if c.message.is_empty() || c.message.iter().any(|m| m.trim().is_empty()) {
-                return Err(format!("class {}: message needs at least one non-blank substring", c.id));
+            let blank = |v: &Vec<String>| v.iter().any(|m| m.trim().is_empty() || m.chars().all(|ch| ch == '*' || ch == ' '));
+            if (c.message.is_empty() && c.message_glob.is_empty()) || blank(&c.message) || blank(&c.message_glob) {
+                return Err(format!("class {}: message or message_glob needs at least one non-blank symptom", c.id));
+            }
+            if c.max.is_none() {
+                return Err(format!("class {}: max is required, so a symptom that spreads fails the run", c.id));
+            }
+            if c.vulnerable_allowed.iter().any(|v| v.trim().is_empty()) {
+                return Err(format!("class {}: vulnerable_allowed entries must not be blank", c.id));
             }
             if c.max == Some(0) {
                 return Err(format!("class {}: max must be at least 1", c.id));
@@ -188,8 +215,52 @@ impl Class {
     pub fn matches(&self, nodeid: &str, r: &TestResult) -> bool {
         self.outcomes.iter().any(|o| *o == r.outcome)
             && self.nodeid.iter().any(|p| glob(p, nodeid))
-            && self.message.iter().any(|m| r.message.contains(m.as_str()))
+            && (self.message.iter().any(|m| r.message.contains(m.as_str()))
+                || self.message_glob.iter().any(|g| glob(g, &r.message)))
+            && (self.vulnerable_allowed.is_empty() || self.only_allowed_vulnerabilities(&r.message))
     }
+
+    fn only_allowed_vulnerabilities(&self, message: &str) -> bool {
+        if message.ends_with(TRUNCATED) {
+            return false;
+        }
+        let reported = reported_vulnerabilities(message);
+        !reported.is_empty() && reported.iter().all(|v| self.vulnerable_allowed.iter().any(|a| a == v))
+    }
+}
+
+/// The suffix `collect.py` adds to a message it had to shorten.
+pub const TRUNCATED: &str = "[truncated]";
+
+/// The vulnerabilities a CPU vulnerability report names: each CVE whose JSON entry (spectre-meltdown-checker
+/// `--batch json`) says `"VULNERABLE": true`, and each file under `/sys/devices/system/cpu/vulnerabilities/` it lists
+/// (the upstream tests list only the files that say `Vulnerable`).
+pub fn reported_vulnerabilities(message: &str) -> std::collections::BTreeSet<String> {
+    let mut out = std::collections::BTreeSet::new();
+    let squeezed: String = message.chars().filter(|c| !c.is_whitespace()).collect();
+    let mut at = 0;
+    while let Some(i) = squeezed[at..].find("\"VULNERABLE\":true") {
+        let end = at + i;
+        // The CVE must be in the same JSON entry; an entry without one is reported as such, and no class allows it.
+        let id = squeezed[..end]
+            .rfind("\"CVE\":\"")
+            .filter(|c| !squeezed[*c..end].contains('}'))
+            .map(|c| squeezed[c + 7..].chars().take_while(|ch| *ch != '"').collect::<String>())
+            .filter(|id| !id.is_empty());
+        out.insert(id.unwrap_or_else(|| "<a vulnerable entry with no CVE>".into()));
+        at = end + 1;
+    }
+    const SYS: &str = "/sys/devices/system/cpu/vulnerabilities/";
+    let mut at = 0;
+    while let Some(i) = message[at..].find(SYS) {
+        let start = at + i + SYS.len();
+        let name: String = message[start..].chars().take_while(|ch| ch.is_ascii_alphanumeric() || *ch == '_').collect();
+        if !name.is_empty() {
+            out.insert(name);
+        }
+        at = start;
+    }
+    out
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
@@ -258,6 +329,9 @@ impl Comparison {
             f.push(format!("class {} explained {} tests, more than its max of {}", o.class, o.matched, o.max));
         }
         if let Some(m) = &self.meta {
+            if m.exitcode.is_none() {
+                f.push("pytest's exit code is unknown: the run was stopped before pytest finished".to_string());
+            }
             if let Some(code) = m.exitcode.filter(|c| !matches!(c, 0 | 1)) {
                 f.push(format!("pytest exited {code} (interrupted, internal error, usage error or nothing collected)"));
             }
@@ -317,7 +391,7 @@ pub fn compare(
             None => out.unmatched.push(Unmatched {
                 nodeid: nodeid.clone(),
                 outcome: r.outcome.clone(),
-                message: r.message.chars().take(300).collect(),
+                message: head_and_tail(&r.message, 200, 200),
             }),
         }
     }
@@ -330,11 +404,24 @@ pub fn compare(
         if let Some(max) = c.max.filter(|m| n > *m) {
             out.over_max.push(OverMax { class: c.id.clone(), matched: n, max });
         }
-        if n == 0 && !c.flaky {
+        // With a reference, a class may explain nothing because the reference exempts its tests; that is not stale.
+        if n == 0 && !c.flaky && reference.is_none() {
             out.stale_required.push(c.id.clone());
         }
     }
     out
+}
+
+/// The first `head` and last `tail` characters of `s`, joined by ` … ` when the middle is dropped: the symptom of a
+/// long message is often at its end (an SSH command's stderr).
+fn head_and_tail(s: &str, head: usize, tail: usize) -> String {
+    let n = s.chars().count();
+    if n <= head + tail {
+        return s.to_string();
+    }
+    let h: String = s.chars().take(head).collect();
+    let t: String = s.chars().skip(n - tail).collect();
+    format!("{h} … {t}")
 }
 
 #[cfg(test)]
@@ -343,6 +430,40 @@ mod tests {
 
     fn r(outcome: &str, message: &str) -> TestResult {
         TestResult { outcome: outcome.into(), message: message.into() }
+    }
+
+    #[test]
+    fn a_vulnerability_class_rejects_one_it_does_not_allow_and_a_truncated_report() {
+        let yaml = r#"
+version: 1
+classes:
+  - id: ssb
+    kind: environment
+    nodeid: ["integration_tests/security/test_vulnerabilities.py::*"]
+    message: ["spec_store_bypass", "CVE-2018-3639"]
+    outcomes: [failed]
+    max: 10
+    vulnerable_allowed: [spec_store_bypass, CVE-2018-3639, CVE-2018-3640]
+    tracked_by: CE-0001
+    reason: Apple CPU
+"#;
+        let c: ClassFile = serde_yaml::from_str(yaml).unwrap();
+        c.validate().unwrap();
+        let ssb = &c.classes[0];
+        let n = "integration_tests/security/test_vulnerabilities.py::t";
+        let host = r#"stdout: [{"NAME":"MELTDOWN","CVE":"CVE-2017-5754","VULNERABLE":false},{"NAME":"VARIANT 4","CVE":"CVE-2018-3639","VULNERABLE":true}]"#;
+        assert!(ssb.matches(n, &r("failed", host)));
+        let guest = r#"assert {'{"NAME": "VARIANT 3A", "CVE": "CVE-2018-3640", "VULNERABLE": true}', '{"CVE": "CVE-2018-3639", ' + '"VULNERABLE": true}'} == set()"#;
+        assert!(ssb.matches(n, &r("failed", guest)));
+        assert!(ssb.matches(n, &r("failed", "/sys/devices/system/cpu/vulnerabilities/spec_store_bypass:Vulnerable")));
+        let meltdown = host.replace(r#""CVE-2017-5754","VULNERABLE":false"#, r#""CVE-2017-5754","VULNERABLE":true"#);
+        assert!(!ssb.matches(n, &r("failed", &meltdown)), "an extra vulnerability must not be explained");
+        let two_files = "/sys/devices/system/cpu/vulnerabilities/spec_store_bypass:Vulnerable\n/sys/devices/system/cpu/vulnerabilities/meltdown:Vulnerable";
+        assert!(!ssb.matches(n, &r("failed", two_files)));
+        assert!(!ssb.matches(n, &r("failed", &format!("{host} {TRUNCATED}"))), "a truncated report proves nothing");
+        assert!(!ssb.matches(n, &r("failed", "spec_store_bypass mentioned, nothing reported")));
+        let no_cve = host.replace(r#"}]"#, r#"},{"NAME":"NEW","VULNERABLE":true}]"#);
+        assert!(!ssb.matches(n, &r("failed", &no_cve)), "an entry without a CVE must not borrow the previous one's");
     }
 
     fn classes() -> ClassFile {
@@ -359,9 +480,10 @@ classes:
     reason: no CONFIG_USERFAULTFD
   - id: x86-only
     kind: skip
-    nodeid: ["*test_cpu_template*"]
+    nodeid: ["integration_tests/functional/test_cpu_template_helper.py::*"]
     message: ["x86"]
     outcomes: [skipped]
+    max: 5
     flaky: true
     tracked_by: CE-0001
     reason: x86-only
@@ -390,7 +512,7 @@ classes:
         let mut res = Results::new();
         res.insert("integration_tests/functional/test_uffd.py::test_a".into(), r("failed", "UFFD object: System error"));
         res.insert("integration_tests/functional/test_api.py::test_b".into(), r("passed", ""));
-        res.insert("integration_tests/functional/test_cpu_template.py::t".into(), r("skipped", "x86"));
+        res.insert("integration_tests/functional/test_cpu_template_helper.py::t".into(), r("skipped", "x86"));
         let c = full(&res);
         assert!(c.ok(), "{:?}", c.failures());
         assert_eq!((c.passed, c.per_class["no-uffd"], c.per_class["x86-only"]), (1, 1, 1));
@@ -435,9 +557,65 @@ classes:
             Some(RunMeta { exitcode: code, collection_errors: errs.iter().map(|e| e.to_string()).collect() })
         };
         assert!(compare(&res, None, &classes(), meta(Some(1), &[]), false).ok());
-        assert!(compare(&res, None, &classes(), meta(None, &[]), false).ok());
+        // A stopped run has no pytest verdict, and that fails it.
+        let stopped = compare(&res, None, &classes(), meta(None, &[]), false);
+        assert!(stopped.failures().iter().any(|f| f.contains("exit code is unknown")), "{:?}", stopped.failures());
         assert!(!compare(&res, None, &classes(), meta(Some(3), &[]), false).ok());
         assert!(!compare(&res, None, &classes(), meta(Some(1), &["integration_tests/functional/test_x.py"]), false).ok());
+    }
+
+    #[test]
+    fn a_message_glob_matches_the_whole_message_and_validation_refuses_catch_alls() {
+        let yaml = r#"
+version: 1
+classes:
+  - id: tolerance
+    kind: unexplained
+    nodeid: ["integration_tests/functional/test_balloon.py::test_hinting_reporting_snapshot*"]
+    message_glob: ["assert * > *"]
+    outcomes: [failed]
+    max: 4
+    tracked_by: CE-0001
+    reason: timing
+"#;
+        let c: ClassFile = serde_yaml::from_str(yaml).unwrap();
+        c.validate().unwrap();
+        let n = "integration_tests/functional/test_balloon.py::test_hinting_reporting_snapshot[x]";
+        assert!(c.classes[0].matches(n, &r("failed", "assert 187840 > 192048")));
+        assert!(!c.classes[0].matches(n, &r("failed", "AssertionError: assert 1 == 0")), "the shape, not any assertion");
+        for (field, bad) in [
+            ("nodeid", r#"["*::*"]"#),
+            ("nodeid", r#"["integration_tests/*.py::t"]"#),
+            ("nodeid", r#"["tests/test_x.py::t"]"#),
+            ("message_glob", r#"["* *"]"#),
+        ] {
+            let mut v: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
+            v["classes"][0][field] = serde_yaml::from_str(bad).unwrap();
+            let c: ClassFile = serde_yaml::from_value(v).unwrap();
+            assert!(c.validate().is_err(), "{field} = {bad} must be refused");
+        }
+        let mut v: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
+        v["classes"][0].as_mapping_mut().unwrap().remove("max");
+        let c: ClassFile = serde_yaml::from_value(v).unwrap();
+        assert!(c.validate().unwrap_err().contains("max is required"));
+    }
+
+    #[test]
+    fn a_class_whose_tests_the_reference_exempts_is_not_stale() {
+        let mut res = Results::new();
+        res.insert("integration_tests/functional/test_uffd.py::a".into(), r("failed", "UFFD object"));
+        let reference = res.clone();
+        let c = compare(&res, Some(&reference), &classes(), Some(RunMeta { exitcode: Some(1), ..RunMeta::default() }), false);
+        assert_eq!(c.per_class["no-uffd"], 0);
+        assert!(c.stale_required.is_empty() && c.ok(), "{:?}", c.failures());
+    }
+
+    #[test]
+    fn an_unmatched_message_keeps_its_head_and_its_tail() {
+        let long = format!("Command: ssh {} stderr: Connection timed out", "x".repeat(1000));
+        let m = head_and_tail(&long, 200, 200);
+        assert!(m.starts_with("Command: ssh") && m.ends_with("stderr: Connection timed out") && m.contains(" … "));
+        assert_eq!(head_and_tail("short", 200, 200), "short");
     }
 
     #[test]

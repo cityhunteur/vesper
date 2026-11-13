@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Turn pytest-json-report files into the results file `baselinectl --mode upstream-compare` reads (GH #172).
 
-Usage: python3 -I collect.py OUT.json --collected COLLECTED.txt [--meta META.json] [--log PYTEST.log] [REPORT.json ...]
+Usage: python3 -I collect.py OUT.json --collected COLLECTED.txt [--meta META.json] [--exitcode N] [--log PYTEST.log]
+           [REPORT.json ...]
        python3 -I collect.py --self-test
 
 OUT.json is {nodeid: {"outcome": ..., "message": ...}}. The outcome is the worst phase: a failure in setup or teardown
@@ -20,16 +21,30 @@ import json
 import sys
 
 
+MAX_MESSAGE = 16000
+CHAIN = ("During handling of the above exception", "The above exception was the direct cause")
+
+
 def phase_message(p):
     crash = p.get("crash") or {}
     longrepr = p.get("longrepr") or ""
     if not isinstance(longrepr, str):
         longrepr = str(longrepr)
     first = crash.get("message") or ""
+    # pytest's crash message is the last exception of a chain; the symptom is the first one, before "During handling
+    # of the above exception" or "The above exception was the direct cause".
+    chain = [m for m in CHAIN if m in longrepr]
+    if chain:
+        head = longrepr.split(min(chain, key=longrepr.index), 1)[0]
+        e_lines = [l.strip()[2:].strip() for l in head.splitlines() if l.strip().startswith("E ")]
+        if e_lines:
+            first = " ".join(e_lines)
     if not first:
         e_lines = [l.strip()[2:].strip() for l in longrepr.splitlines() if l.strip().startswith("E ")]
         first = e_lines[0] if e_lines else (longrepr.strip().splitlines()[-1] if longrepr.strip() else "")
-    return " ".join(first.split())[:2000]
+    msg = " ".join(first.split())
+    # The comparator refuses a vulnerability class on a shortened message, so the marker must stay last.
+    return msg if len(msg) <= MAX_MESSAGE else msg[:MAX_MESSAGE] + " [truncated]"
 
 
 def result(test):
@@ -85,9 +100,16 @@ def self_test():
     # Only the primary exception: the chained one is dropped.
     r = result({"outcome": "failed", "call": crash("AssertionError: x")})
     assert r == {"outcome": "failed", "message": "AssertionError: x"}, r
+    chained = {"outcome": "failed", "crash": {"message": "RuntimeError: cleanup"},
+               "longrepr": "E   ValueError: first\nE   more\n\nDuring handling of the above exception, another exception occurred:\n\nE   RuntimeError: cleanup"}
+    r = result({"outcome": "failed", "call": chained})
+    assert r == {"outcome": "failed", "message": "ValueError: first more"}, r
     # A worker crash (the `???` phase) fails the test and gives its message.
     r = result({"outcome": "passed", "setup": ok("passed"), "???": {"outcome": "failed", "longrepr": "[gw1] linux\nworker 'gw1' crashed while running 't'"}})
     assert r == {"outcome": "failed", "message": "worker 'gw1' crashed while running 't'"}, r
+    # A long message is cut with a marker the comparator can see, never silently.
+    r = result({"outcome": "failed", "call": crash("x" * (MAX_MESSAGE + 5))})
+    assert r["message"].endswith(" [truncated]") and len(r["message"]) == MAX_MESSAGE + len(" [truncated]"), len(r["message"])
     # Node ids with spaces survive the progress log.
     m = PROGRESS.match("[gw0] [ 92%] FAILED a.py::t[x-1000.0 KB/sec] ")
     assert m and m.group(2) == "a.py::t[x-1000.0 KB/sec]", m
@@ -105,6 +127,9 @@ def main(argv):
     log = meta_path = None
     if rest[:1] == ["--meta"]:
         meta_path, rest = rest[1], rest[2:]
+    exitcode = None
+    if rest[:1] == ["--exitcode"]:
+        exitcode, rest = int(rest[1]), rest[2:]
     if rest[:1] == ["--log"]:
         log, rest = rest[1], rest[2:]
     reports = rest
@@ -118,6 +143,10 @@ def main(argv):
         run_meta = meta(report)
         for test in report.get("tests", []):
             results[test["nodeid"]] = result(test)
+    # The report's exit status is pytest's own; without a report (a stopped run) the container's status stands in,
+    # so the comparator never sees an unknown status from a run that did end.
+    if run_meta["exitcode"] is None and exitcode is not None:
+        run_meta["exitcode"] = exitcode
     if meta_path:
         with open(meta_path, "w") as f:
             json.dump(run_meta, f)

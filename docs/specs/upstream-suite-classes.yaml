@@ -34,21 +34,23 @@ classes:
              "integration_tests/security/test_vulnerabilities.py::test_spectre_meltdown_checker_on_host",
              "integration_tests/security/test_vulnerabilities.py::test_vulnerabilities_on_host"]
     message: ["spec_store_bypass", "CVE-2018-3639"]
+    # Every vulnerability a report names must be one of these; a new one (Meltdown, say) fails the run.
+    vulnerable_allowed: [spec_store_bypass, CVE-2018-3639, CVE-2018-3640, CVE-2018-3615]
     outcomes: [failed, error]
     max: 10
     tracked_by: CE-0001
     reason: >-
       the Apple CPU reports spec_store_bypass (Spectre variant 4, CVE-2018-3639) Vulnerable on the host and in the
-      guest; the host checker also lists variant 3a and L1TF SGX, which a substring cannot exclude, so max caps the
-      count
+      guest; the checkers also report variant 3a (CVE-2018-3640) and L1TF SGX (CVE-2018-3615), and vulnerable_allowed
+      fails any report that names another
   - id: apple-cpu-features-unknown
     kind: test-assumption
     nodeid: ["integration_tests/functional/test_cpu_features_aarch64.py::test_guest_cpu_features*"]
-    message: ["AssertionError: assert {'"]
+    message: ["} == set() Extra items in the left set"]
     outcomes: [failed, error]
     max: 8
     tracked_by: CE-0001
-    reason: expected guest CPU features are keyed on Neoverse N1, V1 and V2; an Apple M3 is "Unknown"
+    reason: expected guest CPU features are keyed on Neoverse N1, V1 and V2; an Apple M3 is "Unknown", so the expected set is empty
   - id: no-dmi
     kind: environment
     nodeid: ["integration_tests/functional/test_cpu_template_helper.py::test_consecutive_fingerprint_consistency"]
@@ -111,7 +113,9 @@ classes:
              "integration_tests/functional/test_balloon.py::test_reinflate_balloon*",
              "integration_tests/functional/test_balloon.py::test_hinting_reporting_snapshot*",
              "integration_tests/functional/test_rng.py::test_rng_bw_rate_limiter*"]
-    message: ["timed out after 100 seconds", "assert 1", "assert 2"]
+    message: ["timed out after 100 seconds", "expected under 80000 due to rate limiting"]
+    # The balloon hinting and reporting checks fail as a bare comparison of two numbers.
+    message_glob: ["assert * > *"]
     outcomes: [failed, error]
     max: 12
     flaky: true
@@ -122,8 +126,8 @@ classes:
   - id: vsock-reset-after-snapshot
     kind: unexplained
     nodeid: ["integration_tests/functional/test_vsock.py::test_vsock_transport_reset_g2h*"]
-    message: ["assert 0 == 1", "no result: the run stopped", "crashed while running"]
-    outcomes: [failed, error, hung]
+    message: ["assert 0 == 1", "crashed while running"]
+    outcomes: [failed, error]
     max: 3
     flaky: true
     tracked_by: CE-0001
@@ -144,7 +148,7 @@ classes:
   - id: balloon-stats-not-refreshed
     kind: unexplained
     nodeid: ["integration_tests/functional/test_balloon.py::test_stats_update*"]
-    message: [" != "]
+    message_glob: ["assert * != *"]
     outcomes: [failed]
     max: 1
     flaky: true

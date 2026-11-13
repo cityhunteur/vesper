@@ -13,7 +13,7 @@
 # tools/test.sh in the pinned container with a per-test timeout that kills a hung worker (--timeout-method=thread)
 # and a wall-clock watchdog; collect {nodeid: outcome}; wipe /srv; restore the previous launch config and restart;
 # compare (baselinectl --mode upstream-compare, which also fails on pytest's own errors). Exit status is the
-# comparator's. One run at a time: build/upstream-suite/run.lock holds the runner's pid.
+# comparator's. One run at a time: build/upstream-suite/runner.lock is a symlink to the runner's pid.
 #
 # Environment: UPSTREAM_WALL_S (default 14400) stops the run; UPSTREAM_MIN_FREE_GB (45) is the data-disk space it
 # needs (the GH #166 trial's /srv peaked at 42 GB apparent, mostly sparse, on the default 64 GiB disk); UPSTREAM_CPUS (4) and UPSTREAM_MEMORY_MIB (8192) size
@@ -40,21 +40,36 @@ CLEAN=0
 if [ "${1:-}" = --clean ]; then CLEAN=1; shift; fi
 for a in "$@"; do case "$a" in -*) echo "a selection is node ids or paths, not pytest options: $a" >&2; exit 2 ;; esac; done
 mkdir -p "$B"
-LOCK="$B/run.lock"
-if ! mkdir "$LOCK" 2>/dev/null; then
-  holder="$(cat "$LOCK/pid" 2>/dev/null || true)"
-  if [ -n "$holder" ] && kill -0 "$holder" 2>/dev/null; then echo "another run (pid $holder) holds $LOCK" >&2; exit 2; fi
-  echo "taking over $LOCK from a run that is gone (pid ${holder:-unknown})" >&2
+# The lock is a symlink to the runner's pid: `ln -s` creates it and records the pid in one atomic step. A lock whose
+# runner is gone is not taken over, since two runners could both decide to take it; the message says how to clear it.
+LOCK="$B/runner.lock"
+if ! ln -s "$$" "$LOCK" 2>/dev/null; then
+  holder="$(readlink "$LOCK" 2>/dev/null || true)"
+  if [ -n "$holder" ] && kill -0 "$holder" 2>/dev/null; then echo "another run (pid $holder) holds $LOCK" >&2
+  else echo "$LOCK names pid ${holder:-?}, which is not running; if no run is in progress, rm $LOCK and retry" >&2; fi
+  exit 2
 fi
-echo $$ > "$LOCK/pid"
+release_lock() { [ "$(readlink "$LOCK" 2>/dev/null)" = "$$" ] && rm -f "$LOCK"; true; }
+trap release_lock EXIT
 mkdir -p "$OUT"
-exec > >(tee -a "$OUT/runner.log") 2>&1
+# tee ignores INT and TERM, so a Ctrl-C cannot kill it and turn restore's next line into a SIGPIPE.
+exec > >(trap '' INT TERM; exec tee -a "$OUT/runner.log") 2>&1
 say() { echo "[upstream-suite $(date -u +%H:%M:%S)] $*"; }
 # step NAME LOG CMD...: run a step whose output goes to LOG, and on failure say which step failed and show its tail.
 step() {
   local name=$1 log=$2; shift 2
   "$@" > "$log" 2>&1 && return 0
   say "step failed: $name (exit $?); last lines of ${log#"$ROOT"/}:"; tail -20 "$log"; exit 2
+}
+
+# with_timeout SECS CMD...: macOS has no timeout(1); kill CMD if it outlives SECS.
+with_timeout() {
+  local secs=$1; shift
+  "$@" & local pid=$!
+  ( sleep "$secs" && kill "$pid" 2>/dev/null ) & local dog=$!
+  wait "$pid"; local rc=$?
+  kill "$dog" 2>/dev/null; wait "$dog" 2>/dev/null
+  return "$rc"
 }
 
 eval "$(cargo run -q --bin baselinectl -- --mode upstream-pins)"
@@ -146,14 +161,27 @@ say "release binaries: $(cd "$REL/bin" && ls | tr '\n' ' ')"
 # is used only while the live config is still the one written here, so a config regenerated since (for example by
 # make systemvm-up-snapshot) is never overwritten by a stale backup.
 sha() { shasum -a 256 "$1" 2>/dev/null | cut -d' ' -f1; }
+# The tests' /srv lives on the source volume (see "run" below); wipe it and the test results, if the volume exists.
+wipe_srv() {
+  docker volume inspect "$SRC_VOL" >/dev/null 2>&1 || return 0
+  docker run --rm -v "$SRC_VOL":/f "$HELPER_IMAGE" rm -rf /f/build/srv /f/test_results
+}
 restore() {
   rc=$?
-  trap '' INT TERM
+  trap '' INT TERM PIPE
   set +e
   docker rm -f "$NAME" >/dev/null 2>&1
   docker volume rm -f "$SRV_VOL" >/dev/null 2>&1
+  wipe_srv
   if [ "${UPSTREAM_KEEP_SIZE:-0}" != 1 ] && [ -f "$SAVED" ]; then
-    if [ "$(sha "$CFG")" != "$(cat "$SAVED.resized" 2>/dev/null)" ]; then
+    live="$(sha "$CFG")"
+    if [ "$live" = "$(sha "$SAVED")" ]; then
+      # The resize never replaced the config (an exit before it), but the System VM may be down: bring it back.
+      say "the launch config is unchanged; restart the System VM with it"
+      make -s docker-down >/dev/null 2>&1; make -s systemvm-down >/dev/null 2>&1
+      if make -s systemvm-up >/dev/null 2>&1 && make -s docker-up >/dev/null 2>&1; then rm -f "$SAVED" "$SAVED.resized"
+      else say "restart failed: run make systemvm-up docker-up (the saved config is in ${SAVED#"$ROOT"/})"; fi
+    elif [ "$live" != "$(cat "$SAVED.resized" 2>/dev/null)" ]; then
       say "the launch config changed during the run; keeping it and discarding the saved copy"
       rm -f "$SAVED" "$SAVED.resized"
     else
@@ -168,7 +196,7 @@ restore() {
       fi
     fi
   fi
-  rm -rf "${LOCK:?}"
+  release_lock
   exit "$rc"
 }
 trap restore EXIT
@@ -181,8 +209,11 @@ if [ "${UPSTREAM_KEEP_SIZE:-0}" != 1 ]; then
   fi
   [ -f "$SAVED" ] || cp "$CFG" "$SAVED"
   say "restart the System VM with ${UPSTREAM_CPUS:-4} vCPUs, ${UPSTREAM_MEMORY_MIB:-8192} MiB and $B shared"
-  make -s docker-down >/dev/null 2>&1 || true; make -s systemvm-down >/dev/null 2>&1 || true
-  python3 -I - "$SAVED" "$CFG" "$B" "${UPSTREAM_CPUS:-4}" "${UPSTREAM_MEMORY_MIB:-8192}" <<'PY'
+  make -s docker-down >/dev/null 2>&1 || true
+  make -s systemvm-down >/dev/null 2>&1 || { say "systemvm-down failed; the run needs a resized System VM"; exit 2; }
+  # Write the resized config beside the live one and record its hash before it replaces the live one, so restore
+  # can always tell which config is live.
+  python3 -I - "$SAVED" "$CFG.new" "$B" "${UPSTREAM_CPUS:-4}" "${UPSTREAM_MEMORY_MIB:-8192}" <<'PY'
 import json, sys
 src, dst, share, cpus, mem = sys.argv[1:6]
 c = json.load(open(src))
@@ -194,12 +225,13 @@ for i, s in enumerate(shares):
 c["shared_directories"] = shares
 json.dump(c, open(dst, "w"), indent=2)
 PY
-  sha "$CFG" > "$SAVED.resized"
+  sha "$CFG.new" > "$SAVED.resized"
+  mv "$CFG.new" "$CFG"
   make -s systemvm-up && make -s docker-up
 fi
 docker info >/dev/null || { say "the System VM's Docker is not reachable at $DOCKER_HOST"; exit 2; }
-docker pull -q "$HELPER_IMAGE" >/dev/null
 if [ "$CLEAN" = 1 ]; then docker volume rm -f "$SRC_VOL" "$CARGO_VOL" >/dev/null; fi
+with_timeout 600 docker pull -q "$HELPER_IMAGE" >/dev/null || { say "pull of $HELPER_IMAGE failed or took over 600 s"; exit 2; }
 FREE_GB="$(docker run --rm -v "$SRC_VOL":/v "$HELPER_IMAGE" df -Pk /v | awk 'NR==2 {print int($4 / 1048576)}')"
 MIN_GB="${UPSTREAM_MIN_FREE_GB:-45}"
 [ "$FREE_GB" -ge "$MIN_GB" ] || { say "the data disk has ${FREE_GB} GB free; the run needs $MIN_GB (UPSTREAM_MIN_FREE_GB)"; exit 2; }
@@ -207,9 +239,11 @@ docker run --rm --privileged --pid=host "$HELPER_IMAGE" nsenter -t 1 -m -u -n -i
 say "tun loaded; data disk ${FREE_GB} GB free"
 
 # --- stage -------------------------------------------------------------------------------------------------------
-docker pull -q "$CONTAINER" >/dev/null || { say "pull failed; retrying once"; docker pull -q "$CONTAINER" >/dev/null; }
+with_timeout 1800 docker pull -q "$CONTAINER" >/dev/null || { say "pull failed; retrying once"
+  with_timeout 1800 docker pull -q "$CONTAINER" >/dev/null || { say "pull of $CONTAINER failed"; exit 2; }; }
 say "stage the tree into $SRC_VOL"
-docker run --rm -v "$TREE":/src:ro -v "$SRC_VOL":/firecracker "$HELPER_IMAGE" sh -c '
+step stage "$OUT/stage.log" \
+  docker run --rm -v "$TREE":/src:ro -v "$SRC_VOL":/firecracker "$HELPER_IMAGE" timeout 1800 sh -c '
   # Keep only build/cargo_target (the examples cache); setup-ci-artifacts.sh must start from the raw artefacts.
   cd /firecracker && find . -mindepth 1 -maxdepth 1 ! -name build -exec rm -rf {} + && mkdir -p build
   find build -mindepth 1 -maxdepth 1 ! -name cargo_target -exec rm -rf {} +
@@ -235,29 +269,32 @@ say "staged: $(cat "$OUT/staged-tools.txt")"
 RES="$B/results/$STAMP"
 mkdir -p "$RES"
 common=(--privileged --security-opt seccomp=unconfined --ulimit core=0 --ulimit nofile=4096:4096
-  --ulimit memlock=-1:-1 --volume /dev:/dev --volume "$SRC_VOL":/firecracker --volume "$SRV_VOL":/srv
+  --ulimit memlock=-1:-1 --volume /dev:/dev --volume "$SRC_VOL":/firecracker
   --volume "$RES":/results -v /boot:/boot --env PYTHONDONTWRITEBYTECODE=1
   --workdir /firecracker)
 say "collect the selection"
-# The --binary-dir holds the release binaries and the examples built above (test_uffd.py runs
-# <binary-dir>/examples/uffd_*_handler). The framework hard-links them into each jail under /srv, so they are copied
-# onto the /srv volume: a hard link from the source volume fails with EXDEV. Collection errors are judged from the
-# run's own report.
+# The framework hard-links files into each jail under /srv: the binaries and uffd examples from --binary-dir, and
+# tests/framework files such as vm_config.json (test_invalid_bpf). link(2) fails with EXDEV across mounts, so /srv
+# must be on the source volume's mount: each test container replaces /srv with a symlink to /firecracker/build/srv.
+# The binaries are still copied under /srv, as the tests expect. Collection errors are judged from the run's report.
+SRVDIR=/firecracker/build/srv
+INSRV=(sh -c "rm -rf /srv && mkdir -p $SRVDIR && ln -s $SRVDIR /srv && exec \"\$@\"" sh)
 BIN=/srv/binaries
 docker volume rm -f "$SRV_VOL" >/dev/null 2>&1 || true
-docker run --rm -v "$SRC_VOL":/firecracker:ro -v "$SRV_VOL":/srv "$HELPER_IMAGE" sh -c "
-  set -e; t=/firecracker/$TARGET; mkdir -p $BIN/examples
-  for f in \$t/*; do if [ -f \"\$f\" ]; then cp \"\$f\" $BIN/; fi; done
-  for f in \$t/examples/*; do if [ -f \"\$f\" ] && [ -x \"\$f\" ]; then cp \"\$f\" $BIN/examples/; fi; done
-  ls $BIN $BIN/examples | tr '\n' ' '" > "$OUT/binaries.txt"
-docker run --rm "${common[@]}" "$CONTAINER" timeout 900 ./tools/test.sh --binary-dir "$BIN" --collect-only -qqq \
+wipe_srv
+docker run --rm -v "$SRC_VOL":/firecracker "$HELPER_IMAGE" sh -c "
+  set -e; t=/firecracker/$TARGET; BIN=$SRVDIR/binaries; mkdir -p \$BIN/examples
+  for f in \$t/*; do if [ -f \"\$f\" ]; then cp \"\$f\" \$BIN/; fi; done
+  for f in \$t/examples/*; do if [ -f \"\$f\" ] && [ -x \"\$f\" ]; then cp \"\$f\" \$BIN/examples/; fi; done
+  ls \$BIN \$BIN/examples | tr '\n' ' '" > "$OUT/binaries.txt"
+docker run --rm "${common[@]}" "$CONTAINER" "${INSRV[@]}" timeout 900 ./tools/test.sh --binary-dir "$BIN" --collect-only -qqq \
   -p no:cacheprovider -- "${SELECTION[@]}" > "$OUT/collected.txt" 2>&1 || true
 COLLECTED="$(grep -c '::' "$OUT/collected.txt" || true)"
 [ "$COLLECTED" -gt 0 ] || { say "collected no tests (see collected.txt)"; exit 2; }
 say "run $COLLECTED tests with $WORKERS workers, ${TEST_TIMEOUT_S} s per test, ${WALL_S} s in all"
 docker rm -f "$NAME" >/dev/null 2>&1 || true
 START=$(date +%s)
-docker run -d --name "$NAME" "${common[@]}" "$CONTAINER" ./tools/test.sh --binary-dir "$BIN" -rA \
+docker run -d --name "$NAME" "${common[@]}" "$CONTAINER" "${INSRV[@]}" ./tools/test.sh --binary-dir "$BIN" -rA \
   -n "$WORKERS" --dist worksteal --timeout "$TEST_TIMEOUT_S" --timeout-method=thread \
   --junitxml=/results/junit.xml --json-report-file=/results/report.json -- "${SELECTION[@]}" >/dev/null
 STOPPED=""
@@ -267,7 +304,7 @@ while [ "$(docker inspect -f '{{.State.Running}}' "$NAME" 2>/dev/null)" = true ]
   fi
   sleep 30
 done
-RC="$(docker wait "$NAME" 2>/dev/null || echo 255)"
+RC="$(with_timeout 300 docker wait "$NAME" 2>/dev/null || echo 255)"
 # A full run's log is hundreds of MB (tracebacks print every local), so it is written compressed.
 docker logs "$NAME" 2>&1 | gzip -6 > "$OUT/pytest.log.gz"
 docker rm "$NAME" >/dev/null
@@ -280,21 +317,23 @@ echo "rc=$RC wall_s=$(( $(date +%s) - START )) collected=$COLLECTED stopped=${ST
 { gzip -dc "$OUT/pytest.log.gz" | grep -E '^\[gw[0-9]+\] |^replacing crashed|^worker .* crashed'
   gzip -dc "$OUT/pytest.log.gz" | awk '/short test summary info/{f=1} f'; } > "$OUT/pytest-progress.log" || true
 if [ -s "$RES/report.json" ]; then
-  python3 -I "$HERE/collect.py" "$OUT/results.json" --collected "$OUT/collected.txt" --meta "$OUT/meta.json" "$RES/report.json"
+  python3 -I "$HERE/collect.py" "$OUT/results.json" --collected "$OUT/collected.txt" --meta "$OUT/meta.json" \
+    --exitcode "$RC" "$RES/report.json"
   gzip -c "$RES/report.json" > "$OUT/report.json.gz"
 else
   say "no JSON report (the run was stopped); recovering finished tests from the progress log"
   python3 -I "$HERE/collect.py" "$OUT/results.json" --collected "$OUT/collected.txt" --meta "$OUT/meta.json" \
-    --log "$OUT/pytest-progress.log"
+    --exitcode "$RC" --log "$OUT/pytest-progress.log"
 fi
 rm -rf "${RES:?}"
-docker volume rm -f "$SRV_VOL" >/dev/null
-docker run --rm -v "$SRC_VOL":/f "$HELPER_IMAGE" rm -rf /f/test_results
+wipe_srv
 say "wiped /srv and the test results in $SRC_VOL"
 set +e
 cargo run -q --bin baselinectl -- --mode upstream-compare --results "$OUT/results.json" \
-  --meta "$OUT/meta.json" ${PARTIAL[@]+"${PARTIAL[@]}"} --report "$OUT/compare.json" | tee "$OUT/compare.txt"
+  --meta "$OUT/meta.json" ${PARTIAL[@]+"${PARTIAL[@]}"} --report "$OUT/compare.json" 2>&1 | tee "$OUT/compare.txt"
 CMP=${PIPESTATUS[0]}
 set -e
 say "evidence in ${OUT#"$ROOT"/}"
+# A stopped run fails even if every finished test is explained: the tests it never reached prove nothing.
+if [ -n "$STOPPED" ]; then say "the run was stopped ($STOPPED): failing it"; exit 2; fi
 exit "$CMP"

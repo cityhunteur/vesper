@@ -28,22 +28,22 @@
     {
       "nodeid": "integration_tests/functional/test_uffd.py::test_malicious_handler[vmlinux-6.1.172-PCI_OFF]",
       "outcome": "failed",
-      "message": "FileNotFoundError: [Errno 2] No such file or directory: '/binaries/examples/uffd_malicious_handler' | FileNotFoundError: [Errno 2] No such file or directory: '/binaries/examples/uffd_malicious_handler'"
+      "message": "FileNotFoundError: [Errno 2] No such file or directory: '/binaries/examples/uffd_malicious_handler'"
     },
     {
       "nodeid": "integration_tests/functional/test_uffd.py::test_malicious_handler[vmlinux-6.1.172-PCI_ON]",
       "outcome": "failed",
-      "message": "FileNotFoundError: [Errno 2] No such file or directory: '/binaries/examples/uffd_malicious_handler' | FileNotFoundError: [Errno 2] No such file or directory: '/binaries/examples/uffd_malicious_handler'"
+      "message": "FileNotFoundError: [Errno 2] No such file or directory: '/binaries/examples/uffd_malicious_handler'"
     },
     {
       "nodeid": "integration_tests/functional/test_uffd.py::test_valid_handler[vmlinux-6.1.172-PCI_OFF]",
       "outcome": "failed",
-      "message": "FileNotFoundError: [Errno 2] No such file or directory: '/binaries/examples/uffd_on_demand_handler' | FileNotFoundError: [Errno 2] No such file or directory: '/binaries/examples/uffd_on_demand_handler'"
+      "message": "FileNotFoundError: [Errno 2] No such file or directory: '/binaries/examples/uffd_on_demand_handler'"
     },
     {
       "nodeid": "integration_tests/functional/test_uffd.py::test_valid_handler[vmlinux-6.1.172-PCI_ON]",
       "outcome": "failed",
-      "message": "FileNotFoundError: [Errno 2] No such file or directory: '/binaries/examples/uffd_on_demand_handler' | FileNotFoundError: [Errno 2] No such file or directory: '/binaries/examples/uffd_on_demand_handler'"
+      "message": "FileNotFoundError: [Errno 2] No such file or directory: '/binaries/examples/uffd_on_demand_handler'"
     }
   ],
   "over_max": [],
@@ -55,7 +55,10 @@
   ],
   "stale_required": [],
   "partial": false,
-  "meta": null,
+  "meta": {
+    "exitcode": 1,
+    "collection_errors": []
+  },
   "not_passing_on_reference": 0,
   "missing_from_run": 0
 }
