@@ -41,6 +41,17 @@ struct Args {
     host_os: String,
     #[arg(long, default_value = "")]
     host_cpu: String,
+    /// upstream-compare: Backend A results, `{nodeid: {outcome, message}}`.
+    #[arg(long, default_value = "")]
+    results: String,
+    /// upstream-compare: the Linux reference results (CE-0003); omitted, every test is taken to pass there.
+    #[arg(long, default_value = "")]
+    reference: String,
+    #[arg(long, default_value = "docs/specs/upstream-suite-classes.yaml")]
+    classes: String,
+    /// upstream-compare: where to write the comparison.
+    #[arg(long, default_value = "")]
+    report: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -72,8 +83,10 @@ fn run() -> Result<(), String> {
         "validate-api-matrix" => validate_api_matrix(&lock, &args),
         "generate-api-behavior-matrix" => generate_api_behavior_matrix(&lock, &args),
         "validate-api-behavior-matrix" => validate_api_behavior_matrix(&lock, &args),
+        "upstream-pins" => upstream_pins(&lock),
+        "upstream-compare" => upstream_compare(&args),
         other => Err(format!(
-            "invalid mode {other:?} (expected generate|validate|generate-api-matrix|validate-api-matrix|generate-api-behavior-matrix|validate-api-behavior-matrix)"
+            "invalid mode {other:?} (expected generate|validate|generate-api-matrix|validate-api-matrix|generate-api-behavior-matrix|validate-api-behavior-matrix|upstream-pins|upstream-compare)"
         )),
     }
 }
@@ -253,4 +266,58 @@ fn firecracker_revision(lock: &vesper::baseline::Lock) -> Result<String, String>
         .map(|reference| reference.revision.clone())
         .filter(|revision| !revision.trim().is_empty())
         .ok_or_else(|| "baseline lock missing firecracker revision".to_string())
+}
+
+/// Prints the upstream-suite pins as `KEY=value` lines for `scripts/systemvm/upstream-suite/run.sh`.
+fn upstream_pins(lock: &vesper::baseline::Lock) -> Result<(), String> {
+    let fc = lock.baselines.get("firecracker").ok_or("baseline lock has no firecracker baseline")?;
+    let s = fc.upstream_suite.as_ref().ok_or("baselines.firecracker.upstream_suite is not pinned")?;
+    println!("FC_REPO={}", fc.repo);
+    println!("FC_REVISION={}", fc.revision);
+    println!("CONTAINER={}", s.container);
+    println!("ARTIFACTS_BUCKET={}", s.artifacts_bucket);
+    println!("ARTIFACTS_PREFIX={}", s.artifacts_prefix);
+    println!("RELEASE_ASSET={}", s.release_asset);
+    println!("TEST_PATHS={}", s.paths.join(" "));
+    println!("WORKERS={}", s.workers);
+    println!("TEST_TIMEOUT_S={}", s.test_timeout_s);
+    Ok(())
+}
+
+fn read_results(path: &str) -> Result<vesper::baseline::upstream::Results, String> {
+    let text = fs::read_to_string(path).map_err(|err| format!("read results {path}: {err}"))?;
+    serde_json::from_str(&text).map_err(|err| format!("parse results {path}: {err}"))
+}
+
+/// Explains every Backend A result that needs it, or exits 1 naming the tests no class explains.
+fn upstream_compare(args: &Args) -> Result<(), String> {
+    use vesper::baseline::upstream::{compare, ClassFile};
+    if args.results.is_empty() {
+        return Err("upstream-compare needs --results".to_string());
+    }
+    let results = read_results(&args.results)?;
+    let reference = if args.reference.is_empty() { None } else { Some(read_results(&args.reference)?) };
+    let text = fs::read_to_string(&args.classes).map_err(|err| format!("read classes {}: {err}", args.classes))?;
+    let classes: ClassFile = serde_yaml::from_str(&text).map_err(|err| format!("parse classes {}: {err}", args.classes))?;
+    classes.validate()?;
+    let c = compare(&results, reference.as_ref(), &classes);
+    if !args.report.is_empty() {
+        let json = serde_json::to_string_pretty(&c).map_err(|err| format!("serialize comparison: {err}"))?;
+        fs::write(&args.report, json + "\n").map_err(|err| format!("write {}: {err}", args.report))?;
+    }
+    println!("reference={} total={} passed={} to_explain={:?}", c.reference, c.total, c.passed, c.to_explain);
+    for (id, n) in c.per_class.iter().filter(|(_, n)| **n > 0) {
+        println!("class {id}: {n}");
+    }
+    if !c.stale_classes.is_empty() {
+        println!("classes that explained nothing in this run: {}", c.stale_classes.join(", "));
+    }
+    if c.ok() {
+        println!("upstream-compare: every result is explained");
+        return Ok(());
+    }
+    for u in &c.unmatched {
+        println!("UNMATCHED {} {} {}", u.nodeid, u.outcome, u.message.replace('\n', " "));
+    }
+    Err(format!("upstream-compare: {} result(s) match no exception class", c.unmatched.len()))
 }

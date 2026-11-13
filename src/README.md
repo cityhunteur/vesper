@@ -84,7 +84,8 @@ Public symbols by file:
   `docs/specs/firecracker-api-behavior-replay.yaml` into steps and judges a backend's last response against the
   matrix case; it runs no backend itself.
 - `baseline.rs`: `Lock { version, updated_at, baselines: BTreeMap<String,
-  BaselineRef>, reporting: Reporting }`, `BaselineRef { repo, revision }`,
+  BaselineRef>, reporting: Reporting }`, `BaselineRef { repo, revision,
+  upstream_suite: Option<UpstreamSuite> }`,
   `Reporting { required_metadata }`, `load(path)`,
   `build_metadata(lock, backend, host_os, host_cpu)`,
   `validate_metadata(lock, metadata)`.
@@ -290,8 +291,16 @@ Public symbols by file:
   operations), non-empty `notes`, `source.captures`, and `operations`, status
   codes in 100..=599 with non-blank code and message, capture-state
   consistency, and (behavior matrix only) a matching `behavior_path`.
+- `baseline/upstream.rs` (GH #172): `UpstreamSuite { container, artifacts_bucket, artifacts_prefix, release_asset,
+  paths, workers, test_timeout_s }` and `validate(arch)`; `TestResult { outcome, message }`, `Results`
+  (`BTreeMap<nodeid, TestResult>`); `ClassFile { version, classes: Vec<Class> }` with `Class { id, kind, nodeid,
+  message, outcomes, tracked_by, reason }` and `validate`; `glob` (`*` wildcards, no regex crate);
+  `compare(results, reference, classes) -> Comparison { reference, total, passed, to_explain, per_class, unmatched,
+  stale_classes, not_passing_on_reference, missing_from_run }`. Without a reference every test is taken to pass
+  there; with one, only tests that passed there need a class. `Comparison::ok` is "nothing unmatched".
 - `baseline.rs:load` requires non-zero `version`, non-empty `baselines`, and
-  non-empty `reporting.required_metadata`. `validate_metadata` requires
+  non-empty `reporting.required_metadata`; an `upstream_suite` is allowed only under `firecracker` and must pass
+  `UpstreamSuite::validate` for the architecture its artefact prefix names. `validate_metadata` requires
   every key listed in `required_metadata` to be present and non-blank; the
   required key set is data-driven from the lock file.
 - `compat.rs:load` rejects `version == 0`. `compat.rs:validate`: `id`,

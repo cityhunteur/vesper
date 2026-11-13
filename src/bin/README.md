@@ -69,7 +69,11 @@ errors to stderr and exits with code 1 on failure.
   `third_party/firecracker/firecracker.yaml`), `--matrix`, `--captures`,
   `--behavior-matrix`, `--behavior-captures` (defaults: the `docs/generated/`
   and `docs/specs/` paths), `--backend`, `--host-os`, `--host-cpu` (default
-  empty). Calls
+  empty), and for `upstream-compare` `--results`, `--reference` (optional),
+  `--classes` (default `docs/specs/upstream-suite-classes.yaml`), `--report`.
+  `upstream-pins` prints the lock's upstream-suite pins as `KEY=value` lines for
+  `scripts/systemvm/upstream-suite/run.sh`; `upstream-compare` prints the count
+  per class and exits 1 naming every `UNMATCHED` test (GH #172). Calls
   `vesper::baseline::{load, build_metadata, validate_metadata}`,
   `vesper::spec::{load_routes, load_info_version}`, and the generate, write,
   load, and validate functions of `vesper::api_matrix` and
@@ -135,7 +139,8 @@ Subdirectories: none.
 
 - `baselinectl.rs:run`: `--mode` must be one of `generate`, `validate`,
   `generate-api-matrix`, `validate-api-matrix`,
-  `generate-api-behavior-matrix`, `validate-api-behavior-matrix`. The
+  `generate-api-behavior-matrix`, `validate-api-behavior-matrix`,
+  `upstream-pins`, `upstream-compare`. The
   baseline lock is loaded before any mode dispatch.
 - `baselinectl.rs:firecracker_revision` and `vesperd.rs:run`:
   `lock.baselines["firecracker"].revision` must exist and be non-blank, else

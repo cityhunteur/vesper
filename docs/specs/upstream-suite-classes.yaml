@@ -1,0 +1,106 @@
+version: 1
+# Exception classes for the upstream Firecracker suite on Backend A (GH #172, D-023). `baselinectl --mode
+# upstream-compare` requires every test that needs explaining (see src/baseline/upstream.rs) to match one class,
+# first match wins. Seeded from the GH #166 trial (run/GH-166/summary.md, 2026-11-12, Apple M3 Pro). A class is
+# never a harness gap: those are fixed in scripts/systemvm/upstream-suite/. `unexplained` classes stay open under
+# CE-0001 until the Linux reference run (CE-0003) settles them.
+classes:
+  - id: no-userfaultfd
+    kind: environment
+    nodeid: ["integration_tests/functional/test_uffd.py::*"]
+    outcomes: [failed, error]
+    tracked_by: TD-054
+    reason: the Alpine virt kernel that the System VM and its microVMs boot has no CONFIG_USERFAULTFD
+  - id: apple-cpu-no-cache-topology
+    kind: environment
+    nodeid: ["integration_tests/functional/test_topology.py::*"]
+    outcomes: [failed, error]
+    tracked_by: CE-0001
+    reason: the Apple virtual CPU exposes no cache size, line size or sets to the System VM, so the guest has none
+  - id: apple-cpu-ssb-vulnerable
+    kind: environment
+    nodeid: ["integration_tests/security/test_vulnerabilities.py::*"]
+    outcomes: [failed, error]
+    tracked_by: CE-0001
+    reason: the Apple CPU reports spec_store_bypass Vulnerable on the host and in the guest
+  - id: apple-cpu-features-unknown
+    kind: test-assumption
+    nodeid: ["integration_tests/functional/test_cpu_features_aarch64.py::test_guest_cpu_features*"]
+    outcomes: [failed, error]
+    tracked_by: CE-0001
+    reason: expected guest CPU features are keyed on Neoverse N1, V1 and V2; an Apple M3 is "Unknown"
+  - id: no-dmi
+    kind: environment
+    nodeid: ["*test_consecutive_fingerprint_consistency*"]
+    outcomes: [failed, error]
+    tracked_by: CE-0001
+    reason: the System VM has no DMI or SMBIOS, so /sys/devices/virtual/dmi/id/bios_version is missing
+  - id: vmm-memory-overhead
+    kind: unexplained
+    nodeid: ["*"]
+    message: ["MemoryUsageExceededError"]
+    outcomes: [failed, error]
+    tracked_by: CE-0001
+    reason: Firecracker's own memory outside guest memory is 5.00 to 5.84 MiB against MemoryMonitor's 5 and 7 MiB thresholds
+  - id: guest-ssh-timeout-under-load
+    kind: environment
+    nodeid: ["*"]
+    message: ["'ssh', '-i'", "ssh: connect to host"]
+    outcomes: [failed, error]
+    tracked_by: CE-0001
+    reason: guest SSH timed out under nested virtualisation at a load average of up to 28 on 4 vCPUs
+  - id: per-test-timeout
+    kind: environment
+    nodeid: ["*"]
+    message: ["Timeout ("]
+    outcomes: [failed, error, hung]
+    tracked_by: CE-0001
+    reason: pytest-timeout fired under nested virtualisation (test_attach_maximum_devices and similar)
+  - id: rate-limiter-balloon-tolerance
+    kind: unexplained
+    nodeid: ["*test_serial_rate_limiting*", "*test_reinflate_balloon*", "*test_hinting_reporting_snapshot*"]
+    outcomes: [failed, error]
+    tracked_by: CE-0001
+    reason: rate-limiter or balloon numbers just outside tolerance, probably timing under nested virtualisation
+  - id: vsock-reset-after-snapshot
+    kind: unexplained
+    nodeid: ["*test_vsock_transport_reset_g2h*"]
+    outcomes: [failed, error, hung]
+    tracked_by: CE-0001
+    reason: a vsock connection survived a snapshot restore (assert 0 == 1); the trial also saw it hang
+  - id: jail-hardlink-exdev
+    kind: unexplained
+    nodeid: ["*"]
+    message: ["Invalid cross-device link"]
+    outcomes: [failed, error]
+    tracked_by: CE-0001
+    reason: EXDEV hard-linking framework/vm_config.json into the jail
+  - id: vmclock-gen-counter-flag
+    kind: unexplained
+    nodeid: ["integration_tests/functional/test_vmclock.py::*"]
+    message: ["VMCLOCK_FLAG_VM_GEN_COUNTER_PRESENT"]
+    outcomes: [failed]
+    tracked_by: CE-0001
+    reason: "KeyError on the vmclock generation-counter flag; one of 44 vmclock tests in the trial"
+  - id: upstream-platform-skip
+    kind: skip
+    nodeid: ["*"]
+    message:
+      - "Only run in x86_64"
+      - "only on x86"
+      - "configurable only on x86"
+      - "x86_64 specific"
+      - "Only x86_64"
+      - "only available on x86_64"
+      - "only present in 0x80000006 for AMD"
+      - "only supported on Intel"
+      - "not yet implemented on aarch64"
+      - "cgroup-v1"
+      - "Only supported in kernel"
+      - "got empty parameter set"
+      - "GDB requires a vmlinux"
+      - "identical on all platforms"
+      - "Clocksource arch_sys"
+    outcomes: [skipped]
+    tracked_by: CE-0001
+    reason: upstream skips that apply on Linux aarch64 too (x86-only, cgroup v1, guest-kernel or parameter-set reasons)
