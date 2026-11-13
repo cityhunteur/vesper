@@ -35,14 +35,105 @@ pub struct HttpResponse {
 pub const MAX_TAPS: usize = 8;
 
 /// A tap device name the guest accepts: a Linux interface name (at most 15 bytes) of ASCII letters, digits, `_` and
-/// `-`, not starting with `-` (it would read as an option), and never `lo`. The guest checks it again
-/// (`vesper-vesperd`, `valid_tap`).
+/// `-`, not starting with `-` (it would read as an option), never `lo`, and not starting with `veth` or `vpd`, which
+/// the `--network nat` uplink uses (ADR 0008). The guest checks it again (`vesper-vesperd`, `valid_tap`).
 pub fn valid_tap_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 15
         && name != "lo"
         && !name.starts_with('-')
+        && !name.starts_with("veth")
+        && !name.starts_with("vpd")
         && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+}
+
+/// One `vesperd --tap NAME[:ADDR/PREFIX]`: a tap device, and under `--network nat` the gateway address its guest
+/// routes through (ADR 0008).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TapSpec {
+    pub name: String,
+    pub gateway: Option<(std::net::Ipv4Addr, u8)>,
+}
+
+/// Networks a tap gateway may not touch: Docker's bridge and the veth pool (`198.18.0.0/15`). The guest also checks
+/// the System VM's `eth0` subnet and resolver, which only it knows.
+const RESERVED_NETS: [(std::net::Ipv4Addr, u8); 2] =
+    [(std::net::Ipv4Addr::new(172, 17, 0, 0), 16), (std::net::Ipv4Addr::new(198, 18, 0, 0), 15)];
+
+fn mask(prefix: u8) -> u32 {
+    if prefix == 0 { 0 } else { u32::MAX << (32 - u32::from(prefix)) }
+}
+
+/// Whether two IPv4 networks share an address.
+pub fn nets_overlap(a: (std::net::Ipv4Addr, u8), b: (std::net::Ipv4Addr, u8)) -> bool {
+    let m = mask(a.1.min(b.1));
+    u32::from(a.0) & m == u32::from(b.0) & m
+}
+
+impl TapSpec {
+    /// Parses `NAME` or `NAME:ADDR/PREFIX`. A gateway is a host address inside RFC 1918 with a prefix length of 16
+    /// to 30, clear of `172.17.0.0/16` and `198.18.0.0/15`.
+    pub fn parse(text: &str) -> Result<TapSpec, String> {
+        let (name, gateway) = match text.split_once(':') {
+            None => (text, None),
+            Some((name, cidr)) => (name, Some(parse_gateway(cidr).map_err(|err| format!("--tap {text:?}: {err}"))?)),
+        };
+        if !valid_tap_name(name) {
+            return Err(format!("--tap {text:?}: use 1 to 15 letters, digits, _ and -, not starting with - or veth or vpd, not lo"));
+        }
+        Ok(TapSpec { name: name.to_string(), gateway })
+    }
+
+    /// The `LAUNCHAPI` tokens: `tap=NAME`, and `tapaddr=NAME:ADDR/PREFIX` when it has a gateway.
+    pub fn tokens(&self) -> Vec<String> {
+        let mut out = vec![format!("tap={}", self.name)];
+        if let Some((addr, prefix)) = self.gateway {
+            out.push(format!("tapaddr={}:{addr}/{prefix}", self.name));
+        }
+        out
+    }
+}
+
+fn parse_gateway(cidr: &str) -> Result<(std::net::Ipv4Addr, u8), String> {
+    let (addr, prefix) = cidr.split_once('/').ok_or("give the gateway as ADDR/PREFIX")?;
+    let addr: std::net::Ipv4Addr = addr.parse().map_err(|_| format!("{addr:?} is not an IPv4 address"))?;
+    let prefix: u8 = prefix.parse().ok().filter(|p| (16..=30).contains(p)).ok_or("the prefix length must be 16 to 30")?;
+    let host = u32::from(addr) & !mask(prefix);
+    if host == 0 || host == !mask(prefix) {
+        return Err(format!("{addr}/{prefix}: the gateway must be a host address"));
+    }
+    if !addr.is_private() {
+        return Err(format!("{addr}/{prefix}: not inside RFC 1918"));
+    }
+    if let Some((net, p)) = RESERVED_NETS.iter().find(|n| nets_overlap((addr, prefix), **n)) {
+        return Err(format!("{addr}/{prefix} overlaps {net}/{p}"));
+    }
+    Ok((addr, prefix))
+}
+
+/// Checks `--tap` flags against `--network nat`: at most `MAX_TAPS`, no name twice, gateways only under `nat`, at
+/// least one gateway under `nat`, and no two gateway subnets overlapping.
+pub fn check_network(nat: bool, taps: &[TapSpec]) -> Result<(), String> {
+    if taps.len() > MAX_TAPS {
+        return Err(format!("at most {MAX_TAPS} --tap flags"));
+    }
+    for (i, tap) in taps.iter().enumerate() {
+        if taps[..i].iter().any(|t| t.name == tap.name) {
+            return Err(format!("--tap {:?} given twice", tap.name));
+        }
+        if let Some(g) = tap.gateway {
+            if !nat {
+                return Err(format!("--tap {}:{}/{}: a gateway address needs --network nat", tap.name, g.0, g.1));
+            }
+            if let Some(other) = taps[..i].iter().find(|t| t.gateway.is_some_and(|o| nets_overlap(g, o))) {
+                return Err(format!("--tap {}: its subnet overlaps the one of --tap {}", tap.name, other.name));
+            }
+        }
+    }
+    if nat && !taps.iter().any(|t| t.gateway.is_some()) {
+        return Err("--network nat needs a --tap NAME:ADDR/PREFIX".to_string());
+    }
+    Ok(())
 }
 
 /// The jailer's id rule: 1 to 64 ASCII letters, digits and hyphens.
@@ -280,13 +371,40 @@ mod tests {
     }
 
     #[test]
+    fn tap_specs_check_gateways() {
+        let t = TapSpec::parse("tap0:172.16.0.1/30").unwrap();
+        assert_eq!(t.tokens(), vec!["tap=tap0".to_string(), "tapaddr=tap0:172.16.0.1/30".to_string()]);
+        assert_eq!(TapSpec::parse("tap1").unwrap().tokens(), vec!["tap=tap1".to_string()]);
+        for (bad, why) in [
+            ("tap0:172.16.0.1", "ADDR/PREFIX"),
+            ("tap0:172.16.0.0/30", "host address"),
+            ("tap0:172.16.0.3/30", "host address"),
+            ("tap0:172.16.0.1/31", "16 to 30"),
+            ("tap0:10.0.0.1/8", "16 to 30"),
+            ("tap0:8.8.8.1/24", "RFC 1918"),
+            ("tap0:172.17.0.1/24", "overlaps 172.17.0.0/16"),
+            ("tap0:300.1.1.1/24", "not an IPv4"),
+            ("lo:172.16.0.1/30", "not lo"),
+        ] {
+            let err = TapSpec::parse(bad).unwrap_err();
+            assert!(err.contains(why), "{bad}: {err}");
+        }
+        let a = TapSpec::parse("a:10.1.0.1/16").unwrap();
+        let b = TapSpec::parse("b:10.1.2.1/24").unwrap();
+        assert!(check_network(true, &[a.clone(), b]).unwrap_err().contains("overlaps"));
+        assert!(check_network(false, &[a.clone()]).unwrap_err().contains("needs --network nat"));
+        assert!(check_network(true, &[TapSpec::parse("c").unwrap()]).unwrap_err().contains("needs a --tap NAME:ADDR"));
+        assert!(check_network(true, &[a]).is_ok());
+    }
+
+    #[test]
     fn tap_names_are_short_interface_names() {
         assert!(valid_tap_name("tap0"));
         assert!(valid_tap_name("vm_1-tap"));
         assert!(valid_tap_name(&"t".repeat(15)));
         // ip keywords are names like any other: the guest always passes them after `dev`.
         assert!(valid_tap_name("up") && valid_tap_name("dev") && valid_tap_name("t-"));
-        for bad in ["", "lo", "-", "-tap0", "tap 0", "tap/0", "tap.0", "tap:0", "tap=0", "../x", &"t".repeat(16)] {
+        for bad in ["", "lo", "-", "-tap0", "veth0", "vpd3", "vethx", "tap 0", "tap/0", "tap.0", "tap:0", "tap=0", "../x", &"t".repeat(16)] {
             assert!(!valid_tap_name(bad), "accepted {bad:?}");
         }
     }

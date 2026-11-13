@@ -308,6 +308,7 @@ fn bad_arguments_are_refused() {
     assert!(run(&["--backend", "systemvm", "--id", "../x", "--bridge", "x/3.sock"]).contains("letters, digits and hyphens"));
     assert!(run(&["--id", "vm-1"]).contains("apply to --backend systemvm"));
     assert!(run(&["--tap", "tap0"]).contains("apply to --backend systemvm"));
+    assert!(run(&["--network", "nat"]).contains("apply to --backend systemvm"));
 }
 
 fn cli(dir: &Path, bridge: &Path, args: &[&str]) -> (i32, String, String) {
@@ -359,6 +360,36 @@ fn tap_flags_ride_on_launchapi_after_the_stages() {
     wait_listening(&v);
     let a = agent.lock().unwrap();
     assert_eq!(a.requests[1], "LAUNCHAPI vm-1 stage=store:a.mem:/snap.mem tap=tap0 tap=tap1");
+}
+
+#[test]
+fn network_nat_rides_on_launchapi_with_tap_gateways() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (bridge, agent) = fake_agent(tmp.path(), "1.16.0");
+    let v = spawn(tmp.path(), &bridge, &["--network", "nat", "--tap", "tap0:172.16.0.1/30", "--tap", "tap1"]);
+    wait_listening(&v);
+    let a = agent.lock().unwrap();
+    assert_eq!(a.requests[1], "LAUNCHAPI vm-1 tap=tap0 tapaddr=tap0:172.16.0.1/30 tap=tap1 net=nat");
+}
+
+#[test]
+fn a_bad_network_flag_launches_nothing() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (bridge, agent) = fake_agent(tmp.path(), "1.16.0");
+    for (flags, why) in [
+        (vec!["--tap", "tap0:172.16.0.1/30"], "needs --network nat"),
+        (vec!["--network", "nat", "--tap", "tap0"], "needs a --tap NAME:ADDR/PREFIX"),
+        (vec!["--network", "nat", "--tap", "tap0:8.8.8.1/24"], "RFC 1918"),
+        (vec!["--network", "nat", "--tap", "tap0:198.18.0.1/24"], "RFC 1918"),
+        (vec!["--network", "nat", "--tap", "tap0:172.17.5.1/24"], "overlaps 172.17.0.0/16"),
+        (vec!["--network", "nat", "--tap", "a:10.1.0.1/16", "--tap", "b:10.1.9.1/24"], "overlaps"),
+        (vec!["--network", "open"], "invalid value"),
+    ] {
+        let mut v = spawn(tmp.path(), &bridge, &flags);
+        let (status, err) = wait_exit(&mut v, Duration::from_secs(10));
+        assert!(!status.success() && err.contains(why), "{flags:?}: {err}");
+    }
+    assert!(agent.lock().unwrap().requests.is_empty(), "nothing reaches the agent");
 }
 
 #[test]
@@ -453,10 +484,18 @@ fn bad_stage_and_store_arguments_never_reach_the_agent() {
 fn the_guest_helper_refuses_the_tap_names_vesperd_refuses() {
     let script = concat!(env!("CARGO_MANIFEST_DIR"), "/systemvm/overlay/usr/local/bin/vesper-vesperd");
     let launch = |tokens: &[&str]| {
-        let out = Command::new("sh").arg(script).args(["launch", "vm-1"]).args(tokens).output().unwrap();
+        // The System VM's eth0 and resolver, not this host's (honoured only when the script is not root).
+        let out = Command::new("sh")
+            .arg(script)
+            .args(["launch", "vm-1"])
+            .args(tokens)
+            .env("VESPERD_TEST_ETH0", "192.168.64.2/24")
+            .env("VESPERD_TEST_RESOLVER", "192.168.64.1")
+            .output()
+            .unwrap();
         String::from_utf8_lossy(&out.stdout).into_owned()
     };
-    for name in ["", "lo", "-", "-tap0", "tap 0", "tap.0", "tap/0", "a-name-of-16-chr"] {
+    for name in ["", "lo", "-", "-tap0", "veth0", "vpd1", "tap 0", "tap.0", "tap/0", "a-name-of-16-chr"] {
         let out = launch(&[&format!("tap={name}")]);
         assert!(out.starts_with("ERR bad tap name"), "{name:?}: {out}");
         assert!(!vesper::control::valid_tap_name(name), "{name:?} accepted by vesperd");
@@ -471,4 +510,27 @@ fn the_guest_helper_refuses_the_tap_names_vesperd_refuses() {
     let nine: Vec<String> = (0..9).map(|i| format!("tap=tap{i}")).collect();
     let nine: Vec<&str> = nine.iter().map(String::as_str).collect();
     assert!(launch(&nine).starts_with("ERR at most 8 tap= tokens"), "{}", launch(&nine));
+    // ADR 0008: the guest checks every network token again, before it touches anything.
+    for (tokens, why) in [
+        (&["tap=tap0", "tapaddr=tap0:172.16.0.1/30"][..], "ERR tapaddr= needs net=nat"),
+        (&["tap=tap0", "net=nat"][..], "ERR net=nat needs a tapaddr="),
+        (&["tap=tap0", "tapaddr=tap1:172.16.0.1/30", "net=nat"][..], "ERR tapaddr= names tap1, which is not a tap= token"),
+        (&["tap=tap0", "tapaddr=tap0:8.8.8.1/24", "net=nat"][..], "not inside RFC 1918"),
+        (&["tap=tap0", "tapaddr=tap0:172.16.0.0/30", "net=nat"][..], "host address"),
+        (&["tap=tap0", "tapaddr=tap0:172.16.0.1/31", "net=nat"][..], "prefix length of 16 to 30"),
+        (&["tap=tap0", "tapaddr=tap0:172.17.0.9/24", "net=nat"][..], "overlaps 172.17.0.0/16"),
+        (&["tap=tap0", "tapaddr=tap0:192.168.64.9/24", "net=nat"][..], "overlaps 192.168.64.0/24"),
+        (&["tap=a", "tap=b", "tapaddr=a:10.1.0.1/16", "tapaddr=b:10.1.7.1/24", "net=nat"][..], "overlaps 10.1.0.1/16"),
+        (&["tap=tap0", "tapaddr=tap0:172.16.0.1/30", "tapaddr=tap0:172.16.1.1/30", "net=nat"][..], "gives tap0 twice"),
+        (&["net=open"][..], "ERR bad network policy open"),
+        (&["net=nat", "net=nat"][..], "ERR net= given twice"),
+        (&["net=none", "net=nat"][..], "ERR net= given twice"),
+        (&["tap=tap0", "tapaddr=tap0:172.016.0.1/30", "net=nat"][..], "bad address"),
+        (&["tap=tap0", "tapaddr=tap0:172.16.0.1/030", "net=nat"][..], "prefix length of 16 to 30"),
+    ] {
+        let out = launch(tokens);
+        assert!(out.contains(why), "{tokens:?}: {out}");
+    }
+    let ok = launch(&["tap=tap0", "tapaddr=tap0:172.16.0.1/30", "net=nat"]);
+    assert!(ok.starts_with("ERR") && !ok.contains("tap") && !ok.contains("net"), "{ok}");
 }

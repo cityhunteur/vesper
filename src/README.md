@@ -457,6 +457,14 @@ Public symbols by file:
   microVMs with `--tap tap0 --tap tap1`, each namespace holding exactly `lo` and the two taps owned by uid 20000, an
   unlisted tap Firecracker's own 400, `netns_ok`, the namespace gone after SIGTERM; CE-0010) and `nothing_left`
   (leases, jails and network namespaces); `passed` requires all 19 steps ok. It uses the control channel only to inspect and fault the guest.
+- `control/suites/egress.rs:run_egress_suite` (ADR 0008) ages and reaps its ids, starts `VESPERD test-listen 7777`,
+  boots `vesperd --network nat` microVMs with `vesper_net=` and `vesper_probe=` and judges the guest's
+  `VESPER-PROBE` lines (`denied`, `judge`) and the `DROPS` counters of `VESPERD net`: `listeners_and_internet`,
+  `nat_guest_reaches_public_only` (two leases), `isolation_reports_egress`, `teardown_removes_veths`,
+  `root_mangle_alone_after_docker_restart` (`KILL docker` after the launch, `HEALTH` until dockerd is back, then
+  `VESPERD test-open-ns ID filter`), `root_raw_drops_sources_outside_the_pool` (`test-open-ns ID all`),
+  `none_lease_has_no_uplink`, `reaper_removes_veth_of_killed_holder` and `listeners_stopped`; the System VM's
+  addresses come from `POLICY ... eth0= gw=`; `passed` requires all 10 steps ok.
 - `control/suites/replay.rs:ReplayRun` (ADR 0007 slice 6) writes the replay files into a new
   `share_dir/replay-<ms>/` (a removed and rewritten share file can read as empty in the System VM), makes the snapshot
   fixture in its own `vesperd` and copies it into the store with `vesperd stage jail:… store:…`, then runs each case

@@ -4,8 +4,8 @@
     "backend": "systemvm",
     "host_os": "macOS 27.0.1",
     "host_cpu": "Apple M3 Pro",
-    "timestamp": "2026-11-13T03:23:41Z",
-    "git_sha": "83749cecdb961b493a66b3523b221396018cd006",
+    "timestamp": "2026-11-13T04:40:25Z",
+    "git_sha": "e0add5f821964ca98ecb5639bd4427a59a4d2e61",
     "scripts": "docs/specs/firecracker-api-behavior-replay.yaml",
     "matrix": "docs/generated/firecracker-api-behavior-matrix.json"
   },
@@ -17,7 +17,7 @@
     "backend_error": 0,
     "not_applicable": 3
   },
-  "fixture": "5 steps, store vesper-rp.vmstate and vesper-rp.mem, 1145 ms",
+  "fixture": "5 steps, store vesper-rp.vmstate and vesper-rp.mem, 1082 ms",
   "cases": [
     {
       "key": "GET /#preboot_instance_info",
@@ -122,7 +122,7 @@
       "verdict": "match",
       "detail": "200, 4 assertions",
       "status": 200,
-      "body": "{\"target_pages\":16384,\"actual_pages\":16384,\"target_mib\":64,\"actual_mib\":64,\"swap_in\":0,\"swap_out\":0,\"major_faults\":0,\"minor_faults\":1099,\"free_memory\":119934976,\"total_memory\":225574912,\"available_memory\":117387264,\"disk_caches\":25419776,\"hugetlb_allocations\":0,\"hugetlb_failures\":0,\"oom_kill\":0,\"alloc_stall\":0,\"async_scan\":0,\"direct_scan\":0,\"async_reclaim\":0,\"direct_reclaim\":0}"
+      "body": "{\"target_pages\":16384,\"actual_pages\":16384,\"target_mib\":64,\"actual_mib\":64,\"swap_in\":0,\"swap_out\":0,\"major_faults\":0,\"minor_faults\":1210,\"free_memory\":118542336,\"total_memory\":225574912,\"available_memory\":115994624,\"disk_caches\":25636864,\"hugetlb_allocations\":0,\"hugetlb_failures\":0,\"oom_kill\":0,\"alloc_stall\":0,\"async_scan\":0,\"direct_scan\":0,\"async_reclaim\":0,\"direct_reclaim\":0}"
     },
     {
       "key": "GET /hotplug/memory#preboot_invalid_state",

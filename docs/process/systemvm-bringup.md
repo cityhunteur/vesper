@@ -498,7 +498,7 @@ The [shim contract](../../shim/README.md) describes lifecycle and protocol detai
 ## `vesperd` microVMs (ADR 0007, slice 3)
 
 `vesperd`'s backend in the System VM is `vesper-vesperd` (overlay, `usr/local/bin`), reached through three agent
-verbs. `LAUNCHAPI <id> [ceiling] [stage=SRC:DEST|tap=NAME]...` refuses without the data disk (`ERR data disk not in use`),
+verbs. `LAUNCHAPI <id> [ceiling] [stage=SRC:DEST|tap=NAME|tapaddr=NAME:ADDR/PREFIX|net=none|net=nat]...` refuses without the data disk (`ERR data disk not in use`),
 runs `vesper-microvm prepare`, copies the kernel and initramfs into
 `/var/lib/vesper/state/vesperd/jailer/firecracker/<id>/root` as `/Image` and `/initrd.gz`, stages each `stage=` token
 into that fresh jail (next section), creates the network namespace `/run/vesper/vesperd/netns/<id>` with `lo` and
@@ -526,7 +526,7 @@ Since slice 5 the jails are on the data disk (above).
 
 `vesperd --backend systemvm --id <id> [--socket PATH] [--memory-max BYTES]` uses the verbs above from macOS. It reads
 the bridge path and agent port from `build/systemvm/launch-config.json` (or `--bridge` and `--agent-port`), takes
-`<socket>.lock` and refuses a live socket, sends `LAUNCHAPI <id> [ceiling]`, and refuses to serve unless `READY`
+`<socket>.lock` and refuses a live socket, sends `LAUNCHAPI <id> [ceiling] [tokens]...`, and refuses to serve unless `READY`
 names the vendored swagger's `info.version` (1.16.0). `ERR busy <id>` is retried for 15 s, one reaper interval
 plus a teardown, then refused. It then binds the socket (0600) and relays each client connection over its own bridge
 connection (`CONNECT 1024`, the greeting, `FCAPI <id>`, `OK`) with `proxy::serve`. The bounds and their reasons are

@@ -14,6 +14,33 @@ sha256sum -c /runtime.sha256 >/dev/null || { echo VESPER-RUNTIME-DIGEST-FAILED; 
 # activate and their API requests fail with "Device not activated yet" (ADR 0007 slice 6).
 /bin/busybox modprobe -a virtio_mmio virtio_balloon virtio_mem >/dev/null 2>&1 || echo "VESPER-MODULES-FAILED"
 echo "VESPER-MICROVM-OK"
+# Network probes for the egress tests (ADR 0008): vesper_net=ADDR/PREFIX,GATEWAY configures eth0, and
+# vesper_probe=P1,P2,... runs each probe once and prints VESPER-PROBE <probe> open|closed (tcp:IP:PORT,
+# udp:IP:PORT, spoof:SRC:IP:PORT from a source outside the tap subnet, dns:NAME through the gateway), then
+# VESPER-PROBES-DONE. Probes only report; the test judges them.
+net=$(/bin/busybox sed -n 's/.*vesper_net=\([0-9./,]*\).*/\1/p' /proc/cmdline)
+if [ -n "$net" ]; then
+  /bin/busybox modprobe -a virtio_mmio failover net_failover virtio_net >/dev/null 2>&1 || echo "VESPER-NET-MODULES-FAILED"
+  for i in 1 2 3 4 5 6 7 8 9 10; do [ -e /sys/class/net/eth0 ] && break; sleep 0.2; done
+  ip link set dev lo up
+  ip link set dev eth0 up && ip addr add "${net%,*}" dev eth0 && ip route add default via "${net#*,}" \
+    && mkdir -p /etc && echo "nameserver ${net#*,}" > /etc/resolv.conf && echo "VESPER-NET-OK ${net}" || echo "VESPER-NET-FAILED"
+  probes=$(/bin/busybox sed -n 's/.*vesper_probe=\([A-Za-z0-9.:,_-]*\).*/\1/p' /proc/cmdline)
+  for p in $(echo "$probes" | tr ',' ' '); do
+    kind=${p%%:*}; rest=${p#*:}; r=closed
+    case "$kind" in
+      tcp) nc -z -w 2 "${rest%:*}" "${rest##*:}" </dev/null >/dev/null 2>&1 && r=open ;;
+      udp) echo probe | nc -u -w 2 "${rest%:*}" "${rest##*:}" 2>/dev/null | grep -q . && r=open ;;
+      spoof) src=${rest%%:*}; dst=${rest#*:}
+             ip addr add "$src/32" dev eth0 2>/dev/null
+             nc -z -w 2 -s "$src" "${dst%:*}" "${dst##*:}" </dev/null >/dev/null 2>&1 && r=open
+             ip addr del "$src/32" dev eth0 2>/dev/null ;;
+      dns) nslookup "$rest" "${net#*,}" >/dev/null 2>&1 && r=open ;;
+    esac
+    echo "VESPER-PROBE $p $r"
+  done
+  echo "VESPER-PROBES-DONE"
+fi
 if /bin/busybox grep -q vesper_exit=1 /proc/cmdline; then
   /bin/busybox poweroff -f
 fi

@@ -8,6 +8,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 mod bundle;
+mod egress;
+pub use egress::run_egress_suite;
 mod exec;
 pub use exec::run_exec_suite;
 mod launchapi;

@@ -158,7 +158,7 @@ Deleting the image with the System VM stopped erases all container state; nothin
 Three agent verbs on vsock port 1024 serve `vesperd` microVMs; no new port, socket, share or entitlement is added,
 and the bridge allow-list is unchanged.
 
-- `LAUNCHAPI <id> [ceiling] [stage=SRC:DEST|tap=NAME]...` starts one stock Firecracker under the jailer with no configuration file: uid and gid
+- `LAUNCHAPI <id> [ceiling] [stage=SRC:DEST|tap=NAME|tapaddr=NAME:ADDR/PREFIX|net=none|net=nat]...` starts one stock Firecracker under the jailer with no configuration file: uid and gid
   20000 (the shim's microVMs run as 10000), cgroup `/sys/fs/cgroup/vesperd/<id>` (`--parent-cgroup vesperd`,
   `pids.max=256`, `memory.max` from `ceiling`, default 640 MiB, at least 128 MiB and at most the System VM's
   memory), chroot `/var/lib/vesper/state/vesperd/jailer/firecracker/<id>/root` on the data disk (slice 5; refused
@@ -201,11 +201,44 @@ network namespace. In it, root brings up `lo` and creates each tap with busybox 
 persistent and owned by uid 20000, which is what lets the jailed Firecracker open it without `CAP_NET_ADMIN`. A name
 not given cannot be created by Firecracker and fails with Firecracker's own `EPERM` error.
 
-The namespace has no route out: no veth, bridge, NAT or DNS. A guest reaches its own taps, and the far side of a tap
-is an interface nobody else reads, so a guest cannot reach the System VM, other microVMs, containers, the macOS host
-or the internet through it. Connectivity is TD-058 and needs the owner's decision, because it widens what a guest
-can reach. Teardown, the reaper and `status` (`DIRTY <id> netns`) cover the namespace; `VESPERD net <id>` lists its
+With `--network none` (the default) the namespace has no route out: no veth, bridge, NAT or DNS. A guest reaches its
+own taps, and the far side of a tap is an interface nobody else reads, so a guest cannot reach the System VM, other
+microVMs, containers, the macOS host or the internet through it. `--network nat` is the one opt-in uplink (next
+section; the owner asked for the most secure option on 2026-11-13, D-028). Teardown, the reaper and `status` (`DIRTY <id> netns`) cover the namespace; `VESPERD net <id>` lists its
 interfaces and `isolation` reports `netns_ok`.
+
+## Egress for `vesperd` microVMs (ADR 0008)
+
+`vesperd --network nat` (opt-in; `none` is the default) gives a microVM egress; [ADR 0008](design-docs/adr/0008-vesperd-microvm-egress.md)
+is the normative policy and this section the summary. No new port, socket, share, package or entitlement is added.
+
+- **Path.** One veth pair per lease, `vpd<N>` in the System VM and `up.<N>` in the lease's namespace, a /30 from
+  `198.18.0.0/16`; the namespace masquerades out of `up.<N>` and the System VM out of `eth0`. Tap gateways
+  (`--tap NAME:ADDR/PREFIX`) are RFC 1918, prefix length 16 to 30, clear of `eth0`'s subnet, `docker0`, the pool and
+  the resolver, checked by `vesperd` and again by the guest helper.
+- **Allowed.** Public unicast IPv4 over TCP, UDP and ICMP echo, and replies; DNS to the tap gateway, DNATed to the
+  System VM's IPv4 resolver (a `nat` launch fails without one). At most 1024 tracked flows per lease, in both layers.
+- **Denied.** RFC 6890's special-purpose IPv4 table (loopback, RFC 1918, CGNAT, link-local and metadata, the
+  benchmarking pool, documentation ranges, multicast, reserved, broadcast) and `eth0`'s subnet: so the System VM,
+  the Mac's vmnet gateway (other than DNS), containers, other leases and the LAN. `INVALID` packets, other IP
+  protocols and other ICMP types are dropped. Nothing can open a connection to a lease, and nothing in a lease's
+  namespace (Firecracker included) can open one either: its `INPUT` and `OUTPUT` accept only `lo` and replies.
+- **Two layers.** The lease's namespace (`iptables` and `ip6tables` policies `DROP`; gone with the namespace) and
+  static root rules: `raw PREROUTING` drops sources outside the pool, `mangle PREROUTING -i vpd+` runs the policy
+  before routing (so it also covers the System VM's own addresses), `mangle POSTROUTING -o vpd+` drops anything
+  that is not a reply, and `ip6tables` drops all IPv6 on `vpd+`. Docker owns `FORWARD`; Vesper only adds accepts to
+  `DOCKER-USER`, so a Docker restart can cut `nat` egress but cannot open a path. `mangle INPUT` and `FORWARD` also
+  drop anything from `vpd+` that is for the System VM itself or not bound for `eth0`. `make systemvm-egress-suite`
+  shows each root table holding alone: `mangle` with the namespace filter opened after dockerd was killed and
+  respawned under a running microVM, `raw` with the namespace's masquerade and reverse-path check removed too.
+- **Limits.** The 1024-flow limit comes before every accept, DNS included; tap names may not start with `veth` or
+  `vpd`; every lease's namespace, `none` included, has IPv6, redirects and loose reverse-path filtering off.
+- **Accepted risks** (TD-058): a VPN on the Mac that routes a public prefix is reachable, because address filtering
+  cannot see macOS routes; guests' DNS queries, including names that resolve to private addresses, reach the macOS
+  resolver (the addresses themselves stay blocked); DNS can carry data out (tunnelling), as any egress can.
+- **Inspection.** `VESPERD net <id>` prints the policy, the veth addresses and both layers' drop counters;
+  `isolation` adds `ipv6_off`, `egress` and `egress_ok`; `list`, `status` and the reaper cover `veth` (the record
+  `/run/vesper/vesperd/net/<id>` outlives the lease until the link is gone).
 
 ## Staging and the snapshot store (ADR 0007, slice 5)
 
