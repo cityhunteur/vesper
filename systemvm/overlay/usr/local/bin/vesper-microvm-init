@@ -16,7 +16,8 @@ sha256sum -c /runtime.sha256 >/dev/null || { echo VESPER-RUNTIME-DIGEST-FAILED; 
 echo "VESPER-MICROVM-OK"
 # Network probes for the egress tests (ADR 0008): vesper_net=ADDR/PREFIX,GATEWAY configures eth0, and
 # vesper_probe=P1,P2,... runs each probe once and prints VESPER-PROBE <probe> open|closed (tcp:IP:PORT,
-# udp:IP:PORT, spoof:SRC:IP:PORT from a source outside the tap subnet, dns:NAME through the gateway), then
+# udp:IP:PORT, spoof:SRC:IP:PORT from a source outside the tap subnet, dns:NAME through the gateway,
+# flood:IP:PORT:N one UDP datagram from each of N sockets, so N tracked flows, reported as sent), then
 # VESPER-PROBES-DONE. Probes only report; the test judges them.
 net=$(/bin/busybox sed -n 's/.*vesper_net=\([0-9./,]*\).*/\1/p' /proc/cmdline)
 if [ -n "$net" ]; then
@@ -36,6 +37,11 @@ if [ -n "$net" ]; then
              nc -z -w 2 -s "$src" "${dst%:*}" "${dst##*:}" </dev/null >/dev/null 2>&1 && r=open
              ip addr del "$src/32" dev eth0 2>/dev/null ;;
       dns) nslookup "$rest" "${net#*,}" >/dev/null 2>&1 && r=open ;;
+      flood) fip=${rest%%:*}; fx=${rest#*:}; fport=${fx%%:*}; fn=${fx#*:}; r=sent
+             for i in $(seq 1 "$fn"); do
+               echo x | timeout 1 nc -u "$fip" "$fport" >/dev/null 2>&1 &
+               [ $((i % 128)) -eq 0 ] && wait
+             done; wait ;;
     esac
     echo "VESPER-PROBE $p $r"
   done
