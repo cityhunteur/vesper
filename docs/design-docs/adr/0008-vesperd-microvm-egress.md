@@ -123,15 +123,19 @@ enforcement on the Mac or an egress proxy; both are out of scope here and are li
 - **Resolver changes.** The root chains carry the resolver and `eth0`'s subnet in a signature comment; when DHCP
   changes either, the next `nat` launch replaces the chains atomically and rebuilds every running lease's namespace
   tables for the new values, so their DNS keeps working.
-- **Tests.** `make systemvm-egress-suite` (10 steps) judges every verdict from inside a guest, against TCP and UDP
+- **Tests.** `make systemvm-egress-suite` (12 steps) judges every verdict from inside a guest, against TCP and UDP
   listeners on the System VM's addresses as the helper reports them, and compares both layers' drop counters before
   and after. One microVM has its namespace filter opened after dockerd was killed and respawned while it ran (no
   launch in between), to show the root `mangle` layer holds alone and Docker keeps `DOCKER-USER`; one also loses its
   masquerade and reverse-path check, to show the root `raw` rule drops sources outside the pool. The suite fails
-  when the System VM has no internet, because then the allowed probes cannot be judged.
-- **Not measured.** The 1024-flow limit is placed before every accept in both layers but no flood test has run; a
-  stopped lease's conntrack entries stay until their timeouts (`conntrack-tools` is not in the package set), which
-  matters only if the same /30 is given again within that time, after the cursor has gone round 16384 leases.
+  when the System VM has no internet, because then the allowed probes cannot be judged. Two flood steps (added
+  2026-11-13, D-029) send 1,400 UDP flows from one guest: with both layers, the lease's namespace holds exactly 1,024
+  and drops the rest; with the namespace filter opened, the root `connlimit` drops the excess.
+- **Measured residual.** A stopped lease's conntrack entries stay in the System VM until their timeouts (30 s for
+  UDP, 5 days for established TCP): the flood step sees the same count, 1,028, before and after teardown. The owner
+  chose to count them rather than add `conntrack-tools` (D-029). They matter only if the same /30 is given again
+  within that time, after the cursor has gone round 16384 leases, or if many leases each leave 1,024 established
+  TCP flows behind against the table's 65,536.
 
 ## Alternatives considered
 

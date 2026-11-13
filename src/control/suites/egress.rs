@@ -24,7 +24,11 @@ const PUBLIC: &str = "1.1.1.1:443";
 /// How long the guest's probes may take (each waits up to 2 s).
 const PROBE_WAIT: Duration = Duration::from_secs(90);
 /// Steps a full run records.
-const STEPS: usize = 10;
+const STEPS: usize = 12;
+/// Datagrams the flood probe sends, each from its own socket: well over the per-lease cap of 1,024 tracked flows.
+const FLOOD: u64 = 1400;
+/// The flood's target: a public address and the discard port; the datagrams need no answer.
+const FLOOD_TO: &str = "1.1.1.1:9";
 
 /// The System VM's own addresses, as the helper reports them.
 #[derive(Debug, Clone, Default)]
@@ -131,6 +135,44 @@ fn drops(control: &mut Session, id: &str) -> Result<Drops, String> {
 }
 
 /// A `POLICY nat` field of `VESPERD net <id>`.
+/// `FLOWS <id> ns=N root=N cap=N`: tracked flows in the lease's namespace and in the whole System VM.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct Flows {
+    ns: u64,
+    root: u64,
+    cap: u64,
+}
+
+fn flows(control: &mut Session, id: &str) -> Result<Flows, String> {
+    let (_, lines) = control.vesperd(&["net", id])?;
+    let line = lines.iter().find(|l| l.starts_with("FLOWS ")).ok_or_else(|| format!("net {id}: {}", lines.join(" | ")))?;
+    Ok(parse_flows(line))
+}
+
+fn parse_flows(line: &str) -> Flows {
+    let field = |k: &str| line.split_whitespace().find_map(|w| w.strip_prefix(k)).and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
+    Flows { ns: field("ns="), root: field("root="), cap: field("cap=") }
+}
+
+/// The System VM-wide `FLOWS root=N ...` line, which outlives any lease.
+fn root_flows(control: &mut Session) -> Result<(u64, String), String> {
+    let (_, lines) = control.vesperd(&["flows"])?;
+    let line = first(&lines);
+    let n = parse_flows(&line).root;
+    if line.starts_with("FLOWS ") { Ok((n, line)) } else { Err(format!("flows: {line}")) }
+}
+
+/// The flood probe for this run.
+fn flood_probe() -> String {
+    format!("flood:{FLOOD_TO}:{FLOOD}")
+}
+
+/// Waits for the flood to finish and checks that the probe ran.
+fn flooded(control: &mut Session, id: &str) -> Result<(), String> {
+    let got = results(control, id)?;
+    if got.iter().any(|(p, _)| *p == flood_probe()) { Ok(()) } else { Err(format!("{id}: the flood probe did not run: {got:?}")) }
+}
+
 fn policy_field(control: &mut Session, id: &str, key: &str) -> Result<String, String> {
     let (_, lines) = control.vesperd(&["net", id])?;
     let line = lines.iter().find(|l| l.starts_with("POLICY nat")).ok_or_else(|| format!("net {id}: {}", lines.join(" | ")))?;
@@ -340,6 +382,57 @@ pub fn run_egress_suite(endpoint: &ControlEndpoint, run: &VesperdRun, id: &str) 
         Ok(((), format!("{opened}; every probe closed, the allowed ones too ({verdict}); raw drops +{}", after.raw - before.raw)))
     });
 
+    // The flow cap in the namespace layer: the guest opens more flows than the cap; the excess is dropped there,
+    // its namespace holds no more than the cap, and teardown's effect on the System VM's table is recorded.
+    step(&mut steps, "flow_cap_drops_excess_in_namespace", || {
+        let mut before = Drops::default();
+        let mut lease = boot(run, &mut control, &a, &[flood_probe()], &mut |s| {
+            before = drops(s, &a)?;
+            Ok(())
+        })?;
+        let ran = flooded(&mut control, &a);
+        let after = drops(&mut control, &a);
+        let held = flows(&mut control, &a);
+        let (root_up, _) = root_flows(&mut control)?;
+        let stopped = stop(&mut control, &mut lease);
+        let (root_down, timeouts) = root_flows(&mut control)?;
+        ran?;
+        stopped?;
+        let (after, held) = (after?, held?);
+        let dropped = after.ns.saturating_sub(before.ns);
+        let excess = FLOOD.saturating_sub(held.cap);
+        if held.cap != 1024 || held.ns > held.cap + 16 || held.ns + 64 < held.cap {
+            return Err(format!("namespace holds {} flows against a cap of {}", held.ns, held.cap));
+        }
+        if dropped < excess / 2 {
+            return Err(format!("{FLOOD} flows sent, cap {}: the namespace layer dropped only {dropped}", held.cap));
+        }
+        Ok(((), format!("{FLOOD} UDP flows to {FLOOD_TO}: namespace holds {} (cap {}), namespace drops +{dropped}; System VM flows {root_up} with the lease, {root_down} after teardown ({timeouts})", held.ns, held.cap)))
+    });
+
+    // The flow cap in the root layer alone: the namespace filter is opened, so only the root mangle connlimit
+    // stands between the flood and the System VM's shared table.
+    step(&mut steps, "flow_cap_drops_excess_in_root_alone", || {
+        let mut before = Drops::default();
+        let mut opened = String::new();
+        let mut lease = boot(run, &mut control, &c, &[flood_probe()], &mut |s| {
+            let (rc, l) = s.vesperd(&["test-open-ns", &c, "filter"])?;
+            opened = first(&l);
+            before = drops(s, &c)?;
+            if rc == 0 { Ok(()) } else { Err(format!("test-open-ns: {opened}")) }
+        })?;
+        let ran = flooded(&mut control, &c);
+        let after = drops(&mut control, &c);
+        let _ = stop(&mut control, &mut lease);
+        ran?;
+        let after = after?;
+        let dropped = after.root.saturating_sub(before.root);
+        if after.ns != before.ns || dropped < FLOOD.saturating_sub(1024) / 2 {
+            return Err(format!("drops {before:?} -> {after:?}: the root connlimit did not drop the excess"));
+        }
+        Ok(((), format!("{opened}; {FLOOD} UDP flows: root drops +{dropped}, namespace +0")))
+    });
+
     step(&mut steps, "none_lease_has_no_uplink", || {
         let flags: Vec<String> = ["--tap", "tap0"].map(String::from).to_vec();
         let (mut v, _, _) = run.start_with(&d, &format!("{d}.sock"), &flags)?;
@@ -404,5 +497,9 @@ mod tests {
         let d = denied(&sys, &["198.18.0.5".to_string()]);
         assert!(d.iter().any(|p| p == "tcp:198.18.0.5:7777") && d.iter().any(|p| p == "tcp:192.168.65.3:7777"));
         assert!(d.iter().any(|p| p == "tcp:192.168.65.1:80") && !d.iter().any(|p| p.contains("192.168.64.")));
+        let f = parse_flows("FLOWS vm-a ns=1030 root=1100 cap=1024");
+        assert_eq!(f, Flows { ns: 1030, root: 1100, cap: 1024 });
+        assert_eq!(parse_flows("FLOWS root=7 max=65536 tcp_established_s=432000 udp_s=30").root, 7);
+        assert_eq!(flood_probe(), "flood:1.1.1.1:9:1400");
     }
 }
