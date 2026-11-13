@@ -143,7 +143,8 @@ launch() {
   rm -f "$lf" "$lf.1" "$pipe"
   mkfifo -m 0600 "$pipe" || { echo "ERR console pipe"; return 1; }
   : > "$lf"
-  /usr/local/bin/vesper-boundlog "$lf" "$LOG_MAX" < "$pipe" &
+  # Not on our stdout or stderr: the caller (the agent) reads them to EOF, and the bounder outlives this script.
+  /usr/local/bin/vesper-boundlog "$lf" "$LOG_MAX" < "$pipe" > /dev/null 2>&1 &
   start=$(now_ms)
   setsid "$FC_DIR/jailer" --id "$id" --exec-file "$FC_DIR/firecracker" --uid "$JUID" --gid "$JGID" \
     --chroot-base-dir "$JAIL" --cgroup-version 2 --cgroup pids.max=256 --cgroup "memory.max=$CEILING" \

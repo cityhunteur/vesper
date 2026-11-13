@@ -888,7 +888,8 @@ launch() {
   rm -f "$log" "$log.1" "$pipe"
   mkfifo -m 0600 "$pipe" || { unlock; launch_fail "console pipe"; }
   : > "$log"
-  "$BOUNDLOG" "$log" "$LOG_MAX" < "$pipe" 9>&- &
+  # Not on our stdout or stderr (the caller reads them to EOF) nor the lock (fd 9): the bounder outlives us.
+  "$BOUNDLOG" "$log" "$LOG_MAX" < "$pipe" > /dev/null 2>&1 9>&- &
   setsid "$JAILER" --id "$LID" --exec-file "$FC" --uid "$JUID" --gid "$JGID" --chroot-base-dir "$BASE" \
     --netns "$NETNS/$LID" --parent-cgroup vesperd --cgroup-version 2 --cgroup pids.max=256 --cgroup "memory.max=$ceiling" \
     -- --api-sock /run/firecracker.socket > "$pipe" 2>&1 < /dev/null 9>&- &
