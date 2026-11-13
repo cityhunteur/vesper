@@ -15,31 +15,44 @@ microVM, can reach the file server or another microVM's export.
 
 ## Progress
 
-- [ ] M0 Design: ADR 0009 (proposed, `docs/design-docs/adr/0009-shares-into-microvms-over-nfs.md`), reviewed by an
-  llm-council design review before any code. First review done 2026-11-13 (4 High, 5 Medium, 5 Low, all taken into
-  the ADR); the revision awaits the owner's acceptance
-- [ ] M1 `unfs3` pinned in `docs/specs/systemvm-packages.lock.yaml` and listed in `THIRD_PARTY_NOTICES.md`; no
-  server starts at boot
+- [x] M0 Design: ADR 0009 (accepted, `docs/design-docs/adr/0009-shares-into-microvms-over-nfs.md`), reviewed by two
+  llm-council design reviews before any code. First review 2026-11-13 (4 High, 5 Medium, 5 Low); second, with a
+  comparison of alternatives, the same day (2 High, 8 Medium, 6 Low). All are in the ADR and the milestones, and the
+  owner accepted it with those fixes (D-032)
+- [ ] M1 `unfs3` pinned in `docs/specs/systemvm-packages.lock.yaml` and listed in `THIRD_PARTY_NOTICES.md`, with its
+  dependency closure, each licence and the uid-dropping tool; anything beyond `unfs3` goes to the owner in this
+  PR; no server starts at boot
 - [ ] M2 Share network per shim microVM with shares: `netns_up` and `netns_down` moved to the sourced
   `/usr/local/lib/vesper/netns.sh` (TAP owner uid and state directory as parameters, `vesperd` unchanged); a
   namespace under `/run/vesper/microvm/netns/` holding `lo` and one TAP owned by uid 10000 (`169.254.77.1/30`
   server, `.2` guest) and the in-namespace `INPUT` rule, joined by the jailer with `--netns`; a per-id record
-  written under one lock before the namespace, an error trap in `launch`, and the `vesper-microvm reap` pass
+  written under one lock before the namespace (the lock not held over the boot poll, its descriptor closed in
+  children), an error trap in `launch`, and the `vesper-microvm reap` pass (which runs `cleanup`) in a new
+  `vesper-microvm-reaper` service; `docs/SECURITY.md` and `design-v0.md` updated here, when shim microVMs first get a
+  network device
 - [ ] M3 One `unfsd` per microVM in that namespace, sandboxed (new mount, pid, ipc and uts namespaces, `pivot_root`
   to a tmpfs, sources at `/s/N` with `nosuid,nodev` and kernel `ro`, `no_new_privs`, a reduced capability bounding
-  set), in a capped cgroup, under `supervise-daemon`; memory measured; `all_squash` evaluated; tests: a container
-  and another microVM cannot connect, a `..`, symlink or forged handle finds nothing outside the exports, a handle
-  cannot cross between exports, a nested-chroot escape fails, a write to a `ro` export fails, `ESTALE` after a
-  restart measured
+  set), in a capped cgroup admitted by `vesper-memadmit` with the microVM, under `supervise-daemon`, logging through
+  `vesper-boundlog`; sources opened under the share mount's descriptor and bound from it; every `ro` source bound
+  again read-only inside each `rw` source that contains it; memory measured; the non-root `all_squash` server
+  adopted if `0600` files, `0700` directories and the binds suite work with it, else root with the capability set;
+  tests: a container and another microVM cannot connect, a `..`, symlink or forged handle finds nothing outside
+  the exports, a handle cannot cross between exports, a nested-chroot escape fails, a write to a `ro` export fails,
+  a `ro` source nested in a `rw` one cannot be written through the outer export, a source swapped for a symlink
+  after validation exports nothing outside the share, `ESTALE` after a restart measured. Exit gate: the GH #159
+  `>` then `>>` lost write is reproduced and explained, or shown not to recur in 1,000 tries
 - [ ] M4 Guest: NFS client modules and their `modules.dep` closure, and `virtio_net`, in the initramfs;
-  `vesper_share_net=` brings up `eth0` with no default route; the share list arrives as JSON over the vsock
-  session; the init mounts each share with
-  `vers=3,proto=tcp,port=2049,mountport=2050,mountproto=tcp,nolock,hard,actimeo=1,lookupcache=positive` (+ `ro`)
+  `vesper_share_net=` brings up `eth0` with no default route; the share list arrives as JSON in the session's `RUN`
+  request; a `vesper-console` subcommand decodes it and calls `mount(2)` for each share, shallowest destination
+  first, after a 3 s probe of the server, with
+  `addr=169.254.77.1,vers=3,proto=tcp,port=2049,mountport=2050,mountproto=tcp,nolock,hard,actimeo=1,lookupcache=positive`
+  (+ `ro`); the guest unmounts its shares before it reports `EXIT`
 - [ ] M5 Shim: OCI bind mounts whose resolved source is under a share mount become NFS mounts; file sources are
-  refused with a clear error; other bind mounts keep today's behaviour; `Kill` with `SIGKILL`, or after the
-  `SIGTERM` grace period, stops the VMM; the server stops at `PhaseStopped`; the leak sensors cover servers and
-  namespaces
-- [ ] M6 Event hop: the GH #150 host-edit replay reaches the microVM, so a macOS edit gives `IN_MODIFY` inside it
+  refused with a clear error; other bind mounts keep today's behaviour; `Kill` forwards the signal as today, and a
+  `SIGKILL` whose `EXIT` does not arrive within a bounded wait (outside the task's operation lock) stops the VMM;
+  no `SIGTERM` timer; the server stops at `PhaseStopped`; the leak sensors cover servers and namespaces
+- [ ] M6 Event hop: the GH #150 host-edit replay reaches the microVM, so a macOS edit gives `IN_MODIFY` inside it,
+  through a bounded, coalescing queue per microVM, with no echo back to macOS
 - [ ] M7 `binds-suite` variant against the microVM path, with the failure tests below; deviations recorded as
   accepted or fixed; `design-v0.md`, `docs/SECURITY.md`, TD-032, TD-049 and the decision log updated; #160 closed
 
@@ -69,6 +82,19 @@ None yet.
   System VM, so its isolation rules are decided and reviewed before code. Anything that would let a guest reach more
   than its own exports goes back to the owner.
 
+- 2026-11-13: a second council review (same seats), asked also to compare alternatives, kept the design: no
+  alternative beat a server per microVM in a private namespace. FUSE over vsock stays the fallback (best correctness,
+  3,000 to 5,000 new lines); NFS relayed over vsock is slower and risks a writeback deadlock; 9p stays excluded; a
+  block image cannot carry writes; a custom memory-safe NFS server is possible later. Its two High findings changed
+  the ADR: a `ro` source nested in a `rw` source was writable through the outer export, so `ro` sources are bound
+  again inside it; and stopping the VMM on every `SIGKILL` lost buffered writes, so `Kill` signals the guest first
+  and stops the VMM only after a bounded wait. The Mediums are in too: the non-root `all_squash` server is preferred
+  but must first read `0600` files (shares appear as `0:0`); sources are bound from a held descriptor; mounts are
+  done by `vesper-console` from the `RUN` request after a server probe; the server's memory is admitted with the
+  microVM's; #160 closes only with the event hop. One finding was out of date: `vesper-memadmit` exists since W4.
+  The report is a working paper (`run/` is not tracked); its conclusions are here and in the ADR.
+- 2026-11-13: the owner accepted ADR 0009 with those fixes (D-032). M1 can start.
+
 ## Outcomes & Retrospective
 
 Not yet written.
@@ -87,7 +113,8 @@ Not yet written.
 ## Plan of Work
 
 The milestones above, in order, each a PR. M0 is a document and a review, and no code changes until it is accepted.
-M2 and M3 carry the security tests. M6 can slip to a follow-up if M1 to M5 and M7 land with the deviation recorded.
+M2 and M3 carry the security tests. M6 may land after M7's suite, but #160 stays open until its event test passes,
+unless the owner changes that acceptance criterion.
 
 ## Concrete Steps
 
@@ -108,6 +135,14 @@ M2 and M3 carry the security tests. M6 can slip to a follow-up if M1 to M5 and M
 Failure tests, each a suite step:
 - With the server killed and held down, `docker stop` (and `ctr task kill -s KILL`) ends the task within its grace
   period plus 10 s, and `Delete` completes.
+- With the server alive, `dd` of 32 MiB to a share without `fsync`, then `docker kill`: the file on macOS has all
+  32 MiB.
+- A stalled server at session start fails the `RUN` within 5 s with an error naming the share.
+- The server respawns under load and I/O resumes; a `launch` racing `reap` leaves either a running task or nothing.
+- `0600` files and `0700` directories read and write through the share.
+- A file 60 directories deep reads, and a write through a descriptor opened before a rename across directories
+  either succeeds or is recorded as a deviation.
+- A burst of 1,000 macOS edits reaches the guest coalesced, with the queue bounded and no echo.
 - After a `launch` aborted mid-way, and after the shim is killed, the reaper leaves `vesper-ctr leftovers` clean
   (no server, supervisor, namespace or exports file).
 - A write to a read-only mount fails in the guest and through a forged handle, and macOS sees no change.
