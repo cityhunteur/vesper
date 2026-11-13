@@ -1041,13 +1041,14 @@ net() { # ID's network namespace: one LINK line per interface, then whether it i
     rwd=$(iptables -t raw -nvxL PREROUTING 2>/dev/null | awk '$3=="DROP" && $6 ~ /^vpd/ {s+=$1} END {print s+0}')
     rpd=$(iptables -t mangle -nvxL VESPERD-REPLY 2>/dev/null | awk '$3=="DROP" {s+=$1} END {print s+0}')
     echo "DROPS $sid ns=${nsd:-0} root=${rtd:-0} raw=${rwd:-0} reply=${rpd:-0}"
-    # The flow cap as installed and its own drop counter, in each layer (`-` when the rule or the counter is gone).
+    # The flow cap as installed and its own drop counter, in each layer: only a connlimit rule whose target is DROP
+    # counts, and `-` means no such rule.
     nsf=$(nsenter --net="$f" cat /proc/sys/net/netfilter/nf_conntrack_count 2>/dev/null)
     rtf=$(cat /proc/sys/net/netfilter/nf_conntrack_count 2>/dev/null)
-    nscap=$(nsenter --net="$f" iptables -S VESPERD-GUEST 2>/dev/null | sed -n 's/.*--connlimit-above \([0-9]*\).*/\1/p' | head -1)
-    rtcap=$(iptables -t mangle -S VESPERD-EGRESS 2>/dev/null | sed -n 's/.*--connlimit-above \([0-9]*\).*/\1/p' | head -1)
-    nscd=$(nsenter --net="$f" iptables -nvxL VESPERD-GUEST 2>/dev/null | awk '/connlimit/ {print $1; exit}')
-    rtcd=$(iptables -t mangle -nvxL VESPERD-EGRESS 2>/dev/null | awk '/connlimit/ {print $1; exit}')
+    nscap=$(nsenter --net="$f" iptables -S VESPERD-GUEST 2>/dev/null | sed -n 's/.*--connlimit-above \([0-9]*\) .*-j DROP$/\1/p' | head -1)
+    rtcap=$(iptables -t mangle -S VESPERD-EGRESS 2>/dev/null | sed -n 's/.*--connlimit-above \([0-9]*\) .*-j DROP$/\1/p' | head -1)
+    nscd=$(nsenter --net="$f" iptables -nvxL VESPERD-GUEST 2>/dev/null | awk '$3=="DROP" && /#conn / {print $1; exit}')
+    rtcd=$(iptables -t mangle -nvxL VESPERD-EGRESS 2>/dev/null | awk '$3=="DROP" && /#conn / {print $1; exit}')
     echo "FLOWS $sid ns=${nsf:--} root=${rtf:--} cap_ns=${nscap:--} cap_root=${rtcap:--} capdrop_ns=${nscd:--} capdrop_root=${rtcd:--}"
   else
     echo "POLICY none"

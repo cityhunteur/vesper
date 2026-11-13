@@ -1,0 +1,79 @@
+{
+  "bridge_path": "run/systemvm/vsock/3.sock",
+  "port": 1024,
+  "steps": [
+    {
+      "name": "handshake",
+      "ok": true,
+      "detail": "protocol 1",
+      "elapsed_ms": 3
+    },
+    {
+      "name": "listeners_and_internet",
+      "ok": true,
+      "detail": "LISTEN tcp=7777 udp=7777 pids=29441 29442; System VM to 1.1.1.1:443: REACH 1.1.1.1:443 open",
+      "elapsed_ms": 28
+    },
+    {
+      "name": "nat_guest_reaches_public_only",
+      "ok": true,
+      "detail": "16 denied probes closed; 2 allowed probes open (System VM 192.168.64.2 via 192.168.64.1); namespace layer dropped 23; vesper-egress-b and vesper-egress-a on distinct veths [\"198.18.0.117\", \"198.18.0.118\"] / [\"198.18.0.113\", \"198.18.0.114\"] and vesper-egress-b reached neither of vesper-egress-a's",
+      "elapsed_ms": 33650
+    },
+    {
+      "name": "isolation_reports_egress",
+      "ok": true,
+      "detail": "vesper-egress-a, vesper-egress-b: netns_ok, ipv6_off, egress nat, egress_ok",
+      "elapsed_ms": 26
+    },
+    {
+      "name": "teardown_removes_veths",
+      "ok": true,
+      "detail": "SIGTERM: both leases ABSENT, no VETH record or vpd link left",
+      "elapsed_ms": 125
+    },
+    {
+      "name": "root_mangle_alone_after_docker_restart",
+      "ok": true,
+      "detail": "dockerd (pid 24502) killed after LAUNCHAPI, healthy again after 2075 ms; OPENED vesper-egress-root namespace filter (root layer only); 14 denied probes closed; 2 allowed probes open; root drops +19, namespace +0",
+      "elapsed_ms": 30853
+    },
+    {
+      "name": "root_raw_drops_sources_outside_the_pool",
+      "ok": true,
+      "detail": "OPENED vesper-egress-root namespace all (root layer only); every probe closed, the allowed ones too (16 denied probes closed; 0 allowed probes open); raw drops +27",
+      "elapsed_ms": 35572
+    },
+    {
+      "name": "flow_cap_drops_excess_in_namespace",
+      "ok": true,
+      "detail": "1400 UDP flows to 1.1.1.1:9: the namespace holds 1024 (cap 1024 in both layers); its cap rule dropped 351, the root one 0; System VM flows 1028 with the lease, 1028 after teardown (FLOWS root=1028 max=65536 tcp_established_s=432000 udp_s=30)",
+      "elapsed_ms": 13943
+    },
+    {
+      "name": "flow_cap_drops_excess_in_root_alone",
+      "ok": true,
+      "detail": "OPENED vesper-egress-root namespace filter (root layer only); 1400 UDP flows: the root cap rule dropped 349, the namespace one 0",
+      "elapsed_ms": 14064
+    },
+    {
+      "name": "none_lease_has_no_uplink",
+      "ok": true,
+      "detail": "egress none; no uplink in its namespace",
+      "elapsed_ms": 417
+    },
+    {
+      "name": "reaper_removes_veth_of_killed_holder",
+      "ok": true,
+      "detail": "KILLED-HOLDER vesper-egress-a pid=3279; REAPED vesper-egress-a reason=holder-gone holder=3279 CLEAN vesper-egress-a; no veth left",
+      "elapsed_ms": 374
+    },
+    {
+      "name": "listeners_stopped",
+      "ok": true,
+      "detail": "LISTEN stopped",
+      "elapsed_ms": 2
+    }
+  ],
+  "passed": true
+}

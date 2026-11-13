@@ -24,7 +24,7 @@ it is why the run comes last.
 
 - [x] Owner reviews and approves this plan, including the decisions marked "owner" in the Decision Log (2026-11-13, D-029)
 - [x] W1 Housekeeping: remove the merged worktrees; split `src/systemvm.rs` (TD-043) (2026-11-13, #187)
-- [ ] W2 TD-058 follow-up: flood test of the 1,024-flow cap; conntrack count after teardown (positive runs 2026-11-13; negative controls pending)
+- [x] W2 TD-058 follow-up: flood test of the 1,024-flow cap; conntrack count after teardown (positive and negative-control runs 2026-11-13, `run/TD-058/egress-flood-*.json`)
 - [ ] W3 #172: `make systemvm-upstream-suite` and the comparator (own ExecPlan)
 - [ ] W4 Runtime bounds: console logs (TD-055), memory budget (TD-056), snapshot store pruning (TD-053)
 - [ ] W5 #160: host shares into microVMs over NFS from `unfs3` (own ExecPlan; dependency approved in D-021)
@@ -43,8 +43,14 @@ it is why the run comes last.
   TCP (read, not measured).
 - W2 council review (`run/TD-058/council-w2.md`): the first root-alone check passed with the cap broken in several
   ways, because it summed every root drop and had no upper bound. Both flood steps now judge the cap rules' own
-  counters, with bounds on both sides, and the installed cap values. The negative controls (each cap rule removed in
-  turn) are still to be run.
+  counters, with bounds on both sides, and the installed cap values. Only a connlimit rule whose target is DROP
+  counts. The first run of that version failed: `iptables -nvxL` prints the rule as `#conn src/0 > 1024`, not
+  "connlimit", so the counter readout never matched. With that fixed the suite passes 12/12 (namespace rule dropped
+  351, root rule alone 349; `egress-flood-positive.json`), and each negative control fails both flood steps or the
+  one it targets: no namespace cap rule (`-no-ns-cap`), no root cap rule (`-no-root-cap`), and the root rule with
+  `--connlimit-mask 0` (`-root-cap-mask0`), whose installed cap still reads 1,024 but whose rule dropped all 1,400.
+  Not covered (council #8, #9): a flood split across two destinations, TCP and DNS probes while the cap is
+  saturated, and the cause of the ~20 flows fewer than datagrams sent.
 
 ## Decision Log
 

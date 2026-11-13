@@ -1,0 +1,79 @@
+{
+  "bridge_path": "run/systemvm/vsock/3.sock",
+  "port": 1024,
+  "steps": [
+    {
+      "name": "handshake",
+      "ok": true,
+      "detail": "protocol 1",
+      "elapsed_ms": 1
+    },
+    {
+      "name": "listeners_and_internet",
+      "ok": true,
+      "detail": "LISTEN tcp=7777 udp=7777 pids=9972 9973; System VM to 1.1.1.1:443: REACH 1.1.1.1:443 open",
+      "elapsed_ms": 31
+    },
+    {
+      "name": "nat_guest_reaches_public_only",
+      "ok": true,
+      "detail": "16 denied probes closed; 2 allowed probes open (System VM 192.168.64.2 via 192.168.64.1); namespace layer dropped 23; vesper-egress-b and vesper-egress-a on distinct veths [\"198.18.0.173\", \"198.18.0.174\"] / [\"198.18.0.169\", \"198.18.0.170\"] and vesper-egress-b reached neither of vesper-egress-a's",
+      "elapsed_ms": 33361
+    },
+    {
+      "name": "isolation_reports_egress",
+      "ok": true,
+      "detail": "vesper-egress-a, vesper-egress-b: netns_ok, ipv6_off, egress nat, egress_ok",
+      "elapsed_ms": 28
+    },
+    {
+      "name": "teardown_removes_veths",
+      "ok": true,
+      "detail": "SIGTERM: both leases ABSENT, no VETH record or vpd link left",
+      "elapsed_ms": 125
+    },
+    {
+      "name": "root_mangle_alone_after_docker_restart",
+      "ok": true,
+      "detail": "dockerd (pid 6193) killed after LAUNCHAPI, healthy again after 2068 ms; OPENED vesper-egress-root namespace filter (root layer only); 14 denied probes closed; 2 allowed probes open; root drops +19, namespace +0",
+      "elapsed_ms": 30679
+    },
+    {
+      "name": "root_raw_drops_sources_outside_the_pool",
+      "ok": true,
+      "detail": "OPENED vesper-egress-root namespace all (root layer only); every probe closed, the allowed ones too (16 denied probes closed; 0 allowed probes open); raw drops +27",
+      "elapsed_ms": 35610
+    },
+    {
+      "name": "flow_cap_drops_excess_in_namespace",
+      "ok": false,
+      "detail": "net vesper-egress-a: a flow field is missing or unreadable (a cap rule gone?): FLOWS vesper-egress-a ns=0 root=5 cap_ns=1024 cap_root=- capdrop_ns=0 capdrop_root=-",
+      "elapsed_ms": 438
+    },
+    {
+      "name": "flow_cap_drops_excess_in_root_alone",
+      "ok": false,
+      "detail": "net vesper-egress-root: a flow field is missing or unreadable (a cap rule gone?): FLOWS vesper-egress-root ns=0 root=5 cap_ns=1024 cap_root=- capdrop_ns=0 capdrop_root=-",
+      "elapsed_ms": 342
+    },
+    {
+      "name": "none_lease_has_no_uplink",
+      "ok": true,
+      "detail": "egress none; no uplink in its namespace",
+      "elapsed_ms": 395
+    },
+    {
+      "name": "reaper_removes_veth_of_killed_holder",
+      "ok": true,
+      "detail": "KILLED-HOLDER vesper-egress-a pid=15581; REAPED vesper-egress-a reason=holder-gone holder=15581 CLEAN vesper-egress-a; no veth left",
+      "elapsed_ms": 492
+    },
+    {
+      "name": "listeners_stopped",
+      "ok": true,
+      "detail": "LISTEN stopped",
+      "elapsed_ms": 2
+    }
+  ],
+  "passed": false
+}
