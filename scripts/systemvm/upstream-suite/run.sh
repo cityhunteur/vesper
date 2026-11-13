@@ -84,6 +84,8 @@ say "revision $FC_REVISION ($TAG), container $CONTAINER, artefacts $ARTIFACTS_PR
 
 # --- fetch (host side, cached) -----------------------------------------------------------------------------------
 TREE="$B/firecracker"
+# Steps that only need the tree mount the volume's firecracker/ at /firecracker (test containers: see "run").
+FCVOL=(--mount "type=volume,src=$SRC_VOL,dst=/firecracker,volume-subpath=firecracker")
 if [ "$(git -C "$TREE" rev-parse HEAD 2>/dev/null || true)" != "$FC_REVISION" ]; then
   say "fetch upstream tree"
   rm -rf "${TREE:?}" && git init -q "$TREE"
@@ -161,10 +163,12 @@ say "release binaries: $(cd "$REL/bin" && ls | tr '\n' ' ')"
 # is used only while the live config is still the one written here, so a config regenerated since (for example by
 # make systemvm-up-snapshot) is never overwritten by a stale backup.
 sha() { shasum -a 256 "$1" 2>/dev/null | cut -d' ' -f1; }
-# The tests' /srv lives on the source volume (see "run" below); wipe it and the test results, if the volume exists.
+# The source volume's root is the tests' /srv and holds the tree in firecracker/ (see "run" below). Wipe everything
+# else at its root, and the tree's test results, if the volume exists.
 wipe_srv() {
   docker volume inspect "$SRC_VOL" >/dev/null 2>&1 || return 0
-  docker run --rm -v "$SRC_VOL":/f "$HELPER_IMAGE" rm -rf /f/build/srv /f/test_results
+  docker run --rm -v "$SRC_VOL":/v "$HELPER_IMAGE" sh -c \
+    'find /v -mindepth 1 -maxdepth 1 ! -name firecracker -exec rm -rf {} + && rm -rf /v/firecracker/test_results'
 }
 restore() {
   rc=$?
@@ -243,23 +247,30 @@ with_timeout 1800 docker pull -q "$CONTAINER" >/dev/null || { say "pull failed; 
   with_timeout 1800 docker pull -q "$CONTAINER" >/dev/null || { say "pull of $CONTAINER failed"; exit 2; }; }
 say "stage the tree into $SRC_VOL"
 step stage "$OUT/stage.log" \
-  docker run --rm -v "$TREE":/src:ro -v "$SRC_VOL":/firecracker "$HELPER_IMAGE" timeout 1800 sh -c '
+  docker run --rm -v "$TREE":/src:ro -v "$SRC_VOL":/v "$HELPER_IMAGE" timeout 1800 sh -c '
+  # The tree lives in firecracker/ (a volume staged before that layout had it at the root: keep its cargo cache).
+  set -e
+  if [ ! -d /v/firecracker ] && [ -d /v/build/cargo_target ]; then
+    mkdir -p /v/firecracker/build && mv /v/build/cargo_target /v/firecracker/build/
+  fi
+  find /v -mindepth 1 -maxdepth 1 ! -name firecracker -exec rm -rf {} +
   # Keep only build/cargo_target (the examples cache); setup-ci-artifacts.sh must start from the raw artefacts.
-  cd /firecracker && find . -mindepth 1 -maxdepth 1 ! -name build -exec rm -rf {} + && mkdir -p build
+  mkdir -p /v/firecracker/build && cd /v/firecracker
+  find . -mindepth 1 -maxdepth 1 ! -name build -exec rm -rf {} +
   find build -mindepth 1 -maxdepth 1 ! -name cargo_target -exec rm -rf {} +
-  cp -a /src/. /firecracker/ && echo staged'
+  cp -a /src/. /v/firecracker/ && echo staged'
 step setup-ci-artifacts "$OUT/setup-ci-artifacts.log" \
-  docker run --rm -v "$SRC_VOL":/firecracker -w /firecracker "$CONTAINER" timeout 1800 ./tools/setup-ci-artifacts.sh "$ARTDIR"
+  docker run --rm "${FCVOL[@]}" -w /firecracker "$CONTAINER" timeout 1800 ./tools/setup-ci-artifacts.sh "$ARTDIR"
 TARGET="build/cargo_target/$ARCH-unknown-linux-musl/release"
 say "build the examples and tools that tests expect in $TARGET"
 step build-examples "$OUT/build.log" \
-  docker run --rm -v "$SRC_VOL":/firecracker -v "$CARGO_VOL":/usr/local/rust/registry -w /firecracker \
+  docker run --rm "${FCVOL[@]}" -v "$CARGO_VOL":/usr/local/rust/registry -w /firecracker \
   --env CARGO_TARGET_DIR=/firecracker/build/cargo_target "$CONTAINER" timeout 3600 bash -c "
   set -e
   cargo build -q --release --target $ARCH-unknown-linux-musl --examples
   cargo build -q --release --target $ARCH-unknown-linux-musl -p clippy-tracing
   cargo build -q --release --target $ARCH-unknown-linux-musl -p log-instrument --examples"
-docker run --rm -v "$SRC_VOL":/firecracker -v "$REL/bin":/rel:ro "$HELPER_IMAGE" sh -c "
+docker run --rm "${FCVOL[@]}" -v "$REL/bin":/rel:ro "$HELPER_IMAGE" sh -c "
   set -e; t=/firecracker/$TARGET; mkdir -p \$t/examples
   cp /rel/* \$t/
   ls \$t | tr '\n' ' '" > "$OUT/staged-tools.txt"
@@ -269,21 +280,22 @@ say "staged: $(cat "$OUT/staged-tools.txt")"
 RES="$B/results/$STAMP"
 mkdir -p "$RES"
 common=(--privileged --security-opt seccomp=unconfined --ulimit core=0 --ulimit nofile=4096:4096
-  --ulimit memlock=-1:-1 --volume /dev:/dev --volume "$SRC_VOL":/firecracker
+  --ulimit memlock=-1:-1 --volume /dev:/dev --volume "$SRC_VOL":/srv
   --volume "$RES":/results -v /boot:/boot --env PYTHONDONTWRITEBYTECODE=1
-  --workdir /firecracker)
+  --workdir /)
 say "collect the selection"
 # The framework hard-links files into each jail under /srv: the binaries and uffd examples from --binary-dir, and
-# tests/framework files such as vm_config.json (test_invalid_bpf). link(2) fails with EXDEV across mounts, so /srv
-# must be on the source volume's mount: each test container replaces /srv with a symlink to /firecracker/build/srv.
-# The binaries are still copied under /srv, as the tests expect. Collection errors are judged from the run's report.
-SRVDIR=/firecracker/build/srv
-INSRV=(sh -c "rm -rf /srv && mkdir -p $SRVDIR && ln -s $SRVDIR /srv && exec \"\$@\"" sh)
+# tests/framework files such as vm_config.json (test_invalid_bpf). link(2) fails with EXDEV across mounts, so the
+# tree and /srv must share one mount. /srv must be a real directory, not a symlink: the jailer reports canonical
+# paths, and test_jail's hard-link and symlink tests match its error against the /srv path. So each test container
+# mounts the volume's root at /srv and makes /firecracker a symlink to /srv/firecracker.
+SRVDIR=/srv
+INSRV=(sh -c 'rm -rf /firecracker && ln -s /srv/firecracker /firecracker && cd /firecracker && exec "$@"' sh)
 BIN=/srv/binaries
 docker volume rm -f "$SRV_VOL" >/dev/null 2>&1 || true
 wipe_srv
-docker run --rm -v "$SRC_VOL":/firecracker "$HELPER_IMAGE" sh -c "
-  set -e; t=/firecracker/$TARGET; BIN=$SRVDIR/binaries; mkdir -p \$BIN/examples
+docker run --rm -v "$SRC_VOL":/srv "$HELPER_IMAGE" sh -c "
+  set -e; t=/srv/firecracker/$TARGET; BIN=$SRVDIR/binaries; mkdir -p \$BIN/examples
   for f in \$t/*; do if [ -f \"\$f\" ]; then cp \"\$f\" \$BIN/; fi; done
   for f in \$t/examples/*; do if [ -f \"\$f\" ] && [ -x \"\$f\" ]; then cp \"\$f\" \$BIN/examples/; fi; done
   ls \$BIN \$BIN/examples | tr '\n' ' '" > "$OUT/binaries.txt"
@@ -318,7 +330,7 @@ echo "rc=$RC wall_s=$(( $(date +%s) - START )) collected=$COLLECTED stopped=${ST
   gzip -dc "$OUT/pytest.log.gz" | awk '/short test summary info/{f=1} f'; } > "$OUT/pytest-progress.log" || true
 if [ -s "$RES/report.json" ]; then
   python3 -I "$HERE/collect.py" "$OUT/results.json" --collected "$OUT/collected.txt" --meta "$OUT/meta.json" \
-    --exitcode "$RC" "$RES/report.json"
+    --exitcode "$RC" --log "$OUT/pytest-progress.log" "$RES/report.json"
   gzip -c "$RES/report.json" > "$OUT/report.json.gz"
 else
   say "no JSON report (the run was stopped); recovering finished tests from the progress log"

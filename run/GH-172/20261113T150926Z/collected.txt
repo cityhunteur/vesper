@@ -1,0 +1,69 @@
+[Firecracker test.sh] Create TMPDIR in /srv
+mkdir: created directory '/srv/tmp'
+[Firecracker test.sh] cgroups v2: enable nesting
+[Firecracker test.sh] Copy artifacts to /srv/test_artifacts, so hardlinks work
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/.' -> '/srv/test_artifacts/'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./ubuntu-24.04.squashfs.orig' -> '/srv/test_artifacts/ubuntu-24.04.squashfs.orig'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./ubuntu-24.04.manifest' -> '/srv/test_artifacts/ubuntu-24.04.manifest'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./amazonlinux-2023.manifest' -> '/srv/test_artifacts/amazonlinux-2023.manifest'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./vmlinux-6.1.172' -> '/srv/test_artifacts/vmlinux-6.1.172'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./vmlinux-5.10.253' -> '/srv/test_artifacts/vmlinux-5.10.253'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./vmlinux-5.10.253.config' -> '/srv/test_artifacts/vmlinux-5.10.253.config'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./vmlinux-6.1.172.config' -> '/srv/test_artifacts/vmlinux-6.1.172.config'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./initramfs.cpio' -> '/srv/test_artifacts/initramfs.cpio'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./amazonlinux-2023.squashfs.orig' -> '/srv/test_artifacts/amazonlinux-2023.squashfs.orig'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./debug' -> '/srv/test_artifacts/debug'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./debug/vmlinux-6.1.172' -> '/srv/test_artifacts/debug/vmlinux-6.1.172'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./debug/vmlinux-5.10.253' -> '/srv/test_artifacts/debug/vmlinux-5.10.253'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./debug/vmlinux-5.10.253.config' -> '/srv/test_artifacts/debug/vmlinux-5.10.253.config'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./debug/vmlinux-6.1.172.config' -> '/srv/test_artifacts/debug/vmlinux-6.1.172.config'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./debug/vmlinux-6.1.172.debug' -> '/srv/test_artifacts/debug/vmlinux-6.1.172.debug'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./debug/vmlinux-5.10.253.debug' -> '/srv/test_artifacts/debug/vmlinux-5.10.253.debug'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./id_rsa' -> '/srv/test_artifacts/id_rsa'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./id_rsa.pub' -> '/srv/test_artifacts/id_rsa.pub'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./amazonlinux-2023.id_rsa' -> '/srv/test_artifacts/amazonlinux-2023.id_rsa'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./amazonlinux-2023.squashfs' -> '/srv/test_artifacts/amazonlinux-2023.squashfs'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./amazonlinux-2023.ext4' -> '/srv/test_artifacts/amazonlinux-2023.ext4'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./ubuntu-24.04.id_rsa' -> '/srv/test_artifacts/ubuntu-24.04.id_rsa'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./ubuntu-24.04.squashfs' -> '/srv/test_artifacts/ubuntu-24.04.squashfs'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./ubuntu-24.04.ext4' -> '/srv/test_artifacts/ubuntu-24.04.ext4'
+integration_tests/functional/test_snapshot_editor.py::test_remove_regs[vmlinux-6.1.172-PCI_ON]
+integration_tests/functional/test_snapshot_editor.py::test_remove_regs[vmlinux-6.1.172-PCI_OFF]
+integration_tests/functional/test_snapshot_not_losing_dirty_pages.py::test_diff_snapshot_works_after_error[vmlinux-6.1.172]
+integration_tests/functional/test_serial_io.py::test_serial_after_snapshot[vmlinux-6.1.172-PCI_ON]
+integration_tests/functional/test_serial_io.py::test_serial_after_snapshot[vmlinux-6.1.172-PCI_OFF]
+integration_tests/functional/test_serial_io.py::test_serial_active_tx_snapshot[vmlinux-6.1.172-PCI_ON]
+integration_tests/functional/test_serial_io.py::test_serial_active_tx_snapshot[vmlinux-6.1.172-PCI_OFF]
+integration_tests/functional/test_serial_io.py::test_serial_console_login[vmlinux-5.10.253-PCI_ON]
+integration_tests/functional/test_serial_io.py::test_serial_console_login[vmlinux-5.10.253-PCI_OFF]
+integration_tests/functional/test_serial_io.py::test_serial_console_login[vmlinux-6.1.172-PCI_ON]
+integration_tests/functional/test_serial_io.py::test_serial_console_login[vmlinux-6.1.172-PCI_OFF]
+integration_tests/functional/test_serial_io.py::test_serial_dos[vmlinux-5.10.253-PCI_ON]
+integration_tests/functional/test_serial_io.py::test_serial_dos[vmlinux-5.10.253-PCI_OFF]
+integration_tests/functional/test_serial_io.py::test_serial_dos[vmlinux-6.1.172-PCI_ON]
+integration_tests/functional/test_serial_io.py::test_serial_dos[vmlinux-6.1.172-PCI_OFF]
+integration_tests/functional/test_serial_io.py::test_serial_block[vmlinux-5.10.253-PCI_ON]
+integration_tests/functional/test_serial_io.py::test_serial_block[vmlinux-5.10.253-PCI_OFF]
+integration_tests/functional/test_serial_io.py::test_serial_block[vmlinux-6.1.172-PCI_ON]
+integration_tests/functional/test_serial_io.py::test_serial_block[vmlinux-6.1.172-PCI_OFF]
+integration_tests/functional/test_serial_io.py::test_no_serial_fd_error_when_daemonized[vmlinux-6.1.172-PCI_ON]
+integration_tests/functional/test_serial_io.py::test_no_serial_fd_error_when_daemonized[vmlinux-6.1.172-PCI_OFF]
+integration_tests/functional/test_serial_io.py::test_serial_file_output[uvm_booted-vmlinux-5.10.253-NO_CPU_TMPL-PCI_ON]
+integration_tests/functional/test_serial_io.py::test_serial_file_output[uvm_booted-vmlinux-5.10.253-NO_CPU_TMPL-PCI_OFF]
+integration_tests/functional/test_serial_io.py::test_serial_file_output[uvm_booted-vmlinux-6.1.172-NO_CPU_TMPL-PCI_ON]
+integration_tests/functional/test_serial_io.py::test_serial_file_output[uvm_booted-vmlinux-6.1.172-NO_CPU_TMPL-PCI_OFF]
+integration_tests/functional/test_serial_io.py::test_serial_file_output[uvm_restored-vmlinux-5.10.253-NO_CPU_TMPL-PCI_ON]
+integration_tests/functional/test_serial_io.py::test_serial_file_output[uvm_restored-vmlinux-5.10.253-NO_CPU_TMPL-PCI_OFF]
+integration_tests/functional/test_serial_io.py::test_serial_file_output[uvm_restored-vmlinux-6.1.172-NO_CPU_TMPL-PCI_ON]
+integration_tests/functional/test_serial_io.py::test_serial_file_output[uvm_restored-vmlinux-6.1.172-NO_CPU_TMPL-PCI_OFF]
+integration_tests/functional/test_serial_io.py::test_serial_rate_limiting[vmlinux-6.1.172-PCI_ON]
+integration_tests/functional/test_serial_io.py::test_serial_rate_limiting[vmlinux-6.1.172-PCI_OFF]
+
+=============================== warnings summary ===============================
+../../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: cache_dir
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+31 tests collected in 0.02s

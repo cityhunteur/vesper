@@ -1,0 +1,6 @@
+# Frozen for the fourth full run (2026-11-13, after run 3: /srv a real directory, rerun outcomes, two load classes widened).
+# Run 3 was frozen at classes.yaml 8b722485…59d3 and upstream.rs 2e7f3a44…a879.
+0853e0f5bb1fec38bd72e3d5318936b18c43573b50474a73223898ca8bbd5b4c  docs/specs/upstream-suite-classes.yaml
+2e7f3a44f8660861f17b4be56158d386a9060a013b7a01eab7ad036fabd1a879  src/baseline/upstream.rs
+f4582e7d65297b9792d45b9a24eeed9d878e5c8fff101ea373f195595e55fff5  scripts/systemvm/upstream-suite/collect.py
+cb7ee4f5b5d507fd971d4deed3620465a06775dbb44c83d414300e0eb52230ae  scripts/systemvm/upstream-suite/run.sh

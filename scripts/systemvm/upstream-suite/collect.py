@@ -12,6 +12,11 @@ before it started, which the comparator must explain like a failure. When the ru
 never wrote its file, so `--log` recovers each finished test from pytest-xdist's progress lines
 (`[gw0] [ 3%] PASSED nodeid`), keeping the worst outcome a test logged (a teardown ERROR after a PASSED).
 
+Upstream marks some tests `@pytest.mark.flaky(reruns=N)` (pytest-rerunfailures). pytest-json-report then keeps one
+entry with outcome "rerun", an attempt that was retried, and not the final attempt; `--log` gives that attempt: the
+worst outcome logged after the test's last RERUN line, with a message saying it was rerun. Without a log, or with no
+line after the last RERUN, a rerun test is an "error".
+
 The message is the primary exception only (pytest's crash message, else the first `E` line), so a chained exception
 cannot lend a test another class's symptom; a failure's message wins over a skip's. META.json gets pytest's exit code
 and the modules that failed to collect, which `baselinectl --mode upstream-compare --meta` turns into failures.
@@ -73,21 +78,39 @@ def meta(report):
 
 
 # A node id can contain spaces (`...-1000.0 KB/sec]`), so it runs to the end of the line.
-PROGRESS = re.compile(r"^\[gw\d+\] \[\s*\d+%\] (PASSED|FAILED|ERROR|SKIPPED|XFAIL|XPASS) (.+?)\s*$")
+PROGRESS = re.compile(r"^\[gw\d+\] \[\s*\d+%\] (PASSED|FAILED|ERROR|SKIPPED|XFAIL|XPASS|RERUN) (.+?)\s*$")
 FROM_LOG = {"PASSED": "passed", "XFAIL": "xfailed", "XPASS": "xpassed", "SKIPPED": "skipped", "FAILED": "failed", "ERROR": "error"}
 WORST = ["passed", "xfailed", "xpassed", "skipped", "failed", "error"]
 
 
-def from_log(path):
+def log_outcomes(lines):
+    """{nodeid: (worst outcome logged after its last RERUN line or None, reruns)}."""
     found = {}
+    for line in lines:
+        m = PROGRESS.match(line)
+        if not m:
+            continue
+        status, nodeid = m.group(1), m.group(2)
+        outcome, reruns = found.get(nodeid, (None, 0))
+        if status == "RERUN":
+            found[nodeid] = (None, reruns + 1)
+        elif outcome is None or WORST.index(FROM_LOG[status]) > WORST.index(outcome):
+            found[nodeid] = (FROM_LOG[status], reruns)
+    return found
+
+
+def from_log(path):
     with open(path, errors="replace") as f:
-        for line in f:
-            m = PROGRESS.match(line)
-            if m:
-                outcome, nodeid = FROM_LOG[m.group(1)], m.group(2)
-                if nodeid not in found or WORST.index(outcome) > WORST.index(found[nodeid]):
-                    found[nodeid] = outcome
-    return {n: {"outcome": o, "message": "from the progress log; the JSON report was not written"} for n, o in found.items()}
+        found = log_outcomes(f)
+    return {n: {"outcome": o, "message": "from the progress log; the JSON report was not written"}
+            for n, (o, _) in found.items() if o is not None}
+
+
+def resolve_rerun(nodeid, logged):
+    outcome, reruns = logged.get(nodeid, (None, 0))
+    if outcome is None:
+        return {"outcome": "error", "message": "rerun (pytest-rerunfailures) with no final result in the progress log"}
+    return {"outcome": outcome, "message": f"{outcome} after {reruns} rerun(s) (pytest-rerunfailures), from the progress log"}
 
 
 def self_test():
@@ -115,6 +138,12 @@ def self_test():
     assert m and m.group(2) == "a.py::t[x-1000.0 KB/sec]", m
     assert meta({"exitcode": 2, "collectors": [{"nodeid": "a.py", "outcome": "failed"}, {"nodeid": "", "outcome": "passed"}]}) == \
         {"exitcode": 2, "collection_errors": ["a.py"]}
+    # A rerun resolves to the attempt after the last RERUN line, not the worst of all attempts.
+    logged = log_outcomes(["[gw0] [ 5%] FAILED a.py::t ", "[gw0] [ 5%] RERUN a.py::t ", "[gw0] [ 9%] PASSED a.py::t ",
+                           "[gw1] [ 6%] RERUN a.py::u ", "[gw1] [ 9%] PASSED a.py::v "])
+    assert resolve_rerun("a.py::t", logged)["outcome"] == "passed", logged
+    assert resolve_rerun("a.py::u", logged)["outcome"] == "error", logged
+    assert resolve_rerun("a.py::w", {})["outcome"] == "error"
     print("collect.py self-test: ok")
 
 
@@ -135,14 +164,19 @@ def main(argv):
     reports = rest
     results = {}
     run_meta = {"exitcode": None, "collection_errors": []}
+    logged = {}
     if log:
-        results.update(from_log(log))
+        with open(log, errors="replace") as f:
+            logged = log_outcomes(f)
+        # Tests the log shows finished, for a run whose JSON report was never written.
+        if not reports:
+            results.update(from_log(log))
     for path in reports:
         with open(path) as f:
             report = json.load(f)
         run_meta = meta(report)
         for test in report.get("tests", []):
-            results[test["nodeid"]] = result(test)
+            results[test["nodeid"]] = resolve_rerun(test["nodeid"], logged) if test["outcome"] == "rerun" else result(test)
     # The report's exit status is pytest's own; without a report (a stopped run) the container's status stands in,
     # so the comparator never sees an unknown status from a run that did end.
     if run_meta["exitcode"] is None and exitcode is not None:

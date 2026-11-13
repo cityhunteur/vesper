@@ -83,6 +83,24 @@ Either way, a new, unexplained failure turns the run red.
   not an exception, so `/srv` now lives on the source volume's mount (a symlink in each test container).
 - 2026-11-13: the review also pointed out that judging run 2 green after editing the classes from run 2 is circular.
   The classes are frozen for a third full run, which is the evidence the comparator works on an unseen run.
+- 2026-11-13: the third full run (`20261113T133615Z`, 4,911 s, 757 passed), judged with the classes frozen, left 8
+  results unmatched (`compare.txt`). Four were a regression from the `/srv` symlink: the jailer reports canonical
+  paths (`/firecracker/build/srv/jailer/...`), and `test_exec_destination_path_is_hardlink` and `_is_symlink` match its
+  error against the `/srv` path. The quick check of the symlink had run only `test_custom_seccomp` and `test_uffd`.
+  `/srv` is now a real directory: each test container mounts the source volume's root at `/srv`, the tree lives in
+  its `firecracker/`, and `/firecracker` is a symlink to it, so the tree and the jails still share one mount. The
+  quick run `20261113T150145Z` passes all of `test_jail.py` and `test_custom_seccomp.py`. The other four were load:
+  three guest SSH failures after a restore (`test_remove_regs` twice, one "Connection refused";
+  `test_diff_snapshot_works_after_error`) and a 6.78 MiB overshoot in `test_serial_file_output`. All three snapshot tests
+  passed when rerun alone (`20261113T150926Z`). The two load classes name those tests now and the SSH class accepts
+  "Connection refused".
+- 2026-11-13: that quick run also showed upstream's `@pytest.mark.flaky(reruns=2)` (`test_serial_active_tx_snapshot`):
+  pytest-json-report keeps only the retried attempt, with outcome `rerun`, and the collector made it an `error`
+  with no message. The collector now reads `pytest-progress.log` and takes the outcome logged after the test's last
+  RERUN line; none of the three full runs had a rerun, and re-collecting runs 2 and 3 changes nothing.
+- 2026-11-13: run 3 is therefore not the frozen-class evidence. The classes, comparator, collector and runner are
+  frozen again (`run/GH-172/frozen-classes.sha256`) for a fourth full run. If it too leaves load results unmatched,
+  fitting stops and the owner decides how the comparator should treat timing under load.
 
 ## Decision Log
 

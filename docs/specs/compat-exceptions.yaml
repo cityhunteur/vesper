@@ -15,8 +15,10 @@ exceptions:
       (run/GH-172/20261113T081827Z and 20261113T101748Z). At the time the second left 7 timing results unmatched
       (compare-at-run.txt); the classes were then widened for them and explain its other 224 (96 skip,
       48 environment, 8 test assumption, 72 unexplained, most a VMM memory overshoot or timing under nested
-      virtualisation). Because those classes were fitted to that run, the evidence that they hold is a third full
-      run judged with the classes unchanged.
+      virtualisation). Because those classes were fitted to that run, a third full run (20261113T133615Z, 757 passed)
+      was judged with them frozen: it left 8 unmatched, 4 a harness regression since fixed and 4 load results in
+      tests the classes did not name. The evidence that the classes hold is a fourth full run judged with them,
+      the comparator, the collector and the runner unchanged (run/GH-172/frozen-classes.sha256).
       An earlier feasibility run on 2026-11-12 (GH #166) ran it unmodified in the System VM at the pinned v1.16.0:
       755 of 980 functional and security tests passed, 96 skipped for architecture or kernel reasons, and
       129 failed, errored or hung. Of those, 58 are environment (Apple virtual CPU cache topology, SSB

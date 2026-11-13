@@ -69,6 +69,7 @@ classes:
              "integration_tests/functional/test_metrics.py::test_net_metrics*",
              "integration_tests/functional/test_mmds.py::*",
              "integration_tests/functional/test_pmem.py::*",
+             "integration_tests/functional/test_serial_io.py::test_serial_file_output*",
              "integration_tests/functional/test_snapshot_basic.py::test_create_large_diff_snapshot*",
              "integration_tests/functional/test_snapshot_basic.py::test_cycled_snapshot_restore*",
              "integration_tests/functional/test_vsock.py::test_vsock_after_override*",
@@ -79,22 +80,26 @@ classes:
     max: 64
     tracked_by: CE-0001
     reason: >-
-      Firecracker's own memory outside guest memory is 5.00 to 6.79 MiB (the two full GH #172 runs) against MemoryMonitor's
-      5 and 7 MiB thresholds
+      Firecracker's own memory outside guest memory is 5.00 to 6.79 MiB (the three full GH #172 runs) against
+      MemoryMonitor's 5 and 7 MiB thresholds; the third run added test_serial_file_output (6.78 MiB, a restored VM)
   - id: guest-ssh-timeout-under-load
     kind: environment
     nodeid: ["integration_tests/functional/test_snapshot_basic.py::test_clocksource_snapshot_restore*",
              "integration_tests/functional/test_snapshot_basic.py::test_vmgenid*",
              "integration_tests/functional/test_balloon.py::test_hinting_reporting_snapshot*",
-             "integration_tests/functional/test_sysgenid.py::test_sysgenid_via_poll_and_nonblocking_read*"]
-    message: ["port 22: Connection timed out", "Connection timed out during banner exchange"]
+             "integration_tests/functional/test_sysgenid.py::test_sysgenid_via_poll_and_nonblocking_read*",
+             "integration_tests/functional/test_snapshot_editor.py::test_remove_regs*",
+             "integration_tests/functional/test_snapshot_not_losing_dirty_pages.py::test_diff_snapshot_works_after_error*"]
+    message: ["port 22: Connection timed out", "Connection timed out during banner exchange", "port 22: Connection refused"]
     outcomes: [failed, error]
     max: 6
     flaky: true
     tracked_by: CE-0001
     reason: >-
       guest SSH timed out after a snapshot restore or a VM generation change under nested virtualisation (load
-      average up to 28 on 4 vCPUs); the first full run saw it in none of these tests, the second in three sysgenid tests
+      average up to 28 on 4 vCPUs); the first full run saw it in none of these tests, the second in three sysgenid tests,
+      the third in test_remove_regs (one refused, before sshd answered) and test_diff_snapshot_works_after_error, all
+      three of which passed when rerun alone (run/GH-172/20261113T150926Z)
   - id: max-devices-worker-timeout
     kind: environment
     nodeid: ["integration_tests/functional/test_max_devices.py::test_attach_maximum_devices*"]
@@ -156,15 +161,6 @@ classes:
     reason: >-
       two balloon statistics reads returned the same value (assert N != N), so the guest had not refreshed them in the
       polling interval; once in the second full GH #172 run, the first passed all four
-  - id: jail-hardlink-exdev
-    kind: unexplained
-    nodeid: ["integration_tests/security/test_custom_seccomp.py::test_invalid_bpf*"]
-    message: ["Invalid cross-device link: 'framework/vm_config.json'"]
-    outcomes: [failed, error]
-    max: 2
-    flaky: true
-    tracked_by: CE-0001
-    reason: EXDEV hard-linking framework/vm_config.json into the jail
   - id: vmclock-gen-counter-flag
     kind: unexplained
     nodeid: ["integration_tests/functional/test_vmclock.py::*"]

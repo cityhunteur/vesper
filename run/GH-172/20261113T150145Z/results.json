@@ -1,0 +1,274 @@
+{
+ "integration_tests/functional/test_uffd.py::test_bad_socket_path[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "failed",
+  "message": "RuntimeError: ('Load snapshot error: Failed to restore from snapshot: Failed to load guest memory: Error creating guest memory from uffd: Failed to UFFD object: System error', {'fault_message': 'Load snapshot error: Failed to restore from snapshot: Failed to load guest memory: Error creating guest memory from uffd: Failed to UFFD object: System error'}, <Response [400]>)"
+ },
+ "integration_tests/functional/test_uffd.py::test_bad_socket_path[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "failed",
+  "message": "RuntimeError: ('Load snapshot error: Failed to restore from snapshot: Failed to load guest memory: Error creating guest memory from uffd: Failed to UFFD object: System error', {'fault_message': 'Load snapshot error: Failed to restore from snapshot: Failed to load guest memory: Error creating guest memory from uffd: Failed to UFFD object: System error'}, <Response [400]>)"
+ },
+ "integration_tests/functional/test_uffd.py::test_malicious_handler[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "failed",
+  "message": "RuntimeError: ('Load snapshot error: Failed to restore from snapshot: Failed to load guest memory: Error creating guest memory from uffd: Failed to UFFD object: System error', {'fault_message': 'Load snapshot error: Failed to restore from snapshot: Failed to load guest memory: Error creating guest memory from uffd: Failed to UFFD object: System error'}, <Response [400]>)"
+ },
+ "integration_tests/functional/test_uffd.py::test_malicious_handler[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "failed",
+  "message": "RuntimeError: ('Load snapshot error: Failed to restore from snapshot: Failed to load guest memory: Error creating guest memory from uffd: Failed to UFFD object: System error', {'fault_message': 'Load snapshot error: Failed to restore from snapshot: Failed to load guest memory: Error creating guest memory from uffd: Failed to UFFD object: System error'}, <Response [400]>)"
+ },
+ "integration_tests/functional/test_uffd.py::test_unbinded_socket[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "failed",
+  "message": "RuntimeError: ('Load snapshot error: Failed to restore from snapshot: Failed to load guest memory: Error creating guest memory from uffd: Failed to UFFD object: System error', {'fault_message': 'Load snapshot error: Failed to restore from snapshot: Failed to load guest memory: Error creating guest memory from uffd: Failed to UFFD object: System error'}, <Response [400]>)"
+ },
+ "integration_tests/functional/test_uffd.py::test_unbinded_socket[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "failed",
+  "message": "RuntimeError: ('Load snapshot error: Failed to restore from snapshot: Failed to load guest memory: Error creating guest memory from uffd: Failed to UFFD object: System error', {'fault_message': 'Load snapshot error: Failed to restore from snapshot: Failed to load guest memory: Error creating guest memory from uffd: Failed to UFFD object: System error'}, <Response [400]>)"
+ },
+ "integration_tests/functional/test_uffd.py::test_valid_handler[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "failed",
+  "message": "RuntimeError: ('Load snapshot error: Failed to restore from snapshot: Failed to load guest memory: Error creating guest memory from uffd: Failed to UFFD object: System error', {'fault_message': 'Load snapshot error: Failed to restore from snapshot: Failed to load guest memory: Error creating guest memory from uffd: Failed to UFFD object: System error'}, <Response [400]>)"
+ },
+ "integration_tests/functional/test_uffd.py::test_valid_handler[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "failed",
+  "message": "RuntimeError: ('Load snapshot error: Failed to restore from snapshot: Failed to load guest memory: Error creating guest memory from uffd: Failed to UFFD object: System error', {'fault_message': 'Load snapshot error: Failed to restore from snapshot: Failed to load guest memory: Error creating guest memory from uffd: Failed to UFFD object: System error'}, <Response [400]>)"
+ },
+ "integration_tests/security/test_custom_seccomp.py::test_allow_all[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_custom_seccomp.py::test_allow_all[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_custom_seccomp.py::test_failing_filter[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_custom_seccomp.py::test_failing_filter[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_custom_seccomp.py::test_invalid_bpf[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_custom_seccomp.py::test_invalid_bpf[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_custom_seccomp.py::test_working_filter[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_custom_seccomp.py::test_working_filter[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_arbitrary_usocket_location[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_arbitrary_usocket_location[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_args_default_resource_limits[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_args_default_resource_limits[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_args_resource_limits[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_args_resource_limits[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_cgroups[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_cgroups[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_cgroups_custom_parent[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_cgroups_custom_parent[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_cgroups_parent_cgroup_but_no_cgroup[vmlinux-6.1.172-PCI_OFF-False-None]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_cgroups_parent_cgroup_but_no_cgroup[vmlinux-6.1.172-PCI_OFF-True-False]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_cgroups_parent_cgroup_but_no_cgroup[vmlinux-6.1.172-PCI_OFF-True-True]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_cgroups_parent_cgroup_but_no_cgroup[vmlinux-6.1.172-PCI_ON-False-None]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_cgroups_parent_cgroup_but_no_cgroup[vmlinux-6.1.172-PCI_ON-True-False]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_cgroups_parent_cgroup_but_no_cgroup[vmlinux-6.1.172-PCI_ON-True-True]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_cgroups_without_numa[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_cgroups_without_numa[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_cgroupsv2_written_only_once[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_cgroupsv2_written_only_once[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_default_chroot_hierarchy[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_default_chroot_hierarchy[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_empty_jailer_id[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_empty_jailer_id[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_exec_destination_path_is_hardlink[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_exec_destination_path_is_hardlink[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_exec_destination_path_is_symlink[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_exec_destination_path_is_symlink[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_exec_file_not_exist[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_exec_file_not_exist[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_firecracker_kill_by_pid[vmlinux-6.1.172-PCI_OFF-False-False]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_firecracker_kill_by_pid[vmlinux-6.1.172-PCI_OFF-False-True]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_firecracker_kill_by_pid[vmlinux-6.1.172-PCI_OFF-True-False]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_firecracker_kill_by_pid[vmlinux-6.1.172-PCI_OFF-True-True]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_firecracker_kill_by_pid[vmlinux-6.1.172-PCI_ON-False-False]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_firecracker_kill_by_pid[vmlinux-6.1.172-PCI_ON-False-True]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_firecracker_kill_by_pid[vmlinux-6.1.172-PCI_ON-True-False]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_firecracker_kill_by_pid[vmlinux-6.1.172-PCI_ON-True-True]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_negative_file_size_limit[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_negative_file_size_limit[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_negative_no_file_limit[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_negative_no_file_limit[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_new_pid_namespace[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_new_pid_namespace[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_new_pid_ns_resource_limits[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_new_pid_ns_resource_limits[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_node_cgroups[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_node_cgroups[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_positive_file_size_limit[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_positive_file_size_limit[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_v1_default_cgroups[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "skipped",
+  "message": "('/srv/firecracker/tests/integration_tests/security/test_jail.py', 440, 'Skipped: Requires system with cgroup-v1 enabled.')"
+ },
+ "integration_tests/security/test_jail.py::test_v1_default_cgroups[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "skipped",
+  "message": "('/srv/firecracker/tests/integration_tests/security/test_jail.py', 440, 'Skipped: Requires system with cgroup-v1 enabled.')"
+ }
+}
