@@ -4,7 +4,8 @@ version: 1
 # first match wins. Seeded from the GH #166 trial (run/GH-166/summary.md, 2026-11-12, Apple M3 Pro) and narrowed after
 # the GH #172 council review to the tests and messages the full run of 2026-11-13 showed: every class names its test
 # functions (no bare `*`), a message substring that is the symptom, not merely the file, and a `max` near the observed
-# count, so a regression with the same symptom in more tests fails the run. `flaky: true` marks a class that need not
+# count, so a regression with the same symptom in more tests fails the run. The one exception is `any_test: true`
+# (vmm-memory-overhead), for a symptom that moves between tests from run to run. `flaky: true` marks a class that need not
 # match in every full run. A class is never a harness gap: those are fixed in scripts/systemvm/upstream-suite/.
 # `unexplained` classes stay open under CE-0001 until the Linux reference run (CE-0003) settles them.
 classes:
@@ -61,27 +62,17 @@ classes:
     reason: the System VM has no DMI or SMBIOS, so /sys/devices/virtual/dmi/id/bios_version is missing
   - id: vmm-memory-overhead
     kind: unexplained
-    nodeid: ["integration_tests/functional/test_api.py::test_get_full_config_after_restoring_snapshot*",
-             "integration_tests/functional/test_cpu_all.py::*",
-             "integration_tests/functional/test_drive_virtio.py::test_non_partuuid_boot*",
-             "integration_tests/functional/test_hotplug.py::test_hotplug_max_devices*",
-             "integration_tests/functional/test_hotplug.py::test_hotplug_pmem*",
-             "integration_tests/functional/test_metrics.py::test_net_metrics*",
-             "integration_tests/functional/test_mmds.py::*",
-             "integration_tests/functional/test_pmem.py::*",
-             "integration_tests/functional/test_serial_io.py::test_serial_file_output*",
-             "integration_tests/functional/test_snapshot_basic.py::test_create_large_diff_snapshot*",
-             "integration_tests/functional/test_snapshot_basic.py::test_cycled_snapshot_restore*",
-             "integration_tests/functional/test_vsock.py::test_vsock_after_override*",
-             "integration_tests/functional/test_vsock.py::test_vsock_transport_reset_h2g*"]
-    # 5.00 to 6.99 MiB only: a larger overshoot is a different problem.
+    # Any test (owner decision D-031): over four full runs the overshoot hit 54, 57, 55 and 65 tests, 80 distinct
+    # ones in 14 files and only 33 every time, so a list of test names cannot be frozen. The symptom and the count
+    # bound it instead. 5.00 to 6.99 MiB only: a larger overshoot is a different problem.
+    any_test: true
     message: ["MemoryUsageExceededError: ('Memory usage (5.", "MemoryUsageExceededError: ('Memory usage (6."]
     outcomes: [failed, error]
-    max: 64
+    max: 80
     tracked_by: CE-0001
     reason: >-
-      Firecracker's own memory outside guest memory is 5.00 to 6.79 MiB (the three full GH #172 runs) against
-      MemoryMonitor's 5 and 7 MiB thresholds; the third run added test_serial_file_output (6.78 MiB, a restored VM)
+      Firecracker's own memory outside guest memory is 5.00 to 6.79 MiB (the four full GH #172 runs) against
+      MemoryMonitor's 5 and 7 MiB thresholds, in a different set of tests each run
   - id: guest-ssh-timeout-under-load
     kind: environment
     nodeid: ["integration_tests/functional/test_snapshot_basic.py::test_clocksource_snapshot_restore*",

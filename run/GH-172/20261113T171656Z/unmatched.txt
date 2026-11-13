@@ -1,0 +1,1 @@
+integration_tests/functional/test_cpu_template_helper.py::test_consecutive_fingerprint_consistency

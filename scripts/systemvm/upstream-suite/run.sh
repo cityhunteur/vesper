@@ -34,6 +34,7 @@ SRV_VOL=vesper-upstream-srv
 CARGO_VOL=vesper-upstream-cargo
 NAME=vesper-upstream-run
 WALL_S="${UPSTREAM_WALL_S:-14400}"
+RERUN_MAX="${UPSTREAM_RERUN_MAX:-8}"
 export DOCKER_HOST="unix://$ROOT/run/vesper/docker.sock"
 
 CLEAN=0
@@ -337,14 +338,54 @@ else
   python3 -I "$HERE/collect.py" "$OUT/results.json" --collected "$OUT/collected.txt" --meta "$OUT/meta.json" \
     --exitcode "$RC" --log "$OUT/pytest-progress.log"
 fi
+judge() {
+  set +e
+  cargo run -q --bin baselinectl -- --mode upstream-compare --results "$OUT/results.json" \
+    --meta "$OUT/meta.json" ${PARTIAL[@]+"${PARTIAL[@]}"} --report "$OUT/compare.json" 2>&1 | tee "$OUT/compare.txt"
+  CMP=${PIPESTATUS[0]}
+  set -e
+}
+judge
+# Isolated rerun (decision D-031): a few tests fail in each full run only because three workers load the host (an
+# SSH or API timeout in a test that passes in other runs). The tests that matched no class run once more, one at a
+# time; one that passes is recorded as passed with its result under load, and the comparator lists it. More than
+# $RERUN_MAX unmatched tests is not timing, so nothing is rerun and the run fails.
+python3 -I - "$OUT/compare.json" > "$OUT/unmatched.txt" <<'PY' || true
+import json, sys
+for u in json.load(open(sys.argv[1])).get("unmatched", []):
+    print(u["nodeid"])
+PY
+N_UNMATCHED="$(grep -c . "$OUT/unmatched.txt" || true)"
+if [ "$N_UNMATCHED" -gt 0 ] && [ -z "$STOPPED" ] && [ -s "$RES/report.json" ]; then
+  if [ "$N_UNMATCHED" -gt "$RERUN_MAX" ]; then
+    say "$N_UNMATCHED results match no class, more than UPSTREAM_RERUN_MAX ($RERUN_MAX): no isolated rerun"
+  else
+    say "rerun $N_UNMATCHED unmatched test(s) alone, one at a time"
+    cp "$OUT/results.json" "$OUT/results-under-load.json"
+    cp "$OUT/compare.json" "$OUT/compare-under-load.json"
+    cp "$OUT/compare.txt" "$OUT/compare-under-load.txt"
+    AGAIN=()
+    while IFS= read -r n; do AGAIN+=("$n"); done < "$OUT/unmatched.txt"
+    docker rm -f "$NAME" >/dev/null 2>&1 || true
+    docker run -d --name "$NAME" "${common[@]}" "$CONTAINER" "${INSRV[@]}" ./tools/test.sh --binary-dir "$BIN" -rA \
+      --timeout "$TEST_TIMEOUT_S" --timeout-method=thread \
+      --json-report-file=/results/alone.json -- "${AGAIN[@]}" >/dev/null
+    with_timeout $(( (TEST_TIMEOUT_S + 60) * N_UNMATCHED + 600 )) docker wait "$NAME" >/dev/null 2>&1 || docker kill "$NAME" >/dev/null 2>&1 || true
+    docker logs "$NAME" 2>&1 | gzip -6 > "$OUT/pytest-alone.log.gz"
+    docker rm -f "$NAME" >/dev/null 2>&1 || true
+    if [ -s "$RES/alone.json" ]; then
+      python3 -I "$HERE/collect.py" "$OUT/results.json" --collected "$OUT/collected.txt" --meta "$OUT/meta.json" \
+        --exitcode "$RC" --log "$OUT/pytest-progress.log" --alone "$RES/alone.json" "$RES/report.json"
+      gzip -c "$RES/alone.json" > "$OUT/alone.json.gz"
+      judge
+    else
+      say "the isolated rerun wrote no report; the first verdict stands"
+    fi
+  fi
+fi
 rm -rf "${RES:?}"
 wipe_srv
 say "wiped /srv and the test results in $SRC_VOL"
-set +e
-cargo run -q --bin baselinectl -- --mode upstream-compare --results "$OUT/results.json" \
-  --meta "$OUT/meta.json" ${PARTIAL[@]+"${PARTIAL[@]}"} --report "$OUT/compare.json" 2>&1 | tee "$OUT/compare.txt"
-CMP=${PIPESTATUS[0]}
-set -e
 say "evidence in ${OUT#"$ROOT"/}"
 # A stopped run fails even if every finished test is explained: the tests it never reached prove nothing.
 if [ -n "$STOPPED" ]; then say "the run was stopped ($STOPPED): failing it"; exit 2; fi

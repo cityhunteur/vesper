@@ -1,0 +1,26 @@
+{
+ "integration_tests/functional/test_cpu_template_helper.py::test_consecutive_fingerprint_consistency": {
+  "outcome": "failed",
+  "message": "ChildProcessError: [204] Command: /srv/firecracker/build/cargo_target/aarch64-unknown-linux-musl/release/cpu-template-helper fingerprint dump --output /srv/tmp/pytest-of-root/pytest-0/popen-gw0/test_consecutive_fingerprint_c0/fp1.json [204] stdout: [204] stderr: Failed to read /sys/devices/virtual/dmi/id/bios_version: No such file or directory (os error 2) Returned error code: 1",
+  "alone": {
+   "outcome": "failed",
+   "message": "ChildProcessError: [66] Command: /srv/firecracker/build/cargo_target/aarch64-unknown-linux-musl/release/cpu-template-helper fingerprint dump --output /srv/tmp/pytest-of-root/pytest-1/test_consecutive_fingerprint_c0/fp1.json [66] stdout: [66] stderr: Failed to read /sys/devices/virtual/dmi/id/bios_version: No such file or directory (os error 2) Returned error code: 1"
+  }
+ },
+ "integration_tests/functional/test_net_config_space.py::test_net_change_mac_address[vmlinux-5.10.253-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_net_config_space.py::test_net_change_mac_address[vmlinux-5.10.253-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_net_config_space.py::test_net_change_mac_address[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_net_config_space.py::test_net_change_mac_address[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ }
+}

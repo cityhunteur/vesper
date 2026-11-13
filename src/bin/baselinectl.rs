@@ -334,12 +334,16 @@ fn upstream_compare(args: &Args) -> Result<(), String> {
     if !c.stale_classes.is_empty() {
         println!("classes that explained nothing in this run: {}", c.stale_classes.join(", "));
     }
+    for u in &c.passed_alone {
+        println!("PASSED-ALONE {} under load: {} {}", u.nodeid, u.outcome, u.message.replace('\n', " "));
+    }
     if c.ok() {
         println!("upstream-compare: every result is explained");
         return Ok(());
     }
     for u in &c.unmatched {
-        println!("UNMATCHED {} {} {}", u.nodeid, u.outcome, u.message.replace('\n', " "));
+        let alone = u.alone.as_ref().map(|a| format!(" [alone: {}]", a.outcome)).unwrap_or_default();
+        println!("UNMATCHED {} {}{alone} {}", u.nodeid, u.outcome, u.message.replace('\n', " "));
     }
     Err(format!("upstream-compare: {}", c.failures().join("; ")))
 }

@@ -1,0 +1,1 @@
+Quick run made to exercise the isolated-rerun path (D-031): the no-dmi class was removed from the working tree for this run only, so its test matched no class, was rerun alone and failed again (results.json 'alone'; compare-under-load.* is the first verdict).

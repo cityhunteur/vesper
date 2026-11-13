@@ -292,10 +292,10 @@ Public symbols by file:
   codes in 100..=599 with non-blank code and message, capture-state
   consistency, and (behavior matrix only) a matching `behavior_path`.
 - `baseline/upstream.rs` (GH #172): `UpstreamSuite { container, artifacts_bucket, artifacts_prefix, release_asset,
-  paths, workers, test_timeout_s }` and `validate(arch)`; `TestResult { outcome, message }`, `Results`
-  (`BTreeMap<nodeid, TestResult>`); `ClassFile { version, classes: Vec<Class> }` with `Class { id, kind, nodeid,
+  paths, workers, test_timeout_s }` and `validate(arch)`; `TestResult { outcome, message, under_load, alone }` (the last two from the runner's isolated rerun), `Results`
+  (`BTreeMap<nodeid, TestResult>`); `ClassFile { version, classes: Vec<Class> }` with `Class { id, kind, nodeid, any_test,
   message, outcomes, tracked_by, reason }` and `validate`; `glob` (`*` wildcards, no regex crate);
-  `compare(results, reference, classes) -> Comparison { reference, total, passed, to_explain, per_class, unmatched,
+  `compare(results, reference, classes) -> Comparison { reference, total, passed, to_explain, per_class, unmatched, passed_alone,
   stale_classes, not_passing_on_reference, missing_from_run }`. Without a reference every test is taken to pass
   there; with one, only tests that passed there need a class. `Comparison::ok` is "nothing unmatched".
 - `baseline.rs:load` requires non-zero `version`, non-empty `baselines`, and

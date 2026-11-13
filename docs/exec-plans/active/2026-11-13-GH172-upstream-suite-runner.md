@@ -121,6 +121,10 @@ Either way, a new, unexplained failure turns the run red.
   trial's two 10-hour hangs happened under the default signal method. An outer watchdog also stops the container
   at a wall-clock limit (default 4 h), and a test still running is then recorded as `hung`.
 
+- 2026-11-13 (owner, D-031): after four full runs the memory overshoot class matches any test, bounded by its
+  symptom and `max: 80`, and the runner reruns alone the tests that match no class (at most 8). Naming tests for a
+  symptom that moves between runs did not converge; a pass without load is evidence that load was the cause.
+
 ## Outcomes & Retrospective
 
 The full run on an Apple M3 Pro (System VM 4 vCPUs, 8 GiB, 3 workers) took 4,616 s. Of 980 tests, 763 passed and

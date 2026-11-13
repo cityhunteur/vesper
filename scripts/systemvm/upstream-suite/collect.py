@@ -2,7 +2,7 @@
 """Turn pytest-json-report files into the results file `baselinectl --mode upstream-compare` reads (GH #172).
 
 Usage: python3 -I collect.py OUT.json --collected COLLECTED.txt [--meta META.json] [--exitcode N] [--log PYTEST.log]
-           [REPORT.json ...]
+           [--alone ALONE.json] [REPORT.json ...]
        python3 -I collect.py --self-test
 
 OUT.json is {nodeid: {"outcome": ..., "message": ...}}. The outcome is the worst phase: a failure in setup or teardown
@@ -16,6 +16,12 @@ Upstream marks some tests `@pytest.mark.flaky(reruns=N)` (pytest-rerunfailures).
 entry with outcome "rerun", an attempt that was retried, and not the final attempt; `--log` gives that attempt: the
 worst outcome logged after the test's last RERUN line, with a message saying it was rerun. Without a log, or with no
 line after the last RERUN, a rerun test is an "error".
+
+`--alone` is the report of the runner's isolated rerun (decision D-031): the tests that matched no exception class
+in the full run, run again one at a time with nothing else loading the host. A test that passes there becomes
+{"outcome": "passed", "under_load": {outcome, message}}, which the comparator counts as passed and lists; one that
+does not keeps its full-run result and gains "alone": {outcome, message}. A test the full run did not report is
+never taken from ALONE.json.
 
 The message is the primary exception only (pytest's crash message, else the first `E` line), so a chained exception
 cannot lend a test another class's symptom; a failure's message wins over a skip's. META.json gets pytest's exit code
@@ -70,6 +76,20 @@ def result(test):
     if outcome not in ("passed", "failed", "error", "skipped", "xfailed", "xpassed"):
         outcome = "error"
     return {"outcome": outcome, "message": failure if outcome in ("failed", "error") else (skip or failure)}
+
+
+def merge_alone(results, alone_tests):
+    for test in alone_tests:
+        nodeid = test["nodeid"]
+        if nodeid not in results or results[nodeid]["outcome"] in ("passed", "xfailed", "xpassed"):
+            continue
+        again = {"outcome": "error", "message": "rerun (pytest-rerunfailures) in the isolated rerun"} \
+            if test["outcome"] == "rerun" else result(test)
+        first = results[nodeid]
+        if again["outcome"] == "passed":
+            results[nodeid] = {"outcome": "passed", "message": "", "under_load": {"outcome": first["outcome"], "message": first["message"]}}
+        else:
+            first["alone"] = again
 
 
 def meta(report):
@@ -144,6 +164,14 @@ def self_test():
     assert resolve_rerun("a.py::t", logged)["outcome"] == "passed", logged
     assert resolve_rerun("a.py::u", logged)["outcome"] == "error", logged
     assert resolve_rerun("a.py::w", {})["outcome"] == "error"
+    # The isolated rerun: a pass replaces the result and keeps the first; a failure is recorded beside it; a test
+    # that passed, or that the full run never reported, is left alone.
+    res = {"a": {"outcome": "failed", "message": "m"}, "b": {"outcome": "error", "message": "n"}, "c": {"outcome": "passed", "message": ""}}
+    merge_alone(res, [{"nodeid": "a", "outcome": "passed"}, {"nodeid": "b", "outcome": "failed", "call": crash("X: y")},
+                      {"nodeid": "c", "outcome": "failed", "call": crash("X: y")}, {"nodeid": "d", "outcome": "passed"}])
+    assert res["a"] == {"outcome": "passed", "message": "", "under_load": {"outcome": "failed", "message": "m"}}, res["a"]
+    assert res["b"] == {"outcome": "error", "message": "n", "alone": {"outcome": "failed", "message": "X: y"}}, res["b"]
+    assert res["c"] == {"outcome": "passed", "message": ""} and "d" not in res, res
     print("collect.py self-test: ok")
 
 
@@ -161,6 +189,9 @@ def main(argv):
         exitcode, rest = int(rest[1]), rest[2:]
     if rest[:1] == ["--log"]:
         log, rest = rest[1], rest[2:]
+    alone = None
+    if rest[:1] == ["--alone"]:
+        alone, rest = rest[1], rest[2:]
     reports = rest
     results = {}
     run_meta = {"exitcode": None, "collection_errors": []}
@@ -185,6 +216,9 @@ def main(argv):
         with open(meta_path, "w") as f:
             json.dump(run_meta, f)
             f.write("\n")
+    if alone:
+        with open(alone) as f:
+            merge_alone(results, json.load(f).get("tests", []))
     with open(collected_path) as f:
         collected = [l.strip() for l in f if "::" in l and not l.startswith(("=", " "))]
     hung = [n for n in collected if n not in results]

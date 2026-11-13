@@ -82,6 +82,21 @@ pub struct TestResult {
     pub outcome: String,
     #[serde(default)]
     pub message: String,
+    /// Set by the runner's isolated rerun: what this test did in the full run, under load, when `outcome` is the
+    /// pass it then gave on its own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub under_load: Option<Attempt>,
+    /// Set by the runner's isolated rerun when the test did not pass on its own either: that attempt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alone: Option<Attempt>,
+}
+
+/// One attempt at a test, beside the result that counts.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct Attempt {
+    pub outcome: String,
+    #[serde(default)]
+    pub message: String,
 }
 
 pub type Results = BTreeMap<String, TestResult>;
@@ -106,8 +121,14 @@ pub enum ClassKind {
 pub struct Class {
     pub id: String,
     pub kind: ClassKind,
-    /// Node-id patterns (`*` matches any run of characters); a test matches when any pattern does.
+    /// Node-id patterns (`*` matches any run of characters); a test matches when any pattern does. Empty exactly
+    /// when `any_test` is set.
+    #[serde(default)]
     pub nodeid: Vec<String>,
+    /// The symptom is not a property of particular tests (it moves between runs), so the class matches any test and
+    /// only `message`, `outcomes` and `max` bound it. Needs `message` substrings and no `message_glob`.
+    #[serde(default)]
+    pub any_test: bool,
     /// Message substrings: the message must contain one of them, or match one of `message_glob`. One of the two is
     /// required, so that a class names a symptom, not a file.
     #[serde(default)]
@@ -154,7 +175,11 @@ impl ClassFile {
                     .and_then(|rest| rest.split_once("::"))
                     .is_some_and(|(file, _)| file.ends_with(".py") && !file.contains('*'))
             };
-            if c.nodeid.is_empty() || !c.nodeid.iter().all(|p| names_a_test(p)) {
+            if c.any_test {
+                if !c.nodeid.is_empty() || c.message.is_empty() || !c.message_glob.is_empty() {
+                    return Err(format!("class {}: any_test takes message substrings, and no nodeid or message_glob", c.id));
+                }
+            } else if c.nodeid.is_empty() || !c.nodeid.iter().all(|p| names_a_test(p)) {
                 return Err(format!(
                     "class {}: every nodeid pattern must be integration_tests/<file>.py::<test>, with no * in the file",
                     c.id
@@ -214,7 +239,7 @@ pub fn glob(pattern: &str, text: &str) -> bool {
 impl Class {
     pub fn matches(&self, nodeid: &str, r: &TestResult) -> bool {
         self.outcomes.iter().any(|o| *o == r.outcome)
-            && self.nodeid.iter().any(|p| glob(p, nodeid))
+            && (self.any_test || self.nodeid.iter().any(|p| glob(p, nodeid)))
             && (self.message.iter().any(|m| r.message.contains(m.as_str()))
                 || self.message_glob.iter().any(|g| glob(g, &r.message)))
             && (self.vulnerable_allowed.is_empty() || self.only_allowed_vulnerabilities(&r.message))
@@ -268,6 +293,9 @@ pub struct Unmatched {
     pub nodeid: String,
     pub outcome: String,
     pub message: String,
+    /// The isolated rerun's result, when the runner made one and it did not pass.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub alone: Option<Attempt>,
 }
 
 /// What pytest itself reported about the run, beside the per-test results.
@@ -299,6 +327,9 @@ pub struct Comparison {
     /// Explained tests per class id.
     pub per_class: BTreeMap<String, usize>,
     pub unmatched: Vec<Unmatched>,
+    /// Tests that matched no class under load and passed when the runner reran them alone: counted as passed, and
+    /// listed with what they did under load.
+    pub passed_alone: Vec<Unmatched>,
     /// Classes that explained more tests than their `max`.
     pub over_max: Vec<OverMax>,
     /// Classes that explained no test in this run.
@@ -375,6 +406,14 @@ pub fn compare(
     for (nodeid, r) in results {
         if is_pass(&r.outcome) {
             out.passed += 1;
+            if let Some(l) = &r.under_load {
+                out.passed_alone.push(Unmatched {
+                    nodeid: nodeid.clone(),
+                    outcome: l.outcome.clone(),
+                    message: head_and_tail(&l.message, 200, 200),
+                    alone: None,
+                });
+            }
             continue;
         }
         if let Some(reference) = reference {
@@ -392,6 +431,7 @@ pub fn compare(
                 nodeid: nodeid.clone(),
                 outcome: r.outcome.clone(),
                 message: head_and_tail(&r.message, 200, 200),
+                alone: r.alone.as_ref().map(|a| Attempt { outcome: a.outcome.clone(), message: head_and_tail(&a.message, 200, 200) }),
             }),
         }
     }
@@ -428,8 +468,45 @@ fn head_and_tail(s: &str, head: usize, tail: usize) -> String {
 mod tests {
     use super::*;
 
+    #[test]
+    fn an_any_test_class_matches_by_symptom_and_a_pass_alone_is_listed() {
+        let mut v: serde_yaml::Value = serde_yaml::from_str(
+            r#"
+version: 1
+classes:
+  - id: overshoot
+    kind: unexplained
+    any_test: true
+    message: ["Memory usage (6."]
+    outcomes: [error]
+    max: 1
+    tracked_by: CE-0001
+    reason: r
+"#,
+        )
+        .unwrap();
+        let c: ClassFile = serde_yaml::from_value(v.clone()).unwrap();
+        c.validate().unwrap();
+        let mut res = Results::new();
+        res.insert("integration_tests/functional/a.py::t".into(), r("error", "Memory usage (6.5 MiB)"));
+        res.insert("integration_tests/functional/b.py::t".into(), r("error", "Memory usage (7.5 MiB)"));
+        let mut alone = r("passed", "");
+        alone.under_load = Some(Attempt { outcome: "failed".into(), message: "AssertionError".into() });
+        res.insert("integration_tests/functional/c.py::t".into(), alone);
+        let out = compare(&res, None, &c, None, false);
+        assert_eq!(out.per_class["overshoot"], 1);
+        assert_eq!(out.unmatched.len(), 1);
+        assert_eq!(out.unmatched[0].nodeid, "integration_tests/functional/b.py::t");
+        assert_eq!((out.passed, out.passed_alone.len()), (1, 1));
+        assert_eq!(out.passed_alone[0].outcome, "failed");
+        // any_test with a nodeid list or a message glob is refused.
+        v["classes"][0]["message_glob"] = serde_yaml::from_str(r#"["assert * > *"]"#).unwrap();
+        let c: ClassFile = serde_yaml::from_value(v).unwrap();
+        assert!(c.validate().unwrap_err().contains("any_test"));
+    }
+
     fn r(outcome: &str, message: &str) -> TestResult {
-        TestResult { outcome: outcome.into(), message: message.into() }
+        TestResult { outcome: outcome.into(), message: message.into(), under_load: None, alone: None }
     }
 
     #[test]
