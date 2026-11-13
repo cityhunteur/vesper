@@ -57,6 +57,11 @@ it is why the run comes last.
 - 2026-11-13, owner review (D-029): order approved as written; W2 counts conntrack entries only (option a); W4 refuses a launch over the shared memory budget; W7 is left to the owner.
 - 2026-11-13: order fixed as W1 to W8. W3 comes before W4 and W5 so that code complete for parity lands first. W4 and
   W5 change runtime behaviour, so W3's expected-results file is regenerated after them, before W8.
+- 2026-11-13: W4 deviates from the plan for TD-053. The plan said to prune unreferenced store entries by age and
+  total size. The store holds the user's own snapshots, which `vesperd` cannot tell from abandoned ones, and a
+  snapshot that no lease references is still the user's only copy. So the store gets a quota (25% of the data disk)
+  and a copy that would pass it is refused with `store quota: …`; nothing is removed automatically. `vesperd store
+  list` reports the usage and the quota. Automatic pruning would need an owner decision on a retention rule.
 - 2026-11-13: W8 compares against an expected-results file kept in the repo until the Linux list exists (#172
   acceptance criterion 3). The Linux list replaces that file in W8.
 - **Owner**: W2 has two options for conntrack. Option a, the default, counts entries with
@@ -116,8 +121,8 @@ detail goes in its own ExecPlan.
   `vesperd log` has had its chance. A test floods the console and asserts the bound.
 - **TD-056:** add one shared admission ledger under the helper's lock that both owners use (see the owner decision).
   A test fills the budget from both sides and asserts the refusal.
-- **TD-053:** prune store entries that no lease references, by age and by total size, and report it in
-  `vesperd store list`.
+- **TD-053:** bound the store by a quota that refuses a copy past it, and report it in `vesperd store list`
+  (changed from pruning; see the Decision Log).
 
 **W5.** Follow #160's checklist in its own ExecPlan:
 1. pin `unfs3`, bind it to the microVM-facing addresses only, and prove that a container cannot connect;
