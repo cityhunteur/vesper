@@ -472,8 +472,10 @@ Public symbols by file:
   `nat_guest_reaches_public_only` (two leases), `isolation_reports_egress`, `teardown_removes_veths`,
   `root_mangle_alone_after_docker_restart` (`KILL docker` after the launch, `HEALTH` until dockerd is back, then
   `VESPERD test-open-ns ID filter`), `root_raw_drops_sources_outside_the_pool` (`test-open-ns ID all`),
+  `flow_cap_drops_excess_in_namespace` and `flow_cap_drops_excess_in_root_alone` (`flood:1.1.1.1:9:1400`, judged by
+  `FLOWS id ns= root= cap_ns= cap_root= capdrop_ns= capdrop_root=` of `VESPERD net`: both caps installed at `FLOW_CAP`, the active layer's cap rule dropping between the excess less `FLOOD_SLACK` and the excess, the other rule nothing; `VESPERD flows` before and after teardown),
   `none_lease_has_no_uplink`, `reaper_removes_veth_of_killed_holder` and `listeners_stopped`; the System VM's
-  addresses come from `POLICY ... eth0= gw=`; `passed` requires all 10 steps ok.
+  addresses come from `POLICY ... eth0= gw=`; `passed` requires all 12 steps ok.
 - `control/suites/replay.rs:ReplayRun` (ADR 0007 slice 6) writes the replay files into a new
   `share_dir/replay-<ms>/` (a removed and rewritten share file can read as empty in the System VM), makes the snapshot
   fixture in its own `vesperd` and copies it into the store with `vesperd stage jail:… store:…`, then runs each case

@@ -59,6 +59,8 @@
 #                                             also no masquerade and no reverse-path check), leaving the root egress
 #                                             layer alone (OPENED ID …)
 #        vesper-vesperd test-reach IP PORT    test hook: REACH IP:PORT open|closed from the System VM itself
+#        vesper-vesperd flows                FLOWS root=N max=M tcp_established_s=S udp_s=S (ERR when unreadable): tracked
+#                                             flows and the timeouts that age them out (egress suite, TD-058)
 #        vesper-vesperd test-container-vsock  run a default and an unconfined Docker container that open AF_VSOCK;
 #                                             VSOCK default=denied|allowed … and VSOCK unconfined=… lines
 #        vesper-vesperd jail-stat|jail-read|jail-write ROOT PATH [BYTES]
@@ -1039,6 +1041,15 @@ net() { # ID's network namespace: one LINK line per interface, then whether it i
     rwd=$(iptables -t raw -nvxL PREROUTING 2>/dev/null | awk '$3=="DROP" && $6 ~ /^vpd/ {s+=$1} END {print s+0}')
     rpd=$(iptables -t mangle -nvxL VESPERD-REPLY 2>/dev/null | awk '$3=="DROP" {s+=$1} END {print s+0}')
     echo "DROPS $sid ns=${nsd:-0} root=${rtd:-0} raw=${rwd:-0} reply=${rpd:-0}"
+    # The flow cap as installed and its own drop counter, in each layer: only a connlimit rule whose target is DROP
+    # counts, and `-` means no such rule.
+    nsf=$(nsenter --net="$f" cat /proc/sys/net/netfilter/nf_conntrack_count 2>/dev/null)
+    rtf=$(cat /proc/sys/net/netfilter/nf_conntrack_count 2>/dev/null)
+    nscap=$(nsenter --net="$f" iptables -S VESPERD-GUEST 2>/dev/null | sed -n 's/.*--connlimit-above \([0-9]*\) .*-j DROP$/\1/p' | head -1)
+    rtcap=$(iptables -t mangle -S VESPERD-EGRESS 2>/dev/null | sed -n 's/.*--connlimit-above \([0-9]*\) .*-j DROP$/\1/p' | head -1)
+    nscd=$(nsenter --net="$f" iptables -nvxL VESPERD-GUEST 2>/dev/null | awk '$3=="DROP" && /#conn / {print $1; exit}')
+    rtcd=$(iptables -t mangle -nvxL VESPERD-EGRESS 2>/dev/null | awk '$3=="DROP" && /#conn / {print $1; exit}')
+    echo "FLOWS $sid ns=${nsf:--} root=${rtf:--} cap_ns=${nscap:--} cap_root=${rtcap:--} capdrop_ns=${nscd:--} capdrop_root=${rtcd:--}"
   else
     echo "POLICY none"
   fi
@@ -1070,6 +1081,13 @@ test_listen() { # PORT|stop: TCP and UDP listeners on every System VM address (t
   setsid socat "UDP-RECVFROM:$1,fork,reuseaddr" SYSTEM:'echo vesper-listen' < /dev/null > /dev/null 2>&1 &
   echo "$p1 $!" > "$TEST_LISTEN"
   echo "LISTEN tcp=$1 udp=$1 pids=$(cat "$TEST_LISTEN")"
+}
+flows() { # the System VM's conntrack table: no conntrack-tools (D-029), so counts and timeouts only
+  c=/proc/sys/net/netfilter
+  n=$(cat $c/nf_conntrack_count 2>/dev/null); m=$(cat $c/nf_conntrack_max 2>/dev/null)
+  digits "$n" && digits "$m" || { echo "ERR conntrack counters unreadable"; return 1; }
+  echo "FLOWS root=$n max=$m tcp_established_s=$(cat $c/nf_conntrack_tcp_timeout_established 2>/dev/null || echo -)" \
+    "udp_s=$(cat $c/nf_conntrack_udp_timeout 2>/dev/null || echo -)"
 }
 test_open_ns() { # ID [filter|all]: as a broken namespace layer would be (the root layer alone)
   sid=${1:-}; mode=${2:-filter}; valid_id "$sid" || { echo "ERR bad id"; return 2; }
@@ -1161,6 +1179,7 @@ case "$cmd" in
   files) files "$@" ;;
   memory) memory "$@" ;;
   net) net "$@" ;;
+  flows) flows ;;
   test-plant) test_plant "$@" ;;
   test-reserve) test_reserve "$@" ;;
   test-listen) test_listen "$@" ;;
@@ -1170,5 +1189,5 @@ case "$cmd" in
   jail-read) jail_read "$@" ;;
   jail-write) jail_write "$@" ;;
   jail-files) jail_files "$@" ;;
-  *) echo "ERR usage: vesper-vesperd launch|connect|stage|store-list|store-rm|sweep|setup-user|reap|reap-loop|status|isolation|files|memory|net|list|log|kill-holder|kill-fc|test-*"; exit 2 ;;
+  *) echo "ERR usage: vesper-vesperd launch|connect|stage|store-list|store-rm|sweep|setup-user|reap|reap-loop|status|isolation|files|memory|net|flows|list|log|kill-holder|kill-fc|test-*"; exit 2 ;;
 esac

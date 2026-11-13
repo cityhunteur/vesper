@@ -24,7 +24,15 @@ const PUBLIC: &str = "1.1.1.1:443";
 /// How long the guest's probes may take (each waits up to 2 s).
 const PROBE_WAIT: Duration = Duration::from_secs(90);
 /// Steps a full run records.
-const STEPS: usize = 10;
+const STEPS: usize = 12;
+/// Datagrams the flood probe sends, each from its own socket: well over the per-lease cap of 1,024 tracked flows.
+const FLOOD: u64 = 1400;
+/// The per-lease flow cap ADR 0008 sets (`NAT_FLOWS` in the helper); both layers must have it installed.
+const FLOW_CAP: u64 = 1024;
+/// The flood arrives as slightly fewer distinct flows than datagrams sent (about 20 fewer in the runs so far).
+const FLOOD_SLACK: u64 = 64;
+/// The flood's target: a public address and the discard port; the datagrams need no answer.
+const FLOOD_TO: &str = "1.1.1.1:9";
 
 /// The System VM's own addresses, as the helper reports them.
 #[derive(Debug, Clone, Default)]
@@ -128,6 +136,70 @@ fn drops(control: &mut Session, id: &str) -> Result<Drops, String> {
     let line = lines.iter().find(|l| l.starts_with("DROPS ")).ok_or_else(|| format!("net {id}: {}", lines.join(" | ")))?;
     let field = |k: &str| line.split_whitespace().find_map(|w| w.strip_prefix(k)).and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
     Ok(Drops { ns: field("ns="), root: field("root="), raw: field("raw=") })
+}
+
+/// `FLOWS <id> ns= root= cap_ns= cap_root= capdrop_ns= capdrop_root=`: tracked flows in the lease's namespace and
+/// in the whole System VM, the flow cap installed in each layer and the packets each cap rule itself dropped.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct Flows {
+    ns: u64,
+    root: u64,
+    cap_ns: u64,
+    cap_root: u64,
+    capdrop_ns: u64,
+    capdrop_root: u64,
+}
+
+fn flows(control: &mut Session, id: &str) -> Result<Flows, String> {
+    let (_, lines) = control.vesperd(&["net", id])?;
+    let line = lines.iter().find(|l| l.starts_with("FLOWS ")).ok_or_else(|| format!("net {id}: {}", lines.join(" | ")))?;
+    parse_flows(line).ok_or_else(|| format!("net {id}: a flow field is missing or unreadable (a cap rule gone?): {line}"))
+}
+
+/// Every field must be a number: `-` means the helper could not read it, which the steps treat as a failure.
+fn parse_flows(line: &str) -> Option<Flows> {
+    let field = |k: &str| line.split_whitespace().find_map(|w| w.strip_prefix(k)?.strip_prefix('=')).and_then(|v| v.parse::<u64>().ok());
+    Some(Flows {
+        ns: field("ns")?,
+        root: field("root")?,
+        cap_ns: field("cap_ns")?,
+        cap_root: field("cap_root")?,
+        capdrop_ns: field("capdrop_ns")?,
+        capdrop_root: field("capdrop_root")?,
+    })
+}
+
+/// The System VM-wide `FLOWS root=N ...` line, which outlives any lease.
+fn root_flows(control: &mut Session) -> Result<(u64, String), String> {
+    let (rc, lines) = control.vesperd(&["flows"])?;
+    let line = first(&lines);
+    let n = line.split_whitespace().find_map(|w| w.strip_prefix("root=")).and_then(|v| v.parse::<u64>().ok());
+    match n {
+        Some(n) if rc == 0 && line.starts_with("FLOWS ") => Ok((n, line)),
+        _ => Err(format!("flows (rc {rc}): {line}")),
+    }
+}
+
+/// Both layers carry the cap ADR 0008 sets.
+fn caps_installed(f: &Flows) -> Result<(), String> {
+    if f.cap_ns == FLOW_CAP && f.cap_root == FLOW_CAP { Ok(()) } else { Err(format!("installed caps {f:?}, expected {FLOW_CAP} in both layers")) }
+}
+
+/// The excess a cap rule must have dropped: at least the flood less the cap and the slack, at most the flood less the cap.
+fn excess_dropped(dropped: u64) -> bool {
+    let excess = FLOOD - FLOW_CAP;
+    (excess - FLOOD_SLACK..=excess).contains(&dropped)
+}
+
+/// The flood probe for this run.
+fn flood_probe() -> String {
+    format!("flood:{FLOOD_TO}:{FLOOD}")
+}
+
+/// Waits for the flood to finish and checks that the probe ran.
+fn flooded(control: &mut Session, id: &str) -> Result<(), String> {
+    let got = results(control, id)?;
+    if got.iter().any(|(p, _)| *p == flood_probe()) { Ok(()) } else { Err(format!("{id}: the flood probe did not run: {got:?}")) }
 }
 
 /// A `POLICY nat` field of `VESPERD net <id>`.
@@ -340,6 +412,58 @@ pub fn run_egress_suite(endpoint: &ControlEndpoint, run: &VesperdRun, id: &str) 
         Ok(((), format!("{opened}; every probe closed, the allowed ones too ({verdict}); raw drops +{}", after.raw - before.raw)))
     });
 
+    // The flow cap in the namespace layer: the guest opens more flows than the cap; the excess is dropped there,
+    // its namespace holds no more than the cap, and teardown's effect on the System VM's table is recorded.
+    step(&mut steps, "flow_cap_drops_excess_in_namespace", || {
+        let mut before = Flows::default();
+        let mut lease = boot(run, &mut control, &a, &[flood_probe()], &mut |s| {
+            before = flows(s, &a)?;
+            Ok(())
+        })?;
+        let ran = flooded(&mut control, &a);
+        let held = flows(&mut control, &a);
+        let root_up = root_flows(&mut control);
+        let stopped = stop(&mut control, &mut lease);
+        let root_down = root_flows(&mut control);
+        ran?;
+        stopped?;
+        let (held, (root_up, _), (root_down, timeouts)) = (held?, root_up?, root_down?);
+        caps_installed(&held)?;
+        let (ns_dropped, root_dropped) = (held.capdrop_ns.saturating_sub(before.capdrop_ns), held.capdrop_root.saturating_sub(before.capdrop_root));
+        if held.ns > FLOW_CAP + 16 || held.ns + FLOOD_SLACK < FLOW_CAP {
+            return Err(format!("the namespace holds {} flows against a cap of {FLOW_CAP}", held.ns));
+        }
+        if !excess_dropped(ns_dropped) || root_dropped != 0 {
+            return Err(format!("{FLOOD} flows sent, cap {FLOW_CAP}: the namespace cap rule dropped {ns_dropped}, the root one {root_dropped}"));
+        }
+        Ok(((), format!("{FLOOD} UDP flows to {FLOOD_TO}: the namespace holds {} (cap {FLOW_CAP} in both layers); its cap rule dropped {ns_dropped}, the root one 0; System VM flows {root_up} with the lease, {root_down} after teardown ({timeouts})", held.ns)))
+    });
+
+    // The flow cap in the root layer alone: the namespace filter is opened, so only the root mangle connlimit
+    // stands between the flood and the System VM's shared table.
+    step(&mut steps, "flow_cap_drops_excess_in_root_alone", || {
+        let mut before = Flows::default();
+        let mut opened = String::new();
+        let mut lease = boot(run, &mut control, &c, &[flood_probe()], &mut |s| {
+            let (rc, l) = s.vesperd(&["test-open-ns", &c, "filter"])?;
+            opened = first(&l);
+            before = flows(s, &c)?;
+            if rc == 0 { Ok(()) } else { Err(format!("test-open-ns: {opened}")) }
+        })?;
+        let ran = flooded(&mut control, &c);
+        let after = flows(&mut control, &c);
+        let stopped = stop(&mut control, &mut lease);
+        ran?;
+        stopped?;
+        let after = after?;
+        caps_installed(&after)?;
+        let (ns_dropped, root_dropped) = (after.capdrop_ns.saturating_sub(before.capdrop_ns), after.capdrop_root.saturating_sub(before.capdrop_root));
+        if ns_dropped != 0 || !excess_dropped(root_dropped) {
+            return Err(format!("{FLOOD} flows sent with the namespace filter open: the root cap rule dropped {root_dropped}, the namespace one {ns_dropped}"));
+        }
+        Ok(((), format!("{opened}; {FLOOD} UDP flows: the root cap rule dropped {root_dropped}, the namespace one 0")))
+    });
+
     step(&mut steps, "none_lease_has_no_uplink", || {
         let flags: Vec<String> = ["--tap", "tap0"].map(String::from).to_vec();
         let (mut v, _, _) = run.start_with(&d, &format!("{d}.sock"), &flags)?;
@@ -404,5 +528,12 @@ mod tests {
         let d = denied(&sys, &["198.18.0.5".to_string()]);
         assert!(d.iter().any(|p| p == "tcp:198.18.0.5:7777") && d.iter().any(|p| p == "tcp:192.168.65.3:7777"));
         assert!(d.iter().any(|p| p == "tcp:192.168.65.1:80") && !d.iter().any(|p| p.contains("192.168.64.")));
+        let f = parse_flows("FLOWS vm-a ns=1024 root=1100 cap_ns=1024 cap_root=1024 capdrop_ns=356 capdrop_root=0").unwrap();
+        assert_eq!((f.ns, f.cap_ns, f.capdrop_ns, f.capdrop_root), (1024, 1024, 356, 0));
+        assert!(caps_installed(&f).is_ok());
+        // A cap rule that is gone prints `-`, which must not read as zero.
+        assert!(parse_flows("FLOWS vm-a ns=1380 root=1400 cap_ns=- cap_root=1024 capdrop_ns=- capdrop_root=0").is_none());
+        assert!(excess_dropped(356) && excess_dropped(376) && !excess_dropped(377) && !excess_dropped(311) && !excess_dropped(0));
+        assert_eq!(flood_probe(), "flood:1.1.1.1:9:1400");
     }
 }

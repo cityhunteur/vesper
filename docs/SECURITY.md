@@ -231,7 +231,7 @@ is the normative policy and this section the summary. No new port, socket, share
   drop anything from `vpd+` that is for the System VM itself or not bound for `eth0`. `make systemvm-egress-suite`
   shows each root table holding alone: `mangle` with the namespace filter opened after dockerd was killed and
   respawned under a running microVM, `raw` with the namespace's masquerade and reverse-path check removed too.
-- **Limits.** The 1024-flow limit comes before every accept, DNS included; tap names may not start with `veth` or
+- **Limits.** The 1024-flow limit comes before every accept, DNS included, and the egress suite floods it in each layer; tap names may not start with `veth` or
   `vpd`; every lease's namespace, `none` included, has IPv6, redirects and loose reverse-path filtering off.
 - **Accepted risks** (TD-058): a VPN on the Mac that routes a public prefix is reachable, because address filtering
   cannot see macOS routes; guests' DNS queries, including names that resolve to private addresses, reach the macOS
