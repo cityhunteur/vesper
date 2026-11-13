@@ -55,8 +55,9 @@
 #                                             ID's jail (PLANTED ID)
 #        vesper-vesperd test-reserve BYTES|clear  test hook: override the free-space reserve until reboot (RESERVE …)
 #        vesper-vesperd test-listen PORT|stop  test hook: TCP and UDP listeners on every System VM address (egress suite)
-#        vesper-vesperd test-open-ns ID       test hook: accept everything in ID's namespace FORWARD, leaving the root
-#                                             egress layer alone (OPENED ID …)
+#        vesper-vesperd test-open-ns ID [filter|all]  test hook: accept everything in ID's namespace FORWARD (all:
+#                                             also no masquerade and no reverse-path check), leaving the root egress
+#                                             layer alone (OPENED ID …)
 #        vesper-vesperd test-reach IP PORT    test hook: REACH IP:PORT open|closed from the System VM itself
 #        vesper-vesperd test-container-vsock  run a default and an unconfined Docker container that open AF_VSOCK;
 #                                             VSOCK default=denied|allowed … and VSOCK unconfined=… lines
@@ -103,8 +104,9 @@ valid_id() { # the jailer's rule: 1 to 64 letters, digits and hyphens
   [ "${#1}" -le 64 ]
 }
 valid_tap() { # a Linux interface name (IFNAMSIZ 16 with the NUL) of letters, digits, _ and -, not starting with -;
-  # never lo. Names that are ip keywords (up, dev, mtu…) are fine: every ip call names the device with dev.
-  case "${1:-}" in ''|lo|-*|*[!A-Za-z0-9_-]*) return 1 ;; esac
+  # never lo, and not veth* or vpd*, which the nat uplink uses (ADR 0008). Names that are ip keywords (up, dev,
+  # mtu…) are fine: every ip call names the device with dev.
+  case "${1:-}" in ''|lo|-*|veth*|vpd*|*[!A-Za-z0-9_-]*) return 1 ;; esac
   [ "${#1}" -le 15 ]
 }
 digits() { case "${1:-}" in ''|*[!0-9]*) return 1 ;; esac; }
@@ -213,6 +215,13 @@ netns_up() { # ID TAP... (the lease record exists, so the reaper leaves the name
   netns_down "$nid"
   [ -e "$f" ] && { echo "netns $nid still bound"; return 1; }
   : > "$f" && unshare --net="$f" true || { rm -f "$f"; echo "netns create failed"; return 1; }
+  # Before any interface but lo exists, so every later one inherits "default": IPv6 off, strict reverse-path
+  # filtering, no ICMP redirects (ADR 0008).
+  # shellcheck disable=SC2016
+  nsenter --net="$f" sh -c 'for k in all default lo; do
+      echo 1 > /proc/sys/net/ipv6/conf/$k/disable_ipv6 && echo 1 > /proc/sys/net/ipv4/conf/$k/rp_filter \
+        && echo 0 > /proc/sys/net/ipv4/conf/$k/accept_redirects && echo 0 > /proc/sys/net/ipv4/conf/$k/send_redirects || exit 1
+    done' || { echo "namespace sysctls"; return 1; }
   out=$(nsenter --net="$f" ip link set dev lo up 2>&1) || { echo "lo: $(printf '%s' "$out" | oneline)"; return 1; }
   for t in "$@"; do
     out=$(nsenter --net="$f" tunctl -t "$t" -u "$JUSER" 2>&1) || { echo "tap $t: $(printf '%s' "$out" | oneline)"; return 1; }
@@ -227,7 +236,7 @@ netns_up() { # ID TAP... (the lease record exists, so the reaper leaves the name
 # not manage. A guest may reach public unicast IPv4 over TCP, UDP and ICMP echo, and DNS through its tap gateway.
 # The deny list is RFC 6890's special-purpose IPv4 table; the System VM's eth0 subnet is added at run time.
 DENY4="0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 127.0.0.0/8 169.254.0.0/16 172.16.0.0/12 192.0.0.0/24 192.0.2.0/24 192.88.99.0/24 192.168.0.0/16 198.18.0.0/15 198.51.100.0/24 203.0.113.0/24 224.0.0.0/4 240.0.0.0/4"
-NETDIR=$STATE/net                 # net/<id>: "idx=N policy=nat resolver=R" until the lease's veth is gone
+NETDIR=$STATE/net                 # net/<id>: "idx=N policy=nat resolver=R gws=TAP:CIDR,..." until the veth is gone
 NAT_CURSOR=$STATE/net.cursor      # the last index given; allocation rotates from it
 POOL_SIZE=16384                   # /30s in 198.18.0.0/16
 NAT_FLOWS=1024                    # tracked flows per lease, in both layers
@@ -236,7 +245,8 @@ ip2int() { # A.B.C.D -> integer; fails on a bad address
   o=$1; n=0; c=0
   while [ -n "$o" ]; do
     p=${o%%.*}; if [ "$p" = "$o" ]; then o=""; else o=${o#*.}; fi
-    { [ -n "$p" ] && [ "${#p}" -le 3 ] && [ "$p" -le 255 ]; } || return 1
+    case "$p" in ''|0?*) return 1 ;; esac # no leading zero: $(( )) would read it as octal
+    { [ "${#p}" -le 3 ] && [ "$p" -le 255 ]; } || return 1
     n=$((n * 256 + p)); c=$((c + 1))
   done
   [ "$c" = 4 ] && echo "$n"
@@ -245,6 +255,7 @@ int2ip() { echo "$(($1 >> 24 & 255)).$(($1 >> 16 & 255)).$(($1 >> 8 & 255)).$(($
 mask_of() { if [ "$1" = 0 ]; then echo 0; else echo $(( (0xffffffff << (32 - $1)) & 0xffffffff )); fi; }
 cidr_net() { # A.B.C.D/P -> "<network int> <prefix>"
   a=${1%/*}; p=${1#*/}; digits "$p" && [ "$p" -le 32 ] || return 1
+  case "$p" in 0?*) return 1 ;; esac
   i=$(ip2int "$a") || return 1
   echo "$((i & $(mask_of "$p"))) $p"
 }
@@ -266,6 +277,7 @@ resolver4() { awk '$1=="nameserver" && $2 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ {
 # docker0, the veth pool and the resolver. Prints a reason on failure.
 tapaddr_check() { # ADDR/PREFIX
   c=$1; a=${c%/*}; p=${c#*/}
+  case "$p" in 0*) p=x ;; esac
   { [ "$a" != "$c" ] && digits "$p" && [ "$p" -ge 16 ] && [ "$p" -le 30 ]; } \
     || { echo "$c: use ADDR/PREFIX with a prefix length of 16 to 30"; return 1; }
   i=$(ip2int "$a") || { echo "$c: bad address"; return 1; }
@@ -293,16 +305,24 @@ pick_idx() { # (lock held) -> a free index, rotating from the last one given
   done
   return 1
 }
-# The root layer: static, one set for every lease; the mangle chains are replaced atomically (iptables-restore
-# --noflush flushes only the chains it declares) when the resolver or eth0's subnet changed.
-nat_root_sig() { echo "vesperd-egress v1 resolver=$1 eth0=$2"; }
+# The root layer: static, one set for every lease. The mangle chains are replaced atomically (iptables-restore
+# --noflush flushes only the chains it declares) when the resolver or eth0's subnet changed, and then every running
+# lease's namespace rules are rebuilt for the new values. The flow limit comes before every accept, DNS included.
+nat_root_sig() { echo "vesperd-egress v2 resolver=$1 eth0=$2"; }
+nat_root_chains_ok() { # RESOLVER ETH0SUBNET
+  iptables -t mangle -S VESPERD-EGRESS 2>/dev/null | grep -qF -- "$(nat_root_sig "$1" "$2")" \
+    && iptables -t mangle -S VESPERD-REPLY 2>/dev/null | grep -q -- '-A VESPERD-REPLY -j DROP'
+}
 nat_root_ok() { # RESOLVER ETH0SUBNET -> 0 when every root rule is in place
-  iptables -t mangle -S VESPERD-EGRESS 2>/dev/null | grep -qF -- "$(nat_root_sig "$1" "$2")" || return 1
-  iptables -t mangle -S VESPERD-REPLY 2>/dev/null | grep -q -- '-j DROP' || return 1
+  nat_root_chains_ok "$1" "$2" || return 1
   iptables -t mangle -C PREROUTING -i vpd+ -j VESPERD-EGRESS 2>/dev/null || return 1
   iptables -t mangle -C POSTROUTING -o vpd+ -j VESPERD-REPLY 2>/dev/null || return 1
+  iptables -t mangle -C INPUT -i vpd+ -j DROP 2>/dev/null || return 1
+  iptables -t mangle -C FORWARD -i vpd+ ! -o eth0 -j DROP 2>/dev/null || return 1
   iptables -t raw -C PREROUTING -i vpd+ ! -s 198.18.0.0/16 -j DROP 2>/dev/null || return 1
   iptables -t nat -C POSTROUTING -s 198.18.0.0/16 -o eth0 -j MASQUERADE 2>/dev/null || return 1
+  iptables -t filter -C DOCKER-USER -i vpd+ -o eth0 -j ACCEPT 2>/dev/null || return 1
+  iptables -t filter -C DOCKER-USER -i eth0 -o vpd+ -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || return 1
   ip6tables -t raw -C PREROUTING -i vpd+ -j DROP 2>/dev/null || return 1
   ip6tables -t mangle -C POSTROUTING -o vpd+ -j DROP 2>/dev/null || return 1
   [ "$(cat /proc/sys/net/ipv4/ip_forward)" = 1 ]
@@ -313,17 +333,17 @@ ipt_ensure() { # iptables|ip6tables TABLE CHAIN RULE...: insert at the top unles
 }
 nat_root_rules() { # RESOLVER ETH0SUBNET (lock held) -> a reason on failure
   res=$1; sub=$2; sig=$(nat_root_sig "$res" "$sub")
-  if ! iptables -t mangle -S VESPERD-EGRESS 2>/dev/null | grep -qF -- "$sig"; then
+  if ! nat_root_chains_ok "$res" "$sub"; then
     out=$({
       echo "*mangle"
       echo ":VESPERD-EGRESS - [0:0]"
       echo ":VESPERD-REPLY - [0:0]"
       echo "-A VESPERD-EGRESS -m comment --comment \"$sig\" -m conntrack --ctstate INVALID -j DROP"
       echo "-A VESPERD-EGRESS -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN"
+      echo "-A VESPERD-EGRESS -m connlimit --connlimit-above $NAT_FLOWS --connlimit-mask 32 --connlimit-saddr -j DROP"
       echo "-A VESPERD-EGRESS -d $res/32 -p udp --dport 53 -j RETURN"
       echo "-A VESPERD-EGRESS -d $res/32 -p tcp --dport 53 -j RETURN"
       for d in $DENY4 $sub; do echo "-A VESPERD-EGRESS -d $d -j DROP"; done
-      echo "-A VESPERD-EGRESS -m connlimit --connlimit-above $NAT_FLOWS --connlimit-mask 32 --connlimit-saddr -j DROP"
       echo "-A VESPERD-EGRESS -p tcp -j RETURN"
       echo "-A VESPERD-EGRESS -p udp -j RETURN"
       echo "-A VESPERD-EGRESS -p icmp --icmp-type echo-request -j RETURN"
@@ -332,9 +352,17 @@ nat_root_rules() { # RESOLVER ETH0SUBNET (lock held) -> a reason on failure
       echo "-A VESPERD-REPLY -j DROP"
       echo "COMMIT"
     } | iptables-restore --noflush 2>&1) || { echo "root mangle rules: $(printf '%s' "$out" | oneline)"; return 1; }
+    for nf in "$NETDIR"/*; do # running leases follow the new resolver and eth0 subnet
+      [ -f "$nf" ] || continue
+      # A subshell: ns_rules sets the same shell variables its callers use.
+      (ns_rules "${nf##*/}" "$res") > /dev/null || echo "lease ${nf##*/}: namespace rules not refreshed" >&2
+    done
   fi
   ipt_ensure iptables mangle PREROUTING -i vpd+ -j VESPERD-EGRESS || { echo "root mangle jump"; return 1; }
   ipt_ensure iptables mangle POSTROUTING -o vpd+ -j VESPERD-REPLY || { echo "root mangle reply jump"; return 1; }
+  # Nothing from a lease is for the System VM itself, and nothing is forwarded anywhere but eth0.
+  ipt_ensure iptables mangle INPUT -i vpd+ -j DROP || { echo "root mangle input rule"; return 1; }
+  ipt_ensure iptables mangle FORWARD -i vpd+ ! -o eth0 -j DROP || { echo "root mangle forward rule"; return 1; }
   ipt_ensure iptables raw PREROUTING -i vpd+ ! -s 198.18.0.0/16 -j DROP || { echo "root raw rule"; return 1; }
   ipt_ensure iptables nat POSTROUTING -s 198.18.0.0/16 -o eth0 -j MASQUERADE || { echo "root nat rule"; return 1; }
   # Docker owns FORWARD's order; these accepts only let traffic through, every drop is in raw and mangle above.
@@ -347,8 +375,48 @@ nat_root_rules() { # RESOLVER ETH0SUBNET (lock held) -> a reason on failure
   echo 1 > /proc/sys/net/ipv4/ip_forward
   nat_root_ok "$res" "$sub" || { echo "root rules not in place"; return 1; }
 }
+net_field() { sed -n "s/.* $2=\([^ ]*\).*/\1/p" "$NETDIR/$1" 2>/dev/null; } # ID KEY -> value from net/<id>
+# The namespace layer of lease ID from its record (and RESOLVER, which is written back): the filter and nat tables
+# are each replaced whole, so a rebuild is atomic. Prints a reason on failure.
+ns_rules() { # ID RESOLVER
+  nid=$1; res=$2; f="$NETNS/$nid"; n=$(net_idx "$nid"); gws=$(net_field "$nid" gws | tr ',' ' ')
+  sub=$(eth0_subnet); [ -n "$n" ] && [ -n "$gws" ] && [ -n "$sub" ] || { echo "net record of $nid"; return 1; }
+  rules=$({
+    echo "*filter"; echo ":INPUT DROP [0:0]"; echo ":FORWARD DROP [0:0]"; echo ":OUTPUT DROP [0:0]"
+    echo ":VESPERD-GUEST - [0:0]"
+    echo "-A INPUT -i lo -j ACCEPT"; echo "-A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT"
+    echo "-A OUTPUT -o lo -j ACCEPT"; echo "-A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT"
+    echo "-A FORWARD -m conntrack --ctstate INVALID -j DROP"
+    echo "-A FORWARD -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT"
+    for spec in $gws; do
+      t=${spec%%:*}; x=$(cidr_net "${spec#*:}"); set -- $x
+      echo "-A FORWARD -i $t -s $(int2ip "$1")/$2 -o up.$n -j VESPERD-GUEST"
+    done
+    echo "-A VESPERD-GUEST -m connlimit --connlimit-above $NAT_FLOWS --connlimit-mask 0 -j DROP"
+    echo "-A VESPERD-GUEST -d $res/32 -p udp --dport 53 -j ACCEPT"
+    echo "-A VESPERD-GUEST -d $res/32 -p tcp --dport 53 -j ACCEPT"
+    for d in $DENY4 $sub; do echo "-A VESPERD-GUEST -d $d -j DROP"; done
+    echo "-A VESPERD-GUEST -p tcp -j ACCEPT"; echo "-A VESPERD-GUEST -p udp -j ACCEPT"
+    echo "-A VESPERD-GUEST -p icmp --icmp-type echo-request -j ACCEPT"
+    echo "COMMIT"
+    echo "*nat"; echo ":PREROUTING ACCEPT [0:0]"; echo ":INPUT ACCEPT [0:0]"; echo ":OUTPUT ACCEPT [0:0]"; echo ":POSTROUTING ACCEPT [0:0]"
+    for spec in $gws; do
+      t=${spec%%:*}; g=${spec#*:}; g=${g%/*}
+      echo "-A PREROUTING -i $t -d $g/32 -p udp --dport 53 -j DNAT --to-destination $res:53"
+      echo "-A PREROUTING -i $t -d $g/32 -p tcp --dport 53 -j DNAT --to-destination $res:53"
+    done
+    echo "-A POSTROUTING -o up.$n -j MASQUERADE"
+    echo "COMMIT"
+  })
+  out=$(printf '%s\n' "$rules" | nsenter --net="$f" iptables-restore 2>&1) \
+    || { echo "namespace rules: $(printf '%s' "$out" | oneline)"; return 1; }
+  out=$(printf '*filter\n:INPUT DROP [0:0]\n:FORWARD DROP [0:0]\n:OUTPUT DROP [0:0]\nCOMMIT\n' | nsenter --net="$f" ip6tables-restore 2>&1) \
+    || { echo "namespace ip6 rules: $(printf '%s' "$out" | oneline)"; return 1; }
+  sed -i "s/ resolver=[^ ]*/ resolver=$res/" "$NETDIR/$nid"
+}
 # The veth and the namespace layer for lease ID, with gateway specs TAP:ADDR/PREFIX... (lock held; the namespace and
-# its taps exist). Prints a reason on failure; teardown removes whatever was made.
+# its taps exist). The gateway addresses go on last, once the rules that police them are in place. Prints a reason on
+# failure; teardown removes whatever was made.
 nat_up() {
   nid=$1; shift; f="$NETNS/$nid"
   res=$(resolver4); [ -n "$res" ] || { echo "no IPv4 resolver in /etc/resolv.conf"; return 1; }
@@ -357,62 +425,22 @@ nat_up() {
   mkdir -p "$NETDIR" && chmod 0700 "$NETDIR" || { echo "net directory"; return 1; }
   n=$(pick_idx) || { echo "no free veth address"; return 1; }
   # The file exists before the link, so leftovers and the reaper always know the link's owner.
-  echo "idx=$n policy=nat resolver=$res" > "$NETDIR/$nid" || { echo "net record"; return 1; }
+  echo "idx=$n policy=nat resolver=$res gws=$(echo "$*" | tr ' ' ',')" > "$NETDIR/$nid" || { echo "net record"; return 1; }
   r=$(veth_ip "$n" 1); v=$(veth_ip "$n" 2)
-  # busybox ip ignores "peer name", so the peer is born vethN in this fresh, private namespace: the only veth link
-  # in it. It is renamed vpd<N> here and then moved to the root namespace.
+  # busybox ip ignores "peer name", so the peer is born vethN in this fresh, private namespace, where no tap may be
+  # named veth*: it is the only veth link there. It is renamed vpd<N> and moved to the root namespace.
   nsenter --net="$f" ip link add "up.$n" type veth 2>/dev/null || { echo "veth up.$n"; return 1; }
   peer=$(nsenter --net="$f" ip -o link | sed -n 's/^[0-9]*: \(veth[0-9]*\)[@:].*/\1/p')
   [ "$(printf '%s\n' "$peer" | grep -c .)" = 1 ] || { echo "veth peer of up.$n: ${peer:-none}"; return 1; }
   nsenter --net="$f" ip link set dev "$peer" name "vpd$n" && nsenter --net="$f" ip link set dev "vpd$n" netns 1 \
     || { echo "veth vpd$n"; return 1; }
   { echo 1 > "/proc/sys/net/ipv6/conf/vpd$n/disable_ipv6" && echo 1 > "/proc/sys/net/ipv4/conf/vpd$n/rp_filter" \
+    && echo 0 > "/proc/sys/net/ipv4/conf/vpd$n/send_redirects" \
     && ip addr add "$r/30" dev "vpd$n" && ip link set dev "vpd$n" up; } || { echo "root end vpd$n"; return 1; }
-  # shellcheck disable=SC2016
-  nsenter --net="$f" sh -c 'for k in all default; do
-      echo 1 > /proc/sys/net/ipv6/conf/$k/disable_ipv6 && echo 1 > /proc/sys/net/ipv4/conf/$k/rp_filter \
-        && echo 0 > /proc/sys/net/ipv4/conf/$k/accept_redirects && echo 0 > /proc/sys/net/ipv4/conf/$k/send_redirects || exit 1
-    done; echo 1 > /proc/sys/net/ipv4/ip_forward' || { echo "namespace sysctls"; return 1; }
+  nsenter --net="$f" sh -c 'echo 1 > /proc/sys/net/ipv4/ip_forward' || { echo "namespace forwarding"; return 1; }
   { nsenter --net="$f" ip addr add "$v/30" dev "up.$n" && nsenter --net="$f" ip link set dev "up.$n" up \
     && nsenter --net="$f" ip route add default via "$r"; } || { echo "namespace end up.$n"; return 1; }
-  rules=$({
-    echo "*filter"; echo ":INPUT DROP [0:0]"; echo ":FORWARD DROP [0:0]"; echo ":OUTPUT DROP [0:0]"
-    echo ":VESPERD-GUEST - [0:0]"
-    echo "-A INPUT -i lo -j ACCEPT"; echo "-A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT"
-    echo "-A OUTPUT -o lo -j ACCEPT"; echo "-A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT"
-    echo "-A FORWARD -m conntrack --ctstate INVALID -j DROP"
-    echo "-A FORWARD -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT"
-    for spec in "$@"; do
-      t=${spec%%:*}; x=$(cidr_net "${spec#*:}"); set -- $x
-      echo "-A FORWARD -i $t -s $(int2ip "$1")/$2 -o up.$n -j VESPERD-GUEST"
-    done
-    echo "-A VESPERD-GUEST -d $res/32 -p udp --dport 53 -j ACCEPT"
-    echo "-A VESPERD-GUEST -d $res/32 -p tcp --dport 53 -j ACCEPT"
-    for d in $DENY4 $sub; do echo "-A VESPERD-GUEST -d $d -j DROP"; done
-    echo "-A VESPERD-GUEST -m connlimit --connlimit-above $NAT_FLOWS --connlimit-mask 0 -j DROP"
-    echo "-A VESPERD-GUEST -p tcp -j ACCEPT"; echo "-A VESPERD-GUEST -p udp -j ACCEPT"
-    echo "-A VESPERD-GUEST -p icmp --icmp-type echo-request -j ACCEPT"
-    echo "COMMIT"
-  })
-  out=$(printf '%s\n' "$rules" | nsenter --net="$f" iptables-restore 2>&1) \
-    || { echo "namespace rules: $(printf '%s' "$out" | oneline)"; return 1; }
-  out=$(printf '*filter\n:INPUT DROP [0:0]\n:FORWARD DROP [0:0]\n:OUTPUT DROP [0:0]\nCOMMIT\n' | nsenter --net="$f" ip6tables-restore 2>&1) \
-    || { echo "namespace ip6 rules: $(printf '%s' "$out" | oneline)"; return 1; }
-}
-nat_taps() { # ID TAP:ADDR/PREFIX...: the DNAT for DNS and the masquerade, then the gateway addresses, last
-  nid=$1; shift; f="$NETNS/$nid"; n=$(net_idx "$nid"); res=$(sed -n 's/.* resolver=\([0-9.]*\).*/\1/p' "$NETDIR/$nid")
-  rules=$({
-    echo "*nat"
-    for spec in "$@"; do
-      t=${spec%%:*}; g=${spec#*:}; g=${g%/*}
-      echo "-A PREROUTING -i $t -d $g/32 -p udp --dport 53 -j DNAT --to-destination $res:53"
-      echo "-A PREROUTING -i $t -d $g/32 -p tcp --dport 53 -j DNAT --to-destination $res:53"
-    done
-    echo "-A POSTROUTING -o up.$n -j MASQUERADE"
-    echo "COMMIT"
-  })
-  out=$(printf '%s\n' "$rules" | nsenter --net="$f" iptables-restore --noflush 2>&1) \
-    || { echo "namespace nat rules: $(printf '%s' "$out" | oneline)"; return 1; }
+  why=$(ns_rules "$nid" "$res") || { echo "$why"; return 1; }
   for spec in "$@"; do
     t=${spec%%:*}; c=${spec#*:}
     nsenter --net="$f" ip addr add "$c" dev "$t" || { echo "tap $t address $c"; return 1; }
@@ -742,19 +770,19 @@ launch() {
   valid_id "$LID" || { echo "ERR bad id"; return 2; }
   ceiling=$DEFAULT_CEILING
   case "${1:-}" in stage=*|tap=*|tapaddr=*|net=*|'') ;; *) ceiling=$1; shift; digits "$ceiling" || { echo "ERR bad ceiling"; return 2; } ;; esac
-  nstage=0; taps=""; ntap=0; policy=none; gws=""
+  nstage=0; taps=""; ntap=0; policy=none; netset=""; gws=""
   for spec in "$@"; do
     case "$spec" in
       stage=*) nstage=$((nstage + 1)) ;;
       tap=*)
         t=${spec#tap=}
-        valid_tap "$t" || { echo "ERR bad tap name ${t:-(empty)}: 1 to 15 letters, digits, _ and -, not starting with -, not lo"; return 2; }
+        valid_tap "$t" || { echo "ERR bad tap name ${t:-(empty)}: 1 to 15 letters, digits, _ and -, not starting with -, not lo, veth* or vpd*"; return 2; }
         case " $taps " in *" $t "*) echo "ERR tap $t given twice"; return 2 ;; esac
         taps="$taps $t"; ntap=$((ntap + 1)) ;;
-      net=none|net=nat) [ "$policy" = none ] || { echo "ERR net= given twice"; return 2; }; policy=${spec#net=} ;;
+      net=none|net=nat) [ -z "$netset" ] || { echo "ERR net= given twice"; return 2; }; netset=1; policy=${spec#net=} ;;
       net=*) echo "ERR bad network policy ${spec#net=}: use none or nat"; return 2 ;;
       tapaddr=*:*) gws="$gws ${spec#tapaddr=}" ;;
-      *) echo "ERR usage: LAUNCHAPI <id> [ceiling] [stage=SRC:DEST|tap=NAME|tapaddr=NAME:ADDR/PREFIX|net=none|nat]..."; return 2 ;;
+      *) echo "ERR usage: LAUNCHAPI <id> [ceiling] [stage=SRC:DEST|tap=NAME|tapaddr=NAME:ADDR/PREFIX|net=none|net=nat]..."; return 2 ;;
     esac
   done
   [ "$nstage" -le "$MAX_STAGES" ] || { echo "ERR at most $MAX_STAGES stage= tokens"; return 2; }
@@ -803,7 +831,7 @@ launch() {
   why=$(netns_up "$LID" $taps) || launch_fail "network: $why"
   if [ "$policy" = nat ]; then
     # shellcheck disable=SC2086
-    why=$(nat_up "$LID" $gws) && why=$(nat_taps "$LID" $gws) || launch_fail "network: $why"
+    why=$(nat_up "$LID" $gws) || launch_fail "network: $why"
   fi
   # Staging runs before Firecracker exists, outside the lock (the record keeps the reaper off the jail).
   unlock
@@ -990,13 +1018,17 @@ net() { # ID's network namespace: one LINK line per interface, then whether it i
   echo "NETNS $sid separate=$sep ino=${bnet:--}"
   if [ -f "$NETDIR/$sid" ]; then
     n=$(net_idx "$sid")
-    echo "POLICY nat $(cat "$NETDIR/$sid") root=$(veth_ip "$n" 1) ns=$(veth_ip "$n" 2)"
+    gw=$(ip -4 route show default 2>/dev/null | awk '{for(i=1;i<=NF;i++) if ($i=="via") {print $(i+1); exit}}')
+    echo "POLICY nat $(cat "$NETDIR/$sid") root=$(veth_ip "$n" 1) ns=$(veth_ip "$n" 2) eth0=$(eth0_cidr) gw=${gw:--}"
     # Dropped packets so far: the namespace layer (its FORWARD policy and the guest chain's drops) and the root layer.
     nsd=$(nsenter --net="$f" sh -c 'iptables -nvxL FORWARD | sed -n "1s/.*policy DROP \([0-9]*\) packets.*/\1/p"
       iptables -nvxL VESPERD-GUEST | awk "\$3==\"DROP\" {s+=\$1} END {print s+0}"' 2>/dev/null | awk '{s+=$1} END {print s+0}')
-    rtd=$(iptables -t mangle -nvxL VESPERD-EGRESS 2>/dev/null | awk '$3=="DROP" {s+=$1} END {print s+0}')
+    # Root counters are for every lease together; the suite compares them before and after one guest's probes.
+    rtd=$( { iptables -t mangle -nvxL VESPERD-EGRESS; iptables -t mangle -nvxL INPUT; iptables -t mangle -nvxL FORWARD; } 2>/dev/null \
+      | awk '$3=="DROP" && ($6=="*" || $6 ~ /^vpd/) {s+=$1} END {print s+0}')
     rwd=$(iptables -t raw -nvxL PREROUTING 2>/dev/null | awk '$3=="DROP" && $6 ~ /^vpd/ {s+=$1} END {print s+0}')
-    echo "DROPS $sid ns=${nsd:-0} root=${rtd:-0} raw=${rwd:-0}"
+    rpd=$(iptables -t mangle -nvxL VESPERD-REPLY 2>/dev/null | awk '$3=="DROP" {s+=$1} END {print s+0}')
+    echo "DROPS $sid ns=${nsd:-0} root=${rtd:-0} raw=${rwd:-0} reply=${rpd:-0}"
   else
     echo "POLICY none"
   fi
@@ -1029,11 +1061,19 @@ test_listen() { # PORT|stop: TCP and UDP listeners on every System VM address (t
   echo "$p1 $!" > "$TEST_LISTEN"
   echo "LISTEN tcp=$1 udp=$1 pids=$(cat "$TEST_LISTEN")"
 }
-test_open_ns() { # ID: as a broken namespace layer would be, accept everything in ID's FORWARD (root layer alone)
-  sid=${1:-}; valid_id "$sid" || { echo "ERR bad id"; return 2; }
+test_open_ns() { # ID [filter|all]: as a broken namespace layer would be (the root layer alone)
+  sid=${1:-}; mode=${2:-filter}; valid_id "$sid" || { echo "ERR bad id"; return 2; }
+  case "$mode" in filter|all) ;; *) echo "ERR usage: test-open-ns ID [filter|all]"; return 2 ;; esac
   [ -f "$NETDIR/$sid" ] && netns_mounted "$sid" || { echo "ERR $sid has no nat namespace"; return 1; }
-  nsenter --net="$NETNS/$sid" iptables -P FORWARD ACCEPT && nsenter --net="$NETNS/$sid" iptables -F FORWARD \
-    && echo "OPENED $sid namespace FORWARD (root layer only)"
+  f="$NETNS/$sid"
+  nsenter --net="$f" iptables -P FORWARD ACCEPT && nsenter --net="$f" iptables -F FORWARD || { echo "ERR open FORWARD"; return 1; }
+  if [ "$mode" = all ]; then
+    # No masquerade and no reverse-path check: guest sources reach the root layer as they are.
+    # shellcheck disable=SC2016
+    nsenter --net="$f" iptables -t nat -F POSTROUTING && nsenter --net="$f" sh -c \
+      'for d in /proc/sys/net/ipv4/conf/*/rp_filter; do echo 0 > "$d"; done' || { echo "ERR open nat"; return 1; }
+  fi
+  echo "OPENED $sid namespace $mode (root layer only)"
 }
 test_reach() { # IP PORT: whether the System VM itself reaches IP:PORT over TCP (is the internet there at all?)
   ip2int "${1:-}" > /dev/null && digits "${2:-}" || { echo "ERR usage: test-reach IP PORT"; return 2; }

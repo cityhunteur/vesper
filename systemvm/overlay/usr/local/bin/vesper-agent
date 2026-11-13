@@ -20,7 +20,7 @@
 #   DATA <args...>        -> DATA <rc> <count> then <count> output lines of `vesper-data <args>` (GH #164)
 #   VESPERD <args...>     -> VESPERD <rc> <count> then <count> output lines of `vesper-vesperd <args>`, except
 #                            launch and connect (ADR 0007); includes stage, store-list and store-rm (slice 5)
-#   LAUNCHAPI <id> [ceiling] [stage=SRC:DEST|tap=NAME]...
+#   LAUNCHAPI <id> [ceiling] [stage=SRC:DEST|tap=NAME|tapaddr=NAME:ADDR/PREFIX|net=none|net=nat]...
 #                         -> READY <id> pid=<n> firecracker_version=<v> once the API socket exists, or
 #                            ERR <reason> and close; each stage= token is staged into the fresh jail first, and each
 #                            tap= token is a tap device in the microVM's own network namespace (CE-0010); after

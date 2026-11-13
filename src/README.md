@@ -461,8 +461,10 @@ Public symbols by file:
   boots `vesperd --network nat` microVMs with `vesper_net=` and `vesper_probe=` and judges the guest's
   `VESPER-PROBE` lines (`denied`, `judge`) and the `DROPS` counters of `VESPERD net`: `listeners_and_internet`,
   `nat_guest_reaches_public_only` (two leases), `isolation_reports_egress`, `teardown_removes_veths`,
-  `root_layer_alone_after_docker_restart` (`KILL docker`, then `VESPERD test-open-ns`), `none_lease_has_no_uplink`,
-  `reaper_removes_veth_of_killed_holder` and `listeners_stopped`; `passed` requires all 9 steps ok.
+  `root_mangle_alone_after_docker_restart` (`KILL docker` after the launch, `HEALTH` until dockerd is back, then
+  `VESPERD test-open-ns ID filter`), `root_raw_drops_sources_outside_the_pool` (`test-open-ns ID all`),
+  `none_lease_has_no_uplink`, `reaper_removes_veth_of_killed_holder` and `listeners_stopped`; the System VM's
+  addresses come from `POLICY ... eth0= gw=`; `passed` requires all 10 steps ok.
 - `control/suites/replay.rs:ReplayRun` (ADR 0007 slice 6) writes the replay files into a new
   `share_dir/replay-<ms>/` (a removed and rewritten share file can read as empty in the System VM), makes the snapshot
   fixture in its own `vesperd` and copies it into the store with `vesperd stage jail:… store:…`, then runs each case

@@ -487,7 +487,7 @@ fn the_guest_helper_refuses_the_tap_names_vesperd_refuses() {
         let out = Command::new("sh").arg(script).args(["launch", "vm-1"]).args(tokens).output().unwrap();
         String::from_utf8_lossy(&out.stdout).into_owned()
     };
-    for name in ["", "lo", "-", "-tap0", "tap 0", "tap.0", "tap/0", "a-name-of-16-chr"] {
+    for name in ["", "lo", "-", "-tap0", "veth0", "vpd1", "tap 0", "tap.0", "tap/0", "a-name-of-16-chr"] {
         let out = launch(&[&format!("tap={name}")]);
         assert!(out.starts_with("ERR bad tap name"), "{name:?}: {out}");
         assert!(!vesper::control::valid_tap_name(name), "{name:?} accepted by vesperd");
@@ -515,6 +515,9 @@ fn the_guest_helper_refuses_the_tap_names_vesperd_refuses() {
         (&["tap=tap0", "tapaddr=tap0:172.16.0.1/30", "tapaddr=tap0:172.16.1.1/30", "net=nat"][..], "gives tap0 twice"),
         (&["net=open"][..], "ERR bad network policy open"),
         (&["net=nat", "net=nat"][..], "ERR net= given twice"),
+        (&["net=none", "net=nat"][..], "ERR net= given twice"),
+        (&["tap=tap0", "tapaddr=tap0:172.016.0.1/30", "net=nat"][..], "bad address"),
+        (&["tap=tap0", "tapaddr=tap0:172.16.0.1/030", "net=nat"][..], "prefix length of 16 to 30"),
     ] {
         let out = launch(tokens);
         assert!(out.contains(why), "{tokens:?}: {out}");

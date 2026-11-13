@@ -35,13 +35,15 @@ pub struct HttpResponse {
 pub const MAX_TAPS: usize = 8;
 
 /// A tap device name the guest accepts: a Linux interface name (at most 15 bytes) of ASCII letters, digits, `_` and
-/// `-`, not starting with `-` (it would read as an option), and never `lo`. The guest checks it again
-/// (`vesper-vesperd`, `valid_tap`).
+/// `-`, not starting with `-` (it would read as an option), never `lo`, and not starting with `veth` or `vpd`, which
+/// the `--network nat` uplink uses (ADR 0008). The guest checks it again (`vesper-vesperd`, `valid_tap`).
 pub fn valid_tap_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 15
         && name != "lo"
         && !name.starts_with('-')
+        && !name.starts_with("veth")
+        && !name.starts_with("vpd")
         && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
 }
 
@@ -77,7 +79,7 @@ impl TapSpec {
             Some((name, cidr)) => (name, Some(parse_gateway(cidr).map_err(|err| format!("--tap {text:?}: {err}"))?)),
         };
         if !valid_tap_name(name) {
-            return Err(format!("--tap {text:?}: use 1 to 15 letters, digits, _ and -, not starting with -, not lo"));
+            return Err(format!("--tap {text:?}: use 1 to 15 letters, digits, _ and -, not starting with - or veth or vpd, not lo"));
         }
         Ok(TapSpec { name: name.to_string(), gateway })
     }
@@ -402,7 +404,7 @@ mod tests {
         assert!(valid_tap_name(&"t".repeat(15)));
         // ip keywords are names like any other: the guest always passes them after `dev`.
         assert!(valid_tap_name("up") && valid_tap_name("dev") && valid_tap_name("t-"));
-        for bad in ["", "lo", "-", "-tap0", "tap 0", "tap/0", "tap.0", "tap:0", "tap=0", "../x", &"t".repeat(16)] {
+        for bad in ["", "lo", "-", "-tap0", "veth0", "vpd3", "vethx", "tap 0", "tap/0", "tap.0", "tap:0", "tap=0", "../x", &"t".repeat(16)] {
             assert!(!valid_tap_name(bad), "accepted {bad:?}");
         }
     }

@@ -158,7 +158,7 @@ Deleting the image with the System VM stopped erases all container state; nothin
 Three agent verbs on vsock port 1024 serve `vesperd` microVMs; no new port, socket, share or entitlement is added,
 and the bridge allow-list is unchanged.
 
-- `LAUNCHAPI <id> [ceiling] [stage=SRC:DEST|tap=NAME]...` starts one stock Firecracker under the jailer with no configuration file: uid and gid
+- `LAUNCHAPI <id> [ceiling] [stage=SRC:DEST|tap=NAME|tapaddr=NAME:ADDR/PREFIX|net=none|net=nat]...` starts one stock Firecracker under the jailer with no configuration file: uid and gid
   20000 (the shim's microVMs run as 10000), cgroup `/sys/fs/cgroup/vesperd/<id>` (`--parent-cgroup vesperd`,
   `pids.max=256`, `memory.max` from `ceiling`, default 640 MiB, at least 128 MiB and at most the System VM's
   memory), chroot `/var/lib/vesper/state/vesperd/jailer/firecracker/<id>/root` on the data disk (slice 5; refused
@@ -227,8 +227,12 @@ is the normative policy and this section the summary. No new port, socket, share
   static root rules: `raw PREROUTING` drops sources outside the pool, `mangle PREROUTING -i vpd+` runs the policy
   before routing (so it also covers the System VM's own addresses), `mangle POSTROUTING -o vpd+` drops anything
   that is not a reply, and `ip6tables` drops all IPv6 on `vpd+`. Docker owns `FORWARD`; Vesper only adds accepts to
-  `DOCKER-USER`, so a Docker restart can cut `nat` egress but cannot open a path. `make systemvm-egress-suite` runs a
-  microVM with its namespace layer opened after dockerd was killed and respawned, and every deny still holds.
+  `DOCKER-USER`, so a Docker restart can cut `nat` egress but cannot open a path. `mangle INPUT` and `FORWARD` also
+  drop anything from `vpd+` that is for the System VM itself or not bound for `eth0`. `make systemvm-egress-suite`
+  shows each root table holding alone: `mangle` with the namespace filter opened after dockerd was killed and
+  respawned under a running microVM, `raw` with the namespace's masquerade and reverse-path check removed too.
+- **Limits.** The 1024-flow limit comes before every accept, DNS included; tap names may not start with `veth` or
+  `vpd`; every lease's namespace, `none` included, has IPv6, redirects and loose reverse-path filtering off.
 - **Accepted risks** (TD-058): a VPN on the Mac that routes a public prefix is reachable, because address filtering
   cannot see macOS routes; guests' DNS queries, including names that resolve to private addresses, reach the macOS
   resolver (the addresses themselves stay blocked); DNS can carry data out (tunnelling), as any egress can.

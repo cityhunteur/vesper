@@ -83,22 +83,27 @@ enforcement on the Mac or an egress proxy; both are out of scope here and are li
   `198.18.(N/64).((N%64)*4+1)` and the namespace end `+2`. The index is allocated with the helper's lock held, by a
   rotating cursor over indexes that no `net` file and no live `vpd*` link uses, and is written to the root-only file
   `/run/vesper/vesperd/net/<id>` before the link exists; the file outlives the lease record until the link is gone.
-- **Names.** The root end is `vpd<N>` and the namespace end is `up.<N>`; tap names cannot contain `.`, so no tap can
-  take the uplink's name. (busybox `ip` ignores `peer name`, so the pair is made inside the fresh namespace, where the
+- **Names.** The root end is `vpd<N>` and the namespace end is `up.<N>`; tap names cannot contain `.` or start with
+  `veth` or `vpd`, so no tap can take or shadow the uplink's names. (busybox `ip` ignores `peer name`, so the pair is made inside the fresh namespace, where the
   only `veth*` link is the peer, which is renamed `vpd<N>` and moved to the root namespace.)
-- **Namespace layer** (created under the lock, before the jailer): `ip_forward=1`, `rp_filter=1`,
-  `accept_redirects=0`, `send_redirects=0`, `disable_ipv6=1` (all and default); `iptables` policies `INPUT`,
-  `FORWARD` and `OUTPUT` `DROP`; `ip6tables` the same. `INPUT` and `OUTPUT` accept `lo` and replies only, so
-  nothing in the namespace (Firecracker included) can open a connection. `FORWARD` drops `INVALID`, accepts replies,
-  accepts `-i <tap> -s <tap subnet> -o up.<N>` to the resolver's port 53 and then, after the deny list and the
-  protocol and `connlimit` rules, TCP, UDP and ICMP echo. `nat` `PREROUTING` DNATs the gateway's port 53;
-  `POSTROUTING` masquerades out of `up.<N>`.
+- **Namespace layer** (created under the lock, before the jailer): every lease's namespace, `none` or `nat`, gets
+  `rp_filter=1`, `accept_redirects=0`, `send_redirects=0` and `disable_ipv6=1` (all, default and lo) before any
+  other interface exists, so the taps and `up.<N>` inherit them; under `nat` also `ip_forward=1`, `iptables`
+  policies `INPUT`, `FORWARD` and `OUTPUT` `DROP`, and `ip6tables` the same. `INPUT` and `OUTPUT` accept `lo` and
+  replies only, so nothing in the namespace (Firecracker included) can open a connection. `FORWARD` drops `INVALID`,
+  accepts replies, and sends `-i <tap> -s <tap subnet> -o up.<N>` to a chain that drops above 1024 flows first, then
+  accepts the resolver's port 53, drops the deny list, and accepts TCP, UDP and ICMP echo. `nat` `PREROUTING`
+  DNATs the gateway's port 53; `POSTROUTING` masquerades out of `up.<N>`. Both tables are replaced whole, from the
+  lease's record, so a rebuild is atomic.
 - **Root layer** (static rules, one set for every lease, installed by the first `nat` launch and checked by every
   one; a launch fails closed when they are missing and cannot be added):
   - `raw PREROUTING -i vpd+ ! -s 198.18.0.0/16 -j DROP` and per-veth `rp_filter=1` (spoofing);
-  - `mangle PREROUTING -i vpd+ -j VESPERD-EGRESS`: drop `INVALID`; accept the resolver's port 53; drop the deny list;
-    drop above 1024 flows per source; accept TCP, UDP and ICMP echo; drop the rest. It runs before routing, so it
-    covers traffic to the System VM's own addresses (`INPUT`) as well as forwarded traffic;
+  - `mangle PREROUTING -i vpd+ -j VESPERD-EGRESS`: drop `INVALID`; return replies; drop above 1024 flows per source;
+    accept the resolver's port 53; drop the deny list; accept TCP, UDP and ICMP echo; drop the rest. It runs before
+    routing, so it covers traffic to the System VM's own addresses as well as forwarded traffic;
+  - `mangle INPUT -i vpd+ -j DROP` (nothing from a lease is for the System VM itself) and
+    `mangle FORWARD -i vpd+ ! -o eth0 -j DROP` (nothing is forwarded anywhere but `eth0`), for System VM addresses or
+    networks outside the deny list;
   - `mangle POSTROUTING -o vpd+`: drop anything that is not a reply, so the System VM, containers and other leases
     cannot open a connection to a lease;
   - `nat POSTROUTING -s 198.18.0.0/16 -o eth0 -j MASQUERADE`;
@@ -115,9 +120,18 @@ enforcement on the Mac or an egress proxy; both are out of scope here and are li
   layers; `isolation` adds `ipv6_off` and `egress_ok` (the root rules are in place).
 - **Guest.** The microVM initramfs carries `failover`, `net_failover` and `virtio_net`; the test init can configure
   `eth0` and run TCP, UDP, spoofed-source and DNS probes, each printed on the console.
-- **Tests.** `make systemvm-egress-suite` (9 steps) judges every verdict from inside a guest, against TCP and UDP
-  listeners on every System VM address, and reads both layers' drop counters; one microVM runs with its namespace
-  layer opened after dockerd was killed and respawned, to show the root layer holds alone.
+- **Resolver changes.** The root chains carry the resolver and `eth0`'s subnet in a signature comment; when DHCP
+  changes either, the next `nat` launch replaces the chains atomically and rebuilds every running lease's namespace
+  tables for the new values, so their DNS keeps working.
+- **Tests.** `make systemvm-egress-suite` (10 steps) judges every verdict from inside a guest, against TCP and UDP
+  listeners on the System VM's addresses as the helper reports them, and compares both layers' drop counters before
+  and after. One microVM has its namespace filter opened after dockerd was killed and respawned while it ran (no
+  launch in between), to show the root `mangle` layer holds alone and Docker keeps `DOCKER-USER`; one also loses its
+  masquerade and reverse-path check, to show the root `raw` rule drops sources outside the pool. The suite fails
+  when the System VM has no internet, because then the allowed probes cannot be judged.
+- **Not measured.** The 1024-flow limit is placed before every accept in both layers but no flood test has run; a
+  stopped lease's conntrack entries stay until their timeouts (`conntrack-tools` is not in the package set), which
+  matters only if the same /30 is given again within that time, after the cursor has gone round 16384 leases.
 
 ## Alternatives considered
 
