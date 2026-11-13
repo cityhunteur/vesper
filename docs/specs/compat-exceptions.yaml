@@ -142,21 +142,15 @@ exceptions:
     issue: 156
     expiry_date: "2027-03-31"
     target_release: parity-ga
-    status: open
+    status: closed
     approved_by: cityhunteur
     approved_on: "2026-11-12"
     description: >-
-      A vesperd microVM cannot have a network interface: PUT /network-interfaces/{iface_id} with any
-      host_dev_name returns Firecracker's own 400 "Network config error: Could not create the network device:
-      Open tap device failed: Error while creating ifreq structure: Operation not permitted (os error 1).
-      Invalid TUN/TAP Backend provided by tap0. ...", because the jailed Firecracker runs as uid 20000 without
-      CAP_NET_ADMIN and the jail has no tap device prepared for it. Upstream, with a tap device the jailer
-      user may open, the request returns 204. Everything that needs an interface first follows: MMDS
-      networking configuration, GET /mmds after configuring it, the network-interface rows of GET /vm/config,
-      PATCH of an existing interface, and the duplicate-MAC, duplicate-tap and MTU checks (the MTU check runs
-      after the tap is opened). Requests that fail before the tap is opened (PCI not enabled after boot,
-      path/body id mismatch, a missing interface, MMDS configuration errors) behave as upstream. Measured by
-      make systemvm-replay-suite: 14 of the 173 cases (12 setup failures, 2 mismatches), listed in
-      docs/generated/backend-a-behavior-replay.json. Tracked as TD-058. Resolve by giving vesperd microVMs a
-      tap device created by the System VM before the jailer starts (with a network policy), or by accepting
-      it at the parity-GA review.
+      Closed (2026-11-13, D-027): vesperd --tap NAME gives the microVM a tap device NAME in its own network
+      namespace (jailer --netns), owned by the jailer's uid 20000, so the jailed Firecracker opens it without
+      CAP_NET_ADMIN and PUT /network-interfaces answers as upstream; make systemvm-replay-suite passes the 14 cases
+      this exception counted (docs/generated/backend-a-behavior-replay.json). The namespace has no uplink; guest
+      connectivity beyond its tap is TD-058. Originally: a vesperd microVM could not have a network interface, and
+      PUT /network-interfaces failed with Firecracker's own 400 "Open tap device failed: ... Operation not
+      permitted (os error 1)", because the jailed Firecracker runs as uid 20000 without CAP_NET_ADMIN and no tap
+      device was prepared for it.

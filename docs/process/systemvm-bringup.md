@@ -498,18 +498,19 @@ The [shim contract](../../shim/README.md) describes lifecycle and protocol detai
 ## `vesperd` microVMs (ADR 0007, slice 3)
 
 `vesperd`'s backend in the System VM is `vesper-vesperd` (overlay, `usr/local/bin`), reached through three agent
-verbs. `LAUNCHAPI <id> [ceiling] [stage=SRC:DEST]...` refuses without the data disk (`ERR data disk not in use`),
+verbs. `LAUNCHAPI <id> [ceiling] [stage=SRC:DEST|tap=NAME]...` refuses without the data disk (`ERR data disk not in use`),
 runs `vesper-microvm prepare`, copies the kernel and initramfs into
 `/var/lib/vesper/state/vesperd/jailer/firecracker/<id>/root` as `/Image` and `/initrd.gz`, stages each `stage=` token
-into that fresh jail (next section), and starts `jailer --id <id> --uid 20000 --gid 20000 --chroot-base-dir
-/var/lib/vesper/state/vesperd/jailer --parent-cgroup vesperd --cgroup-version 2 --cgroup pids.max=256 --cgroup
+into that fresh jail (next section), creates the network namespace `/run/vesper/vesperd/netns/<id>` with `lo` and
+one tap per `tap=` token (busybox `tunctl -u vesperd-jail`, up, no uplink; CE-0010), and starts `jailer --id <id>
+--uid 20000 --gid 20000 --chroot-base-dir /var/lib/vesper/state/vesperd/jailer --netns /run/vesper/vesperd/netns/<id> --parent-cgroup vesperd --cgroup-version 2 --cgroup pids.max=256 --cgroup
 memory.max=<ceiling> -- --api-sock /run/firecracker.socket`, with no configuration file, so the microVM is built from
 API requests. It replies `READY <id> pid=<n> firecracker_version=<v>` once the API socket exists, or `ERR <reason>`
 and closes. The connection is then the lease: when the client closes it, the agent stops Firecracker (SIGTERM, 3 s,
-SIGKILL) and removes the jail, the cgroup `/sys/fs/cgroup/vesperd/<id>` and the record
+SIGKILL) and removes the jail, the cgroup `/sys/fs/cgroup/vesperd/<id>`, the network namespace and the record
 `/run/vesper/vesperd/leases/<id>`; when Firecracker exits, the agent does the same and closes the connection.
 `FCAPI <id>` replies `OK` and relays bytes to the API socket. `VESPERD <args…>` runs the helper's inspection
-commands (`status`, `isolation`, `files`, `memory`, `list`, `log`, `reap`), `stage`, `store-list`, `store-rm`, and test hooks with the buffered reply of the other guest
+commands (`status`, `isolation`, `files`, `memory`, `net`, `list`, `log`, `reap`), `stage`, `store-list`, `store-rm`, and test hooks with the buffered reply of the other guest
 tools. The `vesper-vesperd-reaper` service runs a reaper pass every 10 s. Values and their reasons are in the
 [ExecPlan](../exec-plans/completed/2026-11-12-GH156-vesperd-backend-a.md#values).
 

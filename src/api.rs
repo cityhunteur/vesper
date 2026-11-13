@@ -57,7 +57,7 @@ const DRIVE_ROOT_ALREADY_EXISTS_MESSAGE: &str =
     "Drive config error: A root block device already exists!";
 const DRIVE_UPDATE_NOT_FOUND_MESSAGE: &str = "Drive config error: Unable to patch the block device: Failed perform action on device: Device not found Please verify the request arguments.";
 const NETWORK_UPDATE_NOT_FOUND_MESSAGE: &str = "Network config error: Unable to update the net device: Failed perform action on device: Device not found";
-const NETWORK_TAP_OPEN_BUSY_DETAIL: &str = "Device or resource busy (os error 16)";
+const NETWORK_TAP_OPEN_BUSY_DETAIL: &str = "Resource busy (os error 16)";
 const NETWORK_MTU_MIN: u16 = 68;
 const PCI_NOT_ENABLED_MESSAGE: &str = "PCI is not enabled";
 #[cfg(target_arch = "aarch64")]

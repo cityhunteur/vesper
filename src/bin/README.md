@@ -39,7 +39,8 @@ errors to stderr and exits with code 1 on failure.
   (overrides it; must be named `<cid>.sock`), `--agent-port N` (default 1024) and `--stage SRC:DEST` (slice 5,
   repeatable, at most 16, parsed by `vesper::control::StageSpec`). `Options::from_args`, `bridge_and_port`, `run`.
   `run` claims the socket, asks `DATA status` (`check_data_disk`; refuses unless `formatted` or `mounted`), sends
-  `LAUNCHAPI <id> [ceiling] [stage=SRC:DEST]...` over `vesper::proxy::open_upstream` and checks `READY` with
+  `LAUNCHAPI <id> [ceiling] [stage=SRC:DEST]... [tap=NAME]...` (one `tap=` per `--tap`, at most 8, checked by
+  `vesper::control::valid_tap_name`; CE-0010) over `vesper::proxy::open_upstream` and checks `READY` with
   `vesper::control::parse_ready` against the swagger's `info.version`, binds the socket, then runs
   `vesper::proxy::serve` with the `FCAPI <id>` preface and the bounds until the lease closes or SIGTERM/SIGINT.
   Values (each reasoned in the GH #156 ExecPlan): greeting, `OK`, `ERR` and preface writes 5 s; `READY` 30 s, plus

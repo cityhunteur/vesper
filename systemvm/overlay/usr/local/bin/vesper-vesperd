@@ -708,7 +708,8 @@ net() { # ID's network namespace: one LINK line per interface, then whether it d
   nsenter --net="$f" ip -o link | while IFS= read -r l; do
     name=${l#*: }; name=${name%%:*}; name=${name%%@*}
     case "$l" in *"<"*UP*">"*) st=UP ;; *) st=DOWN ;; esac
-    own=$(nsenter --net="$f" unshare -m sh -c "mount --make-rprivate / && mount -t sysfs sysfs /sys 2>/dev/null && cat /sys/class/net/$name/owner 2>/dev/null")
+    # shellcheck disable=SC2016
+    own=$(nsenter --net="$f" unshare -m sh -c 'mount --make-rprivate / && mount -t sysfs sysfs /sys 2>/dev/null && cat "/sys/class/net/$1/owner" 2>/dev/null' sh "$name")
     echo "LINK $name state=$st owner=${own:--}"
   done
   sep=false; [ "$(nsenter --net="$f" readlink /proc/self/ns/net)" != "$(readlink /proc/1/ns/net)" ] && sep=true
