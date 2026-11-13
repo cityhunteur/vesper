@@ -1,0 +1,21 @@
+reference=all-pass partial=false total=980 passed=756 to_explain={"error": 34, "failed": 94, "skipped": 96} not_passing_on_reference=0 missing_from_run=0
+class apple-cpu-features-unknown: 8
+class apple-cpu-no-cache-topology: 24
+class apple-cpu-ssb-vulnerable: 10
+class jail-hardlink-exdev: 2
+class max-devices-worker-timeout: 2
+class no-dmi: 1
+class no-userfaultfd: 8
+class rate-limiter-balloon-tolerance: 7
+class upstream-platform-skip: 96
+class vmclock-gen-counter-flag: 1
+class vmm-memory-overhead: 56
+class vsock-reset-after-snapshot: 2
+classes that explained nothing in this run: guest-ssh-timeout-under-load
+UNMATCHED integration_tests/functional/test_balloon.py::test_stats_update[vmlinux-5.10.253-PCI_OFF] failed assert 187514880 != 187514880
+UNMATCHED integration_tests/functional/test_drive_virtio.py::test_non_partuuid_boot[Async-vmlinux-6.1.172-PCI_ON] error host_tools.memory.MemoryUsageExceededError: ('Memory usage (6.65 MiB) exceeded maximum threshold (5.0 MiB)', psutil.Process(pid=10894, status='terminated', started='11:12:38'))
+UNMATCHED integration_tests/functional/test_shut_down.py::test_reboot[vmlinux-6.1.172-PCI_ON] failed TimeoutError: Process 27436 did not exit within 10.0s
+UNMATCHED integration_tests/functional/test_sysgenid.py::test_sysgenid_via_poll_and_nonblocking_read[vmlinux-5.10.253-PCI_OFF] error ChildProcessError: [27428] Command: ['ip', 'netns', 'exec', 'netns-gw2-5', 'ssh', '-i', '/srv/test_artifacts/ubuntu-24.04.id_rsa', '-o', 'StrictHostKeyChecking=no', '-o', 'ConnectTimeout=2', '-o', 'ControlMaster=auto', '-o', 'ControlPersist=yes', '-o', 'KexAlgorithms=ecdh-sha2-nistp521', '-o', 'Host
+UNMATCHED integration_tests/functional/test_sysgenid.py::test_sysgenid_via_poll_and_nonblocking_read[vmlinux-6.1.172-PCI_OFF] error ChildProcessError: [28808] Command: ['ip', 'netns', 'exec', 'netns-gw2-3', 'ssh', '-i', '/srv/test_artifacts/amazonlinux-2023.id_rsa', '-o', 'StrictHostKeyChecking=no', '-o', 'ConnectTimeout=2', '-o', 'ControlMaster=auto', '-o', 'ControlPersist=yes', '-o', 'KexAlgorithms=ecdh-sha2-nistp521', '-o', '
+UNMATCHED integration_tests/functional/test_sysgenid.py::test_sysgenid_via_poll_and_nonblocking_read[vmlinux-6.1.172-PCI_ON] error ChildProcessError: [28121] Command: ['ip', 'netns', 'exec', 'netns-gw2-2', 'ssh', '-i', '/srv/test_artifacts/amazonlinux-2023.id_rsa', '-o', 'StrictHostKeyChecking=no', '-o', 'ConnectTimeout=2', '-o', 'ControlMaster=auto', '-o', 'ControlPersist=yes', '-o', 'KexAlgorithms=ecdh-sha2-nistp521', '-o', '
+UNMATCHED integration_tests/functional/test_vsock.py::test_vsock_transport_reset_g2h[vmlinux-6.1.172-PCI_OFF-2vcpu] failed worker 'gw4' crashed while running 'integration_tests/functional/test_vsock.py::test_vsock_transport_reset_g2h[vmlinux-6.1.172-PCI_OFF-2vcpu]'

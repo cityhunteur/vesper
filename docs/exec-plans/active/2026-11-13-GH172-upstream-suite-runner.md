@@ -51,6 +51,23 @@ Either way, a new, unexplained failure turns the run red.
 - 2026-11-13: `pytest.log` was 561 MB (tracebacks print every local of the cache-topology failures). The runner
   now also writes `pytest-progress.log` (result lines, worker crashes and the short summary, 328 KB) and
   `junit.xml.gz`; those are committed, and `pytest.log` and `report.json.gz` (23 MB) stay local.
+- 2026-11-13: the council review of the first run's change (four High findings) found that the classes matched on
+  the file alone, so a new failure in a covered file would pass. Every class now names its test functions, a symptom
+  message and a `max`; a test missing from the reference must be explained; and pytest's exit code and collection
+  errors fail the run. The images are pinned by digest and the artefacts by a SHA-256 manifest.
+- 2026-11-13: the four `test_uffd.py` handler tests in the first run failed with FileNotFoundError: the runner had
+  not staged the uffd example binaries. Hard-linking them into the test tree then failed with EXDEV, because
+  `/binaries` and `/srv` are different volumes. The runner now copies the binaries and examples to `/srv/binaries`
+  and passes it as `--binary-dir`; the quick run `20261113T101608Z` shows all eight uffd tests as `no-userfaultfd`.
+- 2026-11-13: the VMM memory overshoot ranges from 5.00 to 6.79 MiB, not "up to 5.84" as the GH #166 trial said,
+  so the class matches 5.x and 6.x and nothing larger.
+- 2026-11-13: the second full run (`20261113T101748Z`, 980 tests, 88 min, 756 passed) was judged first against the
+  classes as they stood: 7 results matched none. All were timing under load, each in a test that passed in the
+  first run: three sysgenid SSH timeouts, one reboot exit over 10 s, one balloon stats read that had not refreshed,
+  one vsock reset that crashed its worker, and one memory overshoot (6.65 MiB) in a test the class did not yet
+  name. The classes gained those tests, two new flaky classes with `max: 1` were added, and the comparator is green
+  on the second run. The verdicts at the time are kept as `compare-at-run.*`. Against today's classes the first run
+  still fails on its four uffd results, which is the harness gap above.
 
 ## Decision Log
 
@@ -72,6 +89,12 @@ EXDEV), the last three classes open under CE-0001 until the Linux reference run.
 gaps are gone, and no test hung past its timeout. With `vmm-memory-overhead` removed the comparator exits 1 and
 names its 54 tests. Two more quick runs of `test_api.py` (`20261113T093902Z`, `20261113T094104Z`, 62 and 60 s of pytest)
 gave the same 67 outcomes as the first (59 passed, 6 skipped, 2 errors), test for test. The System VM came back on 2 vCPUs and 2048 MiB, and volume `vesper-upstream-srv` was removed.
+
+A second full run after the council fixes (`20261113T101748Z`, 5,305 s) passed 756 and, with the classes widened
+for the seven timing results it showed (see Surprises), explained the other 224: 96 skips, 48 environment, 8 test
+assumption and 72 unexplained. Between the two runs 23 tests went from passed to a class and 16 the other way, all in
+the memory-overshoot, SSH, balloon, vsock, vmclock or reboot classes. The run is therefore reproducible in its classes
+but not test for test: timing under nested virtualisation moves a few dozen tests between passed and a class. The `max` caps keep that drift bounded.
 
 ## Context and Orientation
 

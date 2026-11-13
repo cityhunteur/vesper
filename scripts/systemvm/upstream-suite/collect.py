@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Turn pytest-json-report files into the results file `baselinectl --mode upstream-compare` reads (GH #172).
 
-Usage: python3 -I collect.py OUT.json --collected COLLECTED.txt [--log PYTEST.log] [REPORT.json ...]
+Usage: python3 -I collect.py OUT.json --collected COLLECTED.txt [--meta META.json] [--log PYTEST.log] [REPORT.json ...]
+       python3 -I collect.py --self-test
 
 OUT.json is {nodeid: {"outcome": ..., "message": ...}}. The outcome is the worst phase: a failure in setup or teardown
 is "error". A later report overrides an earlier one for the same test (a rerun). Every node id in COLLECTED.txt (one
@@ -9,6 +10,10 @@ per line, from `pytest --collect-only -q`) that no report mentions is "hung": th
 before it started, which the comparator must explain like a failure. When the run was stopped, pytest-json-report
 never wrote its file, so `--log` recovers each finished test from pytest-xdist's progress lines
 (`[gw0] [ 3%] PASSED nodeid`), keeping the worst outcome a test logged (a teardown ERROR after a PASSED).
+
+The message is the primary exception only (pytest's crash message, else the first `E` line), so a chained exception
+cannot lend a test another class's symptom; a failure's message wins over a skip's. META.json gets pytest's exit code
+and the modules that failed to collect, which `baselinectl --mode upstream-compare --meta` turns into failures.
 """
 import re
 import json
@@ -17,35 +22,43 @@ import sys
 
 def phase_message(p):
     crash = p.get("crash") or {}
-    lines = [crash.get("message") or ""]
     longrepr = p.get("longrepr") or ""
     if not isinstance(longrepr, str):
         longrepr = str(longrepr)
-    lines += [l.strip()[2:].strip() for l in longrepr.splitlines() if l.strip().startswith("E ")][:20]
-    if not any(lines):
-        lines.append(longrepr.strip().splitlines()[-1] if longrepr.strip() else "")
-    return " | ".join(" ".join(l.split()) for l in lines if l)[:2000]
+    first = crash.get("message") or ""
+    if not first:
+        e_lines = [l.strip()[2:].strip() for l in longrepr.splitlines() if l.strip().startswith("E ")]
+        first = e_lines[0] if e_lines else (longrepr.strip().splitlines()[-1] if longrepr.strip() else "")
+    return " ".join(first.split())[:2000]
 
 
 def result(test):
-    outcome, message = test["outcome"], ""
+    outcome, failure, skip = test["outcome"], "", ""
     # pytest-xdist reports a worker that died mid-test (a --timeout-method=thread timeout, an OOM kill) as a failed
-    # phase named "???"; its longrepr names the crash, so it is read after the usual three.
+    # phase named "???"; its longrepr names the crash, so it is read after the usual three, like a call failure.
     extra = [k for k, v in test.items() if isinstance(v, dict) and "outcome" in v and k not in ("setup", "call", "teardown")]
     for name in ("setup", "call", "teardown", *extra):
         p = test.get(name) or {}
         if p.get("outcome") == "failed":
             if name in ("setup", "teardown"):
                 outcome = "error"
-            message = message or phase_message(p)
-        elif p.get("outcome") == "skipped" and not message:
-            message = phase_message(p)
+            elif outcome not in ("failed", "error"):
+                outcome = "failed"
+            failure = failure or phase_message(p)
+        elif p.get("outcome") == "skipped":
+            skip = skip or phase_message(p)
     if outcome not in ("passed", "failed", "error", "skipped", "xfailed", "xpassed"):
         outcome = "error"
-    return {"outcome": outcome, "message": message}
+    return {"outcome": outcome, "message": failure if outcome in ("failed", "error") else (skip or failure)}
 
 
-PROGRESS = re.compile(r"^\[gw\d+\] \[\s*\d+%\] (PASSED|FAILED|ERROR|SKIPPED|XFAIL|XPASS) (\S+)")
+def meta(report):
+    errors = [c.get("nodeid") or "?" for c in report.get("collectors", []) if c.get("outcome") == "failed"]
+    return {"exitcode": report.get("exitcode"), "collection_errors": errors}
+
+
+# A node id can contain spaces (`...-1000.0 KB/sec]`), so it runs to the end of the line.
+PROGRESS = re.compile(r"^\[gw\d+\] \[\s*\d+%\] (PASSED|FAILED|ERROR|SKIPPED|XFAIL|XPASS) (.+?)\s*$")
 FROM_LOG = {"PASSED": "passed", "XFAIL": "xfailed", "XPASS": "xpassed", "SKIPPED": "skipped", "FAILED": "failed", "ERROR": "error"}
 WORST = ["passed", "xfailed", "xpassed", "skipped", "failed", "error"]
 
@@ -62,21 +75,53 @@ def from_log(path):
     return {n: {"outcome": o, "message": "from the progress log; the JSON report was not written"} for n, o in found.items()}
 
 
+def self_test():
+    ok = lambda n, msg="": {"outcome": "passed", "longrepr": msg} if not msg else {"outcome": n, "longrepr": msg}
+    crash = lambda m: {"outcome": "failed", "crash": {"message": m}, "longrepr": "E   " + m + "\nE   During handling: Other"}
+    # A teardown failure after a skipped call is an error with the failure's message, not the skip's.
+    r = result({"outcome": "skipped", "setup": ok("passed"), "call": {"outcome": "skipped", "longrepr": "Skipped: x86"},
+                "teardown": crash("MemoryUsageExceededError: ('Memory usage (9.1 MiB)")})
+    assert r == {"outcome": "error", "message": "MemoryUsageExceededError: ('Memory usage (9.1 MiB)"}, r
+    # Only the primary exception: the chained one is dropped.
+    r = result({"outcome": "failed", "call": crash("AssertionError: x")})
+    assert r == {"outcome": "failed", "message": "AssertionError: x"}, r
+    # A worker crash (the `???` phase) fails the test and gives its message.
+    r = result({"outcome": "passed", "setup": ok("passed"), "???": {"outcome": "failed", "longrepr": "[gw1] linux\nworker 'gw1' crashed while running 't'"}})
+    assert r == {"outcome": "failed", "message": "worker 'gw1' crashed while running 't'"}, r
+    # Node ids with spaces survive the progress log.
+    m = PROGRESS.match("[gw0] [ 92%] FAILED a.py::t[x-1000.0 KB/sec] ")
+    assert m and m.group(2) == "a.py::t[x-1000.0 KB/sec]", m
+    assert meta({"exitcode": 2, "collectors": [{"nodeid": "a.py", "outcome": "failed"}, {"nodeid": "", "outcome": "passed"}]}) == \
+        {"exitcode": 2, "collection_errors": ["a.py"]}
+    print("collect.py self-test: ok")
+
+
 def main(argv):
+    if argv == ["--self-test"]:
+        return self_test()
     if len(argv) < 3 or argv[1] != "--collected":
         sys.exit(__doc__)
     out, collected_path, rest = argv[0], argv[2], argv[3:]
-    log = None
+    log = meta_path = None
+    if rest[:1] == ["--meta"]:
+        meta_path, rest = rest[1], rest[2:]
     if rest[:1] == ["--log"]:
         log, rest = rest[1], rest[2:]
     reports = rest
     results = {}
+    run_meta = {"exitcode": None, "collection_errors": []}
     if log:
         results.update(from_log(log))
     for path in reports:
         with open(path) as f:
-            for test in json.load(f).get("tests", []):
-                results[test["nodeid"]] = result(test)
+            report = json.load(f)
+        run_meta = meta(report)
+        for test in report.get("tests", []):
+            results[test["nodeid"]] = result(test)
+    if meta_path:
+        with open(meta_path, "w") as f:
+            json.dump(run_meta, f)
+            f.write("\n")
     with open(collected_path) as f:
         collected = [l.strip() for l in f if "::" in l and not l.startswith(("=", " "))]
     hung = [n for n in collected if n not in results]

@@ -52,6 +52,9 @@ pub fn load(path: impl AsRef<Path>) -> Result<Lock, String> {
             if !matches!(arch, "aarch64" | "x86_64") {
                 return Err(format!("baselines.firecracker.upstream_suite.artifacts_prefix must end in /aarch64 or /x86_64"));
             }
+            if baseline.revision.len() != 40 || !baseline.revision.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')) {
+                return Err("baselines.firecracker.revision must be a 40-character hex commit for the upstream suite".to_string());
+            }
             suite.validate(arch)?;
         }
     }

@@ -4,8 +4,11 @@
 //! A run on Backend A produces `{nodeid: {outcome, message}}`. A test needs explaining when it did not pass here but
 //! passed on the reference. The reference is the Linux pass set (CE-0003) when one is given; without one, every test
 //! is taken to pass there, so every failure, error, hang and skip needs explaining. Each such test must match an
-//! exception class (node-id patterns, optional message substrings, the outcomes it may explain), or the comparison
-//! fails. Patterns use `*` as a wildcard; there is no regular-expression engine, so no new dependency.
+//! exception class (node-id patterns, message substrings, the outcomes it may explain and an optional ceiling on how
+//! many it explains), or the comparison fails. Patterns use `*` as a wildcard; there is no regular-expression engine,
+//! so no new dependency. A comparison also fails on an empty run, on a pytest exit status that is not 0 or 1 or on a
+//! collection error, and, on a full run, on a reference test missing from the run or a non-flaky class that explained
+//! nothing.
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -14,8 +17,10 @@ use std::collections::BTreeMap;
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct UpstreamSuite {
-    /// The upstream build container, as `tools/devtool` pins it.
+    /// The upstream build container, as `tools/devtool` pins it, by digest (`name:tag@sha256:...`).
     pub container: String,
+    /// The small image the runner stages files and loads modules with, by digest.
+    pub helper_image: String,
     /// The public bucket and prefix of the CI artefacts (guest kernels and root filesystems).
     pub artifacts_bucket: String,
     pub artifacts_prefix: String,
@@ -33,6 +38,7 @@ impl UpstreamSuite {
     pub fn validate(&self, arch: &str) -> Result<(), String> {
         for (name, value) in [
             ("container", &self.container),
+            ("helper_image", &self.helper_image),
             ("artifacts_bucket", &self.artifacts_bucket),
             ("artifacts_prefix", &self.artifacts_prefix),
             ("release_asset", &self.release_asset),
@@ -41,14 +47,23 @@ impl UpstreamSuite {
                 return Err(format!("upstream_suite.{name} must be a non-blank word"));
             }
         }
+        for (name, image) in [("container", &self.container), ("helper_image", &self.helper_image)] {
+            let digest = image.split_once("@sha256:").map(|(_, d)| d).unwrap_or_default();
+            if digest.len() != 64 || !digest.bytes().all(|b| b.is_ascii_hexdigit()) {
+                return Err(format!("upstream_suite.{name} {image:?} must be pinned by digest (@sha256:<64 hex>)"));
+            }
+        }
         if !self.artifacts_prefix.ends_with(&format!("/{arch}")) {
             return Err(format!("upstream_suite.artifacts_prefix {:?} is not for {arch}", self.artifacts_prefix));
         }
         if !self.release_asset.contains(arch) {
             return Err(format!("upstream_suite.release_asset {:?} is not for {arch}", self.release_asset));
         }
-        if self.paths.is_empty() || self.paths.iter().any(|p| p.is_empty() || p.starts_with('/') || p.contains("..")) {
-            return Err("upstream_suite.paths must be non-empty relative paths".to_string());
+        let word = |p: &str| !p.is_empty() && p.bytes().all(|b| b.is_ascii_alphanumeric() || b"_./-".contains(&b));
+        if self.paths.is_empty()
+            || self.paths.iter().any(|p| !word(p) || p.starts_with('/') || p.starts_with('-') || p.contains(".."))
+        {
+            return Err("upstream_suite.paths must be relative paths of [A-Za-z0-9_./-], not starting with - or /".to_string());
         }
         if !(1..=8).contains(&self.workers) {
             return Err(format!("upstream_suite.workers {} is outside 1 to 8", self.workers));
@@ -81,7 +96,6 @@ pub fn is_pass(outcome: &str) -> bool {
 pub enum ClassKind {
     Environment,
     TestAssumption,
-    Harness,
     Unexplained,
     Skip,
 }
@@ -94,11 +108,16 @@ pub struct Class {
     pub kind: ClassKind,
     /// Node-id patterns (`*` matches any run of characters); a test matches when any pattern does.
     pub nodeid: Vec<String>,
-    /// Message substrings; when given, the message must contain one of them.
-    #[serde(default)]
+    /// Message substrings: the message must contain one of them. Required, so that a class names a symptom, not a file.
     pub message: Vec<String>,
     /// Outcomes this class may explain.
     pub outcomes: Vec<String>,
+    /// The most tests this class may explain in one run; more is a failure, not an explanation.
+    #[serde(default)]
+    pub max: Option<usize>,
+    /// The class's symptom does not appear in every run, so explaining nothing on a full run is not a failure.
+    #[serde(default)]
+    pub flaky: bool,
     /// The compat exception or tech-debt row that tracks it (`CE-nnnn` or `TD-nnn`).
     pub tracked_by: String,
     pub reason: String,
@@ -118,8 +137,14 @@ impl ClassFile {
             if !seen.insert(c.id.as_str()) {
                 return Err(format!("class {} is listed twice", c.id));
             }
-            if c.nodeid.is_empty() || c.nodeid.iter().any(|p| p.trim().is_empty()) {
-                return Err(format!("class {}: nodeid needs at least one non-blank pattern", c.id));
+            if c.nodeid.is_empty() || c.nodeid.iter().any(|p| p.trim().is_empty() || p.chars().all(|ch| ch == '*')) {
+                return Err(format!("class {}: nodeid needs non-blank patterns that name a test (not a bare *)", c.id));
+            }
+            if c.message.is_empty() || c.message.iter().any(|m| m.trim().is_empty()) {
+                return Err(format!("class {}: message needs at least one non-blank substring", c.id));
+            }
+            if c.max == Some(0) {
+                return Err(format!("class {}: max must be at least 1", c.id));
             }
             if c.outcomes.is_empty() || c.outcomes.iter().any(|o| is_pass(o) || !KNOWN.contains(&o.as_str())) {
                 return Err(format!("class {}: outcomes must be from failed, error, skipped, hung", c.id));
@@ -163,7 +188,7 @@ impl Class {
     pub fn matches(&self, nodeid: &str, r: &TestResult) -> bool {
         self.outcomes.iter().any(|o| *o == r.outcome)
             && self.nodeid.iter().any(|p| glob(p, nodeid))
-            && (self.message.is_empty() || self.message.iter().any(|m| r.message.contains(m.as_str())))
+            && self.message.iter().any(|m| r.message.contains(m.as_str()))
     }
 }
 
@@ -172,6 +197,24 @@ pub struct Unmatched {
     pub nodeid: String,
     pub outcome: String,
     pub message: String,
+}
+
+/// What pytest itself reported about the run, beside the per-test results.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+pub struct RunMeta {
+    /// pytest's exit status; `None` when the run was stopped before pytest wrote its report.
+    #[serde(default)]
+    pub exitcode: Option<i64>,
+    /// Modules that failed to collect (an import error drops their tests from the run).
+    #[serde(default)]
+    pub collection_errors: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct OverMax {
+    pub class: String,
+    pub matched: usize,
+    pub max: usize,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -185,8 +228,16 @@ pub struct Comparison {
     /// Explained tests per class id.
     pub per_class: BTreeMap<String, usize>,
     pub unmatched: Vec<Unmatched>,
-    /// Classes that explained no test in this run (reported, not fatal: a partial run selects few tests).
+    /// Classes that explained more tests than their `max`.
+    pub over_max: Vec<OverMax>,
+    /// Classes that explained no test in this run.
     pub stale_classes: Vec<String>,
+    /// Stale classes not marked `flaky`: fatal on a full run.
+    pub stale_required: Vec<String>,
+    /// A selection of tests, so stale classes and tests missing from the run are not failures.
+    pub partial: bool,
+    /// pytest's own verdict on the run, when given.
+    pub meta: Option<RunMeta>,
     /// Tests that did not pass on the reference either, so need no class.
     pub not_passing_on_reference: usize,
     /// Tests in the reference that this run did not select or report.
@@ -194,15 +245,54 @@ pub struct Comparison {
 }
 
 impl Comparison {
+    /// Every reason the comparison fails; empty when it passes.
+    pub fn failures(&self) -> Vec<String> {
+        let mut f = Vec::new();
+        if self.total == 0 {
+            f.push("the run has no results".to_string());
+        }
+        if !self.unmatched.is_empty() {
+            f.push(format!("{} result(s) match no exception class", self.unmatched.len()));
+        }
+        for o in &self.over_max {
+            f.push(format!("class {} explained {} tests, more than its max of {}", o.class, o.matched, o.max));
+        }
+        if let Some(m) = &self.meta {
+            if let Some(code) = m.exitcode.filter(|c| !matches!(c, 0 | 1)) {
+                f.push(format!("pytest exited {code} (interrupted, internal error, usage error or nothing collected)"));
+            }
+            if !m.collection_errors.is_empty() {
+                f.push(format!("{} module(s) failed to collect: {}", m.collection_errors.len(), m.collection_errors.join(", ")));
+            }
+        }
+        if !self.partial {
+            if self.missing_from_run > 0 {
+                f.push(format!("{} reference test(s) are missing from the run", self.missing_from_run));
+            }
+            if !self.stale_required.is_empty() {
+                f.push(format!("classes that explained nothing on a full run: {}", self.stale_required.join(", ")));
+            }
+        }
+        f
+    }
+
     pub fn ok(&self) -> bool {
-        self.unmatched.is_empty()
+        self.failures().is_empty()
     }
 }
 
-pub fn compare(results: &Results, reference: Option<&Results>, classes: &ClassFile) -> Comparison {
+pub fn compare(
+    results: &Results,
+    reference: Option<&Results>,
+    classes: &ClassFile,
+    meta: Option<RunMeta>,
+    partial: bool,
+) -> Comparison {
     let mut out = Comparison {
         reference: if reference.is_some() { "linux" } else { "all-pass" }.to_string(),
         total: results.len(),
+        partial,
+        meta,
         ..Comparison::default()
     };
     for c in &classes.classes {
@@ -214,13 +304,11 @@ pub fn compare(results: &Results, reference: Option<&Results>, classes: &ClassFi
             continue;
         }
         if let Some(reference) = reference {
-            match reference.get(nodeid) {
-                Some(l) if is_pass(&l.outcome) => {}
-                // Not passing on Linux, or not run there: the reference cannot ask more of Backend A.
-                _ => {
-                    out.not_passing_on_reference += 1;
-                    continue;
-                }
+            // Not passing on Linux: the reference cannot ask more of Backend A. A test the reference never ran still
+            // needs explaining, so a renamed or new test cannot fail unnoticed.
+            if reference.get(nodeid).is_some_and(|l| !is_pass(&l.outcome)) {
+                out.not_passing_on_reference += 1;
+                continue;
             }
         }
         *out.to_explain.entry(r.outcome.clone()).or_default() += 1;
@@ -237,6 +325,15 @@ pub fn compare(results: &Results, reference: Option<&Results>, classes: &ClassFi
         out.missing_from_run = reference.keys().filter(|k| !results.contains_key(*k)).count();
     }
     out.stale_classes = out.per_class.iter().filter(|(_, n)| **n == 0).map(|(k, _)| k.clone()).collect();
+    for c in &classes.classes {
+        let n = out.per_class.get(&c.id).copied().unwrap_or(0);
+        if let Some(max) = c.max.filter(|m| n > *m) {
+            out.over_max.push(OverMax { class: c.id.clone(), matched: n, max });
+        }
+        if n == 0 && !c.flaky {
+            out.stale_required.push(c.id.clone());
+        }
+    }
     out
 }
 
@@ -257,18 +354,25 @@ classes:
     nodeid: ["integration_tests/functional/test_uffd.py::*"]
     message: ["UFFD object"]
     outcomes: [failed]
+    max: 2
     tracked_by: TD-054
     reason: no CONFIG_USERFAULTFD
   - id: x86-only
     kind: skip
     nodeid: ["*test_cpu_template*"]
+    message: ["x86"]
     outcomes: [skipped]
+    flaky: true
     tracked_by: CE-0001
     reason: x86-only
 "#;
         let c: ClassFile = serde_yaml::from_str(yaml).unwrap();
         c.validate().unwrap();
         c
+    }
+
+    fn full(res: &Results) -> Comparison {
+        compare(res, None, &classes(), None, false)
     }
 
     #[test]
@@ -287,18 +391,53 @@ classes:
         res.insert("integration_tests/functional/test_uffd.py::test_a".into(), r("failed", "UFFD object: System error"));
         res.insert("integration_tests/functional/test_api.py::test_b".into(), r("passed", ""));
         res.insert("integration_tests/functional/test_cpu_template.py::t".into(), r("skipped", "x86"));
-        let c = compare(&res, None, &classes());
-        assert!(c.ok(), "{:?}", c.unmatched);
+        let c = full(&res);
+        assert!(c.ok(), "{:?}", c.failures());
         assert_eq!((c.passed, c.per_class["no-uffd"], c.per_class["x86-only"]), (1, 1, 1));
 
         // An unmatched failure, a hang, and a class whose outcomes or message exclude the result all fail.
         res.insert("integration_tests/functional/test_vsock.py::t".into(), r("hung", ""));
         res.insert("integration_tests/functional/test_uffd.py::test_c".into(), r("error", "UFFD object"));
         res.insert("integration_tests/functional/test_uffd.py::test_d".into(), r("failed", "other"));
-        let c = compare(&res, None, &classes());
+        let c = full(&res);
         let names: Vec<&str> = c.unmatched.iter().map(|u| u.nodeid.as_str()).collect();
         assert_eq!(names.len(), 3, "{names:?}");
         assert!(!c.ok());
+    }
+
+    #[test]
+    fn an_empty_run_a_class_over_its_max_and_a_stale_class_fail() {
+        let c = full(&Results::new());
+        assert!(c.failures().iter().any(|f| f.contains("no results")), "{:?}", c.failures());
+
+        let mut res = Results::new();
+        for t in ["a", "b", "c"] {
+            res.insert(format!("integration_tests/functional/test_uffd.py::{t}"), r("failed", "UFFD object"));
+        }
+        let c = full(&res);
+        assert_eq!(c.over_max.len(), 1);
+        assert!(!c.ok());
+
+        // no-uffd is not flaky: explaining nothing on a full run fails, but not on a partial one. x86-only is flaky.
+        let mut res = Results::new();
+        res.insert("t::ok".into(), r("passed", ""));
+        let c = full(&res);
+        assert_eq!(c.stale_required, vec!["no-uffd".to_string()]);
+        assert!(!c.ok());
+        assert!(compare(&res, None, &classes(), None, true).ok());
+    }
+
+    #[test]
+    fn pytest_exit_status_and_collection_errors_fail_the_run() {
+        let mut res = Results::new();
+        res.insert("integration_tests/functional/test_uffd.py::a".into(), r("failed", "UFFD object"));
+        let meta = |code: Option<i64>, errs: &[&str]| {
+            Some(RunMeta { exitcode: code, collection_errors: errs.iter().map(|e| e.to_string()).collect() })
+        };
+        assert!(compare(&res, None, &classes(), meta(Some(1), &[]), false).ok());
+        assert!(compare(&res, None, &classes(), meta(None, &[]), false).ok());
+        assert!(!compare(&res, None, &classes(), meta(Some(3), &[]), false).ok());
+        assert!(!compare(&res, None, &classes(), meta(Some(1), &["integration_tests/functional/test_x.py"]), false).ok());
     }
 
     #[test]
@@ -311,13 +450,14 @@ classes:
         linux.insert("t::skipped_here".into(), r("passed", ""));
         res.insert("t::new_here".into(), r("failed", "x"));
         linux.insert("t::not_run_here".into(), r("passed", ""));
-        let c = compare(&res, Some(&linux), &classes());
+        let c = compare(&res, Some(&linux), &classes(), None, false);
         let names: Vec<&str> = c.unmatched.iter().map(|u| u.nodeid.as_str()).collect();
-        // `new_here` is not in the reference, so it needs no class; `skipped_here` passed there, so it does.
-        assert_eq!(names, vec!["t::skipped_here"]);
-        assert_eq!((c.not_passing_on_reference, c.missing_from_run), (2, 1));
+        // `skipped_here` passed there, so it needs a class; `new_here` was never run there, so it needs one too.
+        assert_eq!(names, vec!["t::new_here", "t::skipped_here"]);
+        assert_eq!((c.not_passing_on_reference, c.missing_from_run), (1, 1));
         assert_eq!(c.reference, "linux");
-        assert_eq!(c.stale_classes, vec!["no-uffd".to_string(), "x86-only".to_string()]);
+        assert!(c.failures().iter().any(|f| f.contains("missing from the run")));
+        assert!(!compare(&res, Some(&linux), &classes(), None, true).failures().iter().any(|f| f.contains("missing")));
     }
 
     #[test]
@@ -331,9 +471,18 @@ classes:
         let mut c = classes();
         c.classes.push(c.classes[0].clone());
         assert!(c.validate().unwrap_err().contains("twice"));
+        // A catch-all class: a bare `*`, no message, or a blank message.
+        for (nodeid, message) in [(vec!["*"], vec!["x"]), (vec!["t::*"], vec![]), (vec!["t::*"], vec![" "])] {
+            let mut c = classes();
+            c.classes[0].nodeid = nodeid.into_iter().map(String::from).collect();
+            c.classes[0].message = message.into_iter().map(String::from).collect();
+            assert!(c.validate().is_err());
+        }
+        assert!(serde_yaml::from_str::<ClassKind>("harness").is_err());
 
         let pins = UpstreamSuite {
-            container: "public.ecr.aws/firecracker/fcuvm:v90".into(),
+            container: format!("public.ecr.aws/firecracker/fcuvm:v90@sha256:{}", "a".repeat(64)),
+            helper_image: format!("alpine:3.22@sha256:{}", "b".repeat(64)),
             artifacts_bucket: "spec.ccfc.min".into(),
             artifacts_prefix: "firecracker-ci/20260603-e656faf58d6c-0/aarch64".into(),
             release_asset: "firecracker-v1.16.0-aarch64.tgz".into(),
@@ -343,8 +492,12 @@ classes:
         };
         pins.validate("aarch64").unwrap();
         assert!(pins.validate("x86_64").is_err());
-        let bad = UpstreamSuite { paths: vec!["../x".into()], ..pins.clone() };
-        assert!(bad.validate("aarch64").is_err());
+        for p in ["../x", "-k", "a b", "/abs"] {
+            let bad = UpstreamSuite { paths: vec![p.into()], ..pins.clone() };
+            assert!(bad.validate("aarch64").is_err(), "{p}");
+        }
+        let bad = UpstreamSuite { container: "public.ecr.aws/firecracker/fcuvm:v90".into(), ..pins.clone() };
+        assert!(bad.validate("aarch64").unwrap_err().contains("digest"));
         let bad = UpstreamSuite { workers: 0, ..pins };
         assert!(bad.validate("aarch64").is_err());
     }

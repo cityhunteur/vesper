@@ -11,7 +11,8 @@ baselines:
     # The upstream integration suite on Backend A (GH #172, D-023): build container as tools/devtool pins it at this
     # revision, the CI artefact set newest at the v1.16.0 tag (2026-06-03), the release whose binaries run.
     upstream_suite:
-      container: "public.ecr.aws/firecracker/fcuvm:v90"
+      container: "public.ecr.aws/firecracker/fcuvm:v90@sha256:657863a847acff0b52888a237173f0f6740d7ace175a2d7423cf5f0307db9698"
+      helper_image: "alpine:3.22@sha256:49340b346798875b5592e5d420241f2f9cfba5f47e62ebb1446a1b34734e898f"
       artifacts_bucket: "spec.ccfc.min"
       artifacts_prefix: "firecracker-ci/20260603-e656faf58d6c-0/aarch64"
       release_asset: "firecracker-v1.16.0-aarch64.tgz"

@@ -11,8 +11,10 @@ exceptions:
     description: >-
       The upstream Firecracker pytest integration suite has no Linux pass set. Since GH #172 the Backend A run is
       scripted (make systemvm-upstream-suite) and judged by baselinectl --mode upstream-compare against the classes
-      in docs/specs/upstream-suite-classes.yaml; the full run of 2026-11-13 (run/GH-172/20261113T081827Z) passed
-      763 of 980 and explained the other 217 (96 skip, 49 environment, 8 test assumption, 64 unexplained).
+      in docs/specs/upstream-suite-classes.yaml. Two full runs on 2026-11-13 passed 763 and 756 of 980
+      (run/GH-172/20261113T081827Z and 20261113T101748Z); the second, with the fixed runner, explained the other
+      224 (96 skip, 48 environment, 8 test assumption, 72 unexplained, most of them a VMM memory overshoot or
+      timing under nested virtualisation).
       An earlier feasibility run on 2026-11-12 (GH #166) ran it unmodified in the System VM at the pinned v1.16.0:
       755 of 980 functional and security tests passed, 96 skipped for architecture or kernel reasons, and
       129 failed, errored or hung. Of those, 58 are environment (Apple virtual CPU cache topology, SSB

@@ -52,6 +52,12 @@ struct Args {
     /// upstream-compare: where to write the comparison.
     #[arg(long, default_value = "")]
     report: String,
+    /// upstream-compare: pytest's own verdict (`{exitcode, collection_errors}`, written by collect.py).
+    #[arg(long, default_value = "")]
+    meta: String,
+    /// upstream-compare: a selection of tests, so stale classes and tests missing from the run are not failures.
+    #[arg(long)]
+    partial: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -276,6 +282,7 @@ fn upstream_pins(lock: &vesper::baseline::Lock) -> Result<(), String> {
         ("FC_REPO", fc.repo.clone()),
         ("FC_REVISION", fc.revision.clone()),
         ("CONTAINER", s.container.clone()),
+        ("HELPER_IMAGE", s.helper_image.clone()),
         ("ARTIFACTS_BUCKET", s.artifacts_bucket.clone()),
         ("ARTIFACTS_PREFIX", s.artifacts_prefix.clone()),
         ("RELEASE_ASSET", s.release_asset.clone()),
@@ -297,7 +304,7 @@ fn read_results(path: &str) -> Result<vesper::baseline::upstream::Results, Strin
 
 /// Explains every Backend A result that needs it, or exits 1 naming the tests no class explains.
 fn upstream_compare(args: &Args) -> Result<(), String> {
-    use vesper::baseline::upstream::{compare, ClassFile};
+    use vesper::baseline::upstream::{compare, ClassFile, RunMeta};
     if args.results.is_empty() {
         return Err("upstream-compare needs --results".to_string());
     }
@@ -306,12 +313,21 @@ fn upstream_compare(args: &Args) -> Result<(), String> {
     let text = fs::read_to_string(&args.classes).map_err(|err| format!("read classes {}: {err}", args.classes))?;
     let classes: ClassFile = serde_yaml::from_str(&text).map_err(|err| format!("parse classes {}: {err}", args.classes))?;
     classes.validate()?;
-    let c = compare(&results, reference.as_ref(), &classes);
+    let meta: Option<RunMeta> = if args.meta.is_empty() {
+        None
+    } else {
+        let text = fs::read_to_string(&args.meta).map_err(|err| format!("read meta {}: {err}", args.meta))?;
+        Some(serde_json::from_str(&text).map_err(|err| format!("parse meta {}: {err}", args.meta))?)
+    };
+    let c = compare(&results, reference.as_ref(), &classes, meta, args.partial);
     if !args.report.is_empty() {
         let json = serde_json::to_string_pretty(&c).map_err(|err| format!("serialize comparison: {err}"))?;
         fs::write(&args.report, json + "\n").map_err(|err| format!("write {}: {err}", args.report))?;
     }
-    println!("reference={} total={} passed={} to_explain={:?}", c.reference, c.total, c.passed, c.to_explain);
+    println!(
+        "reference={} partial={} total={} passed={} to_explain={:?} not_passing_on_reference={} missing_from_run={}",
+        c.reference, c.partial, c.total, c.passed, c.to_explain, c.not_passing_on_reference, c.missing_from_run
+    );
     for (id, n) in c.per_class.iter().filter(|(_, n)| **n > 0) {
         println!("class {id}: {n}");
     }
@@ -325,5 +341,5 @@ fn upstream_compare(args: &Args) -> Result<(), String> {
     for u in &c.unmatched {
         println!("UNMATCHED {} {} {}", u.nodeid, u.outcome, u.message.replace('\n', " "));
     }
-    Err(format!("upstream-compare: {} result(s) match no exception class", c.unmatched.len()))
+    Err(format!("upstream-compare: {}", c.failures().join("; ")))
 }

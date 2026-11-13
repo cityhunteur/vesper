@@ -1,0 +1,74 @@
+{
+  "reference": "all-pass",
+  "total": 980,
+  "passed": 756,
+  "to_explain": {
+    "error": 34,
+    "failed": 94,
+    "skipped": 96
+  },
+  "per_class": {
+    "apple-cpu-features-unknown": 8,
+    "apple-cpu-no-cache-topology": 24,
+    "apple-cpu-ssb-vulnerable": 10,
+    "guest-ssh-timeout-under-load": 0,
+    "jail-hardlink-exdev": 2,
+    "max-devices-worker-timeout": 2,
+    "no-dmi": 1,
+    "no-userfaultfd": 8,
+    "rate-limiter-balloon-tolerance": 7,
+    "upstream-platform-skip": 96,
+    "vmclock-gen-counter-flag": 1,
+    "vmm-memory-overhead": 56,
+    "vsock-reset-after-snapshot": 2
+  },
+  "unmatched": [
+    {
+      "nodeid": "integration_tests/functional/test_balloon.py::test_stats_update[vmlinux-5.10.253-PCI_OFF]",
+      "outcome": "failed",
+      "message": "assert 187514880 != 187514880"
+    },
+    {
+      "nodeid": "integration_tests/functional/test_drive_virtio.py::test_non_partuuid_boot[Async-vmlinux-6.1.172-PCI_ON]",
+      "outcome": "error",
+      "message": "host_tools.memory.MemoryUsageExceededError: ('Memory usage (6.65 MiB) exceeded maximum threshold (5.0 MiB)', psutil.Process(pid=10894, status='terminated', started='11:12:38'))"
+    },
+    {
+      "nodeid": "integration_tests/functional/test_shut_down.py::test_reboot[vmlinux-6.1.172-PCI_ON]",
+      "outcome": "failed",
+      "message": "TimeoutError: Process 27436 did not exit within 10.0s"
+    },
+    {
+      "nodeid": "integration_tests/functional/test_sysgenid.py::test_sysgenid_via_poll_and_nonblocking_read[vmlinux-5.10.253-PCI_OFF]",
+      "outcome": "error",
+      "message": "ChildProcessError: [27428] Command: ['ip', 'netns', 'exec', 'netns-gw2-5', 'ssh', '-i', '/srv/test_artifacts/ubuntu-24.04.id_rsa', '-o', 'StrictHostKeyChecking=no', '-o', 'ConnectTimeout=2', '-o', 'ControlMaster=auto', '-o', 'ControlPersist=yes', '-o', 'KexAlgorithms=ecdh-sha2-nistp521', '-o', 'Host"
+    },
+    {
+      "nodeid": "integration_tests/functional/test_sysgenid.py::test_sysgenid_via_poll_and_nonblocking_read[vmlinux-6.1.172-PCI_OFF]",
+      "outcome": "error",
+      "message": "ChildProcessError: [28808] Command: ['ip', 'netns', 'exec', 'netns-gw2-3', 'ssh', '-i', '/srv/test_artifacts/amazonlinux-2023.id_rsa', '-o', 'StrictHostKeyChecking=no', '-o', 'ConnectTimeout=2', '-o', 'ControlMaster=auto', '-o', 'ControlPersist=yes', '-o', 'KexAlgorithms=ecdh-sha2-nistp521', '-o', '"
+    },
+    {
+      "nodeid": "integration_tests/functional/test_sysgenid.py::test_sysgenid_via_poll_and_nonblocking_read[vmlinux-6.1.172-PCI_ON]",
+      "outcome": "error",
+      "message": "ChildProcessError: [28121] Command: ['ip', 'netns', 'exec', 'netns-gw2-2', 'ssh', '-i', '/srv/test_artifacts/amazonlinux-2023.id_rsa', '-o', 'StrictHostKeyChecking=no', '-o', 'ConnectTimeout=2', '-o', 'ControlMaster=auto', '-o', 'ControlPersist=yes', '-o', 'KexAlgorithms=ecdh-sha2-nistp521', '-o', '"
+    },
+    {
+      "nodeid": "integration_tests/functional/test_vsock.py::test_vsock_transport_reset_g2h[vmlinux-6.1.172-PCI_OFF-2vcpu]",
+      "outcome": "failed",
+      "message": "worker 'gw4' crashed while running 'integration_tests/functional/test_vsock.py::test_vsock_transport_reset_g2h[vmlinux-6.1.172-PCI_OFF-2vcpu]'"
+    }
+  ],
+  "over_max": [],
+  "stale_classes": [
+    "guest-ssh-timeout-under-load"
+  ],
+  "stale_required": [],
+  "partial": false,
+  "meta": {
+    "exitcode": 1,
+    "collection_errors": []
+  },
+  "not_passing_on_reference": 0,
+  "missing_from_run": 0
+}

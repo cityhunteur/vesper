@@ -1,0 +1,1 @@
+rc=1 wall_s=5305 collected=980 stopped=no selection=integration_tests/functional integration_tests/security

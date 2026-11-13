@@ -12,7 +12,8 @@
 # setup-ci-artifacts.sh there; build the examples and tools some tests expect under build/cargo_target; run
 # tools/test.sh in the pinned container with a per-test timeout that kills a hung worker (--timeout-method=thread)
 # and a wall-clock watchdog; collect {nodeid: outcome}; wipe /srv; restore the previous launch config and restart;
-# compare (baselinectl --mode upstream-compare). Exit status is the comparator's.
+# compare (baselinectl --mode upstream-compare, which also fails on pytest's own errors). Exit status is the
+# comparator's. One run at a time: build/upstream-suite/run.lock holds the runner's pid.
 #
 # Environment: UPSTREAM_WALL_S (default 14400) stops the run; UPSTREAM_MIN_FREE_GB (45) is the data-disk space it
 # needs (the GH #166 trial's /srv peaked at 42 GB apparent, mostly sparse, on the default 64 GiB disk); UPSTREAM_CPUS (4) and UPSTREAM_MEMORY_MIB (8192) size
@@ -37,13 +38,29 @@ export DOCKER_HOST="unix://$ROOT/run/vesper/docker.sock"
 
 CLEAN=0
 if [ "${1:-}" = --clean ]; then CLEAN=1; shift; fi
-mkdir -p "$B" "$OUT"
+for a in "$@"; do case "$a" in -*) echo "a selection is node ids or paths, not pytest options: $a" >&2; exit 2 ;; esac; done
+mkdir -p "$B"
+LOCK="$B/run.lock"
+if ! mkdir "$LOCK" 2>/dev/null; then
+  holder="$(cat "$LOCK/pid" 2>/dev/null || true)"
+  if [ -n "$holder" ] && kill -0 "$holder" 2>/dev/null; then echo "another run (pid $holder) holds $LOCK" >&2; exit 2; fi
+  echo "taking over $LOCK from a run that is gone (pid ${holder:-unknown})" >&2
+fi
+echo $$ > "$LOCK/pid"
+mkdir -p "$OUT"
 exec > >(tee -a "$OUT/runner.log") 2>&1
 say() { echo "[upstream-suite $(date -u +%H:%M:%S)] $*"; }
+# step NAME LOG CMD...: run a step whose output goes to LOG, and on failure say which step failed and show its tail.
+step() {
+  local name=$1 log=$2; shift 2
+  "$@" > "$log" 2>&1 && return 0
+  say "step failed: $name (exit $?); last lines of ${log#"$ROOT"/}:"; tail -20 "$log"; exit 2
+}
 
 eval "$(cargo run -q --bin baselinectl -- --mode upstream-pins)"
 SELECTION=("$@")
-[ ${#SELECTION[@]} -gt 0 ] || read -r -a SELECTION <<< "$TEST_PATHS"
+PARTIAL=()
+if [ ${#SELECTION[@]} -gt 0 ]; then PARTIAL=(--partial); else read -r -a SELECTION <<< "$TEST_PATHS"; fi
 TAG="${RELEASE_ASSET#firecracker-}"; TAG="${TAG%%-*}"
 ARCH="${ARTIFACTS_PREFIX##*/}"
 ARTDIR="build/artifacts/${ARTIFACTS_PREFIX#firecracker-ci/}"
@@ -55,11 +72,12 @@ TREE="$B/firecracker"
 if [ "$(git -C "$TREE" rev-parse HEAD 2>/dev/null || true)" != "$FC_REVISION" ]; then
   say "fetch upstream tree"
   rm -rf "${TREE:?}" && git init -q "$TREE"
-  git -C "$TREE" fetch -q --depth 1 "https://github.com/$FC_REPO.git" "$FC_REVISION"
+  GIT_HTTP_LOW_SPEED_LIMIT=1000 GIT_HTTP_LOW_SPEED_TIME=60 \
+    git -C "$TREE" fetch -q --depth 1 "https://github.com/$FC_REPO.git" "$FC_REVISION"
   git -C "$TREE" -c advice.detachedHead=false checkout -q FETCH_HEAD
 fi
 mkdir -p "$TREE/$ARTDIR"
-LISTING="$(curl -fsS "https://s3.amazonaws.com/$ARTIFACTS_BUCKET?list-type=2&prefix=$ARTIFACTS_PREFIX/")"
+LISTING="$(curl -fsS --connect-timeout 20 --max-time 120 "https://s3.amazonaws.com/$ARTIFACTS_BUCKET?list-type=2&prefix=$ARTIFACTS_PREFIX/")"
 case "$LISTING" in *"<IsTruncated>true</IsTruncated>"*) say "artefact listing is truncated"; exit 2 ;; esac
 N=0
 while IFS=' ' read -r key size; do
@@ -69,7 +87,7 @@ while IFS=' ' read -r key size; do
   if [ -f "$dest" ] && [ "$(wc -c < "$dest" | tr -d ' ')" = "$size" ]; then continue; fi
   say "GET $rel ($size bytes)"
   mkdir -p "$(dirname "$dest")"
-  curl -fsS --retry 5 --retry-delay 5 -o "$dest.part" "https://s3.amazonaws.com/$ARTIFACTS_BUCKET/$key"
+  curl -fsS --connect-timeout 20 --max-time 1800 --retry 5 --retry-delay 5 -o "$dest.part" "https://s3.amazonaws.com/$ARTIFACTS_BUCKET/$key"
   [ "$(wc -c < "$dest.part" | tr -d ' ')" = "$size" ] || { say "size mismatch for $rel"; exit 2; }
   mv "$dest.part" "$dest"
 done < <(printf '%s' "$LISTING" | python3 -I -c '
@@ -78,6 +96,28 @@ for c in re.findall(r"<Contents>(.*?)</Contents>", sys.stdin.read(), re.S):
     k = re.search(r"<Key>(.*?)</Key>", c).group(1); s = re.search(r"<Size>(\d+)</Size>", c).group(1)
     if not k.endswith("/"): print(k, s)')
 [ "$N" -gt 0 ] || { say "no artefacts under $ARTIFACTS_PREFIX"; exit 2; }
+# Sizes come from the bucket; digests from the committed manifest, which must name exactly the listed objects.
+MANIFEST="docs/specs/upstream-suite-artifacts.sha256"
+python3 -I - "$TREE/$ARTDIR" "$MANIFEST" <<'PY' || { say "artefacts do not match $MANIFEST"; exit 2; }
+import hashlib, os, sys
+root, manifest = sys.argv[1], sys.argv[2]
+want = {}
+for line in open(manifest):
+    if line.strip() and not line.startswith("#"):
+        key, size, digest = line.split()
+        want[key] = (int(size), digest)
+have = sorted(os.path.relpath(os.path.join(d, f), root) for d, _, fs in os.walk(root) for f in fs)
+bad = sorted(set(have) ^ set(want))
+for key in sorted(set(have) & set(want)):
+    h = hashlib.sha256()
+    with open(os.path.join(root, key), "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    if (os.path.getsize(os.path.join(root, key)), h.hexdigest()) != want[key]:
+        bad.append(key)
+if bad:
+    sys.exit("mismatch: " + " ".join(bad))
+PY
 echo "$ARTDIR" > "$TREE/build/current_artifacts"
 say "artefacts: $N objects"
 
@@ -88,7 +128,7 @@ WANT_SHA="$(grep -A1 "url: .*/$RELEASE_ASSET\$" systemvm/archives.yaml | sed -n 
 mkdir -p "$REL"
 if [ "$(shasum -a 256 "$REL/$RELEASE_ASSET" 2>/dev/null | cut -d' ' -f1)" != "$WANT_SHA" ]; then
   say "GET $RELEASE_ASSET"
-  curl -fsSL --retry 5 -o "$REL/$RELEASE_ASSET" "https://github.com/$FC_REPO/releases/download/$TAG/$RELEASE_ASSET"
+  curl -fsSL --connect-timeout 20 --max-time 1800 --retry 5 -o "$REL/$RELEASE_ASSET" "https://github.com/$FC_REPO/releases/download/$TAG/$RELEASE_ASSET"
   [ "$(shasum -a 256 "$REL/$RELEASE_ASSET" | cut -d' ' -f1)" = "$WANT_SHA" ] || { say "sha256 mismatch for $RELEASE_ASSET"; exit 2; }
 fi
 rm -rf "${REL:?}/bin" "$REL/x" && mkdir -p "$REL/bin" "$REL/x"
@@ -102,23 +142,43 @@ chmod 755 "$REL"/bin/*
 say "release binaries: $(cd "$REL/bin" && ls | tr '\n' ' ')"
 
 # --- System VM: size, share, restore on every exit ---------------------------------------------------------------
+# $SAVED is the config before the resize; $SAVED.resized is the sha256 of the config this runner wrote. A saved copy
+# is used only while the live config is still the one written here, so a config regenerated since (for example by
+# make systemvm-up-snapshot) is never overwritten by a stale backup.
+sha() { shasum -a 256 "$1" 2>/dev/null | cut -d' ' -f1; }
 restore() {
   rc=$?
+  trap '' INT TERM
   set +e
   docker rm -f "$NAME" >/dev/null 2>&1
   docker volume rm -f "$SRV_VOL" >/dev/null 2>&1
   if [ "${UPSTREAM_KEEP_SIZE:-0}" != 1 ] && [ -f "$SAVED" ]; then
-    say "restore the previous launch config and restart the System VM"
-    make -s docker-down >/dev/null 2>&1; make -s systemvm-down >/dev/null 2>&1
-    cp "$SAVED" "$CFG" && rm -f "$SAVED"
-    make -s systemvm-up >/dev/null 2>&1 && make -s docker-up >/dev/null 2>&1 || say "restart failed: run make systemvm-up docker-up"
+    if [ "$(sha "$CFG")" != "$(cat "$SAVED.resized" 2>/dev/null)" ]; then
+      say "the launch config changed during the run; keeping it and discarding the saved copy"
+      rm -f "$SAVED" "$SAVED.resized"
+    else
+      say "restore the previous launch config and restart the System VM"
+      make -s docker-down >/dev/null 2>&1
+      if ! make -s systemvm-down >/dev/null 2>&1; then
+        say "systemvm-down failed; the saved config stays in ${SAVED#"$ROOT"/}: run make systemvm-down, copy it to ${CFG#"$ROOT"/}, then make systemvm-up docker-up"
+      elif cp "$SAVED" "$CFG" && make -s systemvm-up >/dev/null 2>&1 && make -s docker-up >/dev/null 2>&1; then
+        rm -f "$SAVED" "$SAVED.resized"
+      else
+        say "restart failed: run make systemvm-up docker-up (the saved config is in ${SAVED#"$ROOT"/})"
+      fi
+    fi
   fi
+  rm -rf "${LOCK:?}"
   exit "$rc"
 }
 trap restore EXIT
 trap 'exit 130' INT TERM
 if [ "${UPSTREAM_KEEP_SIZE:-0}" != 1 ]; then
   [ -f "$CFG" ] || { say "$CFG missing; run make systemvm-prepare"; exit 2; }
+  if [ -f "$SAVED" ] && [ "$(sha "$CFG")" != "$(cat "$SAVED.resized" 2>/dev/null)" ]; then
+    say "discarding a saved launch config from an earlier run: the live config was regenerated since"
+    rm -f "$SAVED" "$SAVED.resized"
+  fi
   [ -f "$SAVED" ] || cp "$CFG" "$SAVED"
   say "restart the System VM with ${UPSTREAM_CPUS:-4} vCPUs, ${UPSTREAM_MEMORY_MIB:-8192} MiB and $B shared"
   make -s docker-down >/dev/null 2>&1 || true; make -s systemvm-down >/dev/null 2>&1 || true
@@ -134,34 +194,38 @@ for i, s in enumerate(shares):
 c["shared_directories"] = shares
 json.dump(c, open(dst, "w"), indent=2)
 PY
+  sha "$CFG" > "$SAVED.resized"
   make -s systemvm-up && make -s docker-up
 fi
 docker info >/dev/null || { say "the System VM's Docker is not reachable at $DOCKER_HOST"; exit 2; }
-FREE_GB="$(docker run --rm -v "$SRC_VOL":/v alpine:3.22 df -Pk /v | awk 'NR==2 {print int($4 / 1048576)}')"
+docker pull -q "$HELPER_IMAGE" >/dev/null
+if [ "$CLEAN" = 1 ]; then docker volume rm -f "$SRC_VOL" "$CARGO_VOL" >/dev/null; fi
+FREE_GB="$(docker run --rm -v "$SRC_VOL":/v "$HELPER_IMAGE" df -Pk /v | awk 'NR==2 {print int($4 / 1048576)}')"
 MIN_GB="${UPSTREAM_MIN_FREE_GB:-45}"
 [ "$FREE_GB" -ge "$MIN_GB" ] || { say "the data disk has ${FREE_GB} GB free; the run needs $MIN_GB (UPSTREAM_MIN_FREE_GB)"; exit 2; }
-docker run --rm --privileged --pid=host alpine:3.22 nsenter -t 1 -m -u -n -i sh -c 'modprobe tun && test -c /dev/net/tun'
+docker run --rm --privileged --pid=host "$HELPER_IMAGE" nsenter -t 1 -m -u -n -i sh -c 'modprobe tun && test -c /dev/net/tun'
 say "tun loaded; data disk ${FREE_GB} GB free"
 
 # --- stage -------------------------------------------------------------------------------------------------------
-if [ "$CLEAN" = 1 ]; then docker volume rm -f "$SRC_VOL" "$CARGO_VOL" >/dev/null; fi
 docker pull -q "$CONTAINER" >/dev/null || { say "pull failed; retrying once"; docker pull -q "$CONTAINER" >/dev/null; }
 say "stage the tree into $SRC_VOL"
-docker run --rm -v "$TREE":/src:ro -v "$SRC_VOL":/firecracker alpine:3.22 sh -c '
+docker run --rm -v "$TREE":/src:ro -v "$SRC_VOL":/firecracker "$HELPER_IMAGE" sh -c '
   # Keep only build/cargo_target (the examples cache); setup-ci-artifacts.sh must start from the raw artefacts.
   cd /firecracker && find . -mindepth 1 -maxdepth 1 ! -name build -exec rm -rf {} + && mkdir -p build
   find build -mindepth 1 -maxdepth 1 ! -name cargo_target -exec rm -rf {} +
   cp -a /src/. /firecracker/ && echo staged'
-docker run --rm -v "$SRC_VOL":/firecracker -w /firecracker "$CONTAINER" ./tools/setup-ci-artifacts.sh "$ARTDIR" > "$OUT/setup-ci-artifacts.log" 2>&1
+step setup-ci-artifacts "$OUT/setup-ci-artifacts.log" \
+  docker run --rm -v "$SRC_VOL":/firecracker -w /firecracker "$CONTAINER" timeout 1800 ./tools/setup-ci-artifacts.sh "$ARTDIR"
 TARGET="build/cargo_target/$ARCH-unknown-linux-musl/release"
 say "build the examples and tools that tests expect in $TARGET"
-docker run --rm -v "$SRC_VOL":/firecracker -v "$CARGO_VOL":/usr/local/rust/registry -w /firecracker \
-  --env CARGO_TARGET_DIR=/firecracker/build/cargo_target "$CONTAINER" bash -c "
+step build-examples "$OUT/build.log" \
+  docker run --rm -v "$SRC_VOL":/firecracker -v "$CARGO_VOL":/usr/local/rust/registry -w /firecracker \
+  --env CARGO_TARGET_DIR=/firecracker/build/cargo_target "$CONTAINER" timeout 3600 bash -c "
   set -e
   cargo build -q --release --target $ARCH-unknown-linux-musl --examples
   cargo build -q --release --target $ARCH-unknown-linux-musl -p clippy-tracing
-  cargo build -q --release --target $ARCH-unknown-linux-musl -p log-instrument --examples" > "$OUT/build.log" 2>&1
-docker run --rm -v "$SRC_VOL":/firecracker -v "$REL/bin":/rel:ro alpine:3.22 sh -c "
+  cargo build -q --release --target $ARCH-unknown-linux-musl -p log-instrument --examples"
+docker run --rm -v "$SRC_VOL":/firecracker -v "$REL/bin":/rel:ro "$HELPER_IMAGE" sh -c "
   set -e; t=/firecracker/$TARGET; mkdir -p \$t/examples
   cp /rel/* \$t/
   ls \$t | tr '\n' ' '" > "$OUT/staged-tools.txt"
@@ -172,19 +236,30 @@ RES="$B/results/$STAMP"
 mkdir -p "$RES"
 common=(--privileged --security-opt seccomp=unconfined --ulimit core=0 --ulimit nofile=4096:4096
   --ulimit memlock=-1:-1 --volume /dev:/dev --volume "$SRC_VOL":/firecracker --volume "$SRV_VOL":/srv
-  --volume "$REL/bin":/binaries:ro --volume "$RES":/results -v /boot:/boot --env PYTHONDONTWRITEBYTECODE=1
+  --volume "$RES":/results -v /boot:/boot --env PYTHONDONTWRITEBYTECODE=1
   --workdir /firecracker)
 say "collect the selection"
-docker run --rm "${common[@]}" "$CONTAINER" ./tools/test.sh --binary-dir /binaries --collect-only -qqq \
-  -p no:cacheprovider "${SELECTION[@]}" > "$OUT/collected.txt" 2>&1 || true
+# The --binary-dir holds the release binaries and the examples built above (test_uffd.py runs
+# <binary-dir>/examples/uffd_*_handler). The framework hard-links them into each jail under /srv, so they are copied
+# onto the /srv volume: a hard link from the source volume fails with EXDEV. Collection errors are judged from the
+# run's own report.
+BIN=/srv/binaries
+docker volume rm -f "$SRV_VOL" >/dev/null 2>&1 || true
+docker run --rm -v "$SRC_VOL":/firecracker:ro -v "$SRV_VOL":/srv "$HELPER_IMAGE" sh -c "
+  set -e; t=/firecracker/$TARGET; mkdir -p $BIN/examples
+  for f in \$t/*; do if [ -f \"\$f\" ]; then cp \"\$f\" $BIN/; fi; done
+  for f in \$t/examples/*; do if [ -f \"\$f\" ] && [ -x \"\$f\" ]; then cp \"\$f\" $BIN/examples/; fi; done
+  ls $BIN $BIN/examples | tr '\n' ' '" > "$OUT/binaries.txt"
+docker run --rm "${common[@]}" "$CONTAINER" timeout 900 ./tools/test.sh --binary-dir "$BIN" --collect-only -qqq \
+  -p no:cacheprovider -- "${SELECTION[@]}" > "$OUT/collected.txt" 2>&1 || true
 COLLECTED="$(grep -c '::' "$OUT/collected.txt" || true)"
 [ "$COLLECTED" -gt 0 ] || { say "collected no tests (see collected.txt)"; exit 2; }
 say "run $COLLECTED tests with $WORKERS workers, ${TEST_TIMEOUT_S} s per test, ${WALL_S} s in all"
 docker rm -f "$NAME" >/dev/null 2>&1 || true
 START=$(date +%s)
-docker run -d --name "$NAME" "${common[@]}" "$CONTAINER" ./tools/test.sh --binary-dir /binaries -rA \
+docker run -d --name "$NAME" "${common[@]}" "$CONTAINER" ./tools/test.sh --binary-dir "$BIN" -rA \
   -n "$WORKERS" --dist worksteal --timeout "$TEST_TIMEOUT_S" --timeout-method=thread \
-  --junitxml=/results/junit.xml --json-report-file=/results/report.json "${SELECTION[@]}" >/dev/null
+  --junitxml=/results/junit.xml --json-report-file=/results/report.json -- "${SELECTION[@]}" >/dev/null
 STOPPED=""
 while [ "$(docker inspect -f '{{.State.Running}}' "$NAME" 2>/dev/null)" = true ]; do
   if [ $(( $(date +%s) - START )) -ge "$WALL_S" ]; then
@@ -193,30 +268,32 @@ while [ "$(docker inspect -f '{{.State.Running}}' "$NAME" 2>/dev/null)" = true ]
   sleep 30
 done
 RC="$(docker wait "$NAME" 2>/dev/null || echo 255)"
-docker logs "$NAME" > "$OUT/pytest.log" 2>&1
+# A full run's log is hundreds of MB (tracebacks print every local), so it is written compressed.
+docker logs "$NAME" 2>&1 | gzip -6 > "$OUT/pytest.log.gz"
 docker rm "$NAME" >/dev/null
 echo "rc=$RC wall_s=$(( $(date +%s) - START )) collected=$COLLECTED stopped=${STOPPED:-no} selection=${SELECTION[*]}" | tee "$OUT/run.txt"
 
 # --- collect, wipe, compare --------------------------------------------------------------------------------------
-{ cp "$RES"/junit.xml "$OUT/" && gzip -kf9 "$OUT/junit.xml"; } 2>/dev/null || true
-# pytest.log runs to hundreds of MB on a full run (tracebacks print every local); pytest-progress.log keeps each
-# result line, the worker crashes and the short summary, small enough to commit beside results.json.
-{ grep -E '^\[gw[0-9]+\] |^replacing crashed|^worker .* crashed' "$OUT/pytest.log"
-  awk '/short test summary info/{f=1} f' "$OUT/pytest.log"; } > "$OUT/pytest-progress.log" || true
+[ -f "$RES/junit.xml" ] && gzip -9 -c "$RES/junit.xml" > "$OUT/junit.xml.gz"
+# pytest-progress.log keeps each result line, the worker crashes and the short summary: small enough to commit
+# beside results.json, unlike pytest.log.gz and report.json.gz.
+{ gzip -dc "$OUT/pytest.log.gz" | grep -E '^\[gw[0-9]+\] |^replacing crashed|^worker .* crashed'
+  gzip -dc "$OUT/pytest.log.gz" | awk '/short test summary info/{f=1} f'; } > "$OUT/pytest-progress.log" || true
 if [ -s "$RES/report.json" ]; then
-  python3 -I "$HERE/collect.py" "$OUT/results.json" --collected "$OUT/collected.txt" "$RES/report.json"
+  python3 -I "$HERE/collect.py" "$OUT/results.json" --collected "$OUT/collected.txt" --meta "$OUT/meta.json" "$RES/report.json"
   gzip -c "$RES/report.json" > "$OUT/report.json.gz"
 else
   say "no JSON report (the run was stopped); recovering finished tests from the progress log"
-  python3 -I "$HERE/collect.py" "$OUT/results.json" --collected "$OUT/collected.txt" --log "$OUT/pytest.log"
+  python3 -I "$HERE/collect.py" "$OUT/results.json" --collected "$OUT/collected.txt" --meta "$OUT/meta.json" \
+    --log "$OUT/pytest-progress.log"
 fi
 rm -rf "${RES:?}"
 docker volume rm -f "$SRV_VOL" >/dev/null
-docker run --rm -v "$SRC_VOL":/f alpine:3.22 rm -rf /f/test_results
+docker run --rm -v "$SRC_VOL":/f "$HELPER_IMAGE" rm -rf /f/test_results
 say "wiped /srv and the test results in $SRC_VOL"
 set +e
 cargo run -q --bin baselinectl -- --mode upstream-compare --results "$OUT/results.json" \
-  --report "$OUT/compare.json" | tee "$OUT/compare.txt"
+  --meta "$OUT/meta.json" ${PARTIAL[@]+"${PARTIAL[@]}"} --report "$OUT/compare.json" | tee "$OUT/compare.txt"
 CMP=${PIPESTATUS[0]}
 set -e
 say "evidence in ${OUT#"$ROOT"/}"
