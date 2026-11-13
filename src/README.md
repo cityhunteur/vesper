@@ -453,8 +453,10 @@ Public symbols by file:
   `vesperd` equals the same request over `FCAPI`), `pause`, `snapshot_create_under_ceiling` (under a tenth of the
   ceiling), `resume`, `firecracker_connection_limit_passes_through` (Firecracker's own 503 to the 11th connection),
   `idle_timeout_closes_only_vesperd_connections` (about 125 s), `same_id_refused`, `sigterm_stops_microvm`,
-  `sigkill_removes_microvm`, `firecracker_killed_vesperd_exits` and `nothing_left`; `passed` requires all 18 steps
-  ok. It uses the control channel only to inspect and fault the guest.
+  `sigkill_removes_microvm`, `firecracker_killed_vesperd_exits`, `tap_devices_in_own_netns` (two concurrent
+  microVMs with `--tap tap0 --tap tap1`, each namespace holding exactly `lo` and the two taps owned by uid 20000, an
+  unlisted tap Firecracker's own 400, `netns_ok`, the namespace gone after SIGTERM; CE-0010) and `nothing_left`
+  (leases, jails and network namespaces); `passed` requires all 19 steps ok. It uses the control channel only to inspect and fault the guest.
 - `control/suites/replay.rs:ReplayRun` (ADR 0007 slice 6) writes the replay files into a new
   `share_dir/replay-<ms>/` (a removed and rewritten share file can read as empty in the System VM), makes the snapshot
   fixture in its own `vesperd` and copies it into the store with `vesperd stage jail:… store:…`, then runs each case

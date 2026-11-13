@@ -158,7 +158,7 @@ Deleting the image with the System VM stopped erases all container state; nothin
 Three agent verbs on vsock port 1024 serve `vesperd` microVMs; no new port, socket, share or entitlement is added,
 and the bridge allow-list is unchanged.
 
-- `LAUNCHAPI <id> [ceiling]` starts one stock Firecracker under the jailer with no configuration file: uid and gid
+- `LAUNCHAPI <id> [ceiling] [stage=SRC:DEST|tap=NAME]...` starts one stock Firecracker under the jailer with no configuration file: uid and gid
   20000 (the shim's microVMs run as 10000), cgroup `/sys/fs/cgroup/vesperd/<id>` (`--parent-cgroup vesperd`,
   `pids.max=256`, `memory.max` from `ceiling`, default 640 MiB, at least 128 MiB and at most the System VM's
   memory), chroot `/var/lib/vesper/state/vesperd/jailer/firecracker/<id>/root` on the data disk (slice 5; refused
@@ -190,6 +190,22 @@ A default Docker container cannot reach the agent from inside the System VM: Doc
 `socket(AF_VSOCK)` (`make systemvm-launchapi-suite`, step `default_container_cannot_open_vsock`). A container with
 `seccomp=unconfined` can open the socket, but its connects to CID 1 and 3 fail because no vsock loopback transport
 is loaded; a privileged container that can load kernel modules is not covered.
+
+## Network interfaces for `vesperd` microVMs (CE-0010)
+
+`vesperd --tap NAME` (at most 8; 1 to 15 letters, digits, `_` and `-`, never `lo`, checked on both sides) adds a
+`tap=NAME` token to `LAUNCHAPI`. No port, socket, share, package or entitlement is added. Every lease, with or
+without taps, gets its own network namespace, bound at `/run/vesper/vesperd/netns/<id>` (root-only directory, tmpfs)
+and joined by the jailer (`--netns`) before it drops to uid 20000, so Firecracker no longer shares the System VM's
+network namespace. In it, root brings up `lo` and creates each tap with busybox `tunctl -u vesperd-jail`; the tap is
+persistent and owned by uid 20000, which is what lets the jailed Firecracker open it without `CAP_NET_ADMIN`. A name
+not given cannot be created by Firecracker and fails with Firecracker's own `EPERM` error.
+
+The namespace has no route out: no veth, bridge, NAT or DNS. A guest reaches its own taps, and the far side of a tap
+is an interface nobody else reads, so a guest cannot reach the System VM, other microVMs, containers, the macOS host
+or the internet through it. Connectivity is TD-058 and needs the owner's decision, because it widens what a guest
+can reach. Teardown, the reaper and `status` (`DIRTY <id> netns`) cover the namespace; `VESPERD net <id>` lists its
+interfaces and `isolation` reports `netns_ok`.
 
 ## Staging and the snapshot store (ADR 0007, slice 5)
 

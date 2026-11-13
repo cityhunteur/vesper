@@ -307,6 +307,7 @@ fn bad_arguments_are_refused() {
     assert!(run(&["--backend", "systemvm", "--bridge", "x/3.sock"]).contains("needs --id"));
     assert!(run(&["--backend", "systemvm", "--id", "../x", "--bridge", "x/3.sock"]).contains("letters, digits and hyphens"));
     assert!(run(&["--id", "vm-1"]).contains("apply to --backend systemvm"));
+    assert!(run(&["--tap", "tap0"]).contains("apply to --backend systemvm"));
 }
 
 fn cli(dir: &Path, bridge: &Path, args: &[&str]) -> (i32, String, String) {
@@ -348,6 +349,39 @@ fn stage_flags_ride_on_launchapi_in_order() {
     let a = agent.lock().unwrap();
     assert_eq!(a.requests[0], "DATA status");
     assert_eq!(a.requests[1], "LAUNCHAPI vm-1 268435456 stage=store:a.mem:/snap.mem stage=share:/Users/me/vm/d.img:/d.img");
+}
+
+#[test]
+fn tap_flags_ride_on_launchapi_after_the_stages() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (bridge, agent) = fake_agent(tmp.path(), "1.16.0");
+    let v = spawn(tmp.path(), &bridge, &["--tap", "tap0", "--stage", "store:a.mem:/snap.mem", "--tap", "tap1"]);
+    wait_listening(&v);
+    let a = agent.lock().unwrap();
+    assert_eq!(a.requests[1], "LAUNCHAPI vm-1 stage=store:a.mem:/snap.mem tap=tap0 tap=tap1");
+}
+
+#[test]
+fn a_bad_tap_flag_launches_nothing() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (bridge, agent) = fake_agent(tmp.path(), "1.16.0");
+    for (flags, why) in [
+        (vec!["--tap", "lo"], "not lo"),
+        (vec!["--tap=-tap0"], "not starting with -"),
+        (vec!["--tap", "tap 0"], "letters, digits"),
+        (vec!["--tap", "a-name-of-16-chr"], "1 to 15"),
+        (vec!["--tap", "tap0", "--tap", "tap0"], "given twice"),
+    ] {
+        let mut v = spawn(tmp.path(), &bridge, &flags);
+        let (status, err) = wait_exit(&mut v, Duration::from_secs(10));
+        assert!(!status.success() && err.contains(why), "{flags:?}: {err}");
+    }
+    let names: Vec<String> = (0..9).map(|i| format!("tap{i}")).collect();
+    let many: Vec<&str> = names.iter().flat_map(|n| ["--tap", n.as_str()]).collect();
+    let mut v = spawn(tmp.path(), &bridge, &many);
+    let (status, err) = wait_exit(&mut v, Duration::from_secs(10));
+    assert!(!status.success() && err.contains("at most 8"), "{err}");
+    assert!(agent.lock().unwrap().requests.is_empty(), "nothing reaches the agent");
 }
 
 #[test]
@@ -405,9 +439,36 @@ fn bad_stage_and_store_arguments_never_reach_the_agent() {
         (&["stage", "--id", "vm-1", "share:/a", "relative"][..], "bad DEST"),
         (&["store", "rm", ".partial.1"][..], "bad store name"),
         (&["--backend", "systemvm", "store", "list"][..], "do not apply here"),
+        (&["--tap", "tap0", "store", "list"][..], "do not apply here"),
     ] {
         let (code, _, err) = cli(tmp.path(), &bridge, args);
         assert!(code == 2 && err.contains(why), "{args:?}: exit {code}: {err}");
     }
     assert!(agent.lock().unwrap().requests.is_empty());
+}
+
+/// The guest helper's own tap check (`vesper-vesperd launch`, `valid_tap`), run hermetically: it refuses a bad
+/// `tap=` token before it touches anything, and agrees with `vesper::control::valid_tap_name`.
+#[test]
+fn the_guest_helper_refuses_the_tap_names_vesperd_refuses() {
+    let script = concat!(env!("CARGO_MANIFEST_DIR"), "/systemvm/overlay/usr/local/bin/vesper-vesperd");
+    let launch = |tokens: &[&str]| {
+        let out = Command::new("sh").arg(script).args(["launch", "vm-1"]).args(tokens).output().unwrap();
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+    for name in ["", "lo", "-", "-tap0", "tap 0", "tap.0", "tap/0", "a-name-of-16-chr"] {
+        let out = launch(&[&format!("tap={name}")]);
+        assert!(out.starts_with("ERR bad tap name"), "{name:?}: {out}");
+        assert!(!vesper::control::valid_tap_name(name), "{name:?} accepted by vesperd");
+    }
+    for name in ["tap0", "up", "dev", "t-", &"t".repeat(15)] {
+        let out = launch(&[&format!("tap={name}")]);
+        // Past the token checks the helper stops at the first System VM requirement (memory, Firecracker).
+        assert!(out.starts_with("ERR") && !out.contains("tap"), "{name:?}: {out}");
+        assert!(vesper::control::valid_tap_name(name), "{name:?} refused by vesperd");
+    }
+    assert!(launch(&["tap=tap0", "tap=tap0"]).starts_with("ERR tap tap0 given twice"));
+    let nine: Vec<String> = (0..9).map(|i| format!("tap=tap{i}")).collect();
+    let nine: Vec<&str> = nine.iter().map(String::as_str).collect();
+    assert!(launch(&nine).starts_with("ERR at most 8 tap= tokens"), "{}", launch(&nine));
 }

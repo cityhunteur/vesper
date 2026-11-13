@@ -9,6 +9,9 @@
 # model backend and the jail on Backend A (empty, so `{root}/tmp/x` is `/tmp/x` there); it is removed from response
 # bodies before judging. `{pad:N}` is N letters `a`; `{rep:N:TEXT}` is N copies of TEXT.
 #
+# Every case's microVM can open the tap devices in `taps` (on Backend A, `vesperd --tap`, CE-0010), as on the
+# reference host the captures came from; every `host_dev_name` a script names is listed there.
+#
 # Every case root holds `files`, the kernel at `{root}/Image` and the initramfs at `{root}/initrd.gz`. Cases marked
 # `snapshot: true` also hold the snapshot fixture at `{root}/snap/vm.vmstate` and `{root}/snap/vm.mem`: the
 # `snapshot_fixture` steps run once and leave a paused microVM's snapshot at `{root}/tmp/fixture.vmstate` and
@@ -26,6 +29,8 @@ files:
   - { path: /tmp/fc.log, bytes: 0 }
   - { path: /tmp/fc.metrics, bytes: 0 }
   - { path: /tmp/serial.out, bytes: 0 }
+
+taps: [tap0, tap1]
 
 macros:
   boot_source:

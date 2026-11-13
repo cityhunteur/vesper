@@ -21,7 +21,8 @@ use std::time::{Duration, Instant};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::signal::unix::{SignalKind, signal};
 use vesper::control::{
-    AGENT_PROTOCOL_VERSION, DEFAULT_AGENT_PORT, MAX_STAGES, Ready, StageSpec, data_disk_in_use, parse_ready, valid_microvm_id,
+    AGENT_PROTOCOL_VERSION, DEFAULT_AGENT_PORT, MAX_STAGES, MAX_TAPS, Ready, StageSpec, data_disk_in_use, parse_ready,
+    valid_microvm_id, valid_tap_name,
 };
 use vesper::proxy::{self, Bounds, Preface, ServerConfig, Target};
 
@@ -55,6 +56,7 @@ pub struct Options {
     id: String,
     memory_max: Option<u64>,
     stages: Vec<StageSpec>,
+    taps: Vec<String>,
     bridge: PathBuf,
     port: u32,
     swagger: String,
@@ -94,8 +96,9 @@ impl Options {
             return Err(format!("at most {MAX_STAGES} --stage flags"));
         }
         let stages = args.stage.iter().map(|s| StageSpec::parse(s)).collect::<Result<Vec<_>, _>>()?;
+        let taps = check_taps(&args.tap)?;
         let (bridge, port) = bridge_and_port(args)?;
-        Ok(Options { id, memory_max: args.memory_max, stages, bridge, port, swagger: args.swagger.clone() })
+        Ok(Options { id, memory_max: args.memory_max, stages, taps, bridge, port, swagger: args.swagger.clone() })
     }
 }
 
@@ -136,11 +139,28 @@ fn greeting_prefix() -> String {
     format!("VESPER-AGENT {AGENT_PROTOCOL_VERSION} ")
 }
 
-/// `LAUNCHAPI <id> [ceiling] [stage=SRC:DEST]...`.
+/// `--tap` names: at most `MAX_TAPS`, each a valid interface name, none given twice.
+fn check_taps(taps: &[String]) -> Result<Vec<String>, String> {
+    if taps.len() > MAX_TAPS {
+        return Err(format!("at most {MAX_TAPS} --tap flags"));
+    }
+    for (i, tap) in taps.iter().enumerate() {
+        if !valid_tap_name(tap) {
+            return Err(format!("--tap {tap:?}: use 1 to 15 letters, digits, _ and -, not starting with -, not lo"));
+        }
+        if taps[..i].contains(tap) {
+            return Err(format!("--tap {tap:?} given twice"));
+        }
+    }
+    Ok(taps.to_vec())
+}
+
+/// `LAUNCHAPI <id> [ceiling] [stage=SRC:DEST]... [tap=NAME]...`.
 fn launch_request(opts: &Options) -> String {
     let mut words = vec!["LAUNCHAPI".to_string(), opts.id.clone()];
     words.extend(opts.memory_max.map(|bytes| bytes.to_string()));
     words.extend(opts.stages.iter().map(StageSpec::launch_token));
+    words.extend(opts.taps.iter().map(|tap| format!("tap={tap}")));
     words.join(" ")
 }
 

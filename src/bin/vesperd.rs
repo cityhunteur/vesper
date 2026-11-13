@@ -59,6 +59,11 @@ struct Args {
     /// and read-only; everything else is copied.
     #[arg(long = "stage", value_name = "SRC:DEST")]
     stage: Vec<String>,
+    /// Create a tap device NAME for the microVM before Firecracker starts (`--backend systemvm`; repeatable, at most
+    /// 8; 1 to 15 letters, digits, _ and -, not starting with -, not lo): it lives in the microVM's own network namespace, is owned by the jailer's uid and has no uplink, so
+    /// `PUT /network-interfaces` with `host_dev_name` NAME succeeds (CE-0010).
+    #[arg(long = "tap", value_name = "NAME")]
+    tap: Vec<String>,
     /// System VM launch config that names the bridge socket and agent port (`--backend systemvm`, `stage`, `store`).
     #[arg(long, global = true, default_value = "build/systemvm/launch-config.json")]
     launch_config: String,
@@ -108,8 +113,8 @@ async fn run(args: Args) -> Result<(), String> {
         let options = systemvm::Options::from_args(&args)?;
         return systemvm::run(options, &socket_path(&args)?).await;
     }
-    if args.id.is_some() || args.memory_max.is_some() || args.bridge.is_some() || args.agent_port.is_some() || !args.stage.is_empty() {
-        return Err("--id, --memory-max, --stage, --bridge and --agent-port apply to --backend systemvm".to_string());
+    if args.id.is_some() || args.memory_max.is_some() || args.bridge.is_some() || args.agent_port.is_some() || !args.stage.is_empty() || !args.tap.is_empty() {
+        return Err("--id, --memory-max, --stage, --tap, --bridge and --agent-port apply to --backend systemvm".to_string());
     }
 
     let lock = vesper::baseline::load(&args.baseline_lock)?;

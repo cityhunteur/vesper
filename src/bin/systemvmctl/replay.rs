@@ -72,7 +72,7 @@ pub fn run(
         return Err(format!("replay scripts:\n  {}", errors.join("\n  ")));
     }
     let files: Vec<(String, u64)> = scripts.files.iter().map(|f| (f.path.clone(), f.bytes)).collect();
-    let mut session = run.prepare(endpoint, &files)?;
+    let mut session = run.prepare(endpoint, &files, &scripts.taps)?;
     let fixture_steps = to_runner(&api_replay::expand_fixture(&scripts, "")?);
     let fixture = run.make_fixture(
             &mut session,
@@ -127,6 +127,10 @@ pub fn run(
     cleanup?;
     if summary.backend_error > 0 {
         return Err(format!("{} cases could not run on Backend A", summary.backend_error));
+    }
+    // Since CE-0010 closed every applicable case is expected to match; the report above is written either way.
+    if summary.mismatched > 0 || summary.setup_failed > 0 {
+        return Err(format!("{} mismatched and {} failed setup on Backend A", summary.mismatched, summary.setup_failed));
     }
     Ok(())
 }

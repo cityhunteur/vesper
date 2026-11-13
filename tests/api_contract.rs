@@ -4716,7 +4716,7 @@ async fn network_put_rejects_pinned_preboot_conflicts() {
     assert_eq!(duplicate_tap_payload["code"], "InvalidRequest");
     assert_eq!(
         duplicate_tap_payload["fault_message"],
-        "Network config error: Could not create the network device: Open tap device failed: Error while creating ifreq structure: Device or resource busy (os error 16). Invalid TUN/TAP Backend provided by tap0. Check our documentation on setting up the network devices."
+        "Network config error: Could not create the network device: Open tap device failed: Error while creating ifreq structure: Resource busy (os error 16). Invalid TUN/TAP Backend provided by tap0. Check our documentation on setting up the network devices."
     );
     assert_eq!(
         duplicate_tap_payload["baseline_firecracker_revision"]

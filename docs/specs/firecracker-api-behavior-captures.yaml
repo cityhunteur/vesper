@@ -1547,9 +1547,10 @@ captures:
         status_code: 400
         outcome: error_envelope
         code: InvalidRequest
-        message: "Network config error: Could not create the network device: Open tap device failed: Error while creating ifreq structure: Device or resource busy (os error 16). Invalid TUN/TAP Backend provided by tap0. Check our documentation on setting up the network devices."
+        message: "Network config error: Could not create the network device: Open tap device failed: Error while creating ifreq structure: Resource busy (os error 16). Invalid TUN/TAP Backend provided by tap0. Check our documentation on setting up the network devices."
         evidence_files:
           - run/WOR-20/api/step62-upstream-network-create-conflict-baseline.md
+          - run/GH-156/api/ce0010-backend-a-tap-busy-correction.md
       - id: mtu_below_minimum_preboot
         arch: any
         when: Store a network interface before boot with `mtu` 67

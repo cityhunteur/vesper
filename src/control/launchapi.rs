@@ -3,6 +3,8 @@
 //! `LAUNCHAPI <id> [ceiling]` starts one jailed Firecracker built from API requests and answers
 //! `READY <id> pid=<n> firecracker_version=<v>` or `ERR <reason>`; after `READY` the connection is the microVM's
 //! lease. `FCAPI <id>` answers `OK` and then relays bytes to that microVM's API socket, or `ERR <reason>`.
+//! `LAUNCHAPI` also takes `stage=SRC:DEST` and `tap=NAME` tokens; each `tap=NAME` is a tap device in the microVM's
+//! own network namespace, owned by the jailer's uid (CE-0010).
 //! This module parses only those fixed forms; the HTTP helper exists for the System VM suite.
 
 use super::Session;
@@ -27,6 +29,20 @@ pub struct Ready {
 pub struct HttpResponse {
     pub status: u16,
     pub body: String,
+}
+
+/// `tap=` tokens per `LAUNCHAPI` (CE-0010).
+pub const MAX_TAPS: usize = 8;
+
+/// A tap device name the guest accepts: a Linux interface name (at most 15 bytes) of ASCII letters, digits, `_` and
+/// `-`, not starting with `-` (it would read as an option), and never `lo`. The guest checks it again
+/// (`vesper-vesperd`, `valid_tap`).
+pub fn valid_tap_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 15
+        && name != "lo"
+        && !name.starts_with('-')
+        && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
 }
 
 /// The jailer's id rule: 1 to 64 ASCII letters, digits and hyphens.
@@ -260,6 +276,18 @@ mod tests {
         assert!(valid_microvm_id(&"x".repeat(64)));
         for bad in ["", "../x", "a b", "a_b", "a*", &"x".repeat(65)] {
             assert!(!valid_microvm_id(bad), "accepted {bad:?}");
+        }
+    }
+
+    #[test]
+    fn tap_names_are_short_interface_names() {
+        assert!(valid_tap_name("tap0"));
+        assert!(valid_tap_name("vm_1-tap"));
+        assert!(valid_tap_name(&"t".repeat(15)));
+        // ip keywords are names like any other: the guest always passes them after `dev`.
+        assert!(valid_tap_name("up") && valid_tap_name("dev") && valid_tap_name("t-"));
+        for bad in ["", "lo", "-", "-tap0", "tap 0", "tap/0", "tap.0", "tap:0", "tap=0", "../x", &"t".repeat(16)] {
+            assert!(!valid_tap_name(bad), "accepted {bad:?}");
         }
     }
 
