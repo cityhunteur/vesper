@@ -116,6 +116,15 @@ Either way, a new, unexplained failure turns the run red.
   passed, so the verdict is 759 passed, 1 of them listed as PASSED-ALONE, and 221 explained (57 in the any-test
   memory class against a cap of 80). `compare-under-load.*` keeps the first verdict.
 
+- 2026-11-13: a third council review, of the changes since the second, found no blocker and one Medium: a pass on
+  the isolated rerun cleared any symptom, including an overshoot of 7 MiB or more, which D-031 says still fails.
+  The class file now lists `never_pass_alone` (the memory error) and `max_passed_alone: 8`, which the comparator
+  enforces; an `any_test` class needs a message of 16 characters, only failed or error outcomes, and there may be
+  one; an isolated session that did not end normally is not used; the rerun runs under `-n 1` so a timeout ends a
+  worker, not the session. These only tighten the gate, so run 5 was re-judged from its committed results with the
+  new comparator (still clean, the same one PASSED-ALONE) and not run again; quick run `20261113T191105Z` exercises
+  the changed runner. The rest is TD-059.
+
 ## Decision Log
 
 - 2026-11-13: the comparator is a `baselinectl` mode, not a new binary, because it reads the baseline lock and

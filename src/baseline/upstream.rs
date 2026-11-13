@@ -159,12 +159,25 @@ pub struct Class {
 #[serde(deny_unknown_fields)]
 pub struct ClassFile {
     pub version: u32,
+    /// Message substrings of results that a pass on the isolated rerun never clears: a test that showed one under
+    /// load stays unmatched, however it did alone (D-031: an overshoot outside its class is not a timing effect).
+    #[serde(default)]
+    pub never_pass_alone: Vec<String>,
+    /// The most tests one run may pass only on the isolated rerun; more is a failure. Unset, any number may.
+    #[serde(default)]
+    pub max_passed_alone: Option<usize>,
     pub classes: Vec<Class>,
 }
 
 impl ClassFile {
     pub fn validate(&self) -> Result<(), String> {
         let mut seen = std::collections::BTreeSet::new();
+        if self.never_pass_alone.iter().any(|m| m.trim().len() < MIN_ANY_MESSAGE) {
+            return Err(format!("never_pass_alone entries need at least {MIN_ANY_MESSAGE} characters"));
+        }
+        if self.classes.iter().filter(|c| c.any_test).count() > 1 {
+            return Err("at most one class may be any_test".to_string());
+        }
         for c in &self.classes {
             if !seen.insert(c.id.as_str()) {
                 return Err(format!("class {} is listed twice", c.id));
@@ -178,6 +191,15 @@ impl ClassFile {
             if c.any_test {
                 if !c.nodeid.is_empty() || c.message.is_empty() || !c.message_glob.is_empty() {
                     return Err(format!("class {}: any_test takes message substrings, and no nodeid or message_glob", c.id));
+                }
+                // With no test names, the symptom and the outcomes are all that bound the class.
+                if c.message.iter().any(|m| m.trim().len() < MIN_ANY_MESSAGE)
+                    || c.outcomes.iter().any(|o| !matches!(o.as_str(), "failed" | "error"))
+                {
+                    return Err(format!(
+                        "class {}: any_test needs messages of at least {MIN_ANY_MESSAGE} characters and only failed or error outcomes",
+                        c.id
+                    ));
                 }
             } else if c.nodeid.is_empty() || !c.nodeid.iter().all(|p| names_a_test(p)) {
                 return Err(format!(
@@ -215,6 +237,8 @@ impl ClassFile {
 }
 
 const KNOWN: [&str; 4] = ["failed", "error", "skipped", "hung"];
+/// The shortest message an `any_test` class or `never_pass_alone` may match on.
+const MIN_ANY_MESSAGE: usize = 16;
 
 /// `*`-wildcard match over the whole string.
 pub fn glob(pattern: &str, text: &str) -> bool {
@@ -330,6 +354,8 @@ pub struct Comparison {
     /// Tests that matched no class under load and passed when the runner reran them alone: counted as passed, and
     /// listed with what they did under load.
     pub passed_alone: Vec<Unmatched>,
+    /// The class file's cap on `passed_alone`.
+    pub max_passed_alone: Option<usize>,
     /// Classes that explained more tests than their `max`.
     pub over_max: Vec<OverMax>,
     /// Classes that explained no test in this run.
@@ -355,6 +381,9 @@ impl Comparison {
         }
         if !self.unmatched.is_empty() {
             f.push(format!("{} result(s) match no exception class", self.unmatched.len()));
+        }
+        if let Some(max) = self.max_passed_alone.filter(|m| self.passed_alone.len() > *m) {
+            f.push(format!("{} tests passed only on the isolated rerun, more than the cap of {max}", self.passed_alone.len()));
         }
         for o in &self.over_max {
             f.push(format!("class {} explained {} tests, more than its max of {}", o.class, o.matched, o.max));
@@ -398,6 +427,7 @@ pub fn compare(
         total: results.len(),
         partial,
         meta,
+        max_passed_alone: classes.max_passed_alone,
         ..Comparison::default()
     };
     for c in &classes.classes {
@@ -405,14 +435,27 @@ pub fn compare(
     }
     for (nodeid, r) in results {
         if is_pass(&r.outcome) {
-            out.passed += 1;
-            if let Some(l) = &r.under_load {
-                out.passed_alone.push(Unmatched {
-                    nodeid: nodeid.clone(),
-                    outcome: l.outcome.clone(),
-                    message: head_and_tail(&l.message, 200, 200),
-                    alone: None,
-                });
+            match &r.under_load {
+                // A symptom that a pass alone never clears: the result under load stands, unmatched.
+                Some(l) if classes.never_pass_alone.iter().any(|m| l.message.contains(m.as_str())) => {
+                    *out.to_explain.entry(l.outcome.clone()).or_default() += 1;
+                    out.unmatched.push(Unmatched {
+                        nodeid: nodeid.clone(),
+                        outcome: l.outcome.clone(),
+                        message: head_and_tail(&l.message, 200, 200),
+                        alone: Some(Attempt { outcome: r.outcome.clone(), message: String::new() }),
+                    });
+                }
+                Some(l) => {
+                    out.passed += 1;
+                    out.passed_alone.push(Unmatched {
+                        nodeid: nodeid.clone(),
+                        outcome: l.outcome.clone(),
+                        message: head_and_tail(&l.message, 200, 200),
+                        alone: None,
+                    });
+                }
+                None => out.passed += 1,
             }
             continue;
         }
@@ -477,7 +520,7 @@ classes:
   - id: overshoot
     kind: unexplained
     any_test: true
-    message: ["Memory usage (6."]
+    message: ["MemoryUsageExceededError: ('Memory usage (6."]
     outcomes: [error]
     max: 1
     tracked_by: CE-0001
@@ -488,8 +531,8 @@ classes:
         let c: ClassFile = serde_yaml::from_value(v.clone()).unwrap();
         c.validate().unwrap();
         let mut res = Results::new();
-        res.insert("integration_tests/functional/a.py::t".into(), r("error", "Memory usage (6.5 MiB)"));
-        res.insert("integration_tests/functional/b.py::t".into(), r("error", "Memory usage (7.5 MiB)"));
+        res.insert("integration_tests/functional/a.py::t".into(), r("error", "MemoryUsageExceededError: ('Memory usage (6.5 MiB)"));
+        res.insert("integration_tests/functional/b.py::t".into(), r("error", "MemoryUsageExceededError: ('Memory usage (7.5 MiB)"));
         let mut alone = r("passed", "");
         alone.under_load = Some(Attempt { outcome: "failed".into(), message: "AssertionError".into() });
         res.insert("integration_tests/functional/c.py::t".into(), alone);
@@ -499,10 +542,33 @@ classes:
         assert_eq!(out.unmatched[0].nodeid, "integration_tests/functional/b.py::t");
         assert_eq!((out.passed, out.passed_alone.len()), (1, 1));
         assert_eq!(out.passed_alone[0].outcome, "failed");
-        // any_test with a nodeid list or a message glob is refused.
-        v["classes"][0]["message_glob"] = serde_yaml::from_str(r#"["assert * > *"]"#).unwrap();
+        // A pass alone never clears a listed symptom, and the cap on passes alone is enforced.
+        let mut strict = c.clone();
+        strict.never_pass_alone = vec!["MemoryUsageExceededError".into()];
+        strict.max_passed_alone = Some(0);
+        strict.validate().unwrap();
+        let mut big = r("passed", "");
+        big.under_load = Some(Attempt { outcome: "error".into(), message: "MemoryUsageExceededError: ('Memory usage (9.1 MiB)".into() });
+        res.insert("integration_tests/functional/d.py::t".into(), big);
+        let out = compare(&res, None, &strict, None, false);
+        assert_eq!((out.passed, out.passed_alone.len(), out.unmatched.len()), (1, 1, 2));
+        assert!(out.failures().iter().any(|f| f.contains("more than the cap of 0")), "{:?}", out.failures());
+        // any_test with a message glob, a short message, a skip outcome, or a second any_test class is refused.
+        for (key, value) in [("message_glob", r#"["assert * > *"]"#), ("message", r#"["e"]"#), ("outcomes", "[skipped]")] {
+            let mut bad = v.clone();
+            bad["classes"][0][key] = serde_yaml::from_str(value).unwrap();
+            let c: ClassFile = serde_yaml::from_value(bad).unwrap();
+            assert!(c.validate().unwrap_err().contains("any_test"), "{key}");
+        }
+        let mut two = v.clone();
+        let mut second = two["classes"][0].clone();
+        second["id"] = "other".into();
+        two["classes"].as_sequence_mut().unwrap().push(second);
+        let c: ClassFile = serde_yaml::from_value(two).unwrap();
+        assert!(c.validate().unwrap_err().contains("at most one"));
+        v["never_pass_alone"] = serde_yaml::from_str(r#"["x"]"#).unwrap();
         let c: ClassFile = serde_yaml::from_value(v).unwrap();
-        assert!(c.validate().unwrap_err().contains("any_test"));
+        assert!(c.validate().unwrap_err().contains("never_pass_alone"));
     }
 
     fn r(outcome: &str, message: &str) -> TestResult {

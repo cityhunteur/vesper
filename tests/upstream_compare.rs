@@ -33,6 +33,30 @@ fn pins_are_quoted_and_pinned_by_digest() {
     }
 }
 
+/// The isolated rerun (D-031): a pass alone is listed and counts; a memory overshoot under load is never cleared by
+/// it; and a test that failed alone too shows that attempt.
+#[test]
+fn a_pass_alone_counts_unless_its_symptom_is_never_cleared() {
+    let t = "integration_tests/functional/test_api.py::t";
+    let alone = scratch("alone.json", &serde_json::json!({t: {"outcome": "passed", "message": "",
+        "under_load": {"outcome": "failed", "message": "AssertionError: timing"}}}).to_string());
+    let (rc, out) = baselinectl(&["--mode", "upstream-compare", "--results", &alone, "--partial"]);
+    assert_eq!(rc, 0, "{out}");
+    assert!(out.contains(&format!("PASSED-ALONE {t} under load: failed AssertionError: timing")), "{out}");
+
+    let big = scratch("big.json", &serde_json::json!({t: {"outcome": "passed", "message": "",
+        "under_load": {"outcome": "error", "message": "MemoryUsageExceededError: ('Memory usage (9.10 MiB) exceeded"}}}).to_string());
+    let (rc, out) = baselinectl(&["--mode", "upstream-compare", "--results", &big, "--partial"]);
+    assert_ne!(rc, 0, "{out}");
+    assert!(out.contains(&format!("UNMATCHED {t} error [alone: passed]")), "{out}");
+
+    let twice = scratch("twice.json", &serde_json::json!({t: {"outcome": "failed", "message": "AssertionError: x",
+        "alone": {"outcome": "failed", "message": "AssertionError: x"}}}).to_string());
+    let (rc, out) = baselinectl(&["--mode", "upstream-compare", "--results", &twice, "--partial"]);
+    assert_ne!(rc, 0, "{out}");
+    assert!(out.contains(&format!("UNMATCHED {t} failed [alone: failed]")), "{out}");
+}
+
 #[test]
 fn compare_fails_an_empty_run_an_unexplained_failure_and_a_pytest_error() {
     let empty = scratch("empty.json", "{}");

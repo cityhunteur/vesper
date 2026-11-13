@@ -8,6 +8,10 @@ version: 1
 # (vmm-memory-overhead), for a symptom that moves between tests from run to run. `flaky: true` marks a class that need not
 # match in every full run. A class is never a harness gap: those are fixed in scripts/systemvm/upstream-suite/.
 # `unexplained` classes stay open under CE-0001 until the Linux reference run (CE-0003) settles them.
+# The runner reruns alone the tests that match no class (D-031). A pass there never clears these symptoms: a memory
+# overshoot outside its class's 5.00 to 6.99 MiB is not a timing effect. At most this many tests may pass only alone.
+never_pass_alone: ["MemoryUsageExceededError"]
+max_passed_alone: 8
 classes:
   - id: no-userfaultfd
     kind: environment

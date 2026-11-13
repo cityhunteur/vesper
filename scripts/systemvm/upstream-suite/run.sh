@@ -11,9 +11,11 @@
 # the tree into a data-disk volume (unsquashfs cannot write the virtio-fs share) and run upstream's
 # setup-ci-artifacts.sh there; build the examples and tools some tests expect under build/cargo_target; run
 # tools/test.sh in the pinned container with a per-test timeout that kills a hung worker (--timeout-method=thread)
-# and a wall-clock watchdog; collect {nodeid: outcome}; wipe /srv; restore the previous launch config and restart;
-# compare (baselinectl --mode upstream-compare, which also fails on pytest's own errors). Exit status is the
-# comparator's. One run at a time: build/upstream-suite/runner.lock is a symlink to the runner's pid.
+# and a wall-clock watchdog; collect {nodeid: outcome}; compare (baselinectl --mode upstream-compare, which also
+# fails on pytest's own errors); rerun alone the tests that matched no class, when there are 1 to
+# UPSTREAM_RERUN_MAX (8) of them, and compare again (decision D-031; unmatched.txt, alone.json.gz,
+# pytest-alone.log.gz, and the first verdict in *-under-load.*); wipe /srv; restore the previous launch config and
+# restart. Exit status is the comparator's. One run at a time: build/upstream-suite/runner.lock is a symlink to the runner's pid.
 #
 # Environment: UPSTREAM_WALL_S (default 14400) stops the run; UPSTREAM_MIN_FREE_GB (45) is the data-disk space it
 # needs (the GH #166 trial's /srv peaked at 42 GB apparent, mostly sparse, on the default 64 GiB disk); UPSTREAM_CPUS (4) and UPSTREAM_MEMORY_MIB (8192) size
@@ -30,7 +32,6 @@ OUT="$ROOT/run/GH-172/$STAMP"
 CFG="$ROOT/build/systemvm/launch-config.json"
 SAVED="$B/launch-config.saved.json"
 SRC_VOL=vesper-upstream-src
-SRV_VOL=vesper-upstream-srv
 CARGO_VOL=vesper-upstream-cargo
 NAME=vesper-upstream-run
 WALL_S="${UPSTREAM_WALL_S:-14400}"
@@ -168,15 +169,16 @@ sha() { shasum -a 256 "$1" 2>/dev/null | cut -d' ' -f1; }
 # else at its root, and the tree's test results, if the volume exists.
 wipe_srv() {
   docker volume inspect "$SRC_VOL" >/dev/null 2>&1 || return 0
+  # A volume staged before this layout has the tree (and its cargo cache) at the root: leave it for staging to move.
   docker run --rm -v "$SRC_VOL":/v "$HELPER_IMAGE" sh -c \
-    'find /v -mindepth 1 -maxdepth 1 ! -name firecracker -exec rm -rf {} + && rm -rf /v/firecracker/test_results'
+    '[ -d /v/firecracker ] || exit 0
+     find /v -mindepth 1 -maxdepth 1 ! -name firecracker -exec rm -rf {} + && rm -rf /v/firecracker/test_results'
 }
 restore() {
   rc=$?
   trap '' INT TERM PIPE
   set +e
   docker rm -f "$NAME" >/dev/null 2>&1
-  docker volume rm -f "$SRV_VOL" >/dev/null 2>&1
   wipe_srv
   if [ "${UPSTREAM_KEEP_SIZE:-0}" != 1 ] && [ -f "$SAVED" ]; then
     live="$(sha "$CFG")"
@@ -293,7 +295,6 @@ say "collect the selection"
 SRVDIR=/srv
 INSRV=(sh -c 'rm -rf /firecracker && ln -s /srv/firecracker /firecracker && cd /firecracker && exec "$@"' sh)
 BIN=/srv/binaries
-docker volume rm -f "$SRV_VOL" >/dev/null 2>&1 || true
 wipe_srv
 docker run --rm -v "$SRC_VOL":/srv "$HELPER_IMAGE" sh -c "
   set -e; t=/srv/firecracker/$TARGET; BIN=$SRVDIR/binaries; mkdir -p \$BIN/examples
@@ -368,7 +369,7 @@ if [ "$N_UNMATCHED" -gt 0 ] && [ -z "$STOPPED" ] && [ -s "$RES/report.json" ]; t
     while IFS= read -r n; do AGAIN+=("$n"); done < "$OUT/unmatched.txt"
     docker rm -f "$NAME" >/dev/null 2>&1 || true
     docker run -d --name "$NAME" "${common[@]}" "$CONTAINER" "${INSRV[@]}" ./tools/test.sh --binary-dir "$BIN" -rA \
-      --timeout "$TEST_TIMEOUT_S" --timeout-method=thread \
+      -n 1 --timeout "$TEST_TIMEOUT_S" --timeout-method=thread \
       --json-report-file=/results/alone.json -- "${AGAIN[@]}" >/dev/null
     with_timeout $(( (TEST_TIMEOUT_S + 60) * N_UNMATCHED + 600 )) docker wait "$NAME" >/dev/null 2>&1 || docker kill "$NAME" >/dev/null 2>&1 || true
     docker logs "$NAME" 2>&1 | gzip -6 > "$OUT/pytest-alone.log.gz"

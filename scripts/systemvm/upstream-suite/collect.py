@@ -21,7 +21,8 @@ line after the last RERUN, a rerun test is an "error".
 in the full run, run again one at a time with nothing else loading the host. A test that passes there becomes
 {"outcome": "passed", "under_load": {outcome, message}}, which the comparator counts as passed and lists; one that
 does not keeps its full-run result and gains "alone": {outcome, message}. A test the full run did not report is
-never taken from ALONE.json.
+never taken from ALONE.json, and an isolated session that pytest did not end normally (an exit status other than 0
+or 1, or a collection error) is not used at all: the full run's results stand.
 
 The message is the primary exception only (pytest's crash message, else the first `E` line), so a chained exception
 cannot lend a test another class's symptom; a failure's message wins over a skip's. META.json gets pytest's exit code
@@ -76,6 +77,11 @@ def result(test):
     if outcome not in ("passed", "failed", "error", "skipped", "xfailed", "xpassed"):
         outcome = "error"
     return {"outcome": outcome, "message": failure if outcome in ("failed", "error") else (skip or failure)}
+
+
+def alone_usable(report):
+    m = meta(report)
+    return m["exitcode"] in (0, 1) and not m["collection_errors"]
 
 
 def merge_alone(results, alone_tests):
@@ -172,6 +178,8 @@ def self_test():
     assert res["a"] == {"outcome": "passed", "message": "", "under_load": {"outcome": "failed", "message": "m"}}, res["a"]
     assert res["b"] == {"outcome": "error", "message": "n", "alone": {"outcome": "failed", "message": "X: y"}}, res["b"]
     assert res["c"] == {"outcome": "passed", "message": ""} and "d" not in res, res
+    assert alone_usable({"exitcode": 1, "collectors": []}) and not alone_usable({"exitcode": 3}) and not alone_usable({})
+    assert not alone_usable({"exitcode": 0, "collectors": [{"nodeid": "a.py", "outcome": "failed"}]})
     print("collect.py self-test: ok")
 
 
@@ -218,7 +226,11 @@ def main(argv):
             f.write("\n")
     if alone:
         with open(alone) as f:
-            merge_alone(results, json.load(f).get("tests", []))
+            alone_report = json.load(f)
+        if alone_usable(alone_report):
+            merge_alone(results, alone_report.get("tests", []))
+        else:
+            print(f"collect: the isolated rerun did not end normally ({meta(alone_report)}); its results are not used")
     with open(collected_path) as f:
         collected = [l.strip() for l in f if "::" in l and not l.startswith(("=", " "))]
     hung = [n for n in collected if n not in results]
