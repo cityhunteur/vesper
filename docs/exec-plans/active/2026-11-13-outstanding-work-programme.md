@@ -23,8 +23,8 @@ it is why the run comes last.
 ## Progress
 
 - [x] Owner reviews and approves this plan, including the decisions marked "owner" in the Decision Log (2026-11-13, D-029)
-- [ ] W1 Housekeeping: remove the merged worktrees; split `src/systemvm.rs` (TD-043)
-- [ ] W2 TD-058 follow-up: flood test of the 1,024-flow cap; conntrack count after teardown
+- [x] W1 Housekeeping: remove the merged worktrees; split `src/systemvm.rs` (TD-043) (2026-11-13, #187)
+- [x] W2 TD-058 follow-up: flood test of the 1,024-flow cap; conntrack count after teardown (2026-11-13)
 - [ ] W3 #172: `make systemvm-upstream-suite` and the comparator (own ExecPlan)
 - [ ] W4 Runtime bounds: console logs (TD-055), memory budget (TD-056), snapshot store pruning (TD-053)
 - [ ] W5 #160: host shares into microVMs over NFS from `unfs3` (own ExecPlan; dependency approved in D-021)
@@ -35,7 +35,11 @@ it is why the run comes last.
 
 ## Surprises & Discoveries
 
-None yet.
+- W1: one `cargo test` run failed one test (300 passed, 1 failed) on the first run after the split. It did not come
+  back in 8 later runs on the branch or on `main`, and the failing test's name was not captured. It is part of W6.
+- W2: the 1,024-flow cap holds in each layer. The namespace held exactly 1,024 of 1,400 flows. A stopped lease
+  leaves its flows in the System VM's table: 1,028 before teardown and 1,028 after, which then age out on the
+  kernel's timers (30 s for UDP, 5 days for established TCP).
 
 ## Decision Log
 
@@ -82,7 +86,7 @@ Not yet written.
 Move share parsing (`SharedDirectory`, `shared_directories_from_specs`) from `src/systemvm.rs` into
 `src/systemvm/shares.rs`, with no change in behaviour, so the structure sensor stops warning.
 
-**W2.** Add an egress-suite step. A `nat` guest opens more than 1,024 TCP flows to a public listener, and the step
+**W2.** Done as two steps, one per layer, so the egress suite has 12 steps. Add an egress-suite step. A `nat` guest opens more than 1,024 TCP flows to a public listener, and the step
 asserts that the excess is dropped, using the `DROPS` counters and the guest probe results. The same step stops the
 lease and records the System VM's conntrack count before and after. If option b is approved, teardown also deletes
 the lease's entries. Update ADR 0008 and TD-058 with the measured result.
@@ -134,7 +138,7 @@ Each workstream follows the repository workflow:
 ## Validation and Acceptance
 
 - **W1:** the structure sensor prints no TD-043 warning, and `git worktree list` shows only the main checkout.
-- **W2:** the egress suite has 11 steps, all passing twice in one boot, and the flood step fails if the `connlimit`
+- **W2:** the egress suite has 12 steps, all passing twice in one boot, and the flood step fails if the `connlimit`
   rule is removed.
 - **W3:** `make systemvm-upstream-suite` completes with no hang, and the comparator exits 0 on the current results
   and non-zero on an injected unmatched failure. This meets #172's acceptance criteria.
