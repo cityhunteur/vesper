@@ -160,7 +160,7 @@ func (s *Service) Start(ctx context.Context, r *taskAPI.StartRequest) (*taskAPI.
 	if r.ExecID == "" {
 		pid, err = s.backend.Launch(ctx, t.ID, t.Image)
 		if err != nil {
-			_ = s.backend.Cleanup(context.Background(), r.ID)
+			_ = s.backend.Cleanup(context.Background(), r.ID, false)
 			return nil, errgrpc.ToGRPCf(errdefs.ErrFailedPrecondition, "launch microVM: %v", err)
 		}
 	} else {
@@ -178,7 +178,7 @@ func (s *Service) Start(ctx context.Context, r *taskAPI.StartRequest) (*taskAPI.
 	session, err := s.backend.OpenSession(ctx, r.ID, t.Port, t.Config, r.ExecID != "", backend.IO{Stdin: t.Stdin, Stdout: t.Stdout, Stderr: t.Stderr, Terminal: t.Terminal})
 	if err != nil {
 		if r.ExecID == "" {
-			_ = s.backend.Cleanup(context.Background(), r.ID)
+			_ = s.backend.Cleanup(context.Background(), r.ID, false)
 		} else {
 			_ = s.backend.Abort(context.Background(), r.ID, t.Port)
 			t.MarkExited(137, time.Now())
@@ -218,7 +218,7 @@ func (s *Service) watch(ctx context.Context, containerID string, t *Task) {
 		t.exiting = true
 		t.opMu.Unlock()
 		if err != nil {
-			_ = s.backend.Cleanup(ctx, containerID)
+			_ = s.backend.Cleanup(ctx, containerID, false)
 		}
 		s.mu.Lock()
 		children := make([]*Task, 0, len(s.execs))
@@ -315,7 +315,7 @@ func (s *Service) Delete(ctx context.Context, r *taskAPI.DeleteRequest) (*taskAP
 		return &taskAPI.DeleteResponse{Pid: uint32(t.Pid()), ExitStatus: status, ExitedAt: protobuf.ToTimestamp(at)}, nil
 	}
 	s.persist(ctx, t)
-	if err := s.backend.Cleanup(ctx, t.ID); err != nil {
+	if err := s.backend.Cleanup(ctx, t.ID, true); err != nil {
 		log.G(ctx).WithError(err).Warn("microVM cleanup on delete")
 	}
 	_ = os.Remove(t.Image)

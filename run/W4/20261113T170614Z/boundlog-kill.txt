@@ -1,0 +1,10 @@
+CLEAN w4-bl-kill
+shim.ca
+MEMBUDGET total=2068926464 reserve=268435456 budget=1800491008 committed=0 entries=0
+LAUNCHED w4-bl-kill pid=29724 boot_ms=1770
+boundlog pid=29721: /bin/sh /usr/local/bin/vesper-boundlog /var/log/vesper-microvm-w4-bl-kill.log 1048576 
+firecracker pid=29724 after the bounder died
+RUNNING w4-bl-kill pid=29724 vsock=absent
+ 17:15:56 up 9 min,  0 users,  load average: 0.40, 0.57, 0.39
+CLEAN w4-bl-kill
+MEMBUDGET total=2068926464 reserve=268435456 budget=1800491008 committed=0 entries=0

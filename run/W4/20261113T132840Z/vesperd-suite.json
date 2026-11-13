@@ -1,0 +1,121 @@
+{
+  "bridge_path": "run/systemvm/vsock/3.sock",
+  "port": 1024,
+  "steps": [
+    {
+      "name": "handshake",
+      "ok": true,
+      "detail": "protocol 1 host vesper",
+      "elapsed_ms": 0
+    },
+    {
+      "name": "vesperd_starts",
+      "ok": true,
+      "detail": "vesperd listening on run/vesperd-suite/main.sock (backend systemvm, microVM vesper-vesperd, Firecracker 1.16.0 pid 12614) (mode 600) after 312 ms; guest: RUNNING vesper-vesperd pid=12614 holder=12516",
+      "elapsed_ms": 318
+    },
+    {
+      "name": "second_vesperd_on_socket_refused",
+      "ok": true,
+      "detail": "exit Some(1): vesperd failed: another vesperd holds run/vesperd-suite/main.sock.lock; no microVM launched",
+      "elapsed_ms": 62
+    },
+    {
+      "name": "get_root_not_started",
+      "ok": true,
+      "detail": "GET / -> 200 {\"id\":\"vesper-vesperd\",\"state\":\"Not started\",\"vmm_version\":\"1.16.0\",\"app_name\":\"Firecracker\"}",
+      "elapsed_ms": 6
+    },
+    {
+      "name": "boot_through_vesperd",
+      "ok": true,
+      "detail": "PUT /machine-config (1 vCPU, 256 MiB), PUT /boot-source, PUT /actions InstanceStart -> 204 on one connection; InstanceStart took 9 ms",
+      "elapsed_ms": 15
+    },
+    {
+      "name": "get_root_running",
+      "ok": true,
+      "detail": "GET / -> 200 {\"id\":\"vesper-vesperd\",\"state\":\"Running\",\"vmm_version\":\"1.16.0\",\"app_name\":\"Firecracker\"}",
+      "elapsed_ms": 6
+    },
+    {
+      "name": "guest_boots",
+      "ok": true,
+      "detail": "the guest init printed VESPER-MICROVM-OK on the serial console",
+      "elapsed_ms": 2041
+    },
+    {
+      "name": "firecracker_error_byte_for_byte",
+      "ok": true,
+      "detail": "206 bytes identical through vesperd and FCAPI: HTTP/1.1 400 \\r\\nServer: Firecracker API\\r\\nConnection: keep-alive\\r\\nContent-Type: application/json\\r\\nContent-Length: 88\\r\\n\\r\\n{\"fault_message\":\"The requested operation is not supported after starting the microVM.\"}",
+      "elapsed_ms": 13
+    },
+    {
+      "name": "pause",
+      "ok": true,
+      "detail": "PATCH /vm Paused -> 204; GET / -> {\"id\":\"vesper-vesperd\",\"state\":\"Paused\",\"vmm_version\":\"1.16.0\",\"app_name\":\"Firecracker\"}",
+      "elapsed_ms": 7
+    },
+    {
+      "name": "snapshot_create_under_ceiling",
+      "ok": true,
+      "detail": "PUT /snapshot/create (Full, 256 MiB guest, jail on the data disk) -> 204 in 134 ms; ceiling 120 s",
+      "elapsed_ms": 134
+    },
+    {
+      "name": "resume",
+      "ok": true,
+      "detail": "PATCH /vm Resumed -> 204; GET / -> {\"id\":\"vesper-vesperd\",\"state\":\"Running\",\"vmm_version\":\"1.16.0\",\"app_name\":\"Firecracker\"}",
+      "elapsed_ms": 5
+    },
+    {
+      "name": "firecracker_connection_limit_passes_through",
+      "ok": true,
+      "detail": "10 connections open; the next got Firecracker's own 503 byte for byte; after closing them a new one works",
+      "elapsed_ms": 556
+    },
+    {
+      "name": "idle_timeout_closes_only_vesperd_connections",
+      "ok": true,
+      "detail": "vesperd closed an idle connection after 119997 ms with no bytes; a direct FCAPI connection idle for 125 s still answered GET / 200",
+      "elapsed_ms": 125014
+    },
+    {
+      "name": "same_id_refused",
+      "ok": true,
+      "detail": "refused after 15379 ms: vesperd failed: LAUNCHAPI vesper-vesperd: ERR busy vesper-vesperd after 15 s; another microVM holds the id; the first still answers GET / (Running)",
+      "elapsed_ms": 15386
+    },
+    {
+      "name": "sigterm_stops_microvm",
+      "ok": true,
+      "detail": "exit 0 after 53 ms; socket removed; ABSENT vesper-vesperd 4 ms later (jail, cgroup, record and process gone)",
+      "elapsed_ms": 60
+    },
+    {
+      "name": "sigkill_removes_microvm",
+      "ok": true,
+      "detail": "SIGKILL to vesperd; ABSENT vesper-vesperd-kill after 519 ms; stale socket file left: true (removed)",
+      "elapsed_ms": 837
+    },
+    {
+      "name": "firecracker_killed_vesperd_exits",
+      "ok": true,
+      "detail": "KILLED-FC vesper-vesperd-fcexit pid=15188; vesperd exited Some(1) after 961 ms: vesperd failed: the lease of microVM vesper-vesperd-fcexit closed: Firecracker exited or the System VM went away; ABSENT 7 ms later",
+      "elapsed_ms": 1293
+    },
+    {
+      "name": "tap_devices_in_own_netns",
+      "ok": true,
+      "detail": "PUT /network-interfaces eth0 (tap0) and eth1 (tap1) -> 204, and eth0 (tap0) on a concurrent second microVM -> 204; eth2 (tap9, not given) -> 400 \"{\\\"fault_message\\\":\\\"Network config error: Could not create the network device: Ope\"; PUT /mmds/config, InstanceStart -> 204; LINK lo state=UP owner=-, LINK tap0 state=UP owner=20000, LINK tap1 state=UP owner=20000, NETNS vesper-vesperd-net separate=true ino=4026532173, POLICY none; netns_ok on both; namespaces distinct; SIGTERM: ABSENT vesper-vesperd-net and vesper-vesperd-net2 4 ms later; net vesper-vesperd-net: ERR no network namespace for vesper-vesperd-net",
+      "elapsed_ms": 796
+    },
+    {
+      "name": "nothing_left",
+      "ok": true,
+      "detail": "no lease or jail for vesper-vesperd, vesper-vesperd-kill, vesper-vesperd-fcexit, vesper-vesperd-net, vesper-vesperd-net2; no socket in run/vesperd-suite",
+      "elapsed_ms": 3
+    }
+  ],
+  "passed": true
+}

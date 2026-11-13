@@ -289,6 +289,19 @@ enum ControlAction {
         #[arg(long, default_value = "run/vesperd-suite")]
         workdir: String,
     },
+    /// Run the TD-055 and TD-056 checklist: a console flood stays within the bounded log, the reaper prunes old logs,
+    /// and one memory budget admits `vesperd` and shim microVMs together.
+    BoundsSuite {
+        #[arg(long, default_value = "run/systemvm/bounds-report.json")]
+        report: String,
+        #[arg(long, default_value = "vesper-bounds")]
+        id: String,
+        /// The vesperd binary to start (`make systemvm-bounds-suite` builds it).
+        #[arg(long, default_value = "target/debug/vesperd")]
+        vesperd: String,
+        #[arg(long, default_value = "run/bounds-suite")]
+        workdir: String,
+    },
     /// Run the ADR 0008 egress checklist: `vesperd --network nat` guests probe from inside (public only, DNS, the
     /// System VM, the Mac, containers, other leases, spoofing), the root layer alone after a dockerd restart, teardown.
     EgressSuite {
@@ -584,6 +597,26 @@ fn run_control(endpoint: vesper::control::ControlEndpoint, action: ControlAction
                 return Err(format!("vesperd suite failed (report: {report})"));
             }
             println!("vesperd suite passed (report: {report})");
+        }
+        ControlAction::BoundsSuite { report, id, vesperd, workdir } => {
+            let run = control::VesperdRun {
+                binary: vesperd.into(),
+                workdir: workdir.clone().into(),
+                extra_args: vec![
+                    "--bridge".to_string(),
+                    endpoint.bridge_path.to_string_lossy().into_owned(),
+                    "--agent-port".to_string(),
+                    endpoint.port.to_string(),
+                ],
+            };
+            control::prepare_workdir(std::path::Path::new(&workdir))?;
+            let result = control::run_bounds_suite(&endpoint, &run, &id);
+            control::write_report(&report, &result)?;
+            print_steps(&result, 300);
+            if !result.passed {
+                return Err(format!("bounds suite failed (report: {report})"));
+            }
+            println!("bounds suite passed (report: {report})");
         }
         ControlAction::EgressSuite { report, id, vesperd, workdir } => {
             let run = control::VesperdRun {

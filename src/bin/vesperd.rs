@@ -44,7 +44,8 @@ enum Command {
 
 #[derive(Subcommand, Debug)]
 enum StoreAction {
-    /// `STORE NAME bytes=N links=L` per file, then `FREE avail=N reserve=N` (bytes on the data disk).
+    /// `STORE NAME bytes=N links=L` per file, then `FREE avail=N reserve=N store=N quota=N` (bytes: free on the data disk, the free-space
+    /// reserve, the store's size and its quota, TD-053).
     List,
     /// Remove one store file; a microVM that has it linked keeps its own link.
     Rm { name: String },

@@ -369,7 +369,14 @@ snapshots again, and assembles `run/systemvm/reliability-report.json` with
 
 The packages lock's `archives` section pins the Firecracker v1.16.0 aarch64 release (its tag commit `d83d72b7…` is
 the baseline revision of `docs/specs/design-v0.baselines.lock.yaml`, GH #162); `make systemvm-overlay` places
-`firecracker` and `jailer` under `/var/lib/vesper/firecracker/` in the guest. `vesper-microvm` (overlay,
+`firecracker` and `jailer` under `/var/lib/vesper/firecracker/` in the guest. Both launchers of Firecracker
+microVMs, `vesper-microvm` (the shim's) and `vesper-vesperd` (`vesperd`'s), share two bounds (TD-055, TD-056,
+decision D-029). `vesper-memadmit` keeps one memory budget: a launch is admitted only when the ceilings
+(`memory.max`) of every live microVM of either owner, plus the new one, stay within `MemTotal` less a 256 MiB reserve,
+and is refused otherwise with `ERR memory: …`. `vesper-boundlog` writes each console log, which is at most 1 MiB, the
+previous 1 MiB kept as `<log>.1`. `vesperd`'s reaper removes the logs of a microVM gone for 10 minutes; the shim's
+delete removes its logs (`vesper-microvm cleanup ID --logs`), and failure paths keep them for diagnosis.
+`vesper-microvm` (overlay,
 `usr/local/bin`) manages jailed microVMs: `prepare` unpacks the ISO's zboot kernel into a raw Image and builds a
 busybox initramfs whose init prints `VESPER-MICROVM-OK` (and powers off when the command line has `vesper_exit=1`);
 `launch ID [--exit]` copies kernel and initramfs into `/srv/jailer/firecracker/ID/root`, writes a single-file
@@ -560,8 +567,10 @@ A request names jail paths, so files reach the jail through `vesperd`:
 - `vesperd stage [--id ID] SRC DEST` copies while the microVM runs: `SRC` is also allowed to be `jail:/PATH`, and
   `DEST` to be `store:NAME`. It never links and never overwrites. Exit 0 prints `STAGED SRC DEST copy bytes=N`;
   exit 1 is a refusal in the System VM (the reason on stderr); exit 2 is a bad form, refused before connecting.
-- `vesperd store list` prints `STORE NAME bytes=N links=L` lines and `FREE avail=N reserve=N`; `vesperd store rm
-  NAME` removes one file (a jail that has it linked keeps its link).
+- `vesperd store list` prints `STORE NAME bytes=N links=L` lines and `FREE avail=N reserve=N store=N quota=N`;
+  `vesperd store rm NAME` removes one file (a jail that has it linked keeps its link). The store holds at most 25% of
+  the data disk (TD-053): a copy into it that would pass the quota is refused with `store quota: …`, and nothing is
+  ever removed from the store automatically.
 
 The rules (uid 20000 for jail-side reads and writes, no symlinks, a free-space reserve) are in
 [SECURITY.md](../SECURITY.md). A snapshot cycle from macOS, with a share at `$PWD/run/vesperd-share`

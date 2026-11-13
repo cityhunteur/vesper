@@ -316,7 +316,8 @@ Slice 1 is the first that can be built and shown working on its own; it needs no
 gates (D-018). Slice 3 is the first to drive Backend A through the API, and it needs no change to `vesperd`.
 
 Migration: none; the shim gains only the uid filter. New tech-debt rows: memory shared by both owners with no
-budget, no reattach, no network interfaces on `vesperd` microVMs.
+budget, no reattach, no network interfaces on `vesperd` microVMs. (Amended 2026-11-13, D-029: TD-056 is resolved by
+one admission budget over both owners' ceilings, `vesper-memadmit`; see RELIABILITY.md.)
 
 ### Upstream facts checked
 
