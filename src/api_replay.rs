@@ -28,7 +28,7 @@ pub const SNAPSHOT_STATE: &str = "/snap/vm.vmstate";
 pub const SNAPSHOT_MEM: &str = "/snap/vm.mem";
 /// The longest `{pad:N}`.
 const MAX_PAD: usize = 200_000;
-/// Taps a script set may list: `vesperd --tap` takes at most 8 (`vesper::control::MAX_TAPS`).
+/// Taps a script set may list: `vesperd --tap` takes at most 8, so a longer list could never be replayed.
 pub const MAX_TAPS: usize = 8;
 
 /// A file every case's root holds before the first step.
