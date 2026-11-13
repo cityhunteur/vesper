@@ -1,0 +1,151 @@
+{
+  "bridge_path": "run/systemvm/vsock/3.sock",
+  "port": 1024,
+  "steps": [
+    {
+      "name": "handshake",
+      "ok": true,
+      "detail": "protocol 1 host vesper",
+      "elapsed_ms": 1
+    },
+    {
+      "name": "data_disk_and_user",
+      "ok": true,
+      "detail": "DATA mounted /dev/vdb used=13428744 avail=48677620; USER vesperd-jail 20000",
+      "elapsed_ms": 4
+    },
+    {
+      "name": "share_files",
+      "ok": true,
+      "detail": "/Volumes/Workspace/github.com/cityhunteur/vesper/run/vesperd-share: d1.img and d2.img (1048576 bytes), link -> /etc/shadow; mounts: SHARE share0 /Volumes/Workspace/github.com/cityhunteur/vesper/run/vesperd-share mode=rw",
+      "elapsed_ms": 10
+    },
+    {
+      "name": "start_with_share_stage",
+      "ok": true,
+      "detail": "vesperd listening on run/vesperd-suite/a.sock (backend systemvm, microVM vesper-snap-a, Firecracker 1.16.0 pid 10506) after 309 ms; --stage copied: FILE /d1.img uid=20000 mode=644 links=1 bytes=1048576",
+      "elapsed_ms": 320
+    },
+    {
+      "name": "stage_into_running_jail",
+      "ok": true,
+      "detail": "STAGED share:/Volumes/Workspace/github.com/cityhunteur/vesper/run/vesperd-share/d2.img /d2.img copy bytes=1048576; FILE /d2.img uid=20000 mode=644 links=1 bytes=1048576",
+      "elapsed_ms": 35
+    },
+    {
+      "name": "boot_with_both_drives",
+      "ok": true,
+      "detail": "PUT /drives d1 (staged at start) and d2 (staged while Firecracker ran) -> 204, so Firecracker opens files staged into its running jail; InstanceStart 12 ms; VESPER-MARK token=9a14e4f13b647899 tick=1",
+      "elapsed_ms": 2058
+    },
+    {
+      "name": "refuses_symlinked_src",
+      "ok": true,
+      "detail": "share:/Volumes/Workspace/github.com/cityhunteur/vesper/run/vesperd-share/link -> /link: exit 1: vesperd stage: /Volumes/Workspace/github.com/cityhunteur/vesper/run/vesperd-share/link: symlink at /Volumes/Workspace/github.com/cityhunteur/vesper/run/vesperd-share/link; PLANTED vesper-snap-a; jail:/planted-link -> store:vesper-snap-probe: exit 1: vesperd stage: symlink at /planted-link",
+      "elapsed_ms": 32
+    },
+    {
+      "name": "refuses_symlinked_dest",
+      "ok": true,
+      "detail": "share:/Volumes/Workspace/github.com/cityhunteur/vesper/run/vesperd-share/d1.img -> /planted-dir/evil: exit 1: vesperd stage: symlink at /planted-dir; nothing written into the store",
+      "elapsed_ms": 32
+    },
+    {
+      "name": "refuses_src_outside_roots",
+      "ok": true,
+      "detail": "share:/etc/passwd -> /passwd: exit 1: vesperd stage: /etc/passwd is not inside a configured share; share:/Volumes/Workspace/github.com/cityhunteur/vesper/run/vesperd-share/../../../etc/passwd -> /passwd: exit 2: vesperd stage: bad SRC \"share:/Volumes/Workspace/github.com/cityhunteur/vesper/run/vesperd-share/../../../etc/passwd\": a path is absolute, of letters, digits and ._+,@=- between single slashes, with no . or .. component, at most 1024 bytes; share:/var/lib/vesper/state/vesperd/store/x -> /x: exit 1: vesperd stage: /var/lib/vesper/state/vesperd/store/x is not inside a configured share; jail:planted-root -> store:x: exit 2: vesperd stage: bad SRC \"jail:planted-root\": a path is absolute, of letters, digits and ._+,@=- between single slashes, with no . or .. component, at most 1024 bytes",
+      "elapsed_ms": 31
+    },
+    {
+      "name": "jail_side_read_runs_as_uid_20000",
+      "ok": true,
+      "detail": "FILE /planted-root uid=0 mode=600 links=1 bytes=7; jail:/planted-root -> store:vesper-snap-probe: exit 1: vesperd stage: /planted-root: permission denied for uid 20000; store:vesper-snap-probe not written",
+      "elapsed_ms": 41
+    },
+    {
+      "name": "reserve_refuses_breach",
+      "ok": true,
+      "detail": "RESERVE bytes=49795190784 avail=49795715072; share:/Volumes/Workspace/github.com/cityhunteur/vesper/run/vesperd-share/d1.img -> store:vesper-snap-probe: exit 1: vesperd stage: reserve: copying 1048576 bytes would leave 49794666496 of the 49795190784-byte free-space reserve (avail 49795715072); share:/Volumes/Workspace/github.com/cityhunteur/vesper/run/vesperd-share/d1.img -> /d3.img: exit 1: vesperd stage: reserve: copying 1048576 bytes would leave 49794666496 of the 49795190784-byte free-space reserve (avail 49795715072); RESERVE bytes=2068926464 (default)",
+      "elapsed_ms": 62
+    },
+    {
+      "name": "store_quota_refuses_breach",
+      "ok": true,
+      "detail": "QUOTA bytes=524288 used=0; share:/Volumes/Workspace/github.com/cityhunteur/vesper/run/vesperd-share/d1.img -> store:vesper-snap-probe: exit 1: vesperd stage: store quota: copying 1048576 bytes would bring the store to 1048576 of its 524288-byte quota (25% of the data disk); remove files with vesperd store rm; QUOTA bytes=2147483647 (default)",
+      "elapsed_ms": 41
+    },
+    {
+      "name": "pause_and_create",
+      "ok": true,
+      "detail": "paused at tick 3 (token 9a14e4f13b647899); PUT /snapshot/create (Full, 256 MiB) -> 204 in 244 ms, jail on the data disk; MEMORY vesper-snap-a current=380456960 peak=380678144 max=671088640 anon=102940672 file=268554240 shmem=0 ",
+      "elapsed_ms": 2269
+    },
+    {
+      "name": "copy_into_store",
+      "ok": true,
+      "detail": "STAGED jail:/snap.mem store:vesper-snap.mem copy bytes=268435456 in 880 ms; STAGED jail:/snap.vmstate store:vesper-snap.vmstate copy bytes=6186 in 19 ms; STAGED jail:/d1.img store:vesper-snap-d1.img copy bytes=1048576 in 21 ms; STAGED jail:/d2.img store:vesper-snap-d2.img copy bytes=1048576 in 21 ms; STORE vesper-snap.mem bytes=268435456 links=1",
+      "elapsed_ms": 954
+    },
+    {
+      "name": "stop_original",
+      "ok": true,
+      "detail": "SIGTERM: exit 0 after 53 ms; ABSENT vesper-snap-a 3 ms later",
+      "elapsed_ms": 59
+    },
+    {
+      "name": "new_vesperd_stages_by_link",
+      "ok": true,
+      "detail": "vesperd listening on run/vesperd-suite/b.sock (backend systemvm, microVM vesper-snap-b, Firecracker 1.16.0 pid 11642) after 310 ms; FILE /snap.mem uid=0 mode=444 links=2 bytes=268435456; FILE /snap.vmstate uid=0 mode=444 links=2 bytes=6186; FILE /d1.img uid=20000 mode=644 links=1 bytes=1048576",
+      "elapsed_ms": 343
+    },
+    {
+      "name": "load_and_resume",
+      "ok": true,
+      "detail": "PUT /snapshot/load -> 204 in 5 ms; PATCH /vm Resumed -> 204; GET / -> {\"id\":\"vesper-snap-b\",\"state\":\"Running\",\"vmm_version\":\"1.16.0\",\"app_name\":\"Firecracker\"}",
+      "elapsed_ms": 7
+    },
+    {
+      "name": "guest_state_survives",
+      "ok": true,
+      "detail": "the guest kept token 9a14e4f13b647899 in memory and counts on: tick 3 before the snapshot, ticks 4..6 after the restore in vesper-snap-b",
+      "elapsed_ms": 3018
+    },
+    {
+      "name": "create_onto_linked_file_fails",
+      "ok": true,
+      "detail": "PUT /snapshot/create onto /snap.mem and /snap.vmstate -> 400 {\"fault_message\":\"Create snapshot error: Cannot perform open on the snapshot backing file: Permission denied (os error 13)\"} (upstream overwrites; CE-0008); the store file is unchanged (STORE vesper-snap.mem bytes=268435456 links=2); a create onto new paths -> 204",
+      "elapsed_ms": 251
+    },
+    {
+      "name": "stop_restored",
+      "ok": true,
+      "detail": "SIGTERM: exit 0 after 51 ms; ABSENT vesper-snap-b 4 ms later; STORE vesper-snap.mem bytes=268435456 links=1",
+      "elapsed_ms": 70
+    },
+    {
+      "name": "stage_refused_at_start",
+      "ok": true,
+      "detail": "exit Some(1): vesperd failed: LAUNCHAPI vesper-snap-c: stage share:/etc/passwd:/passwd: /etc/passwd is not inside a configured share; ABSENT vesper-snap-c after 3 ms",
+      "elapsed_ms": 165
+    },
+    {
+      "name": "measure_create_at_default_ceiling",
+      "ok": true,
+      "detail": "640 MiB guest, VESPER-FILL-OK mib=512, memory.max 640 MiB: PUT /snapshot/create -> 204 in 1924 ms (ceiling 120 s); before: MEMORY vesper-snap-m current=641564672 peak=641728512 max=671088640 anon=639811584 file=45056 shmem=0 ; after: MEMORY vesper-snap-m current=670973952 peak=671088640 max=671088640 anon=639836160 file=27115520 shmem=0 ; GET / Paused; SIGTERM: exit 0 after 55 ms; ABSENT vesper-snap-m 4 ms later",
+      "elapsed_ms": 5388
+    },
+    {
+      "name": "store_rm",
+      "ok": true,
+      "detail": "REMOVED vesper-snap.mem; REMOVED vesper-snap.vmstate; REMOVED vesper-snap-d1.img; REMOVED vesper-snap-d2.img; a second rm and a bad name are refused",
+      "elapsed_ms": 55
+    },
+    {
+      "name": "nothing_left",
+      "ok": true,
+      "detail": "no lease or jail for vesper-snap-a, vesper-snap-b, vesper-snap-c, vesper-snap-m; no suite file in the store; no socket in run/vesperd-suite",
+      "elapsed_ms": 12
+    }
+  ],
+  "passed": true
+}
