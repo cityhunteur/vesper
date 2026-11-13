@@ -1,0 +1,21 @@
+reference=all-pass partial=false total=980 passed=751 to_explain={"error": 38, "failed": 95, "skipped": 96} not_passing_on_reference=0 missing_from_run=0
+class apple-cpu-features-unknown: 8
+class apple-cpu-no-cache-topology: 24
+class apple-cpu-ssb-vulnerable: 10
+class guest-ssh-timeout-under-load: 5
+class max-devices-worker-timeout: 2
+class no-dmi: 1
+class no-userfaultfd: 8
+class rate-limiter-balloon-tolerance: 7
+class upstream-platform-skip: 96
+class vmm-memory-overhead: 60
+class vsock-reset-after-snapshot: 1
+classes that explained nothing in this run: balloon-stats-not-refreshed, vmclock-gen-counter-flag, vmm-exit-timeout-under-load
+UNMATCHED integration_tests/functional/test_concurrency.py::test_run_concurrency[vmlinux-5.10.253-PCI_ON] error host_tools.memory.MemoryUsageExceededError: ('Memory usage (6.52 MiB) exceeded maximum threshold (5.0 MiB)', psutil.Process(pid=26322, status='terminated', started='15:51:56'))
+UNMATCHED integration_tests/functional/test_drive_virtio.py::test_partuuid_update[Async-vmlinux-5.10.253-PCI_ON] error host_tools.memory.MemoryUsageExceededError: ('Memory usage (6.56 MiB) exceeded maximum threshold (5.0 MiB)', psutil.Process(pid=12204, status='terminated', started='16:19:27'))
+UNMATCHED integration_tests/functional/test_net.py::test_tap_offload[uvm_restored-vmlinux-6.1.172-PCI_ON] error host_tools.memory.MemoryUsageExceededError: ('Memory usage (6.79 MiB) exceeded maximum threshold (5.0 MiB)', psutil.Process(pid=16871, status='terminated', started='16:25:53'))
+UNMATCHED integration_tests/functional/test_net_config_space.py::test_net_change_mac_address[vmlinux-5.10.253-PCI_OFF] failed AssertionError: Message ("API server started.") not found in log data ("").
+UNMATCHED integration_tests/functional/test_serial_io.py::test_serial_console_login[vmlinux-6.1.172-PCI_OFF] failed AssertionError
+UNMATCHED integration_tests/functional/test_vmclock.py::test_snapshot_update[SnapshotType.FULL-vmlinux-5.10.253-PCI_OFF-read()] failed host_tools.memory.MemoryUsageExceededError: ('Memory usage (6.75 MiB) exceeded maximum threshold (7.0 MiB)', psutil.Process(pid=8116, status='terminated', started='16:14:23'))
+UNMATCHED integration_tests/security/test_fips.py::test_fips_reseeded_userspace_csprng[vmlinux-6.1.172] error host_tools.memory.MemoryUsageExceededError: ('Memory usage (6.51 MiB) exceeded maximum threshold (7.0 MiB)', psutil.Process(pid=25009, status='terminated', started='16:36:41'))
+upstream-compare: 7 result(s) match no exception class

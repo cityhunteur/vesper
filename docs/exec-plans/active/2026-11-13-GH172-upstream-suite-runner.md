@@ -101,6 +101,14 @@ Either way, a new, unexplained failure turns the run red.
 - 2026-11-13: run 3 is therefore not the frozen-class evidence. The classes, comparator, collector and runner are
   frozen again (`run/GH-172/frozen-classes.sha256`) for a fourth full run. If it too leaves load results unmatched,
   fitting stops and the owner decides how the comparator should treat timing under load.
+- 2026-11-13: the fourth full run (`20261113T152208Z`, 4,975 s, 751 passed), judged with everything frozen (hashes
+  verified after it), left 7 unmatched: five memory overshoots of 6.51 to 6.79 MiB in tests the class does not name
+  (`test_concurrency`, `test_partuuid_update`, `test_tap_offload`, `test_vmclock::test_snapshot_update`, `test_fips`), and two
+  one-off failures in tests that passed in the other three runs (`test_net_change_mac_address`: "API server started."
+  not in an empty log; `test_serial_console_login`: a bare AssertionError). The harness fixes held: all of
+  `test_jail.py` and `test_custom_seccomp.py` passed. Over the four runs the overshoot hit 54, 57, 55 and 65 tests, 80
+  distinct ones in 14 files and only 33 in all four, so it is not a property of the named tests: a list of test
+  names cannot be frozen for it. Fitting has stopped; how the comparator treats this is with the owner.
 
 ## Decision Log
 
