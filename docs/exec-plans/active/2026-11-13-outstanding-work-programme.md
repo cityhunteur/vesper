@@ -26,7 +26,7 @@ it is why the run comes last.
 - [x] W1 Housekeeping: remove the merged worktrees; split `src/systemvm.rs` (TD-043) (2026-11-13, #187)
 - [x] W2 TD-058 follow-up: flood test of the 1,024-flow cap; conntrack count after teardown (positive and negative-control runs 2026-11-13, `run/TD-058/egress-flood-*.json`)
 - [ ] W3 #172: `make systemvm-upstream-suite` and the comparator (own ExecPlan)
-- [ ] W4 Runtime bounds: console logs (TD-055), memory budget (TD-056), snapshot store pruning (TD-053)
+- [ ] W4 Runtime bounds: console logs (TD-055), memory budget (TD-056), snapshot store quota (TD-053)
 - [ ] W5 #160: host shares into microVMs over NFS from `unfs3` (own ExecPlan; dependency approved in D-021)
 - [ ] W6 ctr-conformance hang: reproduce, then fix or record it
 - [x] W7 Repository settings: the owner applies them (D-029); nothing for the agent to do

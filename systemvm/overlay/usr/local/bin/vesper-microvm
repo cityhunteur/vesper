@@ -31,10 +31,11 @@ MARKER="VESPER-MICROVM-OK"
 fcpid() { pgrep -u "$JUID" -f "firecracker --id $1 " 2>/dev/null | head -1; }
 now_ms() { awk '{printf "%d", $1 * 1000}' /proc/uptime; }
 logfile() { echo "/var/log/vesper-microvm-$1.log"; }
-# memory.max of each microVM, counted in the shared budget (TD-056): the 256 MiB guest plus 128 MiB for Firecracker,
-# page tables, I/O buffers and reclaimable page cache. A guest that used all its memory peaked at 259 MiB (2026-11-13),
-# so a 2 GiB System VM's budget holds four of these; vesperd's 640 MiB default is for its larger, configurable guests.
-CEILING=402653184
+# memory.max of each microVM, counted in the shared budget (TD-056): the 256 MiB guest plus 96 MiB for Firecracker,
+# page tables, I/O buffers and reclaimable page cache. A guest that used all its memory peaked at 259 MiB
+# (run/W4/shim-memory-peak.txt). Launch also books the jail's tmpfs copies (kernel and initramfs, about 44 MB, and the
+# rootfs), so a 2 GiB System VM's budget holds four; vesperd's 640 MiB default is for its larger, configurable guests.
+CEILING=369098752
 LOG_MAX=1048576                    # console log bound: the log plus one previous file (TD-055)
 
 prepare() {
@@ -109,7 +110,19 @@ launch() {
   prep=$(prepare) || { echo "$prep"; return 1; }
   if [ -n "$rootfs" ] && [ ! -f "$rootfs" ]; then echo "ERR rootfs $rootfs missing"; return 1; fi
   if [ -n "$(fcpid "$id")" ]; then echo "ERR $id already running"; return 1; fi
-  adm=$(/usr/local/bin/vesper-memadmit acquire shim "$id" "$CEILING") || { echo "$adm" | head -1; return 1; }
+  # Every check that can refuse the request comes before the memory admission, so a bad request takes nothing.
+  if [ "$runc_smoke" = 1 ]; then
+    [ -n "$rootfs" ] && [ -z "$cmd64" ] && [ -z "$mode" ] || { echo "ERR --runc-smoke needs --rootfs and excludes --cmd/--exit"; return 2; }
+  fi
+  if [ "$guestexec" = 1 ]; then
+    [ -n "$rootfs" ] && [ -z "$cmd64" ] && [ -z "$mode" ] && [ "$runc_smoke" = 0 ] || { echo "ERR --guest-exec needs --rootfs and excludes --cmd/--exit/--runc-smoke"; return 2; }
+  fi
+  if [ -n "$cmd64" ] && [ -z "$rootfs" ]; then echo "ERR --cmd needs --rootfs"; return 2; fi
+  # The jail lives on the tmpfs root, so the kernel, initrd and rootfs copied into it use System VM memory outside
+  # the cgroup: book them with the ceiling.
+  copies=0
+  for f in "$MVM/Image" "$MVM/initrd.gz" ${rootfs:+"$rootfs"}; do s=$(stat -c %s "$f" 2>/dev/null) && copies=$((copies + s)); done
+  adm=$(/usr/local/bin/vesper-memadmit acquire shim "$id" $((CEILING + copies))) || { echo "$adm" | head -1; return 1; }
   root="$JAIL/firecracker/$id/root"
   rm -rf "$JAIL/firecracker/$id"
   mkdir -p "$root"
@@ -118,16 +131,13 @@ launch() {
   extra=""
   [ "$mode" = "--exit" ] && extra=" vesper_exit=1"
   if [ "$runc_smoke" = 1 ]; then
-    [ -n "$rootfs" ] && [ -z "$cmd64" ] && [ -z "$mode" ] || { echo "ERR --runc-smoke needs --rootfs and excludes --cmd/--exit"; return 2; }
     extra="$extra vesper_runc_smoke=1"
   fi
   if [ "$guestexec" = 1 ]; then
-    [ -n "$rootfs" ] && [ -z "$cmd64" ] && [ -z "$mode" ] && [ "$runc_smoke" = 0 ] || { echo "ERR --guest-exec needs --rootfs and excludes --cmd/--exit/--runc-smoke"; return 2; }
     extra="$extra vesper_guest_exec=1"
   fi
   drives="[]"
   if [ -n "$cmd64" ]; then
-    [ -n "$rootfs" ] || { echo "ERR --cmd needs --rootfs"; return 2; }
     extra="$extra vesper_cmd=$cmd64"
   fi
   if [ -n "$rootfs" ]; then
@@ -144,7 +154,7 @@ launch() {
   chown -R "$JUID:$JGID" "$JAIL/firecracker/$id"
   lf=$(logfile "$id"); pipe="/var/log/.vesper-microvm-$id.pipe"
   rm -f "$lf" "$lf.1" "$pipe"
-  mkfifo -m 0600 "$pipe" || { echo "ERR console pipe"; return 1; }
+  mkfifo -m 0600 "$pipe" || { echo "ERR console pipe"; cleanup "$id" > /dev/null; return 1; }
   : > "$lf"
   # Not on our stdout or stderr: the caller (the agent) reads them to EOF, and the bounder outlives this script.
   /usr/local/bin/vesper-boundlog "$lf" "$LOG_MAX" < "$pipe" > /dev/null 2>&1 &
@@ -222,7 +232,6 @@ cleanup() {
   rm -rf "$JAIL/firecracker/$id"
   rm -f "/var/log/.vesper-microvm-$id.pipe"
   [ "${2:-}" = --logs ] && rm -f "$(logfile "$id")" "$(logfile "$id").1"
-  /usr/local/bin/vesper-memadmit release shim "$id" 2>/dev/null
   for cg in "/sys/fs/cgroup/firecracker/$id" "/sys/fs/cgroup/$id"; do
     [ -d "$cg" ] && rmdir "$cg" 2>/dev/null
   done
@@ -232,7 +241,10 @@ cleanup() {
   [ -d "/sys/fs/cgroup/firecracker/$id" ] && dirty="$dirty cgroup"
   grep -q "/firecracker/$id/" /proc/mounts 2>/dev/null && dirty="$dirty mount"
   find /run -name "*$id*" -type s 2>/dev/null | grep -q . && dirty="$dirty socket"
-  if [ -z "$dirty" ]; then echo "CLEAN $id"; else echo "DIRTY $id$dirty"; return 1; fi
+  # The memory stays admitted while anything of the microVM is left (D-029); vesper-memadmit drops a DIRTY entry
+  # itself once the cgroup and jail are gone.
+  if [ -z "$dirty" ]; then /usr/local/bin/vesper-memadmit release shim "$id" 2>/dev/null; echo "CLEAN $id"
+  else echo "DIRTY $id$dirty"; return 1; fi
 }
 
 mlog() { id=$1; n=${2:-20}; lf=$(logfile "$id"); [ -f "$lf" ] && cat "$lf.1" "$lf" 2>/dev/null | tail -n "$n" || echo "ERR no log for $id"; }

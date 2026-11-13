@@ -205,9 +205,12 @@ teardown() { # ID (caller holds the lock) -> CLEAN ID | DIRTY ID <what>
   nat_down "$tid"
   netns_down "$tid"
   rm -f "$LEASES/$tid" "$LOGS/.$tid.pipe"
-  "$MEMADMIT" release vesperd "$tid" 2>/dev/null
+  # Start the log's keep time now, so the reaper prunes it KEEP after teardown, not after its last write.
+  touch -c "$LOGS/$tid.log" 2>/dev/null
   left=$(leftovers "$tid")
-  if [ -z "$left" ]; then echo "CLEAN $tid"; else echo "DIRTY $tid $left"; return 1; fi
+  # The memory stays admitted while anything of the microVM is left (D-029: never overcommit). A DIRTY entry is
+  # dropped by vesper-memadmit itself once the cgroup and jail are gone.
+  if [ -z "$left" ]; then "$MEMADMIT" release vesperd "$tid" 2>/dev/null; echo "CLEAN $tid"; else echo "DIRTY $tid $left"; return 1; fi
 }
 
 # ---- networking (CE-0010, TD-058) -------------------------------------------------------------------------
@@ -573,9 +576,13 @@ avail_bytes() { df -k "$DATA" | awk 'NR==2 {print $4 * 1024}'; }
 store_quota() { # bytes the store may hold: STORE_PCT of the data disk, unless a test overrides it
   q=$(cat "$QUOTA_OVERRIDE" 2>/dev/null)
   digits "$q" && { echo "$q"; return; }
-  df -k "$DATA" | awk -v p="$STORE_PCT" 'NR==2 {printf "%d", $2 * 1024 * p / 100}'
+  # Shell arithmetic is 64-bit; BusyBox awk's printf "%d" clamps to 2^31-1, which once made the quota 2 GiB.
+  kib=$(df -k "$DATA" | awk 'NR==2 {print $2}')
+  digits "$kib" || return 1
+  echo $((kib * 1024 / 100 * STORE_PCT))
 }
-store_used() { u=0; for f in "$STORE"/* "$STORE"/.partial.*; do [ -f "$f" ] && u=$((u + $(stat -c %s "$f"))); done; echo "$u"; }
+store_used() { # a file removed mid-scan counts 0, so the sum never fails on a missing stat
+  u=0; for f in "$STORE"/* "$STORE"/.partial.*; do s=$(stat -c %s "$f" 2>/dev/null) && u=$((u + s)); done; echo "$u"; }
 quota_check() { # BYTES (store lock held): refuse a copy into the store that would pass its quota
   used=$(store_used); q=$(store_quota)
   digits "$q" || { echo "store quota unknown"; return 1; }
@@ -764,11 +771,14 @@ launch_stage() { # ROOT SPEC...
 
 store_list() {
   data_dirs || { echo "ERR data disk not in use"; return 1; }
+  store_lock
   for f in "$STORE"/*; do
     [ -f "$f" ] || continue
-    echo "STORE ${f##*/} bytes=$(stat -c %s "$f") links=$(stat -c %h "$f")"
+    st=$(stat -c '%s %h' "$f" 2>/dev/null) || continue
+    echo "STORE ${f##*/} bytes=${st% *} links=${st#* }"
   done
   echo "FREE avail=$(avail_bytes) reserve=$(reserve_bytes) store=$(store_used) quota=$(store_quota)"
+  store_unlock
 }
 store_rm() {
   [ "$#" -eq 1 ] && valid_name "$1" || { echo "ERR usage: store-rm NAME"; return 2; }
@@ -1210,7 +1220,7 @@ reap_loop() {
   ensure_dirs
   while :; do
     out=$(lock; reap_pass; unlock)
-    printf '%s\n' "$out" | grep '^REAPED' | while IFS= read -r l; do logger -t vesperd-reaper "$l" 2>/dev/null; done
+    printf '%s\n' "$out" | grep -E '^(REAPED|PRUNED)' | while IFS= read -r l; do logger -t vesperd-reaper "$l" 2>/dev/null; done
     sleep "$interval"
   done
 }

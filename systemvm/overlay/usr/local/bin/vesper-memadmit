@@ -12,17 +12,19 @@
 #        vesper-memadmit test-reserve BYTES|clear test hook: override the reserve until reboot
 # OWNER is shim (cgroup /sys/fs/cgroup/firecracker/ID) or vesperd (cgroup /sys/fs/cgroup/vesperd/ID).
 set -u
-DIR=/run/vesper/mem
-LOCK=/run/vesper/mem.lock
-OVERRIDE=/run/vesper/mem.reserve
+# Tests run this hermetically as an ordinary user under VESPER_MEMADMIT_ROOT; as root (in the System VM) it is ignored.
+R=""; [ "$(id -u)" != 0 ] && R=${VESPER_MEMADMIT_ROOT:-}
+DIR=$R/run/vesper/mem
+LOCK=$R/run/vesper/mem.lock
+OVERRIDE=$R/run/vesper/mem.reserve
 DEFAULT_RESERVE=268435456   # 256 MiB for the System VM's own processes and tmpfs
 PENDING_S=30
 
 digits() { case "${1:-}" in ''|*[!0-9]*) return 1 ;; esac; }
 valid_id() { case "${1:-}" in ''|*[!A-Za-z0-9-]*) return 1 ;; esac; [ "${#1}" -le 64 ]; }
-cgroup_of() { case "$1" in shim) echo "/sys/fs/cgroup/firecracker/$2" ;; vesperd) echo "/sys/fs/cgroup/vesperd/$2" ;; esac; }
-jail_of() { case "$1" in shim) echo "/srv/jailer/firecracker/$2" ;; vesperd) echo "/var/lib/vesper/state/vesperd/jailer/firecracker/$2" ;; esac; }
-total() { awk '/^MemTotal:/{print $2 * 1024}' /proc/meminfo; }
+cgroup_of() { case "$1" in shim) echo "$R/sys/fs/cgroup/firecracker/$2" ;; vesperd) echo "$R/sys/fs/cgroup/vesperd/$2" ;; esac; }
+jail_of() { case "$1" in shim) echo "$R/srv/jailer/firecracker/$2" ;; vesperd) echo "$R/var/lib/vesper/state/vesperd/jailer/firecracker/$2" ;; esac; }
+total() { awk '/^MemTotal:/{print $2 * 1024}' "$R/proc/meminfo"; }
 reserve() { r=$(cat "$OVERRIDE" 2>/dev/null); if digits "$r"; then echo "$r"; else echo "$DEFAULT_RESERVE"; fi; }
 now() { date +%s; }
 
@@ -52,8 +54,15 @@ case "$cmd" in
     case "$owner" in shim|vesperd) ;; *) echo "ERR usage: acquire shim|vesperd ID BYTES"; exit 2 ;; esac
     valid_id "$id" && digits "$bytes" || { echo "ERR usage: acquire shim|vesperd ID BYTES"; exit 2; }
     with_lock
-    rm -f "$DIR/$owner.$id"
     set -- $(committed); c=$1
+    # An entry for the same id that is still counted: refuse while its launch may be in progress (PENDING_S), else
+    # it belongs to a microVM the caller has already found dead, and this admission replaces it.
+    e="$DIR/$owner.$id"
+    if [ -f "$e" ]; then
+      age=$(( $(now) - $(stat -c %Y "$e" 2>/dev/null || echo 0) ))
+      [ "$age" -ge "$PENDING_S" ] || { echo "ERR busy: $owner $id was admitted ${age} s ago and may still be launching"; exit 1; }
+      old=$(cat "$e" 2>/dev/null); digits "$old" && c=$((c - old))
+    fi
     tot=$(total); res=$(reserve); budget=$((tot - res))
     if [ $((c + bytes)) -gt "$budget" ]; then
       echo "ERR memory: a $bytes-byte ceiling would commit $((c + bytes)) of $budget bytes (MemTotal $tot less a $res-byte reserve); stop a microVM or lower the ceiling"

@@ -13,14 +13,15 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 /// Steps a full run records.
-const STEPS: usize = 7;
+const STEPS: usize = 8;
 /// Bytes the guest writes to its console: more than both log files hold together.
 /// 2.5 MB rotates the log twice. The console is slow under nested virtualisation (one MMIO exit per byte), so the
 /// step allows 600 s.
 const FLOOD: u64 = 2_500_000;
 /// How long the guest may take to write `FLOOD` bytes to its console.
 const FLOOD_WAIT: Duration = Duration::from_secs(600);
-/// `vesperd`'s default ceiling (640 MiB). The shim's microVMs use 384 MiB, so one fits in the room left for this.
+/// `vesperd`'s default ceiling (640 MiB). A shim microVM books 352 MiB plus its jail copies, so one fits in the room
+/// left for this.
 const CEILING: u64 = 671_088_640;
 /// Room above one ceiling, so a little drift in what is committed does not admit or refuse by accident.
 const SLACK: u64 = 64 << 20;
@@ -177,6 +178,36 @@ pub fn run_bounds_suite(endpoint: &ControlEndpoint, run: &VesperdRun, id: &str) 
         let (mut vb, _, _) = run.start_with(&b, &format!("{b}.sock"), &[])?;
         stop(&mut control, &mut vb, &b)?;
         Ok(((), format!("{}; {b} refused while it ran ({}); {}; then {b} admitted", first(&launched), err.chars().take(120).collect::<String>(), first(&clean))))
+    });
+
+    step(&mut steps, "failed_launches_give_the_budget_back", || {
+        let before = budget(&mut control)?;
+        // Refused before admission: a bad option combination takes nothing.
+        let (rc, bad) = control.microvm(&["launch", &shim, "--cmd", "dHJ1ZQ=="])?;
+        if rc == 0 || !first(&bad).contains("--cmd needs --rootfs") {
+            let _ = control.microvm(&["cleanup", &shim, "--logs"]);
+            return Err(format!("shim launch with --cmd and no rootfs: rc {rc}: {}", bad.join(" | ")));
+        }
+        // Refused after admission: vesperd stages before Firecracker starts, and a stage outside every share fails
+        // the launch, whose teardown must give the memory back.
+        let flags = vec!["--stage".to_string(), "share:/etc/passwd:/passwd".to_string()];
+        let err = match run.start_with(&b, &format!("{b}.sock"), &flags) {
+            Ok(_) => return Err(format!("{b} started with a stage outside every share")),
+            Err(e) if e.contains("not inside a configured share") => e,
+            Err(e) => return Err(format!("{b} failed, but not at staging: {e}")),
+        };
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let after = loop {
+            let now = budget(&mut control)?;
+            if now == before || Instant::now() >= deadline {
+                break now;
+            }
+            thread::sleep(Duration::from_millis(200));
+        };
+        if after != before {
+            return Err(format!("before {before:?}, after {after:?}"));
+        }
+        Ok(((), format!("{}; {b}: {}; committed {} in {} entries before and after", first(&bad), err.chars().take(120).collect::<String>(), after.committed, after.entries)))
     });
 
     step(&mut steps, "budget_whole_again", || {

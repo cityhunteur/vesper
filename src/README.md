@@ -458,7 +458,7 @@ Public symbols by file:
   unlisted tap Firecracker's own 400, `netns_ok`, the namespace gone after SIGTERM; CE-0010) and `nothing_left`
   (leases, jails and network namespaces); `passed` requires all 19 steps ok. It uses the control channel only to inspect and fault the guest.
 - `control/suites/bounds.rs:run_bounds_suite` (TD-055, TD-056) ages and reaps its ids, then `console_log_bounded`
-  (a guest with `vesper_console_flood=3500000`; `VESPERD logsize` shows both files within 1 MiB plus one line),
+  (a guest with `vesper_console_flood=2500000`; `VESPERD logsize` shows both files within 1 MiB plus one line),
   `log_pruned_after_keep_time` (`VESPERD test-age-log`, then `reap` prints `PRUNED`), `budget_refuses_a_second_vesperd`
   (`VESPERD test-mem-reserve` leaves room for one 640 MiB ceiling; the second `vesperd` fails with `ERR memory`),
   `budget_counts_shim_microvms` (`MICROVM launch` takes the room; `vesperd` is refused until `MICROVM cleanup`),
