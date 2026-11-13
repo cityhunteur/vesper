@@ -30,7 +30,7 @@ Public symbols by file:
 
 - `lib.rs`: `pub mod api, api_behavior_matrix, api_matrix, api_replay, baseline,
   buildinfo, compat, control, platform, proxy, spec, systemvm`. `systemvm.rs` declares
-  the private children `systemvm/bridge.rs`, `systemvm/data_disk.rs`, `systemvm/image_lock.rs` and
+  the private children `systemvm/boot_check.rs` (the boot smoke check, TD-043), `systemvm/bridge.rs`, `systemvm/data_disk.rs`, `systemvm/image_lock.rs` and
   `systemvm/packages.rs` and re-exports them, so every symbol below is reachable as
   `vesper::systemvm::*`.
 - `api.rs:ErrorEnvelope` `{ fault_message, code, path, method,
@@ -319,7 +319,7 @@ Public symbols by file:
   requests defeat it.
 - `spec.rs:load_routes` sorts by path then method and dedups; errors on a
   missing `paths` section or empty route list.
-- `systemvm.rs:run_boot_check` requires `iterations > 0` and non-blank
+- `systemvm/boot_check.rs:run_boot_check` requires `iterations > 0` and non-blank
   `command`, `log_path`, and `report_path`, clamps `timeout_seconds` to at
   least 1, captures the command's stdout (logged as `stdout=` lines), takes
   `boot_ms` from the first `{"status":"ready","elapsed_ms":N}` JSON line
@@ -512,7 +512,7 @@ Public symbols by file:
   `<vsock_socket_dir>/<cid>.sock` upstream, runs the preface when one is set, and relays. With
   `bounds.max_connections` a client accepted beyond the cap is dropped at once. `claim_socket` creates a missing
   parent directory with mode 0700, creates `<path>.lock` and removes a stale socket.
-- `systemvm.rs:run_boot_check` spawns `std::process::Command::new(command)`
+- `systemvm/boot_check.rs:run_boot_check` spawns `std::process::Command::new(command)`
   per iteration, kills it on timeout, and writes `log_path` and
   `report_path`. `build_manifest` reads the kernel and rootfs files to
   compute SHA-256 digests.
