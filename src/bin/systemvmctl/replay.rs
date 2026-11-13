@@ -50,6 +50,7 @@ fn to_runner(steps: &[Step]) -> Vec<ReplayStep> {
         .map(|s| match s {
             Step::Http { method, path, body } => ReplayStep::Http { method: method.clone(), path: path.clone(), body: body.clone() },
             Step::Wait { ms } => ReplayStep::Wait { ms: *ms },
+            Step::GuestReady { ms } => ReplayStep::GuestReady { ms: *ms },
         })
         .collect()
 }

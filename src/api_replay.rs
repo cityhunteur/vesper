@@ -75,6 +75,10 @@ pub struct ReplayScripts {
 pub enum Step {
     Http { method: String, path: String, body: Option<String> },
     Wait { ms: u64 },
+    /// Wait, at most `ms`, until the booted guest's init has loaded its device drivers (on Backend A, its
+    /// `VESPER-MICROVM-OK` console marker, printed after `modprobe virtio_balloon virtio_mem`); the model has no
+    /// guest, so it continues at once.
+    GuestReady { ms: u64 },
 }
 
 /// What a backend saw for one `Step::Http` (a `Wait` returns status 0 and no body).
@@ -318,6 +322,13 @@ fn expand_pads(line: &str) -> Result<String, String> {
 /// `METHOD /path [JSON]` or `WAIT <ms>`.
 pub fn parse_step(line: &str) -> Result<Step, String> {
     let line = line.trim();
+    if let Some(ms) = line.strip_prefix("GUEST_READY ") {
+        let ms: u64 = ms.trim().parse().map_err(|_| format!("bad GUEST_READY {line:?}"))?;
+        if ms > MAX_WAIT_MS {
+            return Err(format!("GUEST_READY {ms} exceeds {MAX_WAIT_MS} ms"));
+        }
+        return Ok(Step::GuestReady { ms });
+    }
     if let Some(ms) = line.strip_prefix("WAIT ") {
         let ms: u64 = ms.trim().parse().map_err(|_| format!("bad WAIT {line:?}"))?;
         if ms > MAX_WAIT_MS {
@@ -561,6 +572,8 @@ mod tests {
         assert_eq!(steps.len(), 4);
         assert_eq!(steps[0], Step::Http { method: "PUT".into(), path: "/boot-source".into(), body: Some("{\"kernel_image_path\":\"/t/Image\"}".into()) });
         assert_eq!(steps[2], Step::Wait { ms: 5 });
+        assert_eq!(parse_step("GUEST_READY 10000"), Ok(Step::GuestReady { ms: 10000 }));
+        assert!(parse_step("GUEST_READY 10001").is_err() && parse_step("GUEST_READY x").is_err());
         assert!(matches!(&steps[3], Step::Http { body: Some(b), .. } if b.contains("/t/tmp/r")));
     }
 
