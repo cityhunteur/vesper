@@ -24,7 +24,7 @@
 #                                             path in ID's jail or store:NAME) while ID runs; jail-side reads and writes
 #                                             run as vesperd-jail (uid 20000); never links, never overwrites; checks the
 #                                             free-space reserve first. STAGED SRC DEST copy bytes=N | ERR <reason>
-#        vesper-vesperd store-list            STORE NAME bytes=N links=L lines, then FREE avail=N reserve=N
+#        vesper-vesperd store-list            STORE NAME bytes=N links=L lines, then FREE avail=N reserve=N store=N quota=N
 #        vesper-vesperd store-rm NAME         REMOVED NAME | ERR <reason>
 #        vesper-vesperd sweep                 boot sweep (vesper-data mount): remove every jail without a record and
 #                                             every unfinished store copy; SWEPT jails=N partial=M
@@ -50,10 +50,15 @@
 #                                             been reused by another process (FORGED ID holder=P)
 #        vesper-vesperd test-orphan ID        test hook: create a jail with no record (ORPHAN ID)
 #        vesper-vesperd test-age ID SECONDS   test hook: backdate ID's jail directory (AGED ID seconds=N)
+#        vesper-vesperd test-age-log ID SECONDS  test hook: backdate ID's console logs (AGED-LOG ID seconds=N)
+#        vesper-vesperd logsize ID            LOGSIZE ID current=N previous=N max=N: ID's console log files
+#        vesper-vesperd mem-budget            MEMBUDGET total= reserve= budget= committed= entries= (TD-056)
+#        vesper-vesperd test-mem-reserve BYTES|clear  test hook: override the memory budget's reserve
 #        vesper-vesperd test-plant ID         test hook, as a compromised Firecracker would: /planted-link -> /etc/shadow,
 #                                             /planted-dir -> the store, and /planted-root (root-owned, mode 0600) in
 #                                             ID's jail (PLANTED ID)
 #        vesper-vesperd test-reserve BYTES|clear  test hook: override the free-space reserve until reboot (RESERVE …)
+#        vesper-vesperd test-store-quota BYTES|clear  test hook: override the store quota until reboot (QUOTA …)
 #        vesper-vesperd test-listen PORT|stop  test hook: TCP and UDP listeners on every System VM address (egress suite)
 #        vesper-vesperd test-open-ns ID [filter|all]  test hook: accept everything in ID's namespace FORWARD (all:
 #                                             also no masquerade and no reverse-path check), leaving the root egress
@@ -71,6 +76,8 @@ FC_DIR=/var/lib/vesper/firecracker
 FC=$FC_DIR/firecracker
 JAILER=$FC_DIR/jailer
 MV=/usr/local/bin/vesper-microvm
+MEMADMIT=/usr/local/bin/vesper-memadmit  # the memory budget shared with the shim's microVMs (TD-056)
+BOUNDLOG=/usr/local/bin/vesper-boundlog  # console logs of at most twice LOG_MAX bytes (TD-055)
 MVM=/var/lib/vesper/microvm
 DATA=/var/lib/vesper/state       # bind-mounted onto the data disk by vesper-data; jails and store share this mount
 BASE=$DATA/vesperd/jailer         # --chroot-base-dir
@@ -82,7 +89,11 @@ LEASES=$STATE/leases              # one record per id: "holder=<pid>:<start> con
 LOCK=$STATE/lock                  # one flock serialises reaping, jail creation and teardown
 STORE_LOCK=$STATE/store.lock      # one flock serialises copies (and their reserve checks) and store removals
 RESERVE_OVERRIDE=$STATE/reserve   # test-reserve writes it; tmpfs, so a reboot clears it
+STORE_PCT=25                      # the store may hold at most this share of the data disk (TD-053)
+QUOTA_OVERRIDE=$STATE/store-quota # test-store-quota writes it; tmpfs, so a reboot clears it
 LOGS=/var/log/vesperd
+LOG_MAX=1048576                   # one console log file; the previous one is kept as <id>.log.1
+LOG_KEEP_S=600                    # the reaper removes the logs of a microVM gone this long
 JUID=20000
 JGID=20000
 JUSER=vesperd-jail                # the uid 20000 user that jail-side reads and writes run as
@@ -193,9 +204,13 @@ teardown() { # ID (caller holds the lock) -> CLEAN ID | DIRTY ID <what>
   i=0; while [ -d "$CG/$tid" ] && [ "$i" -lt 20 ]; do rmdir "$CG/$tid" 2>/dev/null || sleep 0.1; i=$((i + 1)); done
   nat_down "$tid"
   netns_down "$tid"
-  rm -f "$LEASES/$tid"
+  rm -f "$LEASES/$tid" "$LOGS/.$tid.pipe"
+  # Start the log's keep time now, so the reaper prunes it KEEP after teardown, not after its last write.
+  touch -c "$LOGS/$tid.log" 2>/dev/null
   left=$(leftovers "$tid")
-  if [ -z "$left" ]; then echo "CLEAN $tid"; else echo "DIRTY $tid $left"; return 1; fi
+  # The memory stays admitted while anything of the microVM is left (D-029: never overcommit). A DIRTY entry is
+  # dropped by vesper-memadmit itself once the cgroup and jail are gone.
+  if [ -z "$left" ]; then "$MEMADMIT" release vesperd "$tid" 2>/dev/null; echo "CLEAN $tid"; else echo "DIRTY $tid $left"; return 1; fi
 }
 
 # ---- networking (CE-0010, TD-058) -------------------------------------------------------------------------
@@ -517,6 +532,15 @@ reap_pass() { # (caller holds the lock)
     netns_down "$rid"; reaped=$((reaped + 1))
     if [ -e "$ns" ]; then echo "REAPED $rid reason=orphan-netns DIRTY $rid netns"; else echo "REAPED $rid reason=orphan-netns CLEAN $rid"; fi
   done
+  for lf in "$LOGS"/*.log; do
+    [ -f "$lf" ] || continue
+    rid=${lf##*/}; rid=${rid%.log}
+    valid_id "$rid" || continue
+    [ -e "$LEASES/$rid" ] || [ -e "$JAILS/$rid" ] && continue
+    age=$((now - $(stat -c %Y "$lf" 2>/dev/null || echo "$now")))
+    [ "$age" -ge "$LOG_KEEP_S" ] || continue
+    rm -f "$lf" "$lf.1" "$LOGS/.$rid.pipe"; echo "PRUNED $rid log age=$age"
+  done
   echo "REAP reaped=$reaped kept=$kept"
 }
 
@@ -549,6 +573,21 @@ reserve_bytes() {
   awk '/^MemTotal:/{print $2 * 1024}' /proc/meminfo
 }
 avail_bytes() { df -k "$DATA" | awk 'NR==2 {print $4 * 1024}'; }
+store_quota() { # bytes the store may hold: STORE_PCT of the data disk, unless a test overrides it
+  q=$(cat "$QUOTA_OVERRIDE" 2>/dev/null)
+  digits "$q" && { echo "$q"; return; }
+  # Shell arithmetic is 64-bit; BusyBox awk's printf "%d" clamps to 2^31-1, which once made the quota 2 GiB.
+  kib=$(df -k "$DATA" | awk 'NR==2 {print $2}')
+  digits "$kib" || return 1
+  echo $((kib * 1024 / 100 * STORE_PCT))
+}
+store_used() { # a file removed mid-scan counts 0, so the sum never fails on a missing stat
+  u=0; for f in "$STORE"/* "$STORE"/.partial.*; do s=$(stat -c %s "$f" 2>/dev/null) && u=$((u + s)); done; echo "$u"; }
+quota_check() { # BYTES (store lock held): refuse a copy into the store that would pass its quota
+  used=$(store_used); q=$(store_quota)
+  digits "$q" || { echo "store quota unknown"; return 1; }
+  [ $((used + $1)) -le "$q" ] || { echo "store quota: copying $1 bytes would bring the store to $((used + $1)) of its $q-byte quota ($STORE_PCT% of the data disk); remove files with vesperd store rm"; return 1; }
+}
 # BYTES: refuse a copy of BYTES that would leave less than the reserve free on the data disk.
 reserve_check() {
   a=$(avail_bytes); r=$(reserve_bytes)
@@ -636,6 +675,7 @@ copy_one() { # SRC DEST ROOT
     store:*)
       name=${dest#store:}; tmp="$STORE/.partial.$$"
       [ -e "$STORE/$name" ] && { echo "store:$name exists"; return 1; }
+      why=$(quota_check "$size") || { echo "$why"; return 1; }
       rm -f "$tmp"
       case "$src" in
         share:*) (umask 077; head -c "$size" < "${src#share:}" > "$tmp") ;;
@@ -731,11 +771,14 @@ launch_stage() { # ROOT SPEC...
 
 store_list() {
   data_dirs || { echo "ERR data disk not in use"; return 1; }
+  store_lock
   for f in "$STORE"/*; do
     [ -f "$f" ] || continue
-    echo "STORE ${f##*/} bytes=$(stat -c %s "$f") links=$(stat -c %h "$f")"
+    st=$(stat -c '%s %h' "$f" 2>/dev/null) || continue
+    echo "STORE ${f##*/} bytes=${st% *} links=${st#* }"
   done
-  echo "FREE avail=$(avail_bytes) reserve=$(reserve_bytes)"
+  echo "FREE avail=$(avail_bytes) reserve=$(reserve_bytes) store=$(store_used) quota=$(store_quota)"
+  store_unlock
 }
 store_rm() {
   [ "$#" -eq 1 ] && valid_name "$1" || { echo "ERR usage: store-rm NAME"; return 2; }
@@ -824,10 +867,12 @@ launch() {
   reap_pass > /dev/null
   if [ -n "$(leftovers "$LID")" ]; then unlock; echo "ERR busy $LID"; return 1; fi
   prep=$("$MV" prepare 2>&1) || { unlock; echo "ERR prepare: $(printf '%s' "$prep" | head -1 | oneline)"; return 1; }
+  # One budget for both owners' microVMs (TD-056); teardown releases it.
+  adm=$("$MEMADMIT" acquire vesperd "$LID" "$ceiling") || { unlock; echo "$adm" | head -1; return 1; }
   # The record names this shell before the jail exists, so the reaper can always tell who owns it.
   ppid=$(awk '/^PPid:/{print $2}' "/proc/$$/status"); pstart=$(start_of "$ppid") || pstart=""
   [ "$(cat "/proc/$ppid/comm" 2>/dev/null)" = socat ] && [ -n "$pstart" ] && CONN="$ppid:$pstart" || CONN="-:-"
-  write_record "$LID" "$$:$MY_START" "$CONN" "" || { unlock; echo "ERR record"; return 1; }
+  write_record "$LID" "$$:$MY_START" "$CONN" "" || { "$MEMADMIT" release vesperd "$LID"; unlock; echo "ERR record"; return 1; }
   OWN=1
   trap lease_exit EXIT
   trap 'exit 129' HUP
@@ -849,11 +894,15 @@ launch() {
   unlock
   if [ "$nstage" -gt 0 ]; then why=$(launch_stage "$root" "$@") || launch_fail "$why"; fi
   lock
-  log="$LOGS/$LID.log"
+  log="$LOGS/$LID.log"; pipe="$LOGS/.$LID.pipe"
+  rm -f "$log" "$log.1" "$pipe"
+  mkfifo -m 0600 "$pipe" || { unlock; launch_fail "console pipe"; }
   : > "$log"
+  # Not on our stdout or stderr (the caller reads them to EOF) nor the lock (fd 9): the bounder outlives us.
+  "$BOUNDLOG" "$log" "$LOG_MAX" < "$pipe" > /dev/null 2>&1 9>&- &
   setsid "$JAILER" --id "$LID" --exec-file "$FC" --uid "$JUID" --gid "$JGID" --chroot-base-dir "$BASE" \
     --netns "$NETNS/$LID" --parent-cgroup vesperd --cgroup-version 2 --cgroup pids.max=256 --cgroup "memory.max=$ceiling" \
-    -- --api-sock /run/firecracker.socket > "$log" 2>&1 < /dev/null 9>&- &
+    -- --api-sock /run/firecracker.socket > "$pipe" 2>&1 < /dev/null 9>&- &
   SPID=$!
   unlock
   sock="$root/run/firecracker.socket"
@@ -954,7 +1003,13 @@ list() {
 }
 
 vlog() { sid=${1:-}; valid_id "$sid" || { echo "ERR bad id"; return 2; }; n=${2:-20}; digits "$n" || n=20
-  [ -f "$LOGS/$sid.log" ] && tail -n "$n" "$LOGS/$sid.log" || { echo "ERR no log for $sid"; return 1; }; }
+  [ -f "$LOGS/$sid.log" ] || { echo "ERR no log for $sid"; return 1; }
+  cat "$LOGS/$sid.log.1" "$LOGS/$sid.log" 2>/dev/null | tail -n "$n"; }
+logsize() { # ID -> LOGSIZE ID current=N previous=N max=N (TD-055)
+  sid=${1:-}; valid_id "$sid" || { echo "ERR bad id"; return 2; }
+  [ -f "$LOGS/$sid.log" ] || { echo "ERR no log for $sid"; return 1; }
+  echo "LOGSIZE $sid current=$(stat -c %s "$LOGS/$sid.log") previous=$(stat -c %s "$LOGS/$sid.log.1" 2>/dev/null || echo 0) max=$LOG_MAX"
+}
 
 kill_holder() {
   sid=${1:-}; valid_id "$sid" || { echo "ERR bad id"; return 2; }
@@ -985,6 +1040,13 @@ test_orphan() {
   mkdir -p "$JAILS/$sid/root"
   unlock
   echo "ORPHAN $sid"
+}
+
+test_age_log() { # ID SECONDS: backdate ID's console logs, so the reaper's age rule can be tested
+  sid=${1:-}; s=${2:-}; valid_id "$sid" && digits "$s" || { echo "ERR usage: test-age-log ID SECONDS"; return 2; }
+  [ -f "$LOGS/$sid.log" ] || { echo "ERR no log for $sid"; return 1; }
+  for f in "$LOGS/$sid.log" "$LOGS/$sid.log.1"; do [ -f "$f" ] && touch -d "@$(( $(now_s) - s ))" "$f"; done
+  echo "AGED-LOG $sid seconds=$s"
 }
 
 test_age() {
@@ -1107,6 +1169,14 @@ test_reach() { # IP PORT: whether the System VM itself reaches IP:PORT over TCP 
   ip2int "${1:-}" > /dev/null && digits "${2:-}" || { echo "ERR usage: test-reach IP PORT"; return 2; }
   if nc -z -w 3 "$1" "$2" < /dev/null > /dev/null 2>&1; then echo "REACH $1:$2 open"; else echo "REACH $1:$2 closed"; fi
 }
+test_store_quota() {
+  case "${1:-}" in
+    clear) rm -f "$QUOTA_OVERRIDE"; echo "QUOTA bytes=$(store_quota) (default)" ;;
+    *) digits "${1:-}" || { echo "ERR usage: test-store-quota BYTES|clear"; return 2; }
+       ensure_dirs; echo "$1" > "$QUOTA_OVERRIDE"; echo "QUOTA bytes=$1 used=$(store_used)" ;;
+  esac
+}
+
 test_reserve() {
   case "${1:-}" in
     clear) rm -f "$RESERVE_OVERRIDE"; echo "RESERVE bytes=$(reserve_bytes) (default)" ;;
@@ -1150,7 +1220,7 @@ reap_loop() {
   ensure_dirs
   while :; do
     out=$(lock; reap_pass; unlock)
-    printf '%s\n' "$out" | grep '^REAPED' | while IFS= read -r l; do logger -t vesperd-reaper "$l" 2>/dev/null; done
+    printf '%s\n' "$out" | grep -E '^(REAPED|PRUNED)' | while IFS= read -r l; do logger -t vesperd-reaper "$l" 2>/dev/null; done
     sleep "$interval"
   done
 }
@@ -1170,6 +1240,10 @@ case "$cmd" in
   test-forge-start) test_forge_start "$@" ;;
   test-orphan) test_orphan "$@" ;;
   test-age) test_age "$@" ;;
+  test-age-log) test_age_log "$@" ;;
+  logsize) logsize "$@" ;;
+  mem-budget) "$MEMADMIT" status ;;
+  test-mem-reserve) "$MEMADMIT" test-reserve "$@" ;;
   test-container-vsock) test_container_vsock ;;
   stage) stage "$@" ;;
   store-list) store_list ;;
@@ -1182,6 +1256,7 @@ case "$cmd" in
   flows) flows ;;
   test-plant) test_plant "$@" ;;
   test-reserve) test_reserve "$@" ;;
+  test-store-quota) test_store_quota "$@" ;;
   test-listen) test_listen "$@" ;;
   test-open-ns) test_open_ns "$@" ;;
   test-reach) test_reach "$@" ;;

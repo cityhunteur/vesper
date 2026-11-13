@@ -457,6 +457,12 @@ Public symbols by file:
   microVMs with `--tap tap0 --tap tap1`, each namespace holding exactly `lo` and the two taps owned by uid 20000, an
   unlisted tap Firecracker's own 400, `netns_ok`, the namespace gone after SIGTERM; CE-0010) and `nothing_left`
   (leases, jails and network namespaces); `passed` requires all 19 steps ok. It uses the control channel only to inspect and fault the guest.
+- `control/suites/bounds.rs:run_bounds_suite` (TD-055, TD-056) ages and reaps its ids, then `console_log_bounded`
+  (a guest with `vesper_console_flood=2500000`; `VESPERD logsize` shows both files within 1 MiB plus one line),
+  `log_pruned_after_keep_time` (`VESPERD test-age-log`, then `reap` prints `PRUNED`), `budget_refuses_a_second_vesperd`
+  (`VESPERD test-mem-reserve` leaves room for one 640 MiB ceiling; the second `vesperd` fails with `ERR memory`),
+  `budget_counts_shim_microvms` (`MICROVM launch` takes the room; `vesperd` is refused until `MICROVM cleanup`),
+  `budget_whole_again` (`VESPERD mem-budget` as before) and `nothing_left`; `passed` requires all 7 steps ok.
 - `control/suites/egress.rs:run_egress_suite` (ADR 0008) ages and reaps its ids, starts `VESPERD test-listen 7777`,
   boots `vesperd --network nat` microVMs with `vesper_net=` and `vesper_probe=` and judges the guest's
   `VESPER-PROBE` lines (`denied`, `judge`) and the `DROPS` counters of `VESPERD net`: `listeners_and_internet`,
@@ -477,10 +483,10 @@ Public symbols by file:
   `share_files` (writes `d1.img`, `d2.img` and a `link -> /etc/shadow` into `share_dir`), `start_with_share_stage`,
   `stage_into_running_jail`, `boot_with_both_drives` (`vesper_mark=1`), `refuses_symlinked_src`,
   `refuses_symlinked_dest`, `refuses_src_outside_roots`, `jail_side_read_runs_as_uid_20000`,
-  `reserve_refuses_breach`, `pause_and_create`, `copy_into_store`, `stop_original`, `new_vesperd_stages_by_link`,
+  `reserve_refuses_breach`, `store_quota_refuses_breach` (`VESPERD test-store-quota` set half a drive above the store's size; the copy is refused with `store quota` and leaves no file), `pause_and_create`, `copy_into_store`, `stop_original`, `new_vesperd_stages_by_link`,
   `load_and_resume`, `guest_state_survives` (the same token, later ticks), `create_onto_linked_file_fails` (CE-0008),
   `stop_restored`, `stage_refused_at_start`, `measure_create_at_default_ceiling` (a 640 MiB guest with 512 MiB
-  dirtied, under a tenth of the request ceiling), `store_rm` and `nothing_left`; `passed` requires all 23 steps ok.
+  dirtied, under a tenth of the request ceiling), `store_rm` and `nothing_left`; `passed` requires all 24 steps ok.
   It drives the microVMs through their sockets and `vesperd stage|store`, and uses the control channel to inspect.
 - `systemvm/packages.rs:validate_packages_lock` requires schema `2`,
   non-blank branch and arch, every requested package in the closure,

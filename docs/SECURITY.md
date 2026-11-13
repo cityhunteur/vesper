@@ -171,7 +171,10 @@ and the bridge allow-list is unchanged.
 - `VESPERD <args…>` inspects and faults these microVMs for the suite: `status`, `isolation`, `files`, `memory`,
   `list`, `log`, `reap`, `kill-holder`, `kill-fc` and the test hooks `test-forge-start`, `test-orphan`, `test-age`,
   `test-plant`, `test-reserve` and `test-container-vsock`; since slice 5 it also carries `stage`, `store-list` and
-  `store-rm` (next section). It cannot launch or connect. Like `MICROVM crash`, the hooks need nothing beyond what
+  `store-rm` (next section), and since W4 `logsize`, `mem-budget` and three hooks that loosen or age the new bounds:
+  `test-mem-reserve` (overrides the 256 MiB memory reserve), `test-store-quota` (overrides the store quota) and
+  `test-age-log` (ages a console log for the reaper). Their overrides live on the System VM's tmpfs and clear at
+  reboot. It cannot launch or connect. Like `MICROVM crash`, the hooks need nothing beyond what
   the agent already is: root in the System VM.
 
 Every id is checked against the jailer's rule (1 to 64 letters, digits and hyphens) before it is joined into a path:

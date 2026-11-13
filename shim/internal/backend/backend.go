@@ -44,8 +44,10 @@ type Backend interface {
 	Signal(ctx context.Context, id string, port, signal uint32, all bool) error
 	// Stop terminates the microVM (SIGTERM, then SIGKILL after a grace period).
 	Stop(ctx context.Context, id string) error
-	// Cleanup removes the jail, the cgroup and any process; it is safe to call repeatedly.
-	Cleanup(ctx context.Context, id string) error
+	// Cleanup removes the jail, the cgroup and any process and releases the microVM's share of the memory budget;
+	// with removeLogs it also removes the console logs (on delete; failure paths keep them for diagnosis). It is safe
+	// to call repeatedly.
+	Cleanup(ctx context.Context, id string, removeLogs bool) error
 	// LogPath is the microVM boot and runtime diagnostic log.
 	LogPath(id string) string
 	// Alive reports whether the VMM process still runs.
@@ -234,8 +236,12 @@ func (m *MicroVM) Stop(ctx context.Context, id string) error {
 	return nil
 }
 
-func (m *MicroVM) Cleanup(ctx context.Context, id string) error {
-	out, err := exec.CommandContext(ctx, microvmBin, "cleanup", id).CombinedOutput()
+func (m *MicroVM) Cleanup(ctx context.Context, id string, removeLogs bool) error {
+	args := []string{"cleanup", id}
+	if removeLogs {
+		args = append(args, "--logs")
+	}
+	out, err := exec.CommandContext(ctx, microvmBin, args...).CombinedOutput()
 	first := strings.SplitN(strings.TrimSpace(string(out)), "\n", 2)[0]
 	if err != nil || !strings.HasPrefix(first, "CLEAN") {
 		return fmt.Errorf("vesper-microvm cleanup %s: %v: %s", id, err, first)

@@ -1,0 +1,55 @@
+{
+  "bridge_path": "run/systemvm/vsock/3.sock",
+  "port": 1024,
+  "steps": [
+    {
+      "name": "handshake",
+      "ok": true,
+      "detail": "connected",
+      "elapsed_ms": 2
+    },
+    {
+      "name": "console_log_bounded",
+      "ok": true,
+      "detail": "2500000 bytes written in 192 s; LOGSIZE vesper-bounds-log current=442890 previous=1048667 max=1048576: rotated and bounded",
+      "elapsed_ms": 194264
+    },
+    {
+      "name": "log_pruned_after_keep_time",
+      "ok": true,
+      "detail": "kept while recent; after AGED-LOG vesper-bounds-log seconds=3600: PRUNED vesper-bounds-log log age=3600; ERR no log for vesper-bounds-log",
+      "elapsed_ms": 22
+    },
+    {
+      "name": "budget_refuses_a_second_vesperd",
+      "ok": true,
+      "detail": "RESERVE bytes=1330728960; vesper-bounds-a admitted (committed 671088640), vesper-bounds-b refused: vesperd exited with exit status: 1 before listening: vesperd failed: LAUNCHAPI vesper-bounds-b: memory: a 671088640-byte ceiling would commit 1342177280 of 738197504 bytes (MemTotal 2068926464 less a ",
+      "elapsed_ms": 593
+    },
+    {
+      "name": "budget_counts_shim_microvms",
+      "ok": true,
+      "detail": "LAUNCHED vesper-bounds-shim pid=9775 boot_ms=1760; vesper-bounds-b refused while it ran (vesperd exited with exit status: 1 before listening: vesperd failed: LAUNCHAPI vesper-bounds-b: memory: a 671088640-byte); CLEAN vesper-bounds-shim; then vesper-bounds-b admitted",
+      "elapsed_ms": 2974
+    },
+    {
+      "name": "failed_launches_give_the_budget_back",
+      "ok": true,
+      "detail": "ERR --cmd needs --rootfs; vesper-bounds-b: vesperd exited with exit status: 1 before listening: vesperd failed: LAUNCHAPI vesper-bounds-b: stage share:/etc/passwd:; committed 0 in 0 entries before and after",
+      "elapsed_ms": 319
+    },
+    {
+      "name": "budget_whole_again",
+      "ok": true,
+      "detail": "RESERVE bytes=268435456; committed 0 in 0 entries, as before",
+      "elapsed_ms": 10
+    },
+    {
+      "name": "nothing_left",
+      "ok": true,
+      "detail": "no record, jail or log of the suite's ids",
+      "elapsed_ms": 3
+    }
+  ],
+  "passed": true
+}

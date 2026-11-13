@@ -46,7 +46,7 @@ run() {
 state() { # NAME -> RUNNING|EXITED <code>|STOPPED|ABSENT
   name=$1; lf=$(logfile "$name")
   st=$("$MV" status "$(mvid "$name")" 2>/dev/null | awk '{print $1}')
-  code=$(sed -n 's/^VESPER-WORKLOAD-EXIT \([0-9]*\).*/\1/p' "$lf" 2>/dev/null | tail -1)
+  code=$(cat "$lf.1" "$lf" 2>/dev/null | sed -n 's/^VESPER-WORKLOAD-EXIT \([0-9]*\).*/\1/p' | tail -1)
   if [ "$st" = "RUNNING" ]; then echo RUNNING
   elif [ -n "$code" ]; then echo "EXITED $code"
   elif [ -f "$(rec "$name")" ]; then echo STOPPED
@@ -65,7 +65,12 @@ ps_() {
 logs() {
   name=${1:-}; lf=$(logfile "$name")
   [ -f "$lf" ] || { echo "ERR no log for $name"; return 1; }
-  sed -n '/^VESPER-WORKLOAD-START/,/^VESPER-WORKLOAD-EXIT/p' "$lf" | grep -vE '^VESPER-WORKLOAD-(START|EXIT)'
+  # The console log is bounded (TD-055): the previous file holds the older part, and output beyond both is lost.
+  # The output runs from the START marker to EXIT. Once rotation has dropped START, everything retained is the
+  # workload's (START comes before its first byte), so print it all up to EXIT.
+  cat "$lf.1" "$lf" 2>/dev/null | awk '
+    { line[NR] = $0 } /^VESPER-WORKLOAD-START/ && !s { s = NR }
+    END { for (i = (s ? s + 1 : 1); i <= NR; i++) { if (line[i] ~ /^VESPER-WORKLOAD-EXIT/) break; print line[i] } }'
 }
 
 wait_() {
@@ -97,7 +102,7 @@ rm_() {
   [ -f "$(rec "$name")" ] || { echo "ERR unknown workload $name"; return 1; }
   "$MV" stop "$(mvid "$name")" >/dev/null 2>&1
   "$MV" cleanup "$(mvid "$name")" >/dev/null 2>&1
-  rm -f "${WL:?}/${name:?}.ext4" "$(rec "$name")" "$(logfile "$name")"
+  rm -f "${WL:?}/${name:?}.ext4" "$(rec "$name")" "$(logfile "$name")" "$(logfile "$name").1"
   left=""
   [ -n "$(pgrep -f "firecracker --id $(mvid "$name") " 2>/dev/null)" ] && left="$left process"
   [ -e "/srv/jailer/firecracker/$(mvid "$name")" ] && left="$left jail"
