@@ -5,7 +5,8 @@
 # judged against the case. `src/api_replay.rs` reads this file; `make behavior-replay-check` (tests/api_replay.rs)
 # checks that it covers the matrix exactly and replays it on the model; `make systemvm-replay-suite` on Backend A.
 #
-# Step forms: `METHOD /path [JSON]`, `WAIT <ms>`, `@macro`. `{root}` is the case's root: a temporary directory on the
+# Step forms: `METHOD /path [JSON]`, `WAIT <ms>`, `GUEST_READY <ms>` (until the booted guest's init has loaded its
+# drivers, at most <ms>; at once on the model, which has no guest), `@macro`. `{root}` is the case's root: a temporary directory on the
 # model backend and the jail on Backend A (empty, so `{root}/tmp/x` is `/tmp/x` there); it is removed from response
 # bodies before judging. `{pad:N}` is N letters `a`; `{rep:N:TEXT}` is N copies of TEXT.
 #
@@ -41,10 +42,11 @@ macros:
     - '@boot_source'
     - '@start'
   # The balloon and virtio-mem devices activate only when the guest driver probes them, a moment after
-  # InstanceStart; until then Firecracker answers "Device not activated yet" or "Device is not active".
+  # InstanceStart; until then Firecracker answers "Device not activated yet" or "Device is not active". A fixed
+  # WAIT 2000 raced the probe on a loaded host, so the macro waits for the guest instead.
   boot_settled:
     - '@boot'
-    - 'WAIT 2000'
+    - 'GUEST_READY 10000'
   pause:
     - 'PATCH /vm {"state":"Paused"}'
   machine_512:

@@ -1,0 +1,5 @@
+replay: 35 cases, 35 match, 0 mismatch, 0 setup failed, 0 backend error, 0 not applicable (report: run/systemvm/replay-report.json)
+Mismatch: PATCH /balloon#oversize_runtime — fault_message "Balloon update error: Balloon: Device not activated yet." (want "Balloon update error: Balloon: Requested memory should be less than 256MiB")
+Mismatch: PATCH /balloon/hinting/start#start_success_runtime — status 400 (want 204): {"fault_message":"Balloon update error: Balloon: Device not activated yet."}
+Mismatch: PATCH /balloon/hinting/stop#stop_success_runtime — status 400 (want 204): {"fault_message":"Balloon update error: Balloon: Device not activated yet."}
+replay: 35 cases, 32 match, 3 mismatch, 0 setup failed, 0 backend error, 0 not applicable (report: run/systemvm/replay-report.json)

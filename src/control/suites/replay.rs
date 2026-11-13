@@ -16,6 +16,8 @@ use std::time::{Duration, Instant};
 pub enum ReplayStep {
     Http { method: String, path: String, body: Option<String> },
     Wait { ms: u64 },
+    /// Poll the microVM's console, at most `ms`, for the guest init's `VESPER-MICROVM-OK` marker.
+    GuestReady { ms: u64 },
 }
 
 /// The status and body of one step (`0` and empty for a `Wait`).
@@ -140,7 +142,9 @@ impl ReplayRun {
         }
         let socket = format!("{id}.sock");
         let (mut v, _line, _took) = self.vesperd.start_with(id, &socket, &flags)?;
-        let result = send_steps(&v.socket, steps).and_then(|responses| after(&self.vesperd, &responses).map(|_| responses));
+        let control = &mut session.control;
+        let mut ready = |within: Duration| guest_ready(control, id, within);
+        let result = send_steps(&v.socket, steps, &mut ready).and_then(|responses| after(&self.vesperd, &responses).map(|_| responses));
         let stopped = stop(&mut session.control, &mut v, id);
         let _ = std::fs::remove_file(self.vesperd.workdir.join(&socket));
         let responses = result?;
@@ -158,11 +162,35 @@ impl ReplayRun {
     }
 }
 
+/// The guest init prints `VESPER-MICROVM-OK` after it loads the balloon and virtio-mem drivers, whose probe is what
+/// activates those devices in Firecracker; a fixed sleep raced it on a loaded host.
+fn guest_ready(control: &mut Session, id: &str, within: Duration) -> Result<(), String> {
+    let deadline = Instant::now() + within;
+    loop {
+        let (_, lines) = control.vesperd(&["log", id, "200"])?;
+        if lines.iter().any(|l| l.contains("VESPER-MICROVM-OK")) {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            return Err(format!("{id}: no VESPER-MICROVM-OK on the console within {} ms", within.as_millis()));
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+}
+
 /// One connection per step, so a step that makes Firecracker close its connection does not affect the next.
-fn send_steps(socket: &Path, steps: &[ReplayStep]) -> Result<Vec<ReplayResponse>, String> {
+fn send_steps(
+    socket: &Path,
+    steps: &[ReplayStep],
+    ready: &mut dyn FnMut(Duration) -> Result<(), String>,
+) -> Result<Vec<ReplayResponse>, String> {
     let mut out = Vec::new();
     for step in steps {
         match step {
+            ReplayStep::GuestReady { ms } => {
+                ready(Duration::from_millis(*ms))?;
+                out.push(ReplayResponse { status: 0, body: String::new() });
+            }
             ReplayStep::Wait { ms } => {
                 thread::sleep(Duration::from_millis(*ms));
                 out.push(ReplayResponse { status: 0, body: String::new() });
