@@ -1,0 +1,88 @@
+#!/bin/sh
+# One memory budget for every Firecracker microVM in the System VM, the shim's and vesperd's together (TD-056,
+# decision D-029). Each microVM's cgroup memory.max is its ceiling; a launch is admitted only when the ceilings
+# already committed plus the new one stay within MemTotal less a reserve kept for the System VM itself (dockerd,
+# containerd, the agent, the tmpfs root). The ledger is one file per admitted microVM under $DIR, written under one
+# lock shared by both owners. An entry counts while its microVM's jail directory or cgroup exists (the launcher makes
+# the jail right after admission and removes it at teardown or cleanup), or for PENDING_S after admission; otherwise
+# it is stale and is dropped, so a launcher that crashed cannot leak budget.
+# usage: vesper-memadmit acquire OWNER ID BYTES   -> ADMIT ... | ERR memory: ... (rc 1)
+#        vesper-memadmit release OWNER ID
+#        vesper-memadmit status                  -> MEMBUDGET total=N reserve=N budget=N committed=N entries=N
+#        vesper-memadmit test-reserve BYTES|clear test hook: override the reserve until reboot
+# OWNER is shim (cgroup /sys/fs/cgroup/firecracker/ID) or vesperd (cgroup /sys/fs/cgroup/vesperd/ID).
+set -u
+# Tests run this hermetically as an ordinary user under VESPER_MEMADMIT_ROOT; as root (in the System VM) it is ignored.
+R=""; [ "$(id -u)" != 0 ] && R=${VESPER_MEMADMIT_ROOT:-}
+DIR=$R/run/vesper/mem
+LOCK=$R/run/vesper/mem.lock
+OVERRIDE=$R/run/vesper/mem.reserve
+DEFAULT_RESERVE=268435456   # 256 MiB for the System VM's own processes and tmpfs
+PENDING_S=30
+
+digits() { case "${1:-}" in ''|*[!0-9]*) return 1 ;; esac; }
+valid_id() { case "${1:-}" in ''|*[!A-Za-z0-9-]*) return 1 ;; esac; [ "${#1}" -le 64 ]; }
+cgroup_of() { case "$1" in shim) echo "$R/sys/fs/cgroup/firecracker/$2" ;; vesperd) echo "$R/sys/fs/cgroup/vesperd/$2" ;; esac; }
+jail_of() { case "$1" in shim) echo "$R/srv/jailer/firecracker/$2" ;; vesperd) echo "$R/var/lib/vesper/state/vesperd/jailer/firecracker/$2" ;; esac; }
+total() { awk '/^MemTotal:/{print $2 * 1024}' "$R/proc/meminfo"; }
+reserve() { r=$(cat "$OVERRIDE" 2>/dev/null); if digits "$r"; then echo "$r"; else echo "$DEFAULT_RESERVE"; fi; }
+now() { date +%s; }
+
+# Sum of live entries; drops stale ones. Caller holds the lock.
+committed() {
+  sum=0; n=0; t=$(now)
+  for e in "$DIR"/*; do
+    [ -f "$e" ] || continue
+    name=${e##*/}; owner=${name%%.*}; id=${name#*.}
+    bytes=$(cat "$e" 2>/dev/null)
+    age=$(( t - $(stat -c %Y "$e" 2>/dev/null || echo 0) ))
+    if digits "$bytes" && { [ -d "$(cgroup_of "$owner" "$id")" ] || [ -d "$(jail_of "$owner" "$id")" ] || [ "$age" -lt "$PENDING_S" ]; }; then
+      sum=$((sum + bytes)); n=$((n + 1))
+    else
+      rm -f "$e"
+    fi
+  done
+  echo "$sum $n"
+}
+
+with_lock() { mkdir -p "$DIR" && exec 7>"$LOCK" && flock 7; }
+
+cmd=${1:-}; shift 2>/dev/null
+case "$cmd" in
+  acquire)
+    owner=${1:-}; id=${2:-}; bytes=${3:-}
+    case "$owner" in shim|vesperd) ;; *) echo "ERR usage: acquire shim|vesperd ID BYTES"; exit 2 ;; esac
+    valid_id "$id" && digits "$bytes" || { echo "ERR usage: acquire shim|vesperd ID BYTES"; exit 2; }
+    with_lock
+    set -- $(committed); c=$1
+    # An entry for the same id that is still counted: refuse while its launch may be in progress (PENDING_S), else
+    # it belongs to a microVM the caller has already found dead, and this admission replaces it.
+    e="$DIR/$owner.$id"
+    if [ -f "$e" ]; then
+      age=$(( $(now) - $(stat -c %Y "$e" 2>/dev/null || echo 0) ))
+      [ "$age" -ge "$PENDING_S" ] || { echo "ERR busy: $owner $id was admitted ${age} s ago and may still be launching"; exit 1; }
+      old=$(cat "$e" 2>/dev/null); digits "$old" && c=$((c - old))
+    fi
+    tot=$(total); res=$(reserve); budget=$((tot - res))
+    if [ $((c + bytes)) -gt "$budget" ]; then
+      echo "ERR memory: a $bytes-byte ceiling would commit $((c + bytes)) of $budget bytes (MemTotal $tot less a $res-byte reserve); stop a microVM or lower the ceiling"
+      exit 1
+    fi
+    echo "$bytes" > "$DIR/$owner.$id"
+    echo "ADMIT $owner $id bytes=$bytes committed=$((c + bytes)) budget=$budget" ;;
+  release)
+    owner=${1:-}; id=${2:-}
+    valid_id "$id" || exit 2
+    with_lock; rm -f "$DIR/$owner.$id" ;;
+  status)
+    with_lock; set -- $(committed)
+    tot=$(total); res=$(reserve)
+    echo "MEMBUDGET total=$tot reserve=$res budget=$((tot - res)) committed=$1 entries=$2" ;;
+  test-reserve)
+    case "${1:-}" in
+      clear) rm -f "$OVERRIDE" ;;
+      *) digits "${1:-}" || { echo "ERR usage: test-reserve BYTES|clear"; exit 2; }; mkdir -p "${OVERRIDE%/*}"; echo "$1" > "$OVERRIDE" ;;
+    esac
+    echo "RESERVE bytes=$(reserve)" ;;
+  *) echo "ERR usage: vesper-memadmit acquire|release|status|test-reserve"; exit 2 ;;
+esac

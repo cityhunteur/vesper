@@ -85,7 +85,7 @@ func TestExecLifecycleDoesNotOverwriteInit(t *testing.T) {
 
 type cleanupBackend struct{ backend.Backend }
 
-func (cleanupBackend) Cleanup(context.Context, string) error { return nil }
+func (cleanupBackend) Cleanup(context.Context, string, bool) error { return nil }
 
 type shutdownProbe struct{ called bool }
 

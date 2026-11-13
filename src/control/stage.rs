@@ -171,7 +171,7 @@ impl StageSpec {
     }
 }
 
-/// Parses `vesperd store list`'s reply: `STORE NAME bytes=N links=L` lines, then `FREE avail=N reserve=N`.
+/// Parses `vesperd store list`'s reply: `STORE NAME bytes=N links=L` lines, then `FREE avail=N reserve=N store=N quota=N`.
 pub fn parse_store_list(lines: &[String]) -> Result<(Vec<StoreEntry>, u64, u64), String> {
     let field = |word: Option<&str>, key: &str, line: &str| -> Result<u64, String> {
         word.and_then(|w| w.strip_prefix(key))

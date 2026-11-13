@@ -145,7 +145,7 @@ func (m manager) Stop(ctx context.Context, id string) (shim.StopStatus, error) {
 		log.G(ctx).WithError(err).Warn("read task state during shim delete")
 	}
 	b := backend.NewMicroVM()
-	if err := b.Cleanup(ctx, id); err != nil {
+	if err := b.Cleanup(ctx, id, true); err != nil {
 		log.G(ctx).WithError(err).Warn("microVM cleanup during shim delete")
 	}
 	if err := mount.UnmountRecursive(filepath.Join(bundle, "rootfs"), 0); err != nil {

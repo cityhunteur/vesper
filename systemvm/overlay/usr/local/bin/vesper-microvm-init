@@ -14,6 +14,14 @@ sha256sum -c /runtime.sha256 >/dev/null || { echo VESPER-RUNTIME-DIGEST-FAILED; 
 # activate and their API requests fail with "Device not activated yet" (ADR 0007 slice 6).
 /bin/busybox modprobe -a virtio_mmio virtio_balloon virtio_mem >/dev/null 2>&1 || echo "VESPER-MODULES-FAILED"
 echo "VESPER-MICROVM-OK"
+# vesper_console_flood=BYTES writes BYTES of text to the console, then VESPER-FLOOD-DONE: the bounds suite checks
+# that the console log stays bounded (TD-055).
+flood=$(/bin/busybox sed -n 's/.*vesper_console_flood=\([0-9]*\).*/\1/p' /proc/cmdline)
+if [ -n "$flood" ]; then
+  /bin/busybox yes "VESPER-FLOOD 0123456789abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwxyz0123456789" \
+    | /bin/busybox head -c "$flood"
+  echo; echo "VESPER-FLOOD-DONE"
+fi
 # Network probes for the egress tests (ADR 0008): vesper_net=ADDR/PREFIX,GATEWAY configures eth0, and
 # vesper_probe=P1,P2,... runs each probe once and prints VESPER-PROBE <probe> open|closed (tcp:IP:PORT,
 # udp:IP:PORT, spoof:SRC:IP:PORT from a source outside the tap subnet, dns:NAME through the gateway,

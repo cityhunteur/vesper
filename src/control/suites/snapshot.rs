@@ -23,7 +23,7 @@ pub const DEFAULT_CEILING_MIB: u64 = 640;
 /// The largest guest the measurement step boots under the default ceiling, and how much of it the guest dirties.
 pub const MEASURE_GUEST_MIB: u64 = 640;
 pub const MEASURE_FILL_MIB: u64 = 512;
-const STEPS: usize = 23;
+const STEPS: usize = 24;
 const DRIVE_BYTES: usize = 1024 * 1024;
 
 /// Where the suite works: the `vesperd` runner and an absolute directory inside a configured share.
@@ -278,6 +278,27 @@ pub fn run_snapshot_suite(endpoint: &ControlEndpoint, run: &SnapshotRun, id: &st
             return Err("a refused copy left a file".to_string());
         }
         Ok(((), format!("{}; {refused}; {into_jail}; {}", first(&set), first(&clear))))
+    });
+
+    // TD-053: the store holds at most its quota; a copy that would pass it is refused and leaves no file.
+    step(&mut steps, "store_quota_refuses_breach", || {
+        let (code, out, err) = cli(v, &["store", "list"])?;
+        let used = out
+            .lines()
+            .find(|l| l.starts_with("FREE "))
+            .and_then(|l| l.split(' ').find_map(|w| w.strip_prefix("store=")))
+            .and_then(|n| n.parse::<u64>().ok())
+            .ok_or_else(|| format!("store list (exit {code}) has no store= on its FREE line: {out} {err}"))?;
+        let quota = used + (DRIVE_BYTES as u64) / 2;
+        let (_, set) = control.vesperd(&["test-store-quota", &quota.to_string()])?;
+        let refused = stage_refused(v, a, &format!("share:{share}/d1.img"), &format!("store:{probe}"), 1, "store quota");
+        let (_, clear) = control.vesperd(&["test-store-quota", "clear"])?;
+        let refused = refused?;
+        let (stored, _) = store(v)?;
+        if store_line(&stored, probe).is_some() {
+            return Err("a refused copy left a store file".to_string());
+        }
+        Ok(((), format!("{}; {refused}; {}", first(&set), first(&clear))))
     });
 
     cycle_ok &= step(&mut steps, "pause_and_create", || {

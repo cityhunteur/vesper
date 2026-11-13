@@ -1,0 +1,25 @@
+# Peak host memory of a shim microVM whose guest uses all its memory (D-030), 2026-11-13, Apple M3 Pro,
+# System VM 2 vCPUs / 2 GiB, W4 helpers hot-patched (shim memory.max then 640 MiB). Run as root in the System VM
+# (docker run --privileged --cgroupns=host --pid=host -v /:/host alpine:3.22 chroot /host sh -c '…'):
+#
+#   img=3ef6c638c54a989578d4102e8aa112fa045bd7388e40cfb9f6e9c093419131f6
+#   vesper-workload run wm4 $img -- sh -c "free -m | head -2; head -c 180m /dev/zero | tr \"\\0\" a | fold -w 1000 \
+#     | sort | wc -c; echo sorted; free -m | head -2; sleep 60"
+#   (wait for "sorted" in vesper-workload logs wm4)
+#   cg=/sys/fs/cgroup/firecracker/wl-wm4; cat $cg/memory.peak $cg/memory.current; grep -E "^(anon|file|kernel) " $cg/memory.stat
+#
+# busybox sort holds its whole input, so the guest's 256 MiB filled until the guest's own OOM killer ended sort:
+# the guest at full use. Output:
+
+STARTED wm4 microvm=wl-wm4 pid=28030 image=3ef6c638c54a989578d4102e8aa112fa045bd7388e40cfb9f6e9c093419131f6
+peak=271937536 cur=271708160
+anon 270684160 file 45056 kernel 978944
+[   16.480441] Out of memory: Killed process 402 (sort) total-vm:178256kB, anon-rss:176512kB, file-rss:44kB, shmem-rss:0kB, UID:0 pgtables:400kB oom_score_adj:0
+Killed
+0
+sorted
+              total        used        free      shared  buff/cache   available
+Mem:            215          15         173           0          28         171
+
+# memory.peak 271,937,536 bytes = 259.3 MiB: guest memory, Firecracker and page tables. A shim microVM running
+# `sleep 300` (ca, same run) peaked at 114,716,672 bytes (109 MiB). The chosen memory.max is 352 MiB (D-030).
