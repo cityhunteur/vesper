@@ -129,7 +129,7 @@ Unit tests cover the cases below. A small Python step in the runner (`collect.py
 
 **M4.** `scripts/systemvm/upstream-suite/run.sh` runs these steps, each idempotent and logged to
 `run/GH-172/<stamp>/`:
-1. **Preflight:** check free space on the data disk (60 GB needed) and that Docker is up.
+1. **Preflight:** check free space on the data disk (45 GB by default; the default disk is 64 GiB, 62.4 GB usable) and that Docker is up.
 2. **Fetch:** shallow-fetch the upstream tree at the lock revision into `build/upstream-suite/firecracker`. Download
    the artefacts at the pinned prefix with retries, then check the object count and sizes against the bucket
    listing. Download the release tarball and check its sha256 against `systemvm/archives.yaml`.

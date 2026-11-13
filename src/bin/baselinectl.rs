@@ -272,15 +272,21 @@ fn firecracker_revision(lock: &vesper::baseline::Lock) -> Result<String, String>
 fn upstream_pins(lock: &vesper::baseline::Lock) -> Result<(), String> {
     let fc = lock.baselines.get("firecracker").ok_or("baseline lock has no firecracker baseline")?;
     let s = fc.upstream_suite.as_ref().ok_or("baselines.firecracker.upstream_suite is not pinned")?;
-    println!("FC_REPO={}", fc.repo);
-    println!("FC_REVISION={}", fc.revision);
-    println!("CONTAINER={}", s.container);
-    println!("ARTIFACTS_BUCKET={}", s.artifacts_bucket);
-    println!("ARTIFACTS_PREFIX={}", s.artifacts_prefix);
-    println!("RELEASE_ASSET={}", s.release_asset);
-    println!("TEST_PATHS={}", s.paths.join(" "));
-    println!("WORKERS={}", s.workers);
-    println!("TEST_TIMEOUT_S={}", s.test_timeout_s);
+    let pins = [
+        ("FC_REPO", fc.repo.clone()),
+        ("FC_REVISION", fc.revision.clone()),
+        ("CONTAINER", s.container.clone()),
+        ("ARTIFACTS_BUCKET", s.artifacts_bucket.clone()),
+        ("ARTIFACTS_PREFIX", s.artifacts_prefix.clone()),
+        ("RELEASE_ASSET", s.release_asset.clone()),
+        ("TEST_PATHS", s.paths.join(" ")),
+        ("WORKERS", s.workers.to_string()),
+        ("TEST_TIMEOUT_S", s.test_timeout_s.to_string()),
+    ];
+    for (key, value) in pins {
+        // Single-quoted for `eval`, so a value with spaces stays one word.
+        println!("{key}='{}'", value.replace('\'', "'\\''"));
+    }
     Ok(())
 }
 

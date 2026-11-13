@@ -14,7 +14,8 @@
 # and a wall-clock watchdog; collect {nodeid: outcome}; wipe /srv; restore the previous launch config and restart;
 # compare (baselinectl --mode upstream-compare). Exit status is the comparator's.
 #
-# Environment: UPSTREAM_WALL_S (default 14400) stops the run; UPSTREAM_CPUS (4) and UPSTREAM_MEMORY_MIB (8192) size
+# Environment: UPSTREAM_WALL_S (default 14400) stops the run; UPSTREAM_MIN_FREE_GB (45) is the data-disk space it
+# needs (the GH #166 trial's /srv peaked at 42 GB apparent, mostly sparse, on the default 64 GiB disk); UPSTREAM_CPUS (4) and UPSTREAM_MEMORY_MIB (8192) size
 # the System VM; UPSTREAM_KEEP_SIZE=1 leaves the System VM as it is (no restart either way), which needs it to share
 # build/upstream-suite already.
 set -euo pipefail
@@ -137,7 +138,8 @@ PY
 fi
 docker info >/dev/null || { say "the System VM's Docker is not reachable at $DOCKER_HOST"; exit 2; }
 FREE_GB="$(docker run --rm -v "$SRC_VOL":/v alpine:3.22 df -Pk /v | awk 'NR==2 {print int($4 / 1048576)}')"
-[ "$FREE_GB" -ge 60 ] || { say "the data disk has ${FREE_GB} GB free; the run needs 60"; exit 2; }
+MIN_GB="${UPSTREAM_MIN_FREE_GB:-45}"
+[ "$FREE_GB" -ge "$MIN_GB" ] || { say "the data disk has ${FREE_GB} GB free; the run needs $MIN_GB (UPSTREAM_MIN_FREE_GB)"; exit 2; }
 docker run --rm --privileged --pid=host alpine:3.22 nsenter -t 1 -m -u -n -i sh -c 'modprobe tun && test -c /dev/net/tun'
 say "tun loaded; data disk ${FREE_GB} GB free"
 
