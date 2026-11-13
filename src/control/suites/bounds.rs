@@ -163,6 +163,7 @@ pub fn run_bounds_suite(endpoint: &ControlEndpoint, run: &VesperdRun, id: &str) 
     step(&mut steps, "budget_counts_shim_microvms", || {
         let (rc, launched) = control.microvm(&["launch", &shim])?;
         if rc != 0 {
+            let _ = control.microvm(&["cleanup", &shim, "--logs"]);
             return Err(format!("shim microVM: {}", launched.join(" | ")));
         }
         let second = refused(run, &b);

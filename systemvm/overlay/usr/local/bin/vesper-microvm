@@ -160,6 +160,9 @@ launch() {
   else
     echo "FAILED $id"
     tail -n 8 "$lf"
+    # A launch that never became ready gives back what it took: the process, the jail and the memory admission.
+    # The console log stays for diagnosis; cleanup --logs removes it.
+    cleanup "$id" > /dev/null
     return 1
   fi
 }
