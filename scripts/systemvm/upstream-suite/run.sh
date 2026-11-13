@@ -148,7 +148,9 @@ if [ "$CLEAN" = 1 ]; then docker volume rm -f "$SRC_VOL" "$CARGO_VOL" >/dev/null
 docker pull -q "$CONTAINER" >/dev/null || { say "pull failed; retrying once"; docker pull -q "$CONTAINER" >/dev/null; }
 say "stage the tree into $SRC_VOL"
 docker run --rm -v "$TREE":/src:ro -v "$SRC_VOL":/firecracker alpine:3.22 sh -c '
+  # Keep only build/cargo_target (the examples cache); setup-ci-artifacts.sh must start from the raw artefacts.
   cd /firecracker && find . -mindepth 1 -maxdepth 1 ! -name build -exec rm -rf {} + && mkdir -p build
+  find build -mindepth 1 -maxdepth 1 ! -name cargo_target -exec rm -rf {} +
   cp -a /src/. /firecracker/ && echo staged'
 docker run --rm -v "$SRC_VOL":/firecracker -w /firecracker "$CONTAINER" ./tools/setup-ci-artifacts.sh "$ARTDIR" > "$OUT/setup-ci-artifacts.log" 2>&1
 TARGET="build/cargo_target/$ARCH-unknown-linux-musl/release"
