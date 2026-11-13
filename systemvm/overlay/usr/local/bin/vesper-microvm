@@ -31,7 +31,10 @@ MARKER="VESPER-MICROVM-OK"
 fcpid() { pgrep -u "$JUID" -f "firecracker --id $1 " 2>/dev/null | head -1; }
 now_ms() { awk '{printf "%d", $1 * 1000}' /proc/uptime; }
 logfile() { echo "/var/log/vesper-microvm-$1.log"; }
-CEILING=671088640                  # memory.max of each microVM, counted in the shared budget (TD-056)
+# memory.max of each microVM, counted in the shared budget (TD-056): the 256 MiB guest plus 128 MiB for Firecracker,
+# page tables, I/O buffers and reclaimable page cache. A guest that used all its memory peaked at 259 MiB (2026-11-13),
+# so a 2 GiB System VM's budget holds four of these; vesperd's 640 MiB default is for its larger, configurable guests.
+CEILING=402653184
 LOG_MAX=1048576                    # console log bound: the log plus one previous file (TD-055)
 
 prepare() {

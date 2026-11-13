@@ -15,8 +15,12 @@ use std::time::{Duration, Instant};
 /// Steps a full run records.
 const STEPS: usize = 7;
 /// Bytes the guest writes to its console: more than both log files hold together.
-const FLOOD: u64 = 3_500_000;
-/// `vesperd`'s default ceiling (640 MiB), which the shim's microVMs also use.
+/// 2.5 MB rotates the log twice. The console is slow under nested virtualisation (one MMIO exit per byte), so the
+/// step allows 600 s.
+const FLOOD: u64 = 2_500_000;
+/// How long the guest may take to write `FLOOD` bytes to its console.
+const FLOOD_WAIT: Duration = Duration::from_secs(600);
+/// `vesperd`'s default ceiling (640 MiB). The shim's microVMs use 384 MiB, so one fits in the room left for this.
 const CEILING: u64 = 671_088_640;
 /// Room above one ceiling, so a little drift in what is committed does not admit or refuse by accident.
 const SLACK: u64 = 64 << 20;
@@ -96,14 +100,15 @@ pub fn run_bounds_suite(endpoint: &ControlEndpoint, run: &VesperdRun, id: &str) 
         let (mut v, _, _) = run.start_with(&log_id, &format!("{log_id}.sock"), &[])?;
         let checked = (|| -> Result<String, String> {
             boot(&v, &format!("vesper_console_flood={FLOOD}"))?;
-            let deadline = Instant::now() + Duration::from_secs(120);
+            let started = Instant::now();
+            let deadline = started + FLOOD_WAIT;
             loop {
                 let (_, tail) = control.vesperd(&["log", &log_id, "5"])?;
                 if tail.iter().any(|l| l.contains("VESPER-FLOOD-DONE")) {
                     break;
                 }
                 if Instant::now() >= deadline {
-                    return Err(format!("no VESPER-FLOOD-DONE within 120 s: {}", tail.join(" | ")));
+                    return Err(format!("no VESPER-FLOOD-DONE within {} s: {}", FLOOD_WAIT.as_secs(), tail.join(" | ")));
                 }
                 thread::sleep(Duration::from_millis(500));
             }
@@ -115,7 +120,7 @@ pub fn run_bounds_suite(endpoint: &ControlEndpoint, run: &VesperdRun, id: &str) 
             if cur > max + 4097 || prev > max + 4097 || prev == 0 {
                 return Err(format!("{FLOOD} bytes written: {line}"));
             }
-            Ok(format!("{FLOOD} bytes written; {line}: rotated and bounded"))
+            Ok(format!("{FLOOD} bytes written in {} s; {line}: rotated and bounded", started.elapsed().as_secs()))
         })();
         let stopped = stop(&mut control, &mut v, &log_id);
         let detail = checked?;
