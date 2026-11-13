@@ -12,6 +12,18 @@ fn helper(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("systemvm/overlay/usr/local/bin").join(name)
 }
 
+/// The bounder needs `read -n`, which the System VM's /bin/sh (BusyBox ash) has and dash does not: run it under
+/// BusyBox when the host has it, else bash.
+fn bounder() -> Command {
+    let busybox = Command::new("busybox").arg("true").status().is_ok_and(|s| s.success());
+    let mut c = if busybox { Command::new("busybox") } else { Command::new("bash") };
+    if busybox {
+        c.arg("sh");
+    }
+    c.arg(helper("vesper-boundlog"));
+    c
+}
+
 fn scratch(name: &str) -> PathBuf {
     let d = std::env::temp_dir().join(format!("vesper-bounds-{name}-{}", std::process::id()));
     let _ = fs::remove_dir_all(&d);
@@ -25,7 +37,7 @@ fn scratch(name: &str) -> PathBuf {
 fn the_bounder_writes_each_line_at_once() {
     let d = scratch("flush");
     let log = d.join("c.log");
-    let mut child = Command::new("sh").arg(helper("vesper-boundlog")).arg(&log).arg("1048576").stdin(Stdio::piped()).spawn().unwrap();
+    let mut child = bounder().arg(&log).arg("1048576").stdin(Stdio::piped()).spawn().unwrap();
     let mut stdin = child.stdin.take().unwrap();
     stdin.write_all(b"boot\nVESPER-MICROVM-OK\n").unwrap();
     stdin.flush().unwrap();
@@ -53,7 +65,7 @@ fn the_bounder_rotates_and_splits() {
     let line = "x".repeat(99) + "\n";
     let mut input = line.repeat(1200).into_bytes(); // 120,000 bytes against a 50,000-byte bound
     input.extend(std::iter::repeat_n(b'y', 10_000));
-    let mut child = Command::new("sh").arg(helper("vesper-boundlog")).arg(&log).arg("50000").stdin(Stdio::piped()).spawn().unwrap();
+    let mut child = bounder().arg(&log).arg("50000").stdin(Stdio::piped()).spawn().unwrap();
     child.stdin.take().unwrap().write_all(&input).unwrap();
     assert!(child.wait().unwrap().success());
     let cur = fs::read(&log).unwrap();

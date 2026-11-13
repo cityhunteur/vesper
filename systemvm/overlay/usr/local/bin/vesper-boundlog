@@ -6,7 +6,8 @@
 #
 # Every line reaches FILE as soon as it is read. Callers wait for marker lines (VESPER-MICROVM-OK), so no stage
 # may buffer: a filter such as fold block-buffers into a pipe and held the last few KB until more output came.
-# The shell's read takes one line, or 4096 bytes, straight from the pipe.
+# The shell's read takes one line, or 4096 bytes, straight from the pipe; read -n is BusyBox ash's (and bash's), not
+# POSIX, and the System VM's /bin/sh is BusyBox.
 # usage: vesper-boundlog FILE [MAXBYTES]   (MAXBYTES defaults to 1 MiB)
 set -u
 f=${1:?usage: vesper-boundlog FILE [MAXBYTES]}
