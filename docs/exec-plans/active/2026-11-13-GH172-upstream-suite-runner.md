@@ -70,7 +70,8 @@ the comparator explained the other 217 with no unmatched test: 96 platform skips
 assumption and 64 unexplained (54 VMM memory overshoot, 8 rate-limiter or balloon timing, 2 jail hard-link
 EXDEV), the last three classes open under CE-0001 until the Linux reference run. The GH #166 trial's seven harness
 gaps are gone, and no test hung past its timeout. With `vmm-memory-overhead` removed the comparator exits 1 and
-names its 54 tests. The System VM came back on 2 vCPUs and 2048 MiB, and volume `vesper-upstream-srv` was removed.
+names its 54 tests. Two more quick runs of `test_api.py` (`20261113T093902Z`, `20261113T094104Z`, 62 and 60 s of pytest)
+gave the same 67 outcomes as the first (59 passed, 6 skipped, 2 errors), test for test. The System VM came back on 2 vCPUs and 2048 MiB, and volume `vesper-upstream-srv` was removed.
 
 ## Context and Orientation
 

@@ -1,0 +1,270 @@
+{
+ "integration_tests/functional/test_api.py::test_api_balloon[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_api_balloon[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_api_cpu_config[NOTSET-vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "skipped",
+  "message": "('/firecracker/tests/integration_tests/functional/test_api.py', 442, 'Skipped: got empty parameter set for (custom_cpu_template)')"
+ },
+ "integration_tests/functional/test_api.py::test_api_cpu_config[NOTSET-vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "skipped",
+  "message": "('/firecracker/tests/integration_tests/functional/test_api.py', 442, 'Skipped: got empty parameter set for (custom_cpu_template)')"
+ },
+ "integration_tests/functional/test_api.py::test_api_entropy[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_api_entropy[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_api_happy_start[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_api_happy_start[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_api_machine_config[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_api_machine_config[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_api_memory_hotplug[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_api_memory_hotplug[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_api_mmds_config[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_api_mmds_config[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_api_patch_pre_boot[Async-vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_api_patch_pre_boot[Async-vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_api_patch_pre_boot[Sync-vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_api_patch_pre_boot[Sync-vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_api_put_update_post_boot[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_api_put_update_post_boot[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_api_put_update_pre_boot[Async-vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_api_put_update_pre_boot[Async-vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_api_put_update_pre_boot[Sync-vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_api_put_update_pre_boot[Sync-vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_api_version[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_api_version[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_api_vsock[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_api_vsock[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_drive_io_engine[Async-vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_drive_io_engine[Async-vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_drive_io_engine[Sync-vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_drive_io_engine[Sync-vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_drive_patch[Async-vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_drive_patch[Async-vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_drive_patch[Sync-vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_drive_patch[Sync-vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_get_full_config[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_get_full_config[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_get_full_config_after_restoring_snapshot[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "error",
+  "message": "host_tools.memory.MemoryUsageExceededError: ('Memory usage (5.32 MiB) exceeded maximum threshold (7.0 MiB)', psutil.Process(pid=1216, status='terminated', started='09:42:15')) | host_tools.memory.MemoryUsageExceededError: ('Memory usage (5.32 MiB) exceeded maximum threshold (7.0 MiB)', psutil.Process(pid=1216, status='terminated', started='09:42:15'))"
+ },
+ "integration_tests/functional/test_api.py::test_get_full_config_after_restoring_snapshot[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "error",
+  "message": "host_tools.memory.MemoryUsageExceededError: ('Memory usage (5.67 MiB) exceeded maximum threshold (7.0 MiB)', psutil.Process(pid=927, status='terminated', started='09:42:06')) | host_tools.memory.MemoryUsageExceededError: ('Memory usage (5.67 MiB) exceeded maximum threshold (7.0 MiB)', psutil.Process(pid=927, status='terminated', started='09:42:06'))"
+ },
+ "integration_tests/functional/test_api.py::test_map_private_seccomp_regression[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_map_private_seccomp_regression[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_negative_api_patch_post_boot[Async-vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_negative_api_patch_post_boot[Async-vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_negative_api_patch_post_boot[Sync-vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_negative_api_patch_post_boot[Sync-vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_negative_machine_config_api[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_negative_machine_config_api[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_negative_snapshot_load_api": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_net_api_put_update_pre_boot[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_net_api_put_update_pre_boot[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_pmem_api[vmlinux-5.10.253-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_pmem_api[vmlinux-5.10.253-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_pmem_api[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_pmem_api[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_pmem_rate_limiter_api[vmlinux-5.10.253-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_pmem_rate_limiter_api[vmlinux-5.10.253-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_pmem_rate_limiter_api[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_pmem_rate_limiter_api[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_rate_limiters_api_config[Async-vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_rate_limiters_api_config[Async-vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_rate_limiters_api_config[Sync-vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_rate_limiters_api_config[Sync-vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_api.py::test_send_ctrl_alt_del[vmlinux-5.10.253-PCI_OFF]": {
+  "outcome": "skipped",
+  "message": "('/firecracker/tests/integration_tests/functional/test_api.py', 757, 'Skipped: not yet implemented on aarch64')"
+ },
+ "integration_tests/functional/test_api.py::test_send_ctrl_alt_del[vmlinux-5.10.253-PCI_ON]": {
+  "outcome": "skipped",
+  "message": "('/firecracker/tests/integration_tests/functional/test_api.py', 757, 'Skipped: not yet implemented on aarch64')"
+ },
+ "integration_tests/functional/test_api.py::test_send_ctrl_alt_del[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "skipped",
+  "message": "('/firecracker/tests/integration_tests/functional/test_api.py', 757, 'Skipped: not yet implemented on aarch64')"
+ },
+ "integration_tests/functional/test_api.py::test_send_ctrl_alt_del[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "skipped",
+  "message": "('/firecracker/tests/integration_tests/functional/test_api.py', 757, 'Skipped: not yet implemented on aarch64')"
+ }
+}
