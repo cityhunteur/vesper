@@ -270,9 +270,19 @@ cidr_in() { # CIDR CONTAINER -> 0 when CIDR lies inside CONTAINER
   set -- $x $y
   [ "$2" -ge "$4" ] && [ $(( $1 & $(mask_of "$4") )) = "$3" ]
 }
-eth0_cidr() { ip -o -4 addr show dev eth0 2>/dev/null | awk '{for(i=1;i<=NF;i++) if ($i=="inet") {print $(i+1); exit}}'; }
+# The hermetic token tests (tests/vesperd_systemvm.rs) run this script unprivileged on a CI host whose own eth0 and
+# resolver are not the System VM's; VESPERD_TEST_ETH0 and VESPERD_TEST_RESOLVER stand in for them, and are ignored
+# when the script runs as root, as it always does in the System VM.
+test_env() { [ "$(id -u)" != 0 ] && eval "printf '%s' \"\${$1:-}\""; }
+eth0_cidr() {
+  t=$(test_env VESPERD_TEST_ETH0); [ -n "$t" ] && { echo "$t"; return; }
+  ip -o -4 addr show dev eth0 2>/dev/null | awk '{for(i=1;i<=NF;i++) if ($i=="inet") {print $(i+1); exit}}'
+}
 eth0_subnet() { c=$(eth0_cidr) && [ -n "$c" ] && x=$(cidr_net "$c") && set -- $x && echo "$(int2ip "$1")/$2"; }
-resolver4() { awk '$1=="nameserver" && $2 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ {print $2; exit}' /etc/resolv.conf 2>/dev/null; }
+resolver4() {
+  t=$(test_env VESPERD_TEST_RESOLVER); [ -n "$t" ] && { echo "$t"; return; }
+  awk '$1=="nameserver" && $2 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ {print $2; exit}' /etc/resolv.conf 2>/dev/null
+}
 # A tap's gateway ADDR/PREFIX under nat: inside RFC 1918, prefix 16..30, a host address, clear of eth0's subnet,
 # docker0, the veth pool and the resolver. Prints a reason on failure.
 tapaddr_check() { # ADDR/PREFIX

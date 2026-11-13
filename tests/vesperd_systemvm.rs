@@ -484,7 +484,15 @@ fn bad_stage_and_store_arguments_never_reach_the_agent() {
 fn the_guest_helper_refuses_the_tap_names_vesperd_refuses() {
     let script = concat!(env!("CARGO_MANIFEST_DIR"), "/systemvm/overlay/usr/local/bin/vesper-vesperd");
     let launch = |tokens: &[&str]| {
-        let out = Command::new("sh").arg(script).args(["launch", "vm-1"]).args(tokens).output().unwrap();
+        // The System VM's eth0 and resolver, not this host's (honoured only when the script is not root).
+        let out = Command::new("sh")
+            .arg(script)
+            .args(["launch", "vm-1"])
+            .args(tokens)
+            .env("VESPERD_TEST_ETH0", "192.168.64.2/24")
+            .env("VESPERD_TEST_RESOLVER", "192.168.64.1")
+            .output()
+            .unwrap();
         String::from_utf8_lossy(&out.stdout).into_owned()
     };
     for name in ["", "lo", "-", "-tap0", "veth0", "vpd1", "tap 0", "tap.0", "tap/0", "a-name-of-16-chr"] {
@@ -511,6 +519,7 @@ fn the_guest_helper_refuses_the_tap_names_vesperd_refuses() {
         (&["tap=tap0", "tapaddr=tap0:172.16.0.0/30", "net=nat"][..], "host address"),
         (&["tap=tap0", "tapaddr=tap0:172.16.0.1/31", "net=nat"][..], "prefix length of 16 to 30"),
         (&["tap=tap0", "tapaddr=tap0:172.17.0.9/24", "net=nat"][..], "overlaps 172.17.0.0/16"),
+        (&["tap=tap0", "tapaddr=tap0:192.168.64.9/24", "net=nat"][..], "overlaps 192.168.64.0/24"),
         (&["tap=a", "tap=b", "tapaddr=a:10.1.0.1/16", "tapaddr=b:10.1.7.1/24", "net=nat"][..], "overlaps 10.1.0.1/16"),
         (&["tap=tap0", "tapaddr=tap0:172.16.0.1/30", "tapaddr=tap0:172.16.1.1/30", "net=nat"][..], "gives tap0 twice"),
         (&["net=open"][..], "ERR bad network policy open"),
