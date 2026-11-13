@@ -129,10 +129,13 @@ enforcement on the Mac or an egress proxy; both are out of scope here and are li
   launch in between), to show the root `mangle` layer holds alone and Docker keeps `DOCKER-USER`; one also loses its
   masquerade and reverse-path check, to show the root `raw` rule drops sources outside the pool. The suite fails
   when the System VM has no internet, because then the allowed probes cannot be judged. Two flood steps (added
-  2026-11-13, D-029) send 1,400 UDP flows from one guest: with both layers, the lease's namespace holds exactly 1,024
-  and drops the rest; with the namespace filter opened, the root `connlimit` drops the excess.
-- **Measured residual.** A stopped lease's conntrack entries stay in the System VM until their timeouts (30 s for
-  UDP, 5 days for established TCP): the flood step sees the same count, 1,028, before and after teardown. The owner
+  2026-11-13, D-029) send up to 1,400 UDP flows from one guest and judge each cap rule by its own drop counter and
+  by the cap value installed in each layer. With both layers, the namespace holds at the cap (1,024 observed), its
+  cap rule drops the excess and the root one drops nothing. With the namespace filter opened, the root cap rule drops
+  the excess.
+- **Residual, counted.** A stopped lease's conntrack entries stay in the System VM until their timeouts. The kernel's
+  timeouts, read and not measured, are 30 s for UDP and 5 days for established TCP. The flood step saw the same
+  count, 1,028, before and after teardown. The owner
   chose to count them rather than add `conntrack-tools` (D-029). They matter only if the same /30 is given again
   within that time, after the cursor has gone round 16384 leases, or if many leases each leave 1,024 established
   TCP flows behind against the table's 65,536.
