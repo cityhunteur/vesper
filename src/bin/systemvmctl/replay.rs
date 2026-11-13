@@ -128,5 +128,9 @@ pub fn run(
     if summary.backend_error > 0 {
         return Err(format!("{} cases could not run on Backend A", summary.backend_error));
     }
+    // Since CE-0010 closed every applicable case is expected to match; the report above is written either way.
+    if summary.mismatched > 0 || summary.setup_failed > 0 {
+        return Err(format!("{} mismatched and {} failed setup on Backend A", summary.mismatched, summary.setup_failed));
+    }
     Ok(())
 }

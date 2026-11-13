@@ -242,7 +242,7 @@ stale one), bind, then chmod the socket to `0o600`.
 
 ### API request on `--backend systemvm`
 
-**Verified** by `tests/vesperd_systemvm.rs` (fake agent) and `make systemvm-vesperd-suite` (System VM, 18 steps).
+**Verified** by `tests/vesperd_systemvm.rs` (fake agent) and `make systemvm-vesperd-suite` (System VM, 19 steps).
 
 ```mermaid
 sequenceDiagram

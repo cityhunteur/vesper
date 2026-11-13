@@ -545,7 +545,7 @@ Paths in requests are paths inside the jail. Before `LAUNCHAPI`, `vesperd` refus
 reports the data disk `formatted` or `mounted`. `vesperd` lives as long as its microVM: SIGTERM or SIGINT stops the microVM and exits 0; a SIGKILL of
 `vesperd` closes the lease through the kernel, so the agent stops the microVM, but leaves the socket file (the next
 `vesperd` on the path replaces it); when Firecracker exits or the System VM goes away, `vesperd` removes its socket
-and exits 1. `make systemvm-vesperd-suite` (18 steps, `run/systemvm/vesperd-report.json`) checks each of these
+and exits 1. `make systemvm-vesperd-suite` (19 steps, `run/systemvm/vesperd-report.json`) checks each of these
 through the socket. On 2026-11-12 (M3 Pro): 18/18; listening 0.4 s after start (1.9 s on the first launch after
 boot), a SIGTERM stop in 56 ms, `vesperd` exiting 1 s after Firecracker was killed (the lease poll).
 

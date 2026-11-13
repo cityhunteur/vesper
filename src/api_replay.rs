@@ -28,6 +28,8 @@ pub const SNAPSHOT_STATE: &str = "/snap/vm.vmstate";
 pub const SNAPSHOT_MEM: &str = "/snap/vm.mem";
 /// The longest `{pad:N}`.
 const MAX_PAD: usize = 200_000;
+/// Taps a script set may list: `vesperd --tap` takes at most 8 (`vesper::control::MAX_TAPS`).
+pub const MAX_TAPS: usize = 8;
 
 /// A file every case's root holds before the first step.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -150,10 +152,16 @@ pub fn validate_replay_scripts(scripts: &ReplayScripts, matrix: &ApiBehaviorMatr
         }
     }
     let mut taps = BTreeSet::new();
+    if scripts.taps.len() > MAX_TAPS {
+        errors.push(format!("{} taps exceed {MAX_TAPS}", scripts.taps.len()));
+    }
     for tap in &scripts.taps {
-        let ok = !tap.is_empty() && tap.len() <= 15 && tap.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-');
+        let ok = !tap.is_empty()
+            && tap.len() <= 15
+            && !tap.starts_with('-')
+            && tap.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-');
         if !ok || tap == "lo" {
-            errors.push(format!("tap {tap:?}: want 1 to 15 letters, digits, _ and -, not lo"));
+            errors.push(format!("tap {tap:?}: want 1 to 15 letters, digits, _ and -, not starting with -, not lo"));
         }
         if !taps.insert(tap.clone()) {
             errors.push(format!("tap {tap:?} listed twice"));
@@ -186,7 +194,13 @@ pub fn validate_replay_scripts(scripts: &ReplayScripts, matrix: &ApiBehaviorMatr
     }
     if scripts.cases.values().any(|c| c.snapshot) {
         match expand_fixture(scripts, "") {
-            Ok(steps) if !steps.is_empty() => {}
+            Ok(steps) if !steps.is_empty() => {
+                for name in host_dev_names(&steps) {
+                    if !taps.contains(&name) {
+                        errors.push(format!("snapshot_fixture: host_dev_name {name:?} is not in taps"));
+                    }
+                }
+            }
             Ok(_) => errors.push("cases need the snapshot fixture, but snapshot_fixture is empty".to_string()),
             Err(err) => errors.push(format!("snapshot_fixture: {err}")),
         }
@@ -194,16 +208,32 @@ pub fn validate_replay_scripts(scripts: &ReplayScripts, matrix: &ApiBehaviorMatr
     errors
 }
 
-/// The `host_dev_name` of every step whose JSON body names one.
+/// Every `host_dev_name` string in the steps' JSON bodies, at any depth (`PUT /snapshot/load` names them inside
+/// `network_overrides`).
 fn host_dev_names(steps: &[Step]) -> Vec<String> {
-    steps
-        .iter()
-        .filter_map(|step| match step {
-            Step::Http { body: Some(body), .. } => serde_json::from_str::<serde_json::Value>(body).ok(),
-            _ => None,
-        })
-        .filter_map(|value| value.get("host_dev_name").and_then(|v| v.as_str()).map(str::to_string))
-        .collect()
+    fn walk(value: &serde_json::Value, out: &mut Vec<String>) {
+        match value {
+            serde_json::Value::Object(map) => {
+                for (key, v) in map {
+                    match (key.as_str(), v.as_str()) {
+                        ("host_dev_name", Some(name)) => out.push(name.to_string()),
+                        _ => walk(v, out),
+                    }
+                }
+            }
+            serde_json::Value::Array(items) => items.iter().for_each(|v| walk(v, out)),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    for step in steps {
+        if let Step::Http { body: Some(body), .. } = step {
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(body) {
+                walk(&value, &mut out);
+            }
+        }
+    }
+    out
 }
 
 fn valid_root_path(path: &str) -> bool {

@@ -32,14 +32,15 @@
 #                                             REAP reaped=N kept=M
 #        vesper-vesperd reap-loop SECONDS     a reaper pass every SECONDS, forever (the vesper-vesperd-reaper service)
 #        vesper-vesperd status ID             RUNNING ID pid=N holder=P | STARTING ID holder=P | ABSENT ID |
-#                                             DIRTY ID <record|jail|cgroup|process>…
-#        vesper-vesperd isolation ID          JSON with uid, chroot, cgroup and seccomp checks of ID's Firecracker
+#                                             DIRTY ID <record|jail|cgroup|netns|process>…
+#        vesper-vesperd isolation ID          JSON with uid, chroot, cgroup, seccomp and netns checks of ID's Firecracker
 #        vesper-vesperd files ID              FILE PATH uid=U mode=M links=L bytes=N per regular file in ID's jail
 #                                             (read as uid 20000)
 #        vesper-vesperd net ID                LINK NAME state=UP|DOWN owner=U per interface in ID's network
-#                                             namespace, then NETNS ID separate=true|false
+#                                             namespace, then NETNS ID separate=true|false ino=N
 #        vesper-vesperd memory ID             MEMORY ID current=N peak=N max=N anon=N file=N (ID's cgroup)
 #        vesper-vesperd list                  LEASE ID holder=P:S conn=P:S fc=P:S lines, then a JAIL ID line per jail
+#                                             and a NETNS ID line per bound network namespace
 #        vesper-vesperd log ID [N]            last N lines of ID's serial console
 #        vesper-vesperd kill-holder ID        SIGKILL the lease shell (KILLED-HOLDER ID pid=N); tests the reaper
 #        vesper-vesperd kill-fc ID            SIGKILL Firecracker (KILLED-FC ID pid=N); tests the lease
@@ -95,8 +96,9 @@ valid_id() { # the jailer's rule: 1 to 64 letters, digits and hyphens
   case "${1:-}" in ''|*[!A-Za-z0-9-]*) return 1 ;; esac
   [ "${#1}" -le 64 ]
 }
-valid_tap() { # a Linux interface name (IFNAMSIZ 16 with the NUL) of letters, digits, _ and -; never lo
-  case "${1:-}" in ''|lo|*[!A-Za-z0-9_-]*) return 1 ;; esac
+valid_tap() { # a Linux interface name (IFNAMSIZ 16 with the NUL) of letters, digits, _ and -, not starting with -;
+  # never lo. Names that are ip keywords (up, dev, mtu…) are fine: every ip call names the device with dev.
+  case "${1:-}" in ''|lo|-*|*[!A-Za-z0-9_-]*) return 1 ;; esac
   [ "${#1}" -le 15 ]
 }
 digits() { case "${1:-}" in ''|*[!0-9]*) return 1 ;; esac; }
@@ -189,22 +191,24 @@ teardown() { # ID (caller holds the lock) -> CLEAN ID | DIRTY ID <what>
 # remove it. The jailed Firecracker has no CAP_NET_ADMIN, so it cannot create a tap; it can open one that exists and
 # is owned by uid 20000 (the kernel's tun owner check). The namespace has no uplink: the guest reaches its tap and
 # nothing else, and the System VM's own interfaces stay out of the jail's reach.
+ns_ino() { stat -L -c %i "$1" 2>/dev/null; } # a namespace file -> its inode, empty when unreadable
 netns_mounted() { awk -v f="$NETNS/$1" '$2 == f && $3 == "nsfs" {m=1} END {exit !m}' /proc/mounts; }
 netns_down() { # ID: unbind and remove; the taps go with the namespace once Firecracker is gone
   f="$NETNS/$1"
-  netns_mounted "$1" && umount "$f" 2>/dev/null
+  # -l: an inspection (net, isolation) may hold the file open; the namespace itself lives on until its last user goes.
+  netns_mounted "$1" && umount -l "$f" 2>/dev/null
   netns_mounted "$1" || rm -f "$f"
 }
-netns_up() { # ID TAP... (caller holds the lock) -> prints a reason on failure
+netns_up() { # ID TAP... (the lease record exists, so the reaper leaves the namespace alone) -> a reason on failure
   nid=$1; shift; f="$NETNS/$nid"
   mkdir -p "$NETNS" && chmod 0700 "$NETNS" || { echo "netns directory"; return 1; }
   netns_down "$nid"
   [ -e "$f" ] && { echo "netns $nid still bound"; return 1; }
   : > "$f" && unshare --net="$f" true || { rm -f "$f"; echo "netns create failed"; return 1; }
-  out=$(nsenter --net="$f" ip link set lo up 2>&1) || { echo "lo: $(printf '%s' "$out" | oneline)"; return 1; }
+  out=$(nsenter --net="$f" ip link set dev lo up 2>&1) || { echo "lo: $(printf '%s' "$out" | oneline)"; return 1; }
   for t in "$@"; do
     out=$(nsenter --net="$f" tunctl -t "$t" -u "$JUSER" 2>&1) || { echo "tap $t: $(printf '%s' "$out" | oneline)"; return 1; }
-    out=$(nsenter --net="$f" ip link set "$t" up 2>&1) || { echo "tap $t up: $(printf '%s' "$out" | oneline)"; return 1; }
+    out=$(nsenter --net="$f" ip link set dev "$t" up 2>&1) || { echo "tap $t up: $(printf '%s' "$out" | oneline)"; return 1; }
   done
 }
 
@@ -241,7 +245,9 @@ reap_pass() { # (caller holds the lock)
     [ -e "$ns" ] || continue
     rid=${ns##*/}
     valid_id "$rid" || continue
-    [ -e "$LEASES/$rid" ] || [ -e "$JAILS/$rid" ] || netns_down "$rid"
+    [ -e "$LEASES/$rid" ] || [ -e "$JAILS/$rid" ] && continue
+    netns_down "$rid"; reaped=$((reaped + 1))
+    if [ -e "$ns" ]; then echo "REAPED $rid reason=orphan-netns DIRTY $rid netns"; else echo "REAPED $rid reason=orphan-netns CLEAN $rid"; fi
   done
   echo "REAP reaped=$reaped kept=$kept"
 }
@@ -495,7 +501,7 @@ lease_exit() {
   # Tear down only while the record is still this shell's: the reaper may have taken it, and a new lease may
   # hold the id since.
   if read_record "$LID" && [ "$H_PID" = "$$" ] && [ "$H_START" = "$MY_START" ]; then
-    teardown "$LID" > /dev/null
+    res=$(teardown "$LID") || logger -t vesperd "$res" 2>/dev/null
   fi
   unlock
   [ -n "$SPID" ] && wait "$SPID" 2>/dev/null
@@ -514,7 +520,7 @@ launch() {
       stage=*) nstage=$((nstage + 1)) ;;
       tap=*)
         t=${spec#tap=}
-        valid_tap "$t" || { echo "ERR bad tap name ${t:-(empty)}: 1 to 15 letters, digits, _ and -, not lo"; return 2; }
+        valid_tap "$t" || { echo "ERR bad tap name ${t:-(empty)}: 1 to 15 letters, digits, _ and -, not starting with -, not lo"; return 2; }
         case " $taps " in *" $t "*) echo "ERR tap $t given twice"; return 2 ;; esac
         taps="$taps $t"; ntap=$((ntap + 1)) ;;
       *) echo "ERR usage: LAUNCHAPI <id> [ceiling] [stage=SRC:DEST|tap=NAME]..."; return 2 ;;
@@ -533,7 +539,7 @@ launch() {
   MY_START=$(start_of $$) || { echo "ERR own start time"; return 1; }
   lock
   reap_pass > /dev/null
-  if [ -e "$LEASES/$LID" ] || [ -e "$JAILS/$LID" ] || [ -d "$CG/$LID" ]; then unlock; echo "ERR busy $LID"; return 1; fi
+  if [ -n "$(leftovers "$LID")" ]; then unlock; echo "ERR busy $LID"; return 1; fi
   prep=$("$MV" prepare 2>&1) || { unlock; echo "ERR prepare: $(printf '%s' "$prep" | head -1 | oneline)"; return 1; }
   # The record names this shell before the jail exists, so the reaper can always tell who owns it.
   ppid=$(awk '/^PPid:/{print $2}' "/proc/$$/status"); pstart=$(start_of "$ppid") || pstart=""
@@ -549,14 +555,13 @@ launch() {
   cp "$MVM/Image" "$root/Image" && cp "$MVM/initrd.gz" "$root/initrd.gz" && chmod 0644 "$root/Image" "$root/initrd.gz" \
     || launch_fail "stage kernel"
   chown "$JUID:$JGID" "$root"
-  # Staging runs before Firecracker exists in this jail, outside the lock (the record keeps the reaper off it).
-  if [ "$#" -gt 0 ]; then
-    unlock
-    why=$(launch_stage "$root" "$@") || launch_fail "$why"
-    lock
-  fi
+  # Staging and the network namespace are made before Firecracker exists, outside the lock (the record keeps the
+  # reaper off them).
+  unlock
+  if [ "$nstage" -gt 0 ]; then why=$(launch_stage "$root" "$@") || launch_fail "$why"; fi
   # shellcheck disable=SC2086
   why=$(netns_up "$LID" $taps) || launch_fail "network: $why"
+  lock
   log="$LOGS/$LID.log"
   : > "$log"
   setsid "$JAILER" --id "$LID" --exec-file "$FC" --uid "$JUID" --gid "$JGID" --chroot-base-dir "$BASE" \
@@ -631,8 +636,10 @@ isolation() {
      && [ "$(readlink "/proc/$pid/ns/mnt")" != "$(readlink /proc/1/ns/mnt)" ]; then chroot_ok=true; fi
   cg_ok=false; [ "$cg" = "/vesperd/$sid" ] && cg_ok=true
   sec_ok=false; [ "$sec" = 2 ] && sec_ok=true
-  net_ok=false
-  [ "$(readlink "/proc/$pid/ns/net")" != "$(readlink /proc/1/ns/net)" ] && netns_mounted "$sid" && net_ok=true
+  # netns_ok: Firecracker is in the lease's own bound namespace, which is not the System VM's (fails closed).
+  net_ok=false; pnet=$(ns_ino "/proc/$pid/ns/net"); bnet=""; netns_mounted "$sid" && bnet=$(ns_ino "$NETNS/$sid")
+  rnet=$(ns_ino /proc/1/ns/net)
+  [ -n "$pnet" ] && [ -n "$rnet" ] && [ "$pnet" = "$bnet" ] && [ "$pnet" != "$rnet" ] && net_ok=true
   printf '{"id":"%s","pid":%s,"holder":%s,"uid":%s,"jail":"%s","cgroup":"%s","memory_max":"%s","seccomp_mode":%s,"uid_ok":%s,"chroot_ok":%s,"cgroup_ok":%s,"seccomp_ok":%s,"netns_ok":%s}\n' \
     "$sid" "$pid" "$H_PID" "${uid:-0}" "$JAILS/$sid/root" "$cg" "$mem" "${sec:-0}" "$uid_ok" "$chroot_ok" "$cg_ok" "$sec_ok" "$net_ok"
 }
@@ -644,6 +651,7 @@ list() {
     echo "LEASE ${rec##*/} holder=$H_PID:$H_START conn=${C_PID:--}:${C_START:--} fc=${F_PID:--}:${F_START:--}"
   done
   for jail in "$JAILS"/*; do [ -d "$jail" ] && echo "JAIL ${jail##*/}"; done
+  for ns in "$NETNS"/*; do [ -e "$ns" ] && echo "NETNS ${ns##*/}"; done
   return 0
 }
 
@@ -700,20 +708,28 @@ jail_files() {
   done
 }
 
-net() { # ID's network namespace: one LINK line per interface, then whether it differs from the System VM's
+net() { # ID's network namespace: one LINK line per interface, then whether it is the System VM's (fails closed)
   sid=${1:-}; valid_id "$sid" || { echo "ERR bad id"; return 2; }
   netns_mounted "$sid" || { echo "ERR no network namespace for $sid"; return 1; }
   f="$NETNS/$sid"
-  # busybox ip -o link: "N: NAME: <FLAGS> ..."; the tun owner is read from the namespace's own sysfs view.
-  nsenter --net="$f" ip -o link | while IFS= read -r l; do
-    name=${l#*: }; name=${name%%:*}; name=${name%%@*}
-    case "$l" in *"<"*UP*">"*) st=UP ;; *) st=DOWN ;; esac
-    # shellcheck disable=SC2016
-    own=$(nsenter --net="$f" unshare -m sh -c 'mount --make-rprivate / && mount -t sysfs sysfs /sys 2>/dev/null && cat "/sys/class/net/$1/owner" 2>/dev/null' sh "$name")
-    echo "LINK $name state=$st owner=${own:--}"
-  done
-  sep=false; [ "$(nsenter --net="$f" readlink /proc/self/ns/net)" != "$(readlink /proc/1/ns/net)" ] && sep=true
-  echo "NETNS $sid separate=$sep"
+  # One entry: a private mount namespace with the network namespace's own sysfs, for the tun owner. busybox ip -o
+  # link prints "N: NAME: <FLAGS> ..."; the flag list is matched as a whole word.
+  # shellcheck disable=SC2016
+  out=$(nsenter --net="$f" unshare -m sh -c '
+    mount --make-rprivate / && mount -t sysfs sysfs /sys || exit 1
+    ip -o link | while IFS= read -r l; do
+      name=${l#*: }; name=${name%%:*}; name=${name%%@*}
+      fl=${l#*<}; fl=${fl%%>*}
+      case ",$fl," in *,UP,*) st=UP ;; *) st=DOWN ;; esac
+      own=$(cat "/sys/class/net/$name/owner" 2>/dev/null)
+      [ "$own" = -1 ] && own=-
+      echo "LINK $name state=$st owner=${own:--}"
+    done' 2>/dev/null) || { echo "ERR cannot enter the network namespace of $sid"; return 1; }
+  [ -n "$out" ] || { echo "ERR no interfaces in the network namespace of $sid"; return 1; }
+  printf '%s\n' "$out"
+  bnet=$(ns_ino "$f"); rnet=$(ns_ino /proc/1/ns/net)
+  sep=false; [ -n "$bnet" ] && [ -n "$rnet" ] && [ "$bnet" != "$rnet" ] && sep=true
+  echo "NETNS $sid separate=$sep ino=${bnet:--}"
 }
 
 memory() { # ID's cgroup: memory.current, memory.peak, memory.max and memory.stat's anon and file, in bytes

@@ -146,7 +146,7 @@ fn check_taps(taps: &[String]) -> Result<Vec<String>, String> {
     }
     for (i, tap) in taps.iter().enumerate() {
         if !valid_tap_name(tap) {
-            return Err(format!("--tap {tap:?}: use 1 to 15 letters, digits, _ and -, not lo"));
+            return Err(format!("--tap {tap:?}: use 1 to 15 letters, digits, _ and -, not starting with -, not lo"));
         }
         if taps[..i].contains(tap) {
             return Err(format!("--tap {tap:?} given twice"));

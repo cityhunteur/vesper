@@ -35,11 +35,13 @@ pub struct HttpResponse {
 pub const MAX_TAPS: usize = 8;
 
 /// A tap device name the guest accepts: a Linux interface name (at most 15 bytes) of ASCII letters, digits, `_` and
-/// `-`, and never `lo`. The guest checks it again (`vesper-vesperd`, `valid_tap`).
+/// `-`, not starting with `-` (it would read as an option), and never `lo`. The guest checks it again
+/// (`vesper-vesperd`, `valid_tap`).
 pub fn valid_tap_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 15
         && name != "lo"
+        && !name.starts_with('-')
         && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
 }
 
@@ -282,7 +284,9 @@ mod tests {
         assert!(valid_tap_name("tap0"));
         assert!(valid_tap_name("vm_1-tap"));
         assert!(valid_tap_name(&"t".repeat(15)));
-        for bad in ["", "lo", "tap 0", "tap/0", "tap.0", "tap:0", "tap=0", "../x", &"t".repeat(16)] {
+        // ip keywords are names like any other: the guest always passes them after `dev`.
+        assert!(valid_tap_name("up") && valid_tap_name("dev") && valid_tap_name("t-"));
+        for bad in ["", "lo", "-", "-tap0", "tap 0", "tap/0", "tap.0", "tap:0", "tap=0", "../x", &"t".repeat(16)] {
             assert!(!valid_tap_name(bad), "accepted {bad:?}");
         }
     }

@@ -60,7 +60,7 @@ struct Args {
     #[arg(long = "stage", value_name = "SRC:DEST")]
     stage: Vec<String>,
     /// Create a tap device NAME for the microVM before Firecracker starts (`--backend systemvm`; repeatable, at most
-    /// 8): it lives in the microVM's own network namespace, is owned by the jailer's uid and has no uplink, so
+    /// 8; 1 to 15 letters, digits, _ and -, not starting with -, not lo): it lives in the microVM's own network namespace, is owned by the jailer's uid and has no uplink, so
     /// `PUT /network-interfaces` with `host_dev_name` NAME succeeds (CE-0010).
     #[arg(long = "tap", value_name = "NAME")]
     tap: Vec<String>,

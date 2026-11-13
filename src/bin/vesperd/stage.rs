@@ -32,8 +32,8 @@ pub fn run(args: &super::Args, command: &Command) -> i32 {
 }
 
 fn run_inner(args: &super::Args, command: &Command) -> Result<Vec<String>, (i32, String)> {
-    if args.backend != super::Backend::Model || args.socket.is_some() || args.id.is_some() || args.memory_max.is_some() || !args.stage.is_empty() {
-        return Err((2, "--backend, --socket, --id, --memory-max and --stage do not apply here; use vesperd stage --id ID".to_string()));
+    if args.backend != super::Backend::Model || args.socket.is_some() || args.id.is_some() || args.memory_max.is_some() || !args.stage.is_empty() || !args.tap.is_empty() {
+        return Err((2, "--backend, --socket, --id, --memory-max, --stage and --tap do not apply here; use vesperd stage --id ID".to_string()));
     }
     // Every form is checked before a connection is made.
     let request = match command {
