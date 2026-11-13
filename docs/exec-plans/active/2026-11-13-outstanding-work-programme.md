@@ -25,7 +25,8 @@ it is why the run comes last.
 - [x] Owner reviews and approves this plan, including the decisions marked "owner" in the Decision Log (2026-11-13, D-029)
 - [x] W1 Housekeeping: remove the merged worktrees; split `src/systemvm.rs` (TD-043) (2026-11-13, #187)
 - [x] W2 TD-058 follow-up: flood test of the 1,024-flow cap; conntrack count after teardown (positive and negative-control runs 2026-11-13, `run/TD-058/egress-flood-*.json`)
-- [ ] W3 #172: `make systemvm-upstream-suite` and the comparator (own ExecPlan)
+- [x] W3 #172: `make systemvm-upstream-suite` and the comparator (PR #189; fifth full run clean with everything
+  frozen, `run/GH-172/20261113T172619Z`; D-031)
 - [x] W4 Runtime bounds: console logs (TD-055), memory budget (TD-056), snapshot store quota (TD-053) (PR #191;
   runtime evidence `run/W4/20261113T170614Z`: 7 suites, 121 of 121 steps, and a microVM that outlives its console bounder)
 - [ ] W5 #160: host shares into microVMs over NFS from `unfs3` (own ExecPlan; dependency approved in D-021)

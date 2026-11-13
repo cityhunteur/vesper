@@ -1,0 +1,40 @@
+{
+  "reference": "all-pass",
+  "total": 67,
+  "passed": 59,
+  "to_explain": {
+    "error": 2,
+    "skipped": 6
+  },
+  "per_class": {
+    "apple-cpu-features-unknown": 0,
+    "apple-cpu-no-cache-topology": 0,
+    "apple-cpu-ssb-vulnerable": 0,
+    "guest-ssh-timeout-under-load": 0,
+    "jail-hardlink-exdev": 0,
+    "no-dmi": 0,
+    "no-userfaultfd": 0,
+    "per-test-timeout": 0,
+    "rate-limiter-balloon-tolerance": 0,
+    "upstream-platform-skip": 6,
+    "vmclock-gen-counter-flag": 0,
+    "vmm-memory-overhead": 2,
+    "vsock-reset-after-snapshot": 0
+  },
+  "unmatched": [],
+  "stale_classes": [
+    "apple-cpu-features-unknown",
+    "apple-cpu-no-cache-topology",
+    "apple-cpu-ssb-vulnerable",
+    "guest-ssh-timeout-under-load",
+    "jail-hardlink-exdev",
+    "no-dmi",
+    "no-userfaultfd",
+    "per-test-timeout",
+    "rate-limiter-balloon-tolerance",
+    "vmclock-gen-counter-flag",
+    "vsock-reset-after-snapshot"
+  ],
+  "not_passing_on_reference": 0,
+  "missing_from_run": 0
+}

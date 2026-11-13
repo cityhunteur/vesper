@@ -1,0 +1,57 @@
+[upstream-suite 17:26:19] revision d83d72b710361a10294480131377b1b00b163af8 (v1.16.0), container public.ecr.aws/firecracker/fcuvm:v90@sha256:657863a847acff0b52888a237173f0f6740d7ace175a2d7423cf5f0307db9698, artefacts firecracker-ci/20260603-e656faf58d6c-0/aarch64, selection: integration_tests/functional integration_tests/security
+[upstream-suite 17:26:20] artefacts: 15 objects
+[upstream-suite 17:26:20] release binaries: cpu-template-helper cpu-template-helper.debug firecracker firecracker.debug jailer jailer.debug rebase-snap rebase-snap.debug seccompiler-bin seccompiler-bin.debug snapshot-editor snapshot-editor.debug 
+[upstream-suite 17:26:20] restart the System VM with 4 vCPUs, 8192 MiB and /Volumes/Workspace/github.com/cityhunteur/vesper/build/upstream-suite shared
+systemvm-up: running (pid 47170); bridge run/systemvm/vsock/3.sock; log /Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/vmlauncher.log
+{"status":"bridge-listening","elapsed_ms":102,"ready_pattern":"login:","console_log":"/Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/console.log","bridge":"run/systemvm/vsock/3.sock"}
+{"status":"ready","elapsed_ms":2969,"ready_pattern":"login:","console_log":"/Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/console.log"}
+{"status":"probe-ok","elapsed_ms":5479,"ready_pattern":"login:","console_log":"/Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/console.log"}
+systemvm-up: MOUNTED share0 /Volumes/Workspace/github.com/cityhunteur/vesper/run/vesperd-share mode=rw
+systemvm-up: MOUNTED share1 /Volumes/Workspace/github.com/cityhunteur/vesper/build/upstream-suite mode=rw
+docker-up: vesper-proxy pid 47419; DOCKER_HOST=unix:///Volumes/Workspace/github.com/cityhunteur/vesper/run/vesper/docker.sock; published ports via the guest relay (status /Volumes/Workspace/github.com/cityhunteur/vesper/run/vesper/ports.json)
+srw-------@ 1 pravin  staff  0 13 Nov 17:26 /Volumes/Workspace/github.com/cityhunteur/vesper/run/vesper/docker.sock
+[upstream-suite 17:26:34] tun loaded; data disk 48 GB free
+[upstream-suite 17:26:34] stage the tree into vesper-upstream-src
+[upstream-suite 17:26:55] build the examples and tools that tests expect in build/cargo_target/aarch64-unknown-linux-musl/release
+[upstream-suite 17:26:59] staged: build clippy-tracing clippy-tracing.d cpu-template-helper cpu-template-helper.debug deps examples firecracker firecracker.debug incremental jailer jailer.debug rebase-snap rebase-snap.debug seccompiler-bin seccompiler-bin.debug snapshot-editor snapshot-editor.debug 
+[upstream-suite 17:26:59] collect the selection
+[upstream-suite 17:27:05] run 980 tests with 3 workers, 600 s per test, 14400 s in all
+rc=1 wall_s=4998 collected=980 stopped=no selection=integration_tests/functional integration_tests/security
+collect: 980 tests (980 collected): {'error': 33, 'failed': 93, 'passed': 758, 'skipped': 96}
+reference=all-pass partial=false total=980 passed=758 to_explain={"error": 33, "failed": 93, "skipped": 96} not_passing_on_reference=0 missing_from_run=0
+class apple-cpu-features-unknown: 8
+class apple-cpu-no-cache-topology: 24
+class apple-cpu-ssb-vulnerable: 10
+class guest-ssh-timeout-under-load: 2
+class max-devices-worker-timeout: 2
+class no-dmi: 1
+class no-userfaultfd: 8
+class rate-limiter-balloon-tolerance: 11
+class upstream-platform-skip: 96
+class vmclock-gen-counter-flag: 1
+class vmm-memory-overhead: 57
+class vsock-reset-after-snapshot: 1
+classes that explained nothing in this run: balloon-stats-not-refreshed, vmm-exit-timeout-under-load
+UNMATCHED integration_tests/functional/test_balloon.py::test_reinflate_balloon[vmlinux-5.10.253-PCI_OFF] failed assert (151656 - 126672) <= 20000
+upstream-compare: 1 result(s) match no exception class
+[upstream-suite 18:50:38] rerun 1 unmatched test(s) alone, one at a time
+collect: 980 tests (980 collected): {'error': 33, 'failed': 92, 'passed': 759, 'skipped': 96}
+reference=all-pass partial=false total=980 passed=759 to_explain={"error": 33, "failed": 92, "skipped": 96} not_passing_on_reference=0 missing_from_run=0
+class apple-cpu-features-unknown: 8
+class apple-cpu-no-cache-topology: 24
+class apple-cpu-ssb-vulnerable: 10
+class guest-ssh-timeout-under-load: 2
+class max-devices-worker-timeout: 2
+class no-dmi: 1
+class no-userfaultfd: 8
+class rate-limiter-balloon-tolerance: 11
+class upstream-platform-skip: 96
+class vmclock-gen-counter-flag: 1
+class vmm-memory-overhead: 57
+class vsock-reset-after-snapshot: 1
+classes that explained nothing in this run: balloon-stats-not-refreshed, vmm-exit-timeout-under-load
+PASSED-ALONE integration_tests/functional/test_balloon.py::test_reinflate_balloon[vmlinux-5.10.253-PCI_OFF] under load: failed assert (151656 - 126672) <= 20000
+upstream-compare: every result is explained
+[upstream-suite 18:51:23] wiped /srv and the test results in vesper-upstream-src
+[upstream-suite 18:51:23] evidence in run/GH-172/20261113T172619Z
+[upstream-suite 18:51:23] restore the previous launch config and restart the System VM

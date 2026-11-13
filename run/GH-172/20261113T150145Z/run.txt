@@ -1,0 +1,1 @@
+rc=1 wall_s=361 collected=68 stopped=no selection=integration_tests/security/test_jail.py integration_tests/security/test_custom_seccomp.py integration_tests/functional/test_uffd.py

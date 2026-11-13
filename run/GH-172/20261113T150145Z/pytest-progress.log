@@ -1,0 +1,157 @@
+[gw0] [  1%] PASSED integration_tests/security/test_jail.py::test_empty_jailer_id[vmlinux-6.1.172-PCI_ON] 
+[gw0] [  2%] PASSED integration_tests/security/test_jail.py::test_empty_jailer_id[vmlinux-6.1.172-PCI_OFF] 
+[gw0] [  4%] PASSED integration_tests/security/test_jail.py::test_exec_file_not_exist[vmlinux-6.1.172-PCI_ON] 
+[gw0] [  5%] PASSED integration_tests/security/test_jail.py::test_exec_file_not_exist[vmlinux-6.1.172-PCI_OFF] 
+[gw0] [  7%] PASSED integration_tests/security/test_jail.py::test_exec_destination_path_is_symlink[vmlinux-6.1.172-PCI_ON] 
+[gw0] [  8%] PASSED integration_tests/security/test_jail.py::test_exec_destination_path_is_symlink[vmlinux-6.1.172-PCI_OFF] 
+[gw0] [ 10%] PASSED integration_tests/security/test_jail.py::test_exec_destination_path_is_hardlink[vmlinux-6.1.172-PCI_ON] 
+[gw0] [ 11%] PASSED integration_tests/security/test_jail.py::test_exec_destination_path_is_hardlink[vmlinux-6.1.172-PCI_OFF] 
+[gw1] [ 13%] PASSED integration_tests/security/test_jail.py::test_cgroups_parent_cgroup_but_no_cgroup[vmlinux-6.1.172-PCI_ON-True-False] 
+[gw0] [ 14%] PASSED integration_tests/security/test_jail.py::test_default_chroot_hierarchy[vmlinux-6.1.172-PCI_ON] 
+[gw1] [ 16%] PASSED integration_tests/security/test_jail.py::test_cgroups_parent_cgroup_but_no_cgroup[vmlinux-6.1.172-PCI_ON-True-True] 
+[gw1] [ 17%] PASSED integration_tests/security/test_jail.py::test_cgroups_parent_cgroup_but_no_cgroup[vmlinux-6.1.172-PCI_ON-False-None] 
+[gw0] [ 19%] PASSED integration_tests/security/test_jail.py::test_default_chroot_hierarchy[vmlinux-6.1.172-PCI_OFF] 
+[gw0] [ 20%] PASSED integration_tests/security/test_jail.py::test_arbitrary_usocket_location[vmlinux-6.1.172-PCI_ON] 
+[gw1] [ 22%] PASSED integration_tests/security/test_jail.py::test_cgroups_parent_cgroup_but_no_cgroup[vmlinux-6.1.172-PCI_OFF-True-False] 
+[gw1] [ 23%] PASSED integration_tests/security/test_jail.py::test_cgroups_parent_cgroup_but_no_cgroup[vmlinux-6.1.172-PCI_OFF-True-True] 
+[gw0] [ 25%] PASSED integration_tests/security/test_jail.py::test_arbitrary_usocket_location[vmlinux-6.1.172-PCI_OFF] 
+[gw1] [ 26%] PASSED integration_tests/security/test_jail.py::test_cgroups_parent_cgroup_but_no_cgroup[vmlinux-6.1.172-PCI_OFF-False-None] 
+[gw0] [ 27%] PASSED integration_tests/security/test_jail.py::test_cgroups[vmlinux-6.1.172-PCI_ON] 
+[gw1] [ 29%] PASSED integration_tests/security/test_jail.py::test_args_default_resource_limits[vmlinux-6.1.172-PCI_ON] 
+[gw1] [ 30%] PASSED integration_tests/security/test_jail.py::test_args_default_resource_limits[vmlinux-6.1.172-PCI_OFF] 
+[gw0] [ 32%] PASSED integration_tests/security/test_jail.py::test_cgroups[vmlinux-6.1.172-PCI_OFF] 
+[gw1] [ 33%] PASSED integration_tests/security/test_jail.py::test_args_resource_limits[vmlinux-6.1.172-PCI_ON] 
+[gw0] [ 35%] PASSED integration_tests/security/test_jail.py::test_cgroups_custom_parent[vmlinux-6.1.172-PCI_ON] 
+[gw1] [ 36%] PASSED integration_tests/security/test_jail.py::test_args_resource_limits[vmlinux-6.1.172-PCI_OFF] 
+[gw0] [ 38%] PASSED integration_tests/security/test_jail.py::test_cgroups_custom_parent[vmlinux-6.1.172-PCI_OFF] 
+[gw1] [ 39%] PASSED integration_tests/security/test_jail.py::test_positive_file_size_limit[vmlinux-6.1.172-PCI_ON] 
+[gw0] [ 41%] PASSED integration_tests/security/test_jail.py::test_node_cgroups[vmlinux-6.1.172-PCI_ON] 
+[gw1] [ 42%] PASSED integration_tests/security/test_jail.py::test_positive_file_size_limit[vmlinux-6.1.172-PCI_OFF] 
+[gw0] [ 44%] PASSED integration_tests/security/test_jail.py::test_node_cgroups[vmlinux-6.1.172-PCI_OFF] 
+[gw0] [ 45%] PASSED integration_tests/security/test_jail.py::test_cgroups_without_numa[vmlinux-6.1.172-PCI_ON] 
+[gw0] [ 47%] PASSED integration_tests/security/test_jail.py::test_cgroups_without_numa[vmlinux-6.1.172-PCI_OFF] 
+[gw0] [ 48%] SKIPPED integration_tests/security/test_jail.py::test_v1_default_cgroups[vmlinux-6.1.172-PCI_ON] 
+[gw0] [ 50%] SKIPPED integration_tests/security/test_jail.py::test_v1_default_cgroups[vmlinux-6.1.172-PCI_OFF] 
+[gw1] [ 51%] PASSED integration_tests/security/test_jail.py::test_negative_file_size_limit[vmlinux-6.1.172-PCI_ON] 
+[gw0] [ 52%] PASSED integration_tests/security/test_custom_seccomp.py::test_failing_filter[vmlinux-6.1.172-PCI_OFF] 
+[gw2] [ 54%] PASSED integration_tests/security/test_jail.py::test_firecracker_kill_by_pid[vmlinux-6.1.172-PCI_ON-False-False] 
+[gw1] [ 55%] PASSED integration_tests/security/test_jail.py::test_negative_file_size_limit[vmlinux-6.1.172-PCI_OFF] 
+[gw1] [ 57%] PASSED integration_tests/security/test_jail.py::test_negative_no_file_limit[vmlinux-6.1.172-PCI_ON] 
+[gw1] [ 58%] PASSED integration_tests/security/test_jail.py::test_negative_no_file_limit[vmlinux-6.1.172-PCI_OFF] 
+[gw1] [ 60%] PASSED integration_tests/security/test_jail.py::test_new_pid_ns_resource_limits[vmlinux-6.1.172-PCI_ON] 
+[gw0] [ 61%] PASSED integration_tests/security/test_custom_seccomp.py::test_invalid_bpf[vmlinux-6.1.172-PCI_ON] 
+[gw1] [ 63%] PASSED integration_tests/security/test_jail.py::test_new_pid_ns_resource_limits[vmlinux-6.1.172-PCI_OFF] 
+[gw1] [ 64%] PASSED integration_tests/security/test_jail.py::test_new_pid_namespace[vmlinux-6.1.172-PCI_ON] 
+[gw1] [ 66%] PASSED integration_tests/security/test_jail.py::test_new_pid_namespace[vmlinux-6.1.172-PCI_OFF] 
+[gw0] [ 67%] PASSED integration_tests/security/test_custom_seccomp.py::test_invalid_bpf[vmlinux-6.1.172-PCI_OFF] 
+[gw2] [ 69%] PASSED integration_tests/security/test_jail.py::test_firecracker_kill_by_pid[vmlinux-6.1.172-PCI_OFF-True-True] 
+[gw1] [ 70%] PASSED integration_tests/security/test_jail.py::test_firecracker_kill_by_pid[vmlinux-6.1.172-PCI_ON-True-True] 
+[gw0] [ 72%] FAILED integration_tests/functional/test_uffd.py::test_bad_socket_path[vmlinux-6.1.172-PCI_ON] 
+[gw2] [ 73%] PASSED integration_tests/security/test_jail.py::test_firecracker_kill_by_pid[vmlinux-6.1.172-PCI_OFF-True-False] 
+[gw1] [ 75%] PASSED integration_tests/security/test_jail.py::test_firecracker_kill_by_pid[vmlinux-6.1.172-PCI_ON-True-False] 
+[gw0] [ 76%] FAILED integration_tests/functional/test_uffd.py::test_bad_socket_path[vmlinux-6.1.172-PCI_OFF] 
+[gw2] [ 77%] PASSED integration_tests/security/test_jail.py::test_firecracker_kill_by_pid[vmlinux-6.1.172-PCI_OFF-False-True] 
+[gw1] [ 79%] PASSED integration_tests/security/test_jail.py::test_firecracker_kill_by_pid[vmlinux-6.1.172-PCI_ON-False-True] 
+[gw1] [ 80%] PASSED integration_tests/security/test_custom_seccomp.py::test_allow_all[vmlinux-6.1.172-PCI_OFF] 
+[gw1] [ 82%] PASSED integration_tests/security/test_custom_seccomp.py::test_working_filter[vmlinux-6.1.172-PCI_ON] 
+[gw1] [ 83%] PASSED integration_tests/security/test_custom_seccomp.py::test_working_filter[vmlinux-6.1.172-PCI_OFF] 
+[gw0] [ 85%] FAILED integration_tests/functional/test_uffd.py::test_unbinded_socket[vmlinux-6.1.172-PCI_ON] 
+[gw1] [ 86%] PASSED integration_tests/security/test_custom_seccomp.py::test_failing_filter[vmlinux-6.1.172-PCI_ON] 
+[gw2] [ 88%] PASSED integration_tests/security/test_jail.py::test_firecracker_kill_by_pid[vmlinux-6.1.172-PCI_OFF-False-False] 
+[gw2] [ 89%] PASSED integration_tests/security/test_jail.py::test_cgroupsv2_written_only_once[vmlinux-6.1.172-PCI_ON] 
+[gw0] [ 91%] FAILED integration_tests/functional/test_uffd.py::test_unbinded_socket[vmlinux-6.1.172-PCI_OFF] 
+[gw1] [ 92%] FAILED integration_tests/functional/test_uffd.py::test_valid_handler[vmlinux-6.1.172-PCI_OFF] 
+[gw2] [ 94%] PASSED integration_tests/security/test_jail.py::test_cgroupsv2_written_only_once[vmlinux-6.1.172-PCI_OFF] 
+[gw2] [ 95%] PASSED integration_tests/security/test_custom_seccomp.py::test_allow_all[vmlinux-6.1.172-PCI_ON] 
+[gw0] [ 97%] FAILED integration_tests/functional/test_uffd.py::test_valid_handler[vmlinux-6.1.172-PCI_ON] 
+[gw1] [ 98%] FAILED integration_tests/functional/test_uffd.py::test_malicious_handler[vmlinux-6.1.172-PCI_ON] 
+[gw0] [100%] FAILED integration_tests/functional/test_uffd.py::test_malicious_handler[vmlinux-6.1.172-PCI_OFF] 
+[gw0] linux -- Python 3.12.3 /opt/venv/bin/python
+[gw0] linux -- Python 3.12.3 /opt/venv/bin/python
+[gw0] linux -- Python 3.12.3 /opt/venv/bin/python
+[gw0] linux -- Python 3.12.3 /opt/venv/bin/python
+[gw1] linux -- Python 3.12.3 /opt/venv/bin/python
+[gw0] linux -- Python 3.12.3 /opt/venv/bin/python
+[gw1] linux -- Python 3.12.3 /opt/venv/bin/python
+[gw0] linux -- Python 3.12.3 /opt/venv/bin/python
+[gw1] linux -- Python 3.12.3 /opt/venv/bin/python
+[gw0] linux -- Python 3.12.3 /opt/venv/bin/python
+[gw1] linux -- Python 3.12.3 /opt/venv/bin/python
+[gw1] linux -- Python 3.12.3 /opt/venv/bin/python
+=========================== short test summary info ============================
+PASSED integration_tests/security/test_jail.py::test_empty_jailer_id[vmlinux-6.1.172-PCI_ON]
+PASSED integration_tests/security/test_jail.py::test_empty_jailer_id[vmlinux-6.1.172-PCI_OFF]
+PASSED integration_tests/security/test_jail.py::test_exec_file_not_exist[vmlinux-6.1.172-PCI_ON]
+PASSED integration_tests/security/test_jail.py::test_exec_file_not_exist[vmlinux-6.1.172-PCI_OFF]
+PASSED integration_tests/security/test_jail.py::test_exec_destination_path_is_symlink[vmlinux-6.1.172-PCI_ON]
+PASSED integration_tests/security/test_jail.py::test_exec_destination_path_is_symlink[vmlinux-6.1.172-PCI_OFF]
+PASSED integration_tests/security/test_jail.py::test_exec_destination_path_is_hardlink[vmlinux-6.1.172-PCI_ON]
+PASSED integration_tests/security/test_jail.py::test_exec_destination_path_is_hardlink[vmlinux-6.1.172-PCI_OFF]
+PASSED integration_tests/security/test_jail.py::test_cgroups_parent_cgroup_but_no_cgroup[vmlinux-6.1.172-PCI_ON-True-False]
+PASSED integration_tests/security/test_jail.py::test_default_chroot_hierarchy[vmlinux-6.1.172-PCI_ON]
+PASSED integration_tests/security/test_jail.py::test_cgroups_parent_cgroup_but_no_cgroup[vmlinux-6.1.172-PCI_ON-True-True]
+PASSED integration_tests/security/test_jail.py::test_cgroups_parent_cgroup_but_no_cgroup[vmlinux-6.1.172-PCI_ON-False-None]
+PASSED integration_tests/security/test_jail.py::test_default_chroot_hierarchy[vmlinux-6.1.172-PCI_OFF]
+PASSED integration_tests/security/test_jail.py::test_arbitrary_usocket_location[vmlinux-6.1.172-PCI_ON]
+PASSED integration_tests/security/test_jail.py::test_cgroups_parent_cgroup_but_no_cgroup[vmlinux-6.1.172-PCI_OFF-True-False]
+PASSED integration_tests/security/test_jail.py::test_cgroups_parent_cgroup_but_no_cgroup[vmlinux-6.1.172-PCI_OFF-True-True]
+PASSED integration_tests/security/test_jail.py::test_arbitrary_usocket_location[vmlinux-6.1.172-PCI_OFF]
+PASSED integration_tests/security/test_jail.py::test_cgroups_parent_cgroup_but_no_cgroup[vmlinux-6.1.172-PCI_OFF-False-None]
+PASSED integration_tests/security/test_jail.py::test_cgroups[vmlinux-6.1.172-PCI_ON]
+PASSED integration_tests/security/test_jail.py::test_args_default_resource_limits[vmlinux-6.1.172-PCI_ON]
+PASSED integration_tests/security/test_jail.py::test_args_default_resource_limits[vmlinux-6.1.172-PCI_OFF]
+PASSED integration_tests/security/test_jail.py::test_cgroups[vmlinux-6.1.172-PCI_OFF]
+PASSED integration_tests/security/test_jail.py::test_args_resource_limits[vmlinux-6.1.172-PCI_ON]
+PASSED integration_tests/security/test_jail.py::test_cgroups_custom_parent[vmlinux-6.1.172-PCI_ON]
+PASSED integration_tests/security/test_jail.py::test_args_resource_limits[vmlinux-6.1.172-PCI_OFF]
+PASSED integration_tests/security/test_jail.py::test_cgroups_custom_parent[vmlinux-6.1.172-PCI_OFF]
+PASSED integration_tests/security/test_jail.py::test_positive_file_size_limit[vmlinux-6.1.172-PCI_ON]
+PASSED integration_tests/security/test_jail.py::test_node_cgroups[vmlinux-6.1.172-PCI_ON]
+PASSED integration_tests/security/test_jail.py::test_positive_file_size_limit[vmlinux-6.1.172-PCI_OFF]
+PASSED integration_tests/security/test_jail.py::test_node_cgroups[vmlinux-6.1.172-PCI_OFF]
+PASSED integration_tests/security/test_jail.py::test_cgroups_without_numa[vmlinux-6.1.172-PCI_ON]
+PASSED integration_tests/security/test_jail.py::test_cgroups_without_numa[vmlinux-6.1.172-PCI_OFF]
+PASSED integration_tests/security/test_jail.py::test_negative_file_size_limit[vmlinux-6.1.172-PCI_ON]
+PASSED integration_tests/security/test_custom_seccomp.py::test_failing_filter[vmlinux-6.1.172-PCI_OFF]
+PASSED integration_tests/security/test_jail.py::test_firecracker_kill_by_pid[vmlinux-6.1.172-PCI_ON-False-False]
+PASSED integration_tests/security/test_jail.py::test_negative_file_size_limit[vmlinux-6.1.172-PCI_OFF]
+PASSED integration_tests/security/test_jail.py::test_negative_no_file_limit[vmlinux-6.1.172-PCI_ON]
+PASSED integration_tests/security/test_jail.py::test_negative_no_file_limit[vmlinux-6.1.172-PCI_OFF]
+PASSED integration_tests/security/test_jail.py::test_new_pid_ns_resource_limits[vmlinux-6.1.172-PCI_ON]
+PASSED integration_tests/security/test_custom_seccomp.py::test_invalid_bpf[vmlinux-6.1.172-PCI_ON]
+PASSED integration_tests/security/test_jail.py::test_new_pid_ns_resource_limits[vmlinux-6.1.172-PCI_OFF]
+PASSED integration_tests/security/test_jail.py::test_new_pid_namespace[vmlinux-6.1.172-PCI_ON]
+PASSED integration_tests/security/test_jail.py::test_new_pid_namespace[vmlinux-6.1.172-PCI_OFF]
+PASSED integration_tests/security/test_custom_seccomp.py::test_invalid_bpf[vmlinux-6.1.172-PCI_OFF]
+PASSED integration_tests/security/test_jail.py::test_firecracker_kill_by_pid[vmlinux-6.1.172-PCI_OFF-True-True]
+PASSED integration_tests/security/test_jail.py::test_firecracker_kill_by_pid[vmlinux-6.1.172-PCI_ON-True-True]
+PASSED integration_tests/security/test_jail.py::test_firecracker_kill_by_pid[vmlinux-6.1.172-PCI_OFF-True-False]
+PASSED integration_tests/security/test_jail.py::test_firecracker_kill_by_pid[vmlinux-6.1.172-PCI_ON-True-False]
+PASSED integration_tests/security/test_jail.py::test_firecracker_kill_by_pid[vmlinux-6.1.172-PCI_OFF-False-True]
+PASSED integration_tests/security/test_jail.py::test_firecracker_kill_by_pid[vmlinux-6.1.172-PCI_ON-False-True]
+PASSED integration_tests/security/test_custom_seccomp.py::test_allow_all[vmlinux-6.1.172-PCI_OFF]
+PASSED integration_tests/security/test_custom_seccomp.py::test_working_filter[vmlinux-6.1.172-PCI_ON]
+PASSED integration_tests/security/test_custom_seccomp.py::test_working_filter[vmlinux-6.1.172-PCI_OFF]
+PASSED integration_tests/security/test_custom_seccomp.py::test_failing_filter[vmlinux-6.1.172-PCI_ON]
+PASSED integration_tests/security/test_jail.py::test_firecracker_kill_by_pid[vmlinux-6.1.172-PCI_OFF-False-False]
+PASSED integration_tests/security/test_jail.py::test_cgroupsv2_written_only_once[vmlinux-6.1.172-PCI_ON]
+PASSED integration_tests/security/test_jail.py::test_cgroupsv2_written_only_once[vmlinux-6.1.172-PCI_OFF]
+PASSED integration_tests/security/test_custom_seccomp.py::test_allow_all[vmlinux-6.1.172-PCI_ON]
+SKIPPED [2] integration_tests/security/test_jail.py:440: Requires system with cgroup-v1 enabled.
+FAILED integration_tests/functional/test_uffd.py::test_bad_socket_path[vmlinux-6.1.172-PCI_ON] - AssertionError: Regex pattern did not match.
+  Expected regex: 'Load\\ snapshot\\ error:\\ Failed\\ to\\ restore\\ from\\ snapshot:\\ Failed\\ to\\ load\\ guest\\ memory:\\ Error\\ creating\\ guest\\ memory\\ from\\ uffd:\\ Failed\\ to\\ connect\\ to\\ UDS\\ Unix\\ stream:\\ No\\ such\\ file\\ or\\ directory\\ \\(os\\ error\\ 2\\)'
+  Actual message: "('Load snapshot error: Failed to restore from snapshot: Failed to load guest memory: Error creating guest memory from uffd: Failed to UFFD object: System error', {'fault_message': 'Load snapshot error: Failed to restore from snapshot: Failed to load guest memory: Error creating guest memory from uffd: Failed to UFFD object: System error'}, <Response [400]>)"
+FAILED integration_tests/functional/test_uffd.py::test_bad_socket_path[vmlinux-6.1.172-PCI_OFF] - AssertionError: Regex pattern did not match.
+  Expected regex: 'Load\\ snapshot\\ error:\\ Failed\\ to\\ restore\\ from\\ snapshot:\\ Failed\\ to\\ load\\ guest\\ memory:\\ Error\\ creating\\ guest\\ memory\\ from\\ uffd:\\ Failed\\ to\\ connect\\ to\\ UDS\\ Unix\\ stream:\\ No\\ such\\ file\\ or\\ directory\\ \\(os\\ error\\ 2\\)'
+  Actual message: "('Load snapshot error: Failed to restore from snapshot: Failed to load guest memory: Error creating guest memory from uffd: Failed to UFFD object: System error', {'fault_message': 'Load snapshot error: Failed to restore from snapshot: Failed to load guest memory: Error creating guest memory from uffd: Failed to UFFD object: System error'}, <Response [400]>)"
+FAILED integration_tests/functional/test_uffd.py::test_unbinded_socket[vmlinux-6.1.172-PCI_ON] - AssertionError: Regex pattern did not match.
+  Expected regex: 'Load\\ snapshot\\ error:\\ Failed\\ to\\ restore\\ from\\ snapshot:\\ Failed\\ to\\ load\\ guest\\ memory:\\ Error\\ creating\\ guest\\ memory\\ from\\ uffd:\\ Failed\\ to\\ connect\\ to\\ UDS\\ Unix\\ stream:\\ Connection\\ refused\\ \\(os\\ error\\ 111\\)'
+  Actual message: "('Load snapshot error: Failed to restore from snapshot: Failed to load guest memory: Error creating guest memory from uffd: Failed to UFFD object: System error', {'fault_message': 'Load snapshot error: Failed to restore from snapshot: Failed to load guest memory: Error creating guest memory from uffd: Failed to UFFD object: System error'}, <Response [400]>)"
+FAILED integration_tests/functional/test_uffd.py::test_unbinded_socket[vmlinux-6.1.172-PCI_OFF] - AssertionError: Regex pattern did not match.
+  Expected regex: 'Load\\ snapshot\\ error:\\ Failed\\ to\\ restore\\ from\\ snapshot:\\ Failed\\ to\\ load\\ guest\\ memory:\\ Error\\ creating\\ guest\\ memory\\ from\\ uffd:\\ Failed\\ to\\ connect\\ to\\ UDS\\ Unix\\ stream:\\ Connection\\ refused\\ \\(os\\ error\\ 111\\)'
+  Actual message: "('Load snapshot error: Failed to restore from snapshot: Failed to load guest memory: Error creating guest memory from uffd: Failed to UFFD object: System error', {'fault_message': 'Load snapshot error: Failed to restore from snapshot: Failed to load guest memory: Error creating guest memory from uffd: Failed to UFFD object: System error'}, <Response [400]>)"
+FAILED integration_tests/functional/test_uffd.py::test_valid_handler[vmlinux-6.1.172-PCI_OFF] - RuntimeError: ('Load snapshot error: Failed to restore from snapshot: Failed to load guest memory: Error creating guest memory from uffd: Failed to UFFD object: System error', {'fault_message': 'Load snapshot error: Failed to restore from snapshot: Failed to load guest memory: Error creating guest memory from uffd: Failed to UFFD object: System error'}, <Response [400]>)
+FAILED integration_tests/functional/test_uffd.py::test_valid_handler[vmlinux-6.1.172-PCI_ON] - RuntimeError: ('Load snapshot error: Failed to restore from snapshot: Failed to load guest memory: Error creating guest memory from uffd: Failed to UFFD object: System error', {'fault_message': 'Load snapshot error: Failed to restore from snapshot: Failed to load guest memory: Error creating guest memory from uffd: Failed to UFFD object: System error'}, <Response [400]>)
+FAILED integration_tests/functional/test_uffd.py::test_malicious_handler[vmlinux-6.1.172-PCI_ON] - RuntimeError: ('Load snapshot error: Failed to restore from snapshot: Failed to load guest memory: Error creating guest memory from uffd: Failed to UFFD object: System error', {'fault_message': 'Load snapshot error: Failed to restore from snapshot: Failed to load guest memory: Error creating guest memory from uffd: Failed to UFFD object: System error'}, <Response [400]>)
+FAILED integration_tests/functional/test_uffd.py::test_malicious_handler[vmlinux-6.1.172-PCI_OFF] - RuntimeError: ('Load snapshot error: Failed to restore from snapshot: Failed to load guest memory: Error creating guest memory from uffd: Failed to UFFD object: System error', {'fault_message': 'Load snapshot error: Failed to restore from snapshot: Failed to load guest memory: Error creating guest memory from uffd: Failed to UFFD object: System error'}, <Response [400]>)
+=================== 8 failed, 58 passed, 2 skipped in 42.67s ===================

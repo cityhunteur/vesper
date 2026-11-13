@@ -1,0 +1,17 @@
+reference=all-pass partial=false total=980 passed=756 to_explain={"error": 34, "failed": 94, "skipped": 96} not_passing_on_reference=0 missing_from_run=0
+class apple-cpu-features-unknown: 8
+class apple-cpu-no-cache-topology: 24
+class apple-cpu-ssb-vulnerable: 10
+class balloon-stats-not-refreshed: 1
+class guest-ssh-timeout-under-load: 3
+class jail-hardlink-exdev: 2
+class max-devices-worker-timeout: 2
+class no-dmi: 1
+class no-userfaultfd: 8
+class rate-limiter-balloon-tolerance: 7
+class upstream-platform-skip: 96
+class vmclock-gen-counter-flag: 1
+class vmm-exit-timeout-under-load: 1
+class vmm-memory-overhead: 57
+class vsock-reset-after-snapshot: 3
+upstream-compare: every result is explained

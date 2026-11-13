@@ -1,0 +1,5 @@
+reference=all-pass partial=true total=53 passed=50 to_explain={"failed": 1, "skipped": 2} not_passing_on_reference=0 missing_from_run=0
+class upstream-platform-skip: 2
+classes that explained nothing in this run: apple-cpu-features-unknown, apple-cpu-no-cache-topology, apple-cpu-ssb-vulnerable, balloon-stats-not-refreshed, guest-ssh-timeout-under-load, max-devices-worker-timeout, no-userfaultfd, rate-limiter-balloon-tolerance, vmclock-gen-counter-flag, vmm-exit-timeout-under-load, vmm-memory-overhead, vsock-reset-after-snapshot
+UNMATCHED integration_tests/functional/test_cpu_template_helper.py::test_consecutive_fingerprint_consistency failed ChildProcessError: [205] Command: /srv/firecracker/build/cargo_target/aarch64-unknown-linux-musl/release/cpu-template-helper fingerprint dump --output /srv/tmp/pytest-of-root/pytest-0/popen-gw0/test_consecutive_fingerprint_c0/fp1.json [205] stdout: [205] stderr: Failed to read /sys/devices/virtual/dmi/id/bios_version: No such file or directory (os error 2) Returned error code: 1
+upstream-compare: 1 result(s) match no exception class

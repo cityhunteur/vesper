@@ -1,0 +1,21 @@
+[gw0] [ 20%] FAILED integration_tests/functional/test_cpu_template_helper.py::test_consecutive_fingerprint_consistency 
+[gw2] [ 40%] PASSED integration_tests/functional/test_net_config_space.py::test_net_change_mac_address[vmlinux-6.1.172-PCI_ON] 
+[gw2] [ 60%] PASSED integration_tests/functional/test_net_config_space.py::test_net_change_mac_address[vmlinux-6.1.172-PCI_OFF] 
+[gw1] [ 80%] PASSED integration_tests/functional/test_net_config_space.py::test_net_change_mac_address[vmlinux-5.10.253-PCI_ON] 
+[gw1] [100%] PASSED integration_tests/functional/test_net_config_space.py::test_net_change_mac_address[vmlinux-5.10.253-PCI_OFF] 
+[gw0] linux -- Python 3.12.3 /opt/venv/bin/python
+=========================== short test summary info ============================
+PASSED integration_tests/functional/test_net_config_space.py::test_net_change_mac_address[vmlinux-6.1.172-PCI_ON]
+PASSED integration_tests/functional/test_net_config_space.py::test_net_change_mac_address[vmlinux-6.1.172-PCI_OFF]
+PASSED integration_tests/functional/test_net_config_space.py::test_net_change_mac_address[vmlinux-5.10.253-PCI_ON]
+PASSED integration_tests/functional/test_net_config_space.py::test_net_change_mac_address[vmlinux-5.10.253-PCI_OFF]
+FAILED integration_tests/functional/test_cpu_template_helper.py::test_consecutive_fingerprint_consistency - ChildProcessError: 
+[204] Command:
+/srv/firecracker/build/cargo_target/aarch64-unknown-linux-musl/release/cpu-template-helper fingerprint dump --output /srv/tmp/pytest-of-root/pytest-0/popen-gw0/test_consecutive_fingerprint_c0/fp1.json
+[204] stdout:
+
+[204] stderr:
+Failed to read /sys/devices/virtual/dmi/id/bios_version: No such file or directory (os error 2)
+
+Returned error code: 1
+========================= 1 failed, 4 passed in 9.93s ==========================

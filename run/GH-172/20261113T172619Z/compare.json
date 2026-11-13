@@ -1,0 +1,47 @@
+{
+  "reference": "all-pass",
+  "total": 980,
+  "passed": 759,
+  "to_explain": {
+    "error": 33,
+    "failed": 92,
+    "skipped": 96
+  },
+  "per_class": {
+    "apple-cpu-features-unknown": 8,
+    "apple-cpu-no-cache-topology": 24,
+    "apple-cpu-ssb-vulnerable": 10,
+    "balloon-stats-not-refreshed": 0,
+    "guest-ssh-timeout-under-load": 2,
+    "max-devices-worker-timeout": 2,
+    "no-dmi": 1,
+    "no-userfaultfd": 8,
+    "rate-limiter-balloon-tolerance": 11,
+    "upstream-platform-skip": 96,
+    "vmclock-gen-counter-flag": 1,
+    "vmm-exit-timeout-under-load": 0,
+    "vmm-memory-overhead": 57,
+    "vsock-reset-after-snapshot": 1
+  },
+  "unmatched": [],
+  "passed_alone": [
+    {
+      "nodeid": "integration_tests/functional/test_balloon.py::test_reinflate_balloon[vmlinux-5.10.253-PCI_OFF]",
+      "outcome": "failed",
+      "message": "assert (151656 - 126672) <= 20000"
+    }
+  ],
+  "over_max": [],
+  "stale_classes": [
+    "balloon-stats-not-refreshed",
+    "vmm-exit-timeout-under-load"
+  ],
+  "stale_required": [],
+  "partial": false,
+  "meta": {
+    "exitcode": 1,
+    "collection_errors": []
+  },
+  "not_passing_on_reference": 0,
+  "missing_from_run": 0
+}

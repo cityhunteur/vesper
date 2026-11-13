@@ -12,6 +12,7 @@ METHOD_PATH_RE = re.compile(r'\("([A-Z]+)",\s*"([^"]+)"\)\s*=>')
 
 RULES: Dict[str, Set[str]] = {
     "src/baseline.rs": set(),
+    "src/baseline/upstream.rs": set(),
     "src/buildinfo.rs": set(),
     "src/compat.rs": set(),
     "src/platform.rs": set(),
@@ -41,6 +42,7 @@ RULES: Dict[str, Set[str]] = {
     "src/proxy/relay.rs": set(),
     "src/ports.rs": set(),
     "src/systemvm.rs": {"buildinfo", "platform"},
+    "src/systemvm/boot_check.rs": set(),
     "src/systemvm/image_lock.rs": set(),
     "src/systemvm/packages.rs": set(),
     "src/lib.rs": set(),

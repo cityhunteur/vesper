@@ -3,6 +3,8 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
+pub mod upstream;
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Lock {
     pub version: u32,
@@ -15,6 +17,9 @@ pub struct Lock {
 pub struct BaselineRef {
     pub repo: String,
     pub revision: String,
+    /// How the upstream suite runs on Backend A (GH #172); only the Firecracker baseline has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upstream_suite: Option<upstream::UpstreamSuite>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -37,6 +42,21 @@ pub fn load(path: impl AsRef<Path>) -> Result<Lock, String> {
     }
     if lock.reporting.required_metadata.is_empty() {
         return Err("baseline lock reporting.required_metadata must not be empty".to_string());
+    }
+    for (name, baseline) in &lock.baselines {
+        if let Some(suite) = &baseline.upstream_suite {
+            if name != "firecracker" {
+                return Err(format!("baselines.{name}.upstream_suite: only the firecracker baseline runs an upstream suite"));
+            }
+            let arch = suite.artifacts_prefix.rsplit('/').next().unwrap_or_default();
+            if !matches!(arch, "aarch64" | "x86_64") {
+                return Err(format!("baselines.firecracker.upstream_suite.artifacts_prefix must end in /aarch64 or /x86_64"));
+            }
+            if baseline.revision.len() != 40 || !baseline.revision.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')) {
+                return Err("baselines.firecracker.revision must be a 40-character hex commit for the upstream suite".to_string());
+            }
+            suite.validate(arch)?;
+        }
     }
 
     Ok(lock)
@@ -101,6 +121,18 @@ pub fn validate_metadata(lock: &Lock, metadata: &BTreeMap<String, String>) -> Re
 mod tests {
     use super::*;
 
+    #[test]
+    fn repository_lock_pins_the_upstream_suite() {
+        let lock = load(concat!(env!("CARGO_MANIFEST_DIR"), "/docs/specs/design-v0.baselines.lock.yaml")).unwrap();
+        let suite = lock.baselines["firecracker"].upstream_suite.as_ref().expect("upstream_suite pinned");
+        assert!(suite.artifacts_prefix.ends_with("/aarch64"));
+        let classes: upstream::ClassFile = serde_yaml::from_str(
+            &fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/docs/specs/upstream-suite-classes.yaml")).unwrap(),
+        )
+        .unwrap();
+        classes.validate().unwrap();
+    }
+
     fn sample_lock() -> Lock {
         Lock {
             version: 1,
@@ -111,6 +143,7 @@ mod tests {
                     BaselineRef {
                         repo: "firecracker-microvm/firecracker".to_string(),
                         revision: "abc".to_string(),
+                        upstream_suite: None,
                     },
                 ),
                 (
@@ -118,6 +151,7 @@ mod tests {
                     BaselineRef {
                         repo: "containerd/containerd".to_string(),
                         revision: "def".to_string(),
+                        upstream_suite: None,
                     },
                 ),
             ]),

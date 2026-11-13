@@ -1,0 +1,5 @@
+reference=all-pass total=67 passed=59 to_explain={"error": 2, "skipped": 6}
+class upstream-platform-skip: 6
+class vmm-memory-overhead: 2
+classes that explained nothing in this run: apple-cpu-features-unknown, apple-cpu-no-cache-topology, apple-cpu-ssb-vulnerable, guest-ssh-timeout-under-load, jail-hardlink-exdev, max-devices-worker-timeout, no-dmi, no-userfaultfd, per-test-timeout, rate-limiter-balloon-tolerance, vmclock-gen-counter-flag, vsock-reset-after-snapshot
+upstream-compare: every result is explained

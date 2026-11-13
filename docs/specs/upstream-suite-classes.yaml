@@ -1,0 +1,203 @@
+version: 1
+# Exception classes for the upstream Firecracker suite on Backend A (GH #172, D-023). `baselinectl --mode
+# upstream-compare` requires every test that needs explaining (see src/baseline/upstream.rs) to match one class,
+# first match wins. Seeded from the GH #166 trial (run/GH-166/summary.md, 2026-11-12, Apple M3 Pro) and narrowed after
+# the GH #172 council review to the tests and messages the full run of 2026-11-13 showed: every class names its test
+# functions (no bare `*`), a message substring that is the symptom, not merely the file, and a `max` near the observed
+# count, so a regression with the same symptom in more tests fails the run. The one exception is `any_test: true`
+# (vmm-memory-overhead), for a symptom that moves between tests from run to run. `flaky: true` marks a class that need not
+# match in every full run. A class is never a harness gap: those are fixed in scripts/systemvm/upstream-suite/.
+# `unexplained` classes stay open under CE-0001 until the Linux reference run (CE-0003) settles them.
+# The runner reruns alone the tests that match no class (D-031). A pass there never clears these symptoms: a memory
+# overshoot outside its class's 5.00 to 6.99 MiB is not a timing effect. At most this many tests may pass only alone.
+never_pass_alone: ["MemoryUsageExceededError"]
+max_passed_alone: 8
+classes:
+  - id: no-userfaultfd
+    kind: environment
+    nodeid: ["integration_tests/functional/test_uffd.py::*"]
+    message: ["Failed to UFFD object: System error"]
+    outcomes: [failed, error]
+    max: 8
+    tracked_by: TD-054
+    reason: the Alpine virt kernel that the System VM and its microVMs boot has no CONFIG_USERFAULTFD
+  - id: apple-cpu-no-cache-topology
+    kind: environment
+    nodeid: ["integration_tests/functional/test_topology.py::test_cache_topology*",
+             "integration_tests/functional/test_topology.py::test_cpu_topology*"]
+    message: ["cache/index*/size: No such file or directory", "depth 2 does not have the expected value"]
+    outcomes: [failed, error]
+    max: 24
+    tracked_by: CE-0001
+    reason: >-
+      the Apple virtual CPU exposes no cache size, line size or sets to the System VM, so the guest has none, and the
+      guest's cache-derived topology (depth 2) differs from the one the test expects
+  - id: apple-cpu-ssb-vulnerable
+    kind: environment
+    nodeid: ["integration_tests/security/test_vulnerabilities.py::test_check_vulnerability_files_ab*",
+             "integration_tests/security/test_vulnerabilities.py::test_spectre_meltdown_checker_on_guest*",
+             "integration_tests/security/test_vulnerabilities.py::test_spectre_meltdown_checker_on_host",
+             "integration_tests/security/test_vulnerabilities.py::test_vulnerabilities_on_host"]
+    message: ["spec_store_bypass", "CVE-2018-3639"]
+    # Every vulnerability a report names must be one of these; a new one (Meltdown, say) fails the run.
+    vulnerable_allowed: [spec_store_bypass, CVE-2018-3639, CVE-2018-3640, CVE-2018-3615]
+    outcomes: [failed, error]
+    max: 10
+    tracked_by: CE-0001
+    reason: >-
+      the Apple CPU reports spec_store_bypass (Spectre variant 4, CVE-2018-3639) Vulnerable on the host and in the
+      guest; the checkers also report variant 3a (CVE-2018-3640) and L1TF SGX (CVE-2018-3615), and vulnerable_allowed
+      fails any report that names another
+  - id: apple-cpu-features-unknown
+    kind: test-assumption
+    nodeid: ["integration_tests/functional/test_cpu_features_aarch64.py::test_guest_cpu_features*"]
+    message: ["} == set() Extra items in the left set"]
+    outcomes: [failed, error]
+    max: 8
+    tracked_by: CE-0001
+    reason: expected guest CPU features are keyed on Neoverse N1, V1 and V2; an Apple M3 is "Unknown", so the expected set is empty
+  - id: no-dmi
+    kind: environment
+    nodeid: ["integration_tests/functional/test_cpu_template_helper.py::test_consecutive_fingerprint_consistency"]
+    message: ["dmi/id/bios_version: No such file or directory"]
+    outcomes: [failed, error]
+    max: 1
+    tracked_by: CE-0001
+    reason: the System VM has no DMI or SMBIOS, so /sys/devices/virtual/dmi/id/bios_version is missing
+  - id: vmm-memory-overhead
+    kind: unexplained
+    # Any test (owner decision D-031): over four full runs the overshoot hit 54, 57, 55 and 65 tests, 80 distinct
+    # ones in 14 files and only 33 every time, so a list of test names cannot be frozen. The symptom and the count
+    # bound it instead. 5.00 to 6.99 MiB only: a larger overshoot is a different problem.
+    any_test: true
+    message: ["MemoryUsageExceededError: ('Memory usage (5.", "MemoryUsageExceededError: ('Memory usage (6."]
+    outcomes: [failed, error]
+    max: 80
+    tracked_by: CE-0001
+    reason: >-
+      Firecracker's own memory outside guest memory is 5.00 to 6.79 MiB (the four full GH #172 runs) against
+      MemoryMonitor's 5 and 7 MiB thresholds, in a different set of tests each run
+  - id: guest-ssh-timeout-under-load
+    kind: environment
+    nodeid: ["integration_tests/functional/test_snapshot_basic.py::test_clocksource_snapshot_restore*",
+             "integration_tests/functional/test_snapshot_basic.py::test_vmgenid*",
+             "integration_tests/functional/test_balloon.py::test_hinting_reporting_snapshot*",
+             "integration_tests/functional/test_sysgenid.py::test_sysgenid_via_poll_and_nonblocking_read*",
+             "integration_tests/functional/test_snapshot_editor.py::test_remove_regs*",
+             "integration_tests/functional/test_snapshot_not_losing_dirty_pages.py::test_diff_snapshot_works_after_error*"]
+    message: ["port 22: Connection timed out", "Connection timed out during banner exchange", "port 22: Connection refused"]
+    outcomes: [failed, error]
+    max: 6
+    flaky: true
+    tracked_by: CE-0001
+    reason: >-
+      guest SSH timed out after a snapshot restore or a VM generation change under nested virtualisation (load
+      average up to 28 on 4 vCPUs); the first full run saw it in none of these tests, the second in three sysgenid tests,
+      the third in test_remove_regs (one refused, before sshd answered) and test_diff_snapshot_works_after_error, all
+      three of which passed when rerun alone (run/GH-172/20261113T150926Z)
+  - id: max-devices-worker-timeout
+    kind: environment
+    nodeid: ["integration_tests/functional/test_max_devices.py::test_attach_maximum_devices*"]
+    message: ["crashed while running"]
+    outcomes: [failed, error]
+    max: 4
+    flaky: true
+    tracked_by: CE-0001
+    reason: >-
+      the 600 s per-test timeout (--timeout-method=thread) ends the whole xdist worker, which reports a crash, not
+      "Timeout ("; in run/GH-172/20261113T081827Z the other two workers ran 577 to 662 s of tests while each crashed
+      test was running; the GH #166 trial timed the same test out at 300 s
+  - id: rate-limiter-balloon-tolerance
+    kind: unexplained
+    nodeid: ["integration_tests/functional/test_serial_io.py::test_serial_rate_limiting*",
+             "integration_tests/functional/test_balloon.py::test_reinflate_balloon*",
+             "integration_tests/functional/test_balloon.py::test_hinting_reporting_snapshot*",
+             "integration_tests/functional/test_rng.py::test_rng_bw_rate_limiter*"]
+    message: ["timed out after 100 seconds", "expected under 80000 due to rate limiting"]
+    # The balloon hinting and reporting checks fail as a bare comparison of two numbers.
+    message_glob: ["assert * > *"]
+    outcomes: [failed, error]
+    max: 12
+    flaky: true
+    tracked_by: CE-0001
+    reason: >-
+      rate-limiter or balloon numbers just outside tolerance (assert N > M), or a rate-limited guest command that
+      overran its 100 s SSH timeout, probably timing under nested virtualisation
+  - id: vsock-reset-after-snapshot
+    kind: unexplained
+    nodeid: ["integration_tests/functional/test_vsock.py::test_vsock_transport_reset_g2h*"]
+    message: ["assert 0 == 1", "crashed while running"]
+    outcomes: [failed, error]
+    max: 3
+    flaky: true
+    tracked_by: CE-0001
+    reason: >-
+      a vsock connection survived a snapshot restore (assert 0 == 1); the trial saw it hang, and the second full
+      GH #172 run saw it crash its xdist worker
+  - id: vmm-exit-timeout-under-load
+    kind: unexplained
+    nodeid: ["integration_tests/functional/test_shut_down.py::test_reboot*"]
+    message: ["did not exit within 10.0s"]
+    outcomes: [failed, error]
+    max: 1
+    flaky: true
+    tracked_by: CE-0001
+    reason: >-
+      after the guest's reboot request Firecracker took longer than the test's 10 s to exit, once in the second full
+      GH #172 run (the first passed all four), probably load under nested virtualisation
+  - id: balloon-stats-not-refreshed
+    kind: unexplained
+    nodeid: ["integration_tests/functional/test_balloon.py::test_stats_update*"]
+    message_glob: ["assert * != *"]
+    outcomes: [failed]
+    max: 1
+    flaky: true
+    tracked_by: CE-0001
+    reason: >-
+      two balloon statistics reads returned the same value (assert N != N), so the guest had not refreshed them in the
+      polling interval; once in the second full GH #172 run, the first passed all four
+  - id: vmclock-gen-counter-flag
+    kind: unexplained
+    nodeid: ["integration_tests/functional/test_vmclock.py::*"]
+    message: ["VMCLOCK_FLAG_VM_GEN_COUNTER_PRESENT"]
+    outcomes: [failed]
+    max: 2
+    flaky: true
+    tracked_by: CE-0001
+    reason: "KeyError on the vmclock generation-counter flag; one of 44 vmclock tests in the trial"
+  - id: upstream-platform-skip
+    kind: skip
+    nodeid:
+      - "integration_tests/functional/test_api.py::test_api_cpu_config*"
+      - "integration_tests/functional/test_api.py::test_send_ctrl_alt_del*"
+      - "integration_tests/functional/test_cpu_features_x86_64.py::*"
+      - "integration_tests/functional/test_cpu_template_helper.py::test_json_static_templates*"
+      - "integration_tests/functional/test_cpu_template_helper.py::test_cpu_config_dump_vs_actual*"
+      - "integration_tests/functional/test_feat_parity.py::test_feat_parity_cpuid_*"
+      - "integration_tests/functional/test_gdb.py::test_gdb_connects*"
+      - "integration_tests/functional/test_kvm_ptp.py::test_kvm_ptp*"
+      - "integration_tests/functional/test_pause_resume.py::test_kvmclock_ctrl*"
+      - "integration_tests/functional/test_snapshot_basic.py::test_clocksource_snapshot_restore*"
+      - "integration_tests/functional/test_topology.py::test_cache_topology*-HTT_ON-*"
+      - "integration_tests/functional/test_topology.py::test_cpu_topology*-HTT_ON-*"
+      - "integration_tests/security/test_jail.py::test_v1_default_cgroups*"
+      - "integration_tests/security/test_sec_audit.py::test_cargo_audit*"
+    message:
+      - "Only run in x86_64"
+      - "x86_64 specific tests"
+      - "only present in 0x80000006 for AMD"
+      - "only supported on Intel Sapphire Rapids"
+      - "only available on x86_64"
+      - "not yet implemented on aarch64"
+      - "Requires system with cgroup-v1 enabled"
+      - "Only supported in kernel 6.1 and after"
+      - "Only x86_64 supports pvclocks"
+      - "got empty parameter set for (custom_cpu_template)"
+      - "GDB requires a vmlinux"
+      - "identical on all platforms"
+      - "doesn't support clock_realtime flag"
+      - "SMT is configurable only on x86"
+    outcomes: [skipped]
+    max: 100
+    tracked_by: CE-0001
+    reason: upstream skips that apply on Linux aarch64 too (x86-only, cgroup v1, guest-kernel or parameter-set reasons)

@@ -2,7 +2,7 @@ CARGO ?= cargo
 RUN_DIR ?= run
 CYCLES ?= 50
 
-.PHONY: build third-party-notices third-party-notices-check test contract-generate contract-check contract-test surface-matrix-generate \
+.PHONY: build systemvm-upstream-suite third-party-notices third-party-notices-check test contract-generate contract-check contract-test surface-matrix-generate \
 	surface-matrix-check behavior-matrix-generate behavior-matrix-check \
 	validate-entitlements dev-up dev-down vmlauncher-build systemvm-fetch systemvm-overlay systemvm-prepare systemvm-build systemvm-launch-config \
 	systemvm-boot-smoke systemvm-up systemvm-down systemvm-control-suite systemvm-services-suite systemvm-trivial-image docker-up docker-down docker-smoke docker-conformance ports-suite binds-suite data-disk-suite share-notify-selftest share-watch-selftest systemvm-up-shares dns-suite workflow-suite crossarch-suite ctr-conformance ctr-conformance-check systemvm-reliability systemvm-microvm-suite systemvm-rootfs-suite systemvm-workload-suite systemvm-parity-baseline parity-baseline-check shim-build shim-test systemvm-exec-suite systemvm-shim-suite systemvm-bundle-suite systemvm-restart-suite systemvm-launchapi-suite systemvm-vesperd-suite systemvm-up-snapshot systemvm-snapshot-suite systemvm-replay-suite systemvm-replay-publish behavior-replay-check systemvm-egress-suite systemvm-bounds-suite
@@ -118,6 +118,11 @@ systemvm-up-snapshot:
 	mkdir -p run/vesperd-share
 	VESPER_SHARES="$(CURDIR)/run/vesperd-share" bash scripts/systemvm/generate-launch-config.sh
 	bash scripts/systemvm/up.sh
+
+# GH #172: the upstream Firecracker suite on Backend A (about 80 min; restarts the System VM with 4 vCPUs and 8 GiB,
+# then restores it). UPSTREAM_ARGS selects tests for a quick run, e.g. integration_tests/functional/test_api.py.
+systemvm-upstream-suite:
+	bash scripts/systemvm/upstream-suite/run.sh $(UPSTREAM_ARGS)
 
 systemvm-snapshot-suite:
 	$(CARGO) build --bin vesperd

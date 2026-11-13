@@ -1,0 +1,214 @@
+{
+ "integration_tests/functional/test_cpu_template_helper.py::test_consecutive_fingerprint_consistency": {
+  "outcome": "failed",
+  "message": "ChildProcessError: [205] Command: /srv/firecracker/build/cargo_target/aarch64-unknown-linux-musl/release/cpu-template-helper fingerprint dump --output /srv/tmp/pytest-of-root/pytest-0/popen-gw0/test_consecutive_fingerprint_c0/fp1.json [205] stdout: [205] stderr: Failed to read /sys/devices/virtual/dmi/id/bios_version: No such file or directory (os error 2) Returned error code: 1"
+ },
+ "integration_tests/security/test_jail.py::test_arbitrary_usocket_location[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_arbitrary_usocket_location[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_args_default_resource_limits[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_args_default_resource_limits[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_args_resource_limits[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_args_resource_limits[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_cgroups[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_cgroups[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_cgroups_custom_parent[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_cgroups_custom_parent[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_cgroups_parent_cgroup_but_no_cgroup[vmlinux-6.1.172-PCI_OFF-False-None]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_cgroups_parent_cgroup_but_no_cgroup[vmlinux-6.1.172-PCI_OFF-True-False]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_cgroups_parent_cgroup_but_no_cgroup[vmlinux-6.1.172-PCI_OFF-True-True]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_cgroups_parent_cgroup_but_no_cgroup[vmlinux-6.1.172-PCI_ON-False-None]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_cgroups_parent_cgroup_but_no_cgroup[vmlinux-6.1.172-PCI_ON-True-False]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_cgroups_parent_cgroup_but_no_cgroup[vmlinux-6.1.172-PCI_ON-True-True]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_cgroups_without_numa[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_cgroups_without_numa[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_cgroupsv2_written_only_once[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_cgroupsv2_written_only_once[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_default_chroot_hierarchy[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_default_chroot_hierarchy[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_empty_jailer_id[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_empty_jailer_id[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_exec_destination_path_is_hardlink[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_exec_destination_path_is_hardlink[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_exec_destination_path_is_symlink[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_exec_destination_path_is_symlink[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_exec_file_not_exist[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_exec_file_not_exist[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_firecracker_kill_by_pid[vmlinux-6.1.172-PCI_OFF-False-False]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_firecracker_kill_by_pid[vmlinux-6.1.172-PCI_OFF-False-True]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_firecracker_kill_by_pid[vmlinux-6.1.172-PCI_OFF-True-False]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_firecracker_kill_by_pid[vmlinux-6.1.172-PCI_OFF-True-True]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_firecracker_kill_by_pid[vmlinux-6.1.172-PCI_ON-False-False]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_firecracker_kill_by_pid[vmlinux-6.1.172-PCI_ON-False-True]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_firecracker_kill_by_pid[vmlinux-6.1.172-PCI_ON-True-False]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_firecracker_kill_by_pid[vmlinux-6.1.172-PCI_ON-True-True]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_negative_file_size_limit[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_negative_file_size_limit[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_negative_no_file_limit[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_negative_no_file_limit[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_new_pid_namespace[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_new_pid_namespace[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_new_pid_ns_resource_limits[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_new_pid_ns_resource_limits[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_node_cgroups[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_node_cgroups[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_positive_file_size_limit[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_positive_file_size_limit[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/security/test_jail.py::test_v1_default_cgroups[vmlinux-6.1.172-PCI_OFF]": {
+  "outcome": "skipped",
+  "message": "('/srv/firecracker/tests/integration_tests/security/test_jail.py', 440, 'Skipped: Requires system with cgroup-v1 enabled.')"
+ },
+ "integration_tests/security/test_jail.py::test_v1_default_cgroups[vmlinux-6.1.172-PCI_ON]": {
+  "outcome": "skipped",
+  "message": "('/srv/firecracker/tests/integration_tests/security/test_jail.py', 440, 'Skipped: Requires system with cgroup-v1 enabled.')"
+ }
+}

@@ -1,0 +1,1 @@
+rc=1 wall_s=572 collected=31 stopped=no selection=integration_tests/functional/test_snapshot_editor.py integration_tests/functional/test_snapshot_not_losing_dirty_pages.py integration_tests/functional/test_serial_io.py

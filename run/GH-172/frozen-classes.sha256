@@ -1,0 +1,7 @@
+# Frozen for the fifth full run (2026-11-13, commit 3427029, after D-031: any-test overshoot class, isolated rerun).
+# Run 4 was frozen at classes.yaml 0853e0f5…5b4c, upstream.rs 2e7f3a44…a879, collect.py f4582e7d…fff5, run.sh cb7ee4f5…30ae.
+1a677436a98f0f1cdc940d65ceb13c6d2c85eb11548fe52d8b9326d7932c342d  docs/specs/upstream-suite-classes.yaml
+7d0e45773655bf061a29d706523e4b0e10f18d174153ce1bfe59c46b2ac98311  src/baseline/upstream.rs
+497ded273a6359b159d8781f48a43bd2455f5aabf48e262983765746f3b029cf  src/bin/baselinectl.rs
+56bbc555be3c94166e39e2c7ef1a9ce6d346f6343420ef7a80f883ec0d029545  scripts/systemvm/upstream-suite/collect.py
+d12148f017f333e5e1353c5469d3dd36bd3a2a29c5271eb84752df587032f011  scripts/systemvm/upstream-suite/run.sh

@@ -1,0 +1,38 @@
+{
+  "reference": "all-pass",
+  "total": 980,
+  "passed": 756,
+  "to_explain": {
+    "error": 34,
+    "failed": 94,
+    "skipped": 96
+  },
+  "per_class": {
+    "apple-cpu-features-unknown": 8,
+    "apple-cpu-no-cache-topology": 24,
+    "apple-cpu-ssb-vulnerable": 10,
+    "balloon-stats-not-refreshed": 1,
+    "guest-ssh-timeout-under-load": 3,
+    "jail-hardlink-exdev": 2,
+    "max-devices-worker-timeout": 2,
+    "no-dmi": 1,
+    "no-userfaultfd": 8,
+    "rate-limiter-balloon-tolerance": 7,
+    "upstream-platform-skip": 96,
+    "vmclock-gen-counter-flag": 1,
+    "vmm-exit-timeout-under-load": 1,
+    "vmm-memory-overhead": 57,
+    "vsock-reset-after-snapshot": 3
+  },
+  "unmatched": [],
+  "over_max": [],
+  "stale_classes": [],
+  "stale_required": [],
+  "partial": false,
+  "meta": {
+    "exitcode": 1,
+    "collection_errors": []
+  },
+  "not_passing_on_reference": 0,
+  "missing_from_run": 0
+}

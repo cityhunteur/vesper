@@ -1,0 +1,34 @@
+[gw0] [ 12%] FAILED integration_tests/functional/test_uffd.py::test_bad_socket_path[vmlinux-6.1.172-PCI_ON] 
+[gw1] [ 25%] FAILED integration_tests/functional/test_uffd.py::test_unbinded_socket[vmlinux-6.1.172-PCI_ON] 
+[gw2] [ 37%] FAILED integration_tests/functional/test_uffd.py::test_valid_handler[vmlinux-6.1.172-PCI_OFF] 
+[gw1] [ 50%] FAILED integration_tests/functional/test_uffd.py::test_unbinded_socket[vmlinux-6.1.172-PCI_OFF] 
+[gw0] [ 62%] FAILED integration_tests/functional/test_uffd.py::test_bad_socket_path[vmlinux-6.1.172-PCI_OFF] 
+[gw2] [ 75%] FAILED integration_tests/functional/test_uffd.py::test_malicious_handler[vmlinux-6.1.172-PCI_ON] 
+[gw0] [ 87%] FAILED integration_tests/functional/test_uffd.py::test_malicious_handler[vmlinux-6.1.172-PCI_OFF] 
+[gw1] [100%] FAILED integration_tests/functional/test_uffd.py::test_valid_handler[vmlinux-6.1.172-PCI_ON] 
+[gw0] linux -- Python 3.12.3 /opt/venv/bin/python
+[gw1] linux -- Python 3.12.3 /opt/venv/bin/python
+[gw2] linux -- Python 3.12.3 /opt/venv/bin/python
+[gw1] linux -- Python 3.12.3 /opt/venv/bin/python
+[gw0] linux -- Python 3.12.3 /opt/venv/bin/python
+[gw2] linux -- Python 3.12.3 /opt/venv/bin/python
+[gw0] linux -- Python 3.12.3 /opt/venv/bin/python
+[gw1] linux -- Python 3.12.3 /opt/venv/bin/python
+=========================== short test summary info ============================
+FAILED integration_tests/functional/test_uffd.py::test_bad_socket_path[vmlinux-6.1.172-PCI_ON] - AssertionError: Regex pattern did not match.
+  Expected regex: 'Load\\ snapshot\\ error:\\ Failed\\ to\\ restore\\ from\\ snapshot:\\ Failed\\ to\\ load\\ guest\\ memory:\\ Error\\ creating\\ guest\\ memory\\ from\\ uffd:\\ Failed\\ to\\ connect\\ to\\ UDS\\ Unix\\ stream:\\ No\\ such\\ file\\ or\\ directory\\ \\(os\\ error\\ 2\\)'
+  Actual message: "('Load snapshot error: Failed to restore from snapshot: Failed to load guest memory: Error creating guest memory from uffd: Failed to UFFD object: System error', {'fault_message': 'Load snapshot error: Failed to restore from snapshot: Failed to load guest memory: Error creating guest memory from uffd: Failed to UFFD object: System error'}, <Response [400]>)"
+FAILED integration_tests/functional/test_uffd.py::test_unbinded_socket[vmlinux-6.1.172-PCI_ON] - AssertionError: Regex pattern did not match.
+  Expected regex: 'Load\\ snapshot\\ error:\\ Failed\\ to\\ restore\\ from\\ snapshot:\\ Failed\\ to\\ load\\ guest\\ memory:\\ Error\\ creating\\ guest\\ memory\\ from\\ uffd:\\ Failed\\ to\\ connect\\ to\\ UDS\\ Unix\\ stream:\\ Connection\\ refused\\ \\(os\\ error\\ 111\\)'
+  Actual message: "('Load snapshot error: Failed to restore from snapshot: Failed to load guest memory: Error creating guest memory from uffd: Failed to UFFD object: System error', {'fault_message': 'Load snapshot error: Failed to restore from snapshot: Failed to load guest memory: Error creating guest memory from uffd: Failed to UFFD object: System error'}, <Response [400]>)"
+FAILED integration_tests/functional/test_uffd.py::test_valid_handler[vmlinux-6.1.172-PCI_OFF] - RuntimeError: ('Load snapshot error: Failed to restore from snapshot: Failed to load guest memory: Error creating guest memory from uffd: Failed to UFFD object: System error', {'fault_message': 'Load snapshot error: Failed to restore from snapshot: Failed to load guest memory: Error creating guest memory from uffd: Failed to UFFD object: System error'}, <Response [400]>)
+FAILED integration_tests/functional/test_uffd.py::test_unbinded_socket[vmlinux-6.1.172-PCI_OFF] - AssertionError: Regex pattern did not match.
+  Expected regex: 'Load\\ snapshot\\ error:\\ Failed\\ to\\ restore\\ from\\ snapshot:\\ Failed\\ to\\ load\\ guest\\ memory:\\ Error\\ creating\\ guest\\ memory\\ from\\ uffd:\\ Failed\\ to\\ connect\\ to\\ UDS\\ Unix\\ stream:\\ Connection\\ refused\\ \\(os\\ error\\ 111\\)'
+  Actual message: "('Load snapshot error: Failed to restore from snapshot: Failed to load guest memory: Error creating guest memory from uffd: Failed to UFFD object: System error', {'fault_message': 'Load snapshot error: Failed to restore from snapshot: Failed to load guest memory: Error creating guest memory from uffd: Failed to UFFD object: System error'}, <Response [400]>)"
+FAILED integration_tests/functional/test_uffd.py::test_bad_socket_path[vmlinux-6.1.172-PCI_OFF] - AssertionError: Regex pattern did not match.
+  Expected regex: 'Load\\ snapshot\\ error:\\ Failed\\ to\\ restore\\ from\\ snapshot:\\ Failed\\ to\\ load\\ guest\\ memory:\\ Error\\ creating\\ guest\\ memory\\ from\\ uffd:\\ Failed\\ to\\ connect\\ to\\ UDS\\ Unix\\ stream:\\ No\\ such\\ file\\ or\\ directory\\ \\(os\\ error\\ 2\\)'
+  Actual message: "('Load snapshot error: Failed to restore from snapshot: Failed to load guest memory: Error creating guest memory from uffd: Failed to UFFD object: System error', {'fault_message': 'Load snapshot error: Failed to restore from snapshot: Failed to load guest memory: Error creating guest memory from uffd: Failed to UFFD object: System error'}, <Response [400]>)"
+FAILED integration_tests/functional/test_uffd.py::test_malicious_handler[vmlinux-6.1.172-PCI_ON] - RuntimeError: ('Load snapshot error: Failed to restore from snapshot: Failed to load guest memory: Error creating guest memory from uffd: Failed to UFFD object: System error', {'fault_message': 'Load snapshot error: Failed to restore from snapshot: Failed to load guest memory: Error creating guest memory from uffd: Failed to UFFD object: System error'}, <Response [400]>)
+FAILED integration_tests/functional/test_uffd.py::test_malicious_handler[vmlinux-6.1.172-PCI_OFF] - RuntimeError: ('Load snapshot error: Failed to restore from snapshot: Failed to load guest memory: Error creating guest memory from uffd: Failed to UFFD object: System error', {'fault_message': 'Load snapshot error: Failed to restore from snapshot: Failed to load guest memory: Error creating guest memory from uffd: Failed to UFFD object: System error'}, <Response [400]>)
+FAILED integration_tests/functional/test_uffd.py::test_valid_handler[vmlinux-6.1.172-PCI_ON] - RuntimeError: ('Load snapshot error: Failed to restore from snapshot: Failed to load guest memory: Error creating guest memory from uffd: Failed to UFFD object: System error', {'fault_message': 'Load snapshot error: Failed to restore from snapshot: Failed to load guest memory: Error creating guest memory from uffd: Failed to UFFD object: System error'}, <Response [400]>)
+============================== 8 failed in 20.67s ==============================

@@ -41,6 +41,23 @@ struct Args {
     host_os: String,
     #[arg(long, default_value = "")]
     host_cpu: String,
+    /// upstream-compare: Backend A results, `{nodeid: {outcome, message}}`.
+    #[arg(long, default_value = "")]
+    results: String,
+    /// upstream-compare: the Linux reference results (CE-0003); omitted, every test is taken to pass there.
+    #[arg(long, default_value = "")]
+    reference: String,
+    #[arg(long, default_value = "docs/specs/upstream-suite-classes.yaml")]
+    classes: String,
+    /// upstream-compare: where to write the comparison.
+    #[arg(long, default_value = "")]
+    report: String,
+    /// upstream-compare: pytest's own verdict (`{exitcode, collection_errors}`, written by collect.py).
+    #[arg(long, default_value = "")]
+    meta: String,
+    /// upstream-compare: a selection of tests, so stale classes and tests missing from the run are not failures.
+    #[arg(long)]
+    partial: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -72,8 +89,10 @@ fn run() -> Result<(), String> {
         "validate-api-matrix" => validate_api_matrix(&lock, &args),
         "generate-api-behavior-matrix" => generate_api_behavior_matrix(&lock, &args),
         "validate-api-behavior-matrix" => validate_api_behavior_matrix(&lock, &args),
+        "upstream-pins" => upstream_pins(&lock),
+        "upstream-compare" => upstream_compare(&args),
         other => Err(format!(
-            "invalid mode {other:?} (expected generate|validate|generate-api-matrix|validate-api-matrix|generate-api-behavior-matrix|validate-api-behavior-matrix)"
+            "invalid mode {other:?} (expected generate|validate|generate-api-matrix|validate-api-matrix|generate-api-behavior-matrix|validate-api-behavior-matrix|upstream-pins|upstream-compare)"
         )),
     }
 }
@@ -253,4 +272,78 @@ fn firecracker_revision(lock: &vesper::baseline::Lock) -> Result<String, String>
         .map(|reference| reference.revision.clone())
         .filter(|revision| !revision.trim().is_empty())
         .ok_or_else(|| "baseline lock missing firecracker revision".to_string())
+}
+
+/// Prints the upstream-suite pins as `KEY=value` lines for `scripts/systemvm/upstream-suite/run.sh`.
+fn upstream_pins(lock: &vesper::baseline::Lock) -> Result<(), String> {
+    let fc = lock.baselines.get("firecracker").ok_or("baseline lock has no firecracker baseline")?;
+    let s = fc.upstream_suite.as_ref().ok_or("baselines.firecracker.upstream_suite is not pinned")?;
+    let pins = [
+        ("FC_REPO", fc.repo.clone()),
+        ("FC_REVISION", fc.revision.clone()),
+        ("CONTAINER", s.container.clone()),
+        ("HELPER_IMAGE", s.helper_image.clone()),
+        ("ARTIFACTS_BUCKET", s.artifacts_bucket.clone()),
+        ("ARTIFACTS_PREFIX", s.artifacts_prefix.clone()),
+        ("RELEASE_ASSET", s.release_asset.clone()),
+        ("TEST_PATHS", s.paths.join(" ")),
+        ("WORKERS", s.workers.to_string()),
+        ("TEST_TIMEOUT_S", s.test_timeout_s.to_string()),
+    ];
+    for (key, value) in pins {
+        // Single-quoted for `eval`, so a value with spaces stays one word.
+        println!("{key}='{}'", value.replace('\'', "'\\''"));
+    }
+    Ok(())
+}
+
+fn read_results(path: &str) -> Result<vesper::baseline::upstream::Results, String> {
+    let text = fs::read_to_string(path).map_err(|err| format!("read results {path}: {err}"))?;
+    serde_json::from_str(&text).map_err(|err| format!("parse results {path}: {err}"))
+}
+
+/// Explains every Backend A result that needs it, or exits 1 naming the tests no class explains.
+fn upstream_compare(args: &Args) -> Result<(), String> {
+    use vesper::baseline::upstream::{compare, ClassFile, RunMeta};
+    if args.results.is_empty() {
+        return Err("upstream-compare needs --results".to_string());
+    }
+    let results = read_results(&args.results)?;
+    let reference = if args.reference.is_empty() { None } else { Some(read_results(&args.reference)?) };
+    let text = fs::read_to_string(&args.classes).map_err(|err| format!("read classes {}: {err}", args.classes))?;
+    let classes: ClassFile = serde_yaml::from_str(&text).map_err(|err| format!("parse classes {}: {err}", args.classes))?;
+    classes.validate()?;
+    let meta: Option<RunMeta> = if args.meta.is_empty() {
+        None
+    } else {
+        let text = fs::read_to_string(&args.meta).map_err(|err| format!("read meta {}: {err}", args.meta))?;
+        Some(serde_json::from_str(&text).map_err(|err| format!("parse meta {}: {err}", args.meta))?)
+    };
+    let c = compare(&results, reference.as_ref(), &classes, meta, args.partial);
+    if !args.report.is_empty() {
+        let json = serde_json::to_string_pretty(&c).map_err(|err| format!("serialize comparison: {err}"))?;
+        fs::write(&args.report, json + "\n").map_err(|err| format!("write {}: {err}", args.report))?;
+    }
+    println!(
+        "reference={} partial={} total={} passed={} to_explain={:?} not_passing_on_reference={} missing_from_run={}",
+        c.reference, c.partial, c.total, c.passed, c.to_explain, c.not_passing_on_reference, c.missing_from_run
+    );
+    for (id, n) in c.per_class.iter().filter(|(_, n)| **n > 0) {
+        println!("class {id}: {n}");
+    }
+    if !c.stale_classes.is_empty() {
+        println!("classes that explained nothing in this run: {}", c.stale_classes.join(", "));
+    }
+    for u in &c.passed_alone {
+        println!("PASSED-ALONE {} under load: {} {}", u.nodeid, u.outcome, u.message.replace('\n', " "));
+    }
+    if c.ok() {
+        println!("upstream-compare: every result is explained");
+        return Ok(());
+    }
+    for u in &c.unmatched {
+        let alone = u.alone.as_ref().map(|a| format!(" [alone: {}]", a.outcome)).unwrap_or_default();
+        println!("UNMATCHED {} {}{alone} {}", u.nodeid, u.outcome, u.message.replace('\n', " "));
+    }
+    Err(format!("upstream-compare: {}", c.failures().join("; ")))
 }

@@ -1,0 +1,1 @@
+Quick run to verify the runner after the third council review (isolated rerun with -n 1, wipe, test_jail on the /srv layout): the no-dmi class was removed from the working tree for this run only, so its test matched no class, was rerun alone and failed again.

@@ -1,0 +1,338 @@
+[Firecracker test.sh] Create TMPDIR in /srv
+[Firecracker test.sh] cgroups v2: enable nesting
+[Firecracker test.sh] Copy artifacts to /srv/test_artifacts, so hardlinks work
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./id_rsa' -> '/srv/test_artifacts/./id_rsa'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./id_rsa.pub' -> '/srv/test_artifacts/./id_rsa.pub'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./ubuntu-24.04.squashfs.orig' -> '/srv/test_artifacts/./ubuntu-24.04.squashfs.orig'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./ubuntu-24.04.manifest' -> '/srv/test_artifacts/./ubuntu-24.04.manifest'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./amazonlinux-2023.manifest' -> '/srv/test_artifacts/./amazonlinux-2023.manifest'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./vmlinux-6.1.172' -> '/srv/test_artifacts/./vmlinux-6.1.172'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./vmlinux-5.10.253' -> '/srv/test_artifacts/./vmlinux-5.10.253'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./vmlinux-5.10.253.config' -> '/srv/test_artifacts/./vmlinux-5.10.253.config'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./vmlinux-6.1.172.config' -> '/srv/test_artifacts/./vmlinux-6.1.172.config'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./initramfs.cpio' -> '/srv/test_artifacts/./initramfs.cpio'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./amazonlinux-2023.squashfs.orig' -> '/srv/test_artifacts/./amazonlinux-2023.squashfs.orig'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./amazonlinux-2023.id_rsa' -> '/srv/test_artifacts/./amazonlinux-2023.id_rsa'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./amazonlinux-2023.squashfs' -> '/srv/test_artifacts/./amazonlinux-2023.squashfs'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./amazonlinux-2023.ext4' -> '/srv/test_artifacts/./amazonlinux-2023.ext4'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./ubuntu-24.04.id_rsa' -> '/srv/test_artifacts/./ubuntu-24.04.id_rsa'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./ubuntu-24.04.squashfs' -> '/srv/test_artifacts/./ubuntu-24.04.squashfs'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./ubuntu-24.04.ext4' -> '/srv/test_artifacts/./ubuntu-24.04.ext4'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./debug' -> '/srv/test_artifacts/./debug'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./debug/vmlinux-6.1.172' -> '/srv/test_artifacts/./debug/vmlinux-6.1.172'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./debug/vmlinux-5.10.253' -> '/srv/test_artifacts/./debug/vmlinux-5.10.253'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./debug/vmlinux-5.10.253.config' -> '/srv/test_artifacts/./debug/vmlinux-5.10.253.config'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./debug/vmlinux-6.1.172.config' -> '/srv/test_artifacts/./debug/vmlinux-6.1.172.config'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./debug/vmlinux-5.10.253.debug' -> '/srv/test_artifacts/./debug/vmlinux-5.10.253.debug'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./debug/vmlinux-6.1.172.debug' -> '/srv/test_artifacts/./debug/vmlinux-6.1.172.debug'
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-9.0.3, pluggy-1.6.0 -- /opt/venv/bin/python
+cachedir: ../build/pytest_cache
+metadata: {'Python': '3.12.3', 'Platform': 'Linux-6.12.115-0-virt-aarch64-with-glibc2.39', 'Packages': {'pytest': '9.0.3', 'pluggy': '1.6.0'}, 'Plugins': {'timeout': '2.4.0', 'repeat': '0.9.4', 'json-report': '1.5.0', 'rerunfailures': '14.0', 'xdist': '3.8.0', 'metadata': '3.1.1'}}
+EC2 AMI: NA
+EC2 Instance ID: NA
+rootdir: /firecracker/tests
+configfile: pytest.ini
+plugins: timeout-2.4.0, repeat-0.9.4, json-report-1.5.0, rerunfailures-14.0, xdist-3.8.0, metadata-3.1.1
+timeout: 600.0s
+timeout method: thread
+timeout func_only: False
+created: 3/3 workers
+3 workers [67 items]
+
+scheduling tests via WorkStealingScheduling
+
+integration_tests/functional/test_api.py::test_api_happy_start[vmlinux-6.1.172-PCI_ON] 
+integration_tests/functional/test_api.py::test_api_vsock[vmlinux-6.1.172-PCI_ON] 
+integration_tests/functional/test_api.py::test_rate_limiters_api_config[Sync-vmlinux-6.1.172-PCI_ON] 
+[gw2] [  1%] PASSED integration_tests/functional/test_api.py::test_api_vsock[vmlinux-6.1.172-PCI_ON] 
+[gw0] [  2%] PASSED integration_tests/functional/test_api.py::test_api_happy_start[vmlinux-6.1.172-PCI_ON] 
+integration_tests/functional/test_api.py::test_api_vsock[vmlinux-6.1.172-PCI_OFF] 
+integration_tests/functional/test_api.py::test_api_happy_start[vmlinux-6.1.172-PCI_OFF] 
+[gw2] [  4%] PASSED integration_tests/functional/test_api.py::test_api_vsock[vmlinux-6.1.172-PCI_OFF] 
+[gw0] [  5%] PASSED integration_tests/functional/test_api.py::test_api_happy_start[vmlinux-6.1.172-PCI_OFF] 
+integration_tests/functional/test_api.py::test_api_entropy[vmlinux-6.1.172-PCI_ON] 
+integration_tests/functional/test_api.py::test_drive_io_engine[Sync-vmlinux-6.1.172-PCI_ON] 
+[gw2] [  7%] PASSED integration_tests/functional/test_api.py::test_api_entropy[vmlinux-6.1.172-PCI_ON] 
+integration_tests/functional/test_api.py::test_api_entropy[vmlinux-6.1.172-PCI_OFF] 
+[gw2] [  8%] PASSED integration_tests/functional/test_api.py::test_api_entropy[vmlinux-6.1.172-PCI_OFF] 
+integration_tests/functional/test_api.py::test_api_memory_hotplug[vmlinux-6.1.172-PCI_ON] 
+[gw1] [ 10%] PASSED integration_tests/functional/test_api.py::test_rate_limiters_api_config[Sync-vmlinux-6.1.172-PCI_ON] 
+integration_tests/functional/test_api.py::test_rate_limiters_api_config[Sync-vmlinux-6.1.172-PCI_OFF] 
+[gw1] [ 11%] PASSED integration_tests/functional/test_api.py::test_rate_limiters_api_config[Sync-vmlinux-6.1.172-PCI_OFF] 
+integration_tests/functional/test_api.py::test_rate_limiters_api_config[Async-vmlinux-6.1.172-PCI_ON] 
+[gw1] [ 13%] PASSED integration_tests/functional/test_api.py::test_rate_limiters_api_config[Async-vmlinux-6.1.172-PCI_ON] 
+integration_tests/functional/test_api.py::test_rate_limiters_api_config[Async-vmlinux-6.1.172-PCI_OFF] 
+[gw1] [ 14%] PASSED integration_tests/functional/test_api.py::test_rate_limiters_api_config[Async-vmlinux-6.1.172-PCI_OFF] 
+integration_tests/functional/test_api.py::test_api_patch_pre_boot[Sync-vmlinux-6.1.172-PCI_ON] 
+[gw0] [ 16%] PASSED integration_tests/functional/test_api.py::test_drive_io_engine[Sync-vmlinux-6.1.172-PCI_ON] 
+integration_tests/functional/test_api.py::test_drive_io_engine[Sync-vmlinux-6.1.172-PCI_OFF] 
+[gw1] [ 17%] PASSED integration_tests/functional/test_api.py::test_api_patch_pre_boot[Sync-vmlinux-6.1.172-PCI_ON] 
+integration_tests/functional/test_api.py::test_api_patch_pre_boot[Sync-vmlinux-6.1.172-PCI_OFF] 
+[gw1] [ 19%] PASSED integration_tests/functional/test_api.py::test_api_patch_pre_boot[Sync-vmlinux-6.1.172-PCI_OFF] 
+[gw2] [ 20%] PASSED integration_tests/functional/test_api.py::test_api_memory_hotplug[vmlinux-6.1.172-PCI_ON] 
+integration_tests/functional/test_api.py::test_api_patch_pre_boot[Async-vmlinux-6.1.172-PCI_ON] 
+integration_tests/functional/test_api.py::test_api_memory_hotplug[vmlinux-6.1.172-PCI_OFF] 
+[gw1] [ 22%] PASSED integration_tests/functional/test_api.py::test_api_patch_pre_boot[Async-vmlinux-6.1.172-PCI_ON] 
+integration_tests/functional/test_api.py::test_api_patch_pre_boot[Async-vmlinux-6.1.172-PCI_OFF] 
+[gw1] [ 23%] PASSED integration_tests/functional/test_api.py::test_api_patch_pre_boot[Async-vmlinux-6.1.172-PCI_OFF] 
+integration_tests/functional/test_api.py::test_negative_api_patch_post_boot[Sync-vmlinux-6.1.172-PCI_ON] 
+[gw1] [ 25%] PASSED integration_tests/functional/test_api.py::test_negative_api_patch_post_boot[Sync-vmlinux-6.1.172-PCI_ON] 
+integration_tests/functional/test_api.py::test_negative_api_patch_post_boot[Sync-vmlinux-6.1.172-PCI_OFF] 
+[gw1] [ 26%] PASSED integration_tests/functional/test_api.py::test_negative_api_patch_post_boot[Sync-vmlinux-6.1.172-PCI_OFF] 
+integration_tests/functional/test_api.py::test_negative_api_patch_post_boot[Async-vmlinux-6.1.172-PCI_ON] 
+[gw1] [ 28%] PASSED integration_tests/functional/test_api.py::test_negative_api_patch_post_boot[Async-vmlinux-6.1.172-PCI_ON] 
+integration_tests/functional/test_api.py::test_negative_api_patch_post_boot[Async-vmlinux-6.1.172-PCI_OFF] 
+[gw1] [ 29%] PASSED integration_tests/functional/test_api.py::test_negative_api_patch_post_boot[Async-vmlinux-6.1.172-PCI_OFF] 
+integration_tests/functional/test_api.py::test_drive_patch[Sync-vmlinux-6.1.172-PCI_ON] 
+[gw0] [ 31%] PASSED integration_tests/functional/test_api.py::test_drive_io_engine[Sync-vmlinux-6.1.172-PCI_OFF] 
+[gw1] [ 32%] PASSED integration_tests/functional/test_api.py::test_drive_patch[Sync-vmlinux-6.1.172-PCI_ON] 
+integration_tests/functional/test_api.py::test_drive_patch[Sync-vmlinux-6.1.172-PCI_OFF] 
+integration_tests/functional/test_api.py::test_drive_io_engine[Async-vmlinux-6.1.172-PCI_ON] 
+[gw2] [ 34%] PASSED integration_tests/functional/test_api.py::test_api_memory_hotplug[vmlinux-6.1.172-PCI_OFF] 
+integration_tests/functional/test_api.py::test_api_balloon[vmlinux-6.1.172-PCI_ON] 
+[gw1] [ 35%] PASSED integration_tests/functional/test_api.py::test_drive_patch[Sync-vmlinux-6.1.172-PCI_OFF] 
+integration_tests/functional/test_api.py::test_drive_patch[Async-vmlinux-6.1.172-PCI_ON] 
+[gw1] [ 37%] PASSED integration_tests/functional/test_api.py::test_drive_patch[Async-vmlinux-6.1.172-PCI_ON] 
+integration_tests/functional/test_api.py::test_drive_patch[Async-vmlinux-6.1.172-PCI_OFF] 
+[gw1] [ 38%] PASSED integration_tests/functional/test_api.py::test_drive_patch[Async-vmlinux-6.1.172-PCI_OFF] 
+integration_tests/functional/test_api.py::test_send_ctrl_alt_del[vmlinux-5.10.253-PCI_ON] 
+[gw1] [ 40%] SKIPPED integration_tests/functional/test_api.py::test_send_ctrl_alt_del[vmlinux-5.10.253-PCI_ON] 
+integration_tests/functional/test_api.py::test_send_ctrl_alt_del[vmlinux-5.10.253-PCI_OFF] 
+[gw1] [ 41%] SKIPPED integration_tests/functional/test_api.py::test_send_ctrl_alt_del[vmlinux-5.10.253-PCI_OFF] 
+integration_tests/functional/test_api.py::test_send_ctrl_alt_del[vmlinux-6.1.172-PCI_ON] 
+[gw1] [ 43%] SKIPPED integration_tests/functional/test_api.py::test_send_ctrl_alt_del[vmlinux-6.1.172-PCI_ON] 
+integration_tests/functional/test_api.py::test_send_ctrl_alt_del[vmlinux-6.1.172-PCI_OFF] 
+[gw1] [ 44%] SKIPPED integration_tests/functional/test_api.py::test_send_ctrl_alt_del[vmlinux-6.1.172-PCI_OFF] 
+integration_tests/functional/test_api.py::test_api_version[vmlinux-6.1.172-PCI_ON] 
+[gw1] [ 46%] PASSED integration_tests/functional/test_api.py::test_api_version[vmlinux-6.1.172-PCI_ON] 
+integration_tests/functional/test_api.py::test_api_version[vmlinux-6.1.172-PCI_OFF] 
+[gw1] [ 47%] PASSED integration_tests/functional/test_api.py::test_api_version[vmlinux-6.1.172-PCI_OFF] 
+integration_tests/functional/test_api.py::test_api_mmds_config[vmlinux-6.1.172-PCI_OFF] 
+[gw1] [ 49%] PASSED integration_tests/functional/test_api.py::test_api_mmds_config[vmlinux-6.1.172-PCI_OFF] 
+integration_tests/functional/test_api.py::test_api_machine_config[vmlinux-6.1.172-PCI_ON] 
+[gw1] [ 50%] PASSED integration_tests/functional/test_api.py::test_api_machine_config[vmlinux-6.1.172-PCI_ON] 
+integration_tests/functional/test_api.py::test_api_machine_config[vmlinux-6.1.172-PCI_OFF] 
+[gw0] [ 52%] PASSED integration_tests/functional/test_api.py::test_drive_io_engine[Async-vmlinux-6.1.172-PCI_ON] 
+[gw1] [ 53%] PASSED integration_tests/functional/test_api.py::test_api_machine_config[vmlinux-6.1.172-PCI_OFF] 
+integration_tests/functional/test_api.py::test_drive_io_engine[Async-vmlinux-6.1.172-PCI_OFF] 
+integration_tests/functional/test_api.py::test_negative_machine_config_api[vmlinux-6.1.172-PCI_ON] 
+[gw1] [ 55%] PASSED integration_tests/functional/test_api.py::test_negative_machine_config_api[vmlinux-6.1.172-PCI_ON] 
+integration_tests/functional/test_api.py::test_negative_machine_config_api[vmlinux-6.1.172-PCI_OFF] 
+[gw1] [ 56%] PASSED integration_tests/functional/test_api.py::test_negative_machine_config_api[vmlinux-6.1.172-PCI_OFF] 
+[gw2] [ 58%] PASSED integration_tests/functional/test_api.py::test_api_balloon[vmlinux-6.1.172-PCI_ON] 
+integration_tests/functional/test_api.py::test_api_cpu_config[NOTSET-vmlinux-6.1.172-PCI_ON] 
+[gw1] [ 59%] SKIPPED integration_tests/functional/test_api.py::test_api_cpu_config[NOTSET-vmlinux-6.1.172-PCI_ON] 
+integration_tests/functional/test_api.py::test_api_cpu_config[NOTSET-vmlinux-6.1.172-PCI_OFF] 
+[gw1] [ 61%] SKIPPED integration_tests/functional/test_api.py::test_api_cpu_config[NOTSET-vmlinux-6.1.172-PCI_OFF] 
+integration_tests/functional/test_api.py::test_api_put_update_post_boot[vmlinux-6.1.172-PCI_ON] 
+integration_tests/functional/test_api.py::test_api_balloon[vmlinux-6.1.172-PCI_OFF] 
+[gw1] [ 62%] PASSED integration_tests/functional/test_api.py::test_api_put_update_post_boot[vmlinux-6.1.172-PCI_ON] 
+integration_tests/functional/test_api.py::test_api_put_update_post_boot[vmlinux-6.1.172-PCI_OFF] 
+[gw1] [ 64%] PASSED integration_tests/functional/test_api.py::test_api_put_update_post_boot[vmlinux-6.1.172-PCI_OFF] 
+integration_tests/functional/test_api.py::test_pmem_rate_limiter_api[vmlinux-6.1.172-PCI_OFF] 
+[gw1] [ 65%] PASSED integration_tests/functional/test_api.py::test_pmem_rate_limiter_api[vmlinux-6.1.172-PCI_OFF] 
+integration_tests/functional/test_api.py::test_get_full_config_after_restoring_snapshot[vmlinux-6.1.172-PCI_ON] 
+[gw0] [ 67%] PASSED integration_tests/functional/test_api.py::test_drive_io_engine[Async-vmlinux-6.1.172-PCI_OFF] 
+integration_tests/functional/test_api.py::test_api_put_update_pre_boot[Sync-vmlinux-6.1.172-PCI_ON] 
+[gw0] [ 68%] PASSED integration_tests/functional/test_api.py::test_api_put_update_pre_boot[Sync-vmlinux-6.1.172-PCI_ON] 
+[gw2] [ 70%] PASSED integration_tests/functional/test_api.py::test_api_balloon[vmlinux-6.1.172-PCI_OFF] 
+integration_tests/functional/test_api.py::test_api_put_update_pre_boot[Sync-vmlinux-6.1.172-PCI_OFF] 
+integration_tests/functional/test_api.py::test_pmem_api[vmlinux-5.10.253-PCI_ON] 
+[gw2] [ 71%] PASSED integration_tests/functional/test_api.py::test_pmem_api[vmlinux-5.10.253-PCI_ON] 
+integration_tests/functional/test_api.py::test_pmem_api[vmlinux-5.10.253-PCI_OFF] 
+[gw0] [ 73%] PASSED integration_tests/functional/test_api.py::test_api_put_update_pre_boot[Sync-vmlinux-6.1.172-PCI_OFF] 
+integration_tests/functional/test_api.py::test_api_put_update_pre_boot[Async-vmlinux-6.1.172-PCI_ON] 
+[gw2] [ 74%] PASSED integration_tests/functional/test_api.py::test_pmem_api[vmlinux-5.10.253-PCI_OFF] 
+integration_tests/functional/test_api.py::test_pmem_api[vmlinux-6.1.172-PCI_ON] 
+[gw2] [ 76%] PASSED integration_tests/functional/test_api.py::test_pmem_api[vmlinux-6.1.172-PCI_ON] 
+integration_tests/functional/test_api.py::test_pmem_api[vmlinux-6.1.172-PCI_OFF] 
+[gw2] [ 77%] PASSED integration_tests/functional/test_api.py::test_pmem_api[vmlinux-6.1.172-PCI_OFF] 
+[gw0] [ 79%] PASSED integration_tests/functional/test_api.py::test_api_put_update_pre_boot[Async-vmlinux-6.1.172-PCI_ON] 
+integration_tests/functional/test_api.py::test_pmem_rate_limiter_api[vmlinux-5.10.253-PCI_ON] 
+integration_tests/functional/test_api.py::test_api_put_update_pre_boot[Async-vmlinux-6.1.172-PCI_OFF] 
+[gw2] [ 80%] PASSED integration_tests/functional/test_api.py::test_pmem_rate_limiter_api[vmlinux-5.10.253-PCI_ON] 
+integration_tests/functional/test_api.py::test_pmem_rate_limiter_api[vmlinux-5.10.253-PCI_OFF] 
+[gw0] [ 82%] PASSED integration_tests/functional/test_api.py::test_api_put_update_pre_boot[Async-vmlinux-6.1.172-PCI_OFF] 
+[gw2] [ 83%] PASSED integration_tests/functional/test_api.py::test_pmem_rate_limiter_api[vmlinux-5.10.253-PCI_OFF] 
+integration_tests/functional/test_api.py::test_net_api_put_update_pre_boot[vmlinux-6.1.172-PCI_ON] 
+integration_tests/functional/test_api.py::test_pmem_rate_limiter_api[vmlinux-6.1.172-PCI_ON] 
+[gw0] [ 85%] PASSED integration_tests/functional/test_api.py::test_net_api_put_update_pre_boot[vmlinux-6.1.172-PCI_ON] 
+[gw2] [ 86%] PASSED integration_tests/functional/test_api.py::test_pmem_rate_limiter_api[vmlinux-6.1.172-PCI_ON] 
+integration_tests/functional/test_api.py::test_net_api_put_update_pre_boot[vmlinux-6.1.172-PCI_OFF] 
+integration_tests/functional/test_api.py::test_map_private_seccomp_regression[vmlinux-6.1.172-PCI_ON] 
+[gw0] [ 88%] PASSED integration_tests/functional/test_api.py::test_net_api_put_update_pre_boot[vmlinux-6.1.172-PCI_OFF] 
+[gw2] [ 89%] PASSED integration_tests/functional/test_api.py::test_map_private_seccomp_regression[vmlinux-6.1.172-PCI_ON] 
+integration_tests/functional/test_api.py::test_api_mmds_config[vmlinux-6.1.172-PCI_ON] 
+integration_tests/functional/test_api.py::test_map_private_seccomp_regression[vmlinux-6.1.172-PCI_OFF] 
+[gw0] [ 91%] PASSED integration_tests/functional/test_api.py::test_api_mmds_config[vmlinux-6.1.172-PCI_ON] 
+[gw2] [ 92%] PASSED integration_tests/functional/test_api.py::test_map_private_seccomp_regression[vmlinux-6.1.172-PCI_OFF] 
+integration_tests/functional/test_api.py::test_get_full_config[vmlinux-6.1.172-PCI_ON] 
+integration_tests/functional/test_api.py::test_negative_snapshot_load_api 
+[gw0] [ 94%] PASSED integration_tests/functional/test_api.py::test_get_full_config[vmlinux-6.1.172-PCI_ON] 
+[gw1] [ 95%] PASSED integration_tests/functional/test_api.py::test_get_full_config_after_restoring_snapshot[vmlinux-6.1.172-PCI_ON] 
+integration_tests/functional/test_api.py::test_get_full_config[vmlinux-6.1.172-PCI_OFF] 
+[gw2] [ 97%] PASSED integration_tests/functional/test_api.py::test_negative_snapshot_load_api 
+[gw1] [ 97%] ERROR integration_tests/functional/test_api.py::test_get_full_config_after_restoring_snapshot[vmlinux-6.1.172-PCI_ON] 
+integration_tests/functional/test_api.py::test_get_full_config_after_restoring_snapshot[vmlinux-6.1.172-PCI_OFF] 
+[gw0] [ 98%] PASSED integration_tests/functional/test_api.py::test_get_full_config[vmlinux-6.1.172-PCI_OFF] 
+[gw1] [100%] PASSED integration_tests/functional/test_api.py::test_get_full_config_after_restoring_snapshot[vmlinux-6.1.172-PCI_OFF] 
+[gw1] [100%] ERROR integration_tests/functional/test_api.py::test_get_full_config_after_restoring_snapshot[vmlinux-6.1.172-PCI_OFF] 
+
+==================================== ERRORS ====================================
+_ ERROR at teardown of test_get_full_config_after_restoring_snapshot[vmlinux-6.1.172-PCI_ON] _
+[gw1] linux -- Python 3.12.3 /opt/venv/bin/python
+conftest.py:449: in microvm_factory
+    uvm_factory.kill()
+        binary_dir = PosixPath('/binaries')
+        custom_cpu_template = None
+        custom_cpu_template_path = None
+        netns_factory = <bound method netns_factory.<locals>.NetNsFactory.get of <conftest.netns_factory.<locals>.NetNsFactory object at 0xffff9f9c3c20>>
+        record_property = <function record_property.<locals>.sub at 0xffff9f1839c0>
+        report     = {'call': <TestReport 'integration_tests/functional/test_api.py::test_get_full_config_after_restoring_snapshot[vmlinux-6.1.172-PCI_ON]' when='call' outcome='passed'>,
+ 'setup': <TestReport 'integration_tests/functional/test_api.py::test_get_full_config_after_restoring_snapshot[vmlinux-6.1.172-PCI_ON]' when='setup' outcome='passed'>}
+        request    = <SubRequest 'microvm_factory' for <Function test_get_full_config_after_restoring_snapshot[vmlinux-6.1.172-PCI_ON]>>
+        results_dir = PosixPath('/results/test_get_full_config_after_restoring_snapshot/test_get_full_config_after_restoring_snapshot[vmlinux-6.1.172-PCI_ON]')
+        uvm_factory = <framework.microvm.MicroVMFactory object at 0xffff9f729730>
+framework/microvm.py:1401: in kill
+    vm.kill()
+        self       = <framework.microvm.MicroVMFactory object at 0xffff9f729730>
+        vm         = <Microvm id=a01590af-fce1-4dcf-aded-af74857b4856>
+framework/microvm.py:405: in kill
+    self.memory_monitor.check_samples()
+        _          = '1326'
+        cmd        = 'grep a01590af-fce1-4dcf-aded-af74857b4856'
+        connection = <host_tools.network.SSHConnection object at 0xffff9f7ac620>
+        might_be_dead = False
+        monitor    = <MemoryMonitor(Thread-60, stopped daemon 281473341714816)>
+        offenders  = []
+        pid_to_kill = None
+        proc       = ' 1326 grep a01590af-fce1-4dcf-aded-af74857b4856'
+        self       = <Microvm id=a01590af-fce1-4dcf-aded-af74857b4856>
+        stderr     = ''
+        stdout     = (' 1324 /bin/sh -c ps ax -o pid,cmd -ww | grep '
+ 'a01590af-fce1-4dcf-aded-af74857b4856\n'
+ ' 1326 grep a01590af-fce1-4dcf-aded-af74857b4856\n')
+host_tools/memory.py:172: in check_samples
+    raise MemoryUsageExceededError(
+E   host_tools.memory.MemoryUsageExceededError: ('Memory usage (5.70 MiB) exceeded maximum threshold (7.0 MiB)', psutil.Process(pid=968, status='terminated', started='08:15:41'))
+        self       = <MemoryMonitor(Thread-60, stopped daemon 281473341714816)>
+_ ERROR at teardown of test_get_full_config_after_restoring_snapshot[vmlinux-6.1.172-PCI_OFF] _
+[gw1] linux -- Python 3.12.3 /opt/venv/bin/python
+conftest.py:449: in microvm_factory
+    uvm_factory.kill()
+        binary_dir = PosixPath('/binaries')
+        custom_cpu_template = None
+        custom_cpu_template_path = None
+        netns_factory = <bound method netns_factory.<locals>.NetNsFactory.get of <conftest.netns_factory.<locals>.NetNsFactory object at 0xffff9f9c3c20>>
+        record_property = <function record_property.<locals>.sub at 0xffff9f186840>
+        report     = {'call': <TestReport 'integration_tests/functional/test_api.py::test_get_full_config_after_restoring_snapshot[vmlinux-6.1.172-PCI_OFF]' when='call' outcome='passed'>,
+ 'setup': <TestReport 'integration_tests/functional/test_api.py::test_get_full_config_after_restoring_snapshot[vmlinux-6.1.172-PCI_OFF]' when='setup' outcome='passed'>}
+        request    = <SubRequest 'microvm_factory' for <Function test_get_full_config_after_restoring_snapshot[vmlinux-6.1.172-PCI_OFF]>>
+        results_dir = PosixPath('/results/test_get_full_config_after_restoring_snapshot/test_get_full_config_after_restoring_snapshot[vmlinux-6.1.172-PCI_OFF]')
+        uvm_factory = <framework.microvm.MicroVMFactory object at 0xffff9f71e330>
+framework/microvm.py:1401: in kill
+    vm.kill()
+        self       = <framework.microvm.MicroVMFactory object at 0xffff9f71e330>
+        vm         = <Microvm id=4cbc49a8-561a-4479-8496-26ebed2dd452>
+framework/microvm.py:405: in kill
+    self.memory_monitor.check_samples()
+        _          = '1381'
+        cmd        = 'grep 4cbc49a8-561a-4479-8496-26ebed2dd452'
+        connection = <host_tools.network.SSHConnection object at 0xffff9f71ca10>
+        might_be_dead = False
+        monitor    = <MemoryMonitor(Thread-63, stopped daemon 281473331163520)>
+        offenders  = []
+        pid_to_kill = None
+        proc       = ' 1381 grep 4cbc49a8-561a-4479-8496-26ebed2dd452'
+        self       = <Microvm id=4cbc49a8-561a-4479-8496-26ebed2dd452>
+        stderr     = ''
+        stdout     = (' 1379 /bin/sh -c ps ax -o pid,cmd -ww | grep '
+ '4cbc49a8-561a-4479-8496-26ebed2dd452\n'
+ ' 1381 grep 4cbc49a8-561a-4479-8496-26ebed2dd452\n')
+host_tools/memory.py:172: in check_samples
+    raise MemoryUsageExceededError(
+E   host_tools.memory.MemoryUsageExceededError: ('Memory usage (5.31 MiB) exceeded maximum threshold (7.0 MiB)', psutil.Process(pid=1333, status='terminated', started='08:15:48'))
+        self       = <MemoryMonitor(Thread-63, stopped daemon 281473331163520)>
+==================================== PASSES ====================================
+-------------------- generated xml file: /results/junit.xml --------------------
+--------------------------------- JSON report ----------------------------------
+report saved to: /results/report.json
+============================= slowest 10 durations =============================
+6.79s call     integration_tests/functional/test_api.py::test_get_full_config_after_restoring_snapshot[vmlinux-6.1.172-PCI_ON]
+6.29s call     integration_tests/functional/test_api.py::test_get_full_config_after_restoring_snapshot[vmlinux-6.1.172-PCI_OFF]
+4.48s call     integration_tests/functional/test_api.py::test_drive_io_engine[Sync-vmlinux-6.1.172-PCI_ON]
+4.48s call     integration_tests/functional/test_api.py::test_api_memory_hotplug[vmlinux-6.1.172-PCI_ON]
+4.46s call     integration_tests/functional/test_api.py::test_api_memory_hotplug[vmlinux-6.1.172-PCI_OFF]
+4.44s call     integration_tests/functional/test_api.py::test_drive_io_engine[Async-vmlinux-6.1.172-PCI_OFF]
+4.43s call     integration_tests/functional/test_api.py::test_drive_io_engine[Sync-vmlinux-6.1.172-PCI_OFF]
+4.39s call     integration_tests/functional/test_api.py::test_drive_io_engine[Async-vmlinux-6.1.172-PCI_ON]
+4.28s call     integration_tests/functional/test_api.py::test_api_balloon[vmlinux-6.1.172-PCI_OFF]
+4.28s call     integration_tests/functional/test_api.py::test_api_balloon[vmlinux-6.1.172-PCI_ON]
+=========================== short test summary info ============================
+PASSED integration_tests/functional/test_api.py::test_api_vsock[vmlinux-6.1.172-PCI_ON]
+PASSED integration_tests/functional/test_api.py::test_api_happy_start[vmlinux-6.1.172-PCI_ON]
+PASSED integration_tests/functional/test_api.py::test_api_vsock[vmlinux-6.1.172-PCI_OFF]
+PASSED integration_tests/functional/test_api.py::test_api_happy_start[vmlinux-6.1.172-PCI_OFF]
+PASSED integration_tests/functional/test_api.py::test_api_entropy[vmlinux-6.1.172-PCI_ON]
+PASSED integration_tests/functional/test_api.py::test_api_entropy[vmlinux-6.1.172-PCI_OFF]
+PASSED integration_tests/functional/test_api.py::test_rate_limiters_api_config[Sync-vmlinux-6.1.172-PCI_ON]
+PASSED integration_tests/functional/test_api.py::test_rate_limiters_api_config[Sync-vmlinux-6.1.172-PCI_OFF]
+PASSED integration_tests/functional/test_api.py::test_rate_limiters_api_config[Async-vmlinux-6.1.172-PCI_ON]
+PASSED integration_tests/functional/test_api.py::test_rate_limiters_api_config[Async-vmlinux-6.1.172-PCI_OFF]
+PASSED integration_tests/functional/test_api.py::test_drive_io_engine[Sync-vmlinux-6.1.172-PCI_ON]
+PASSED integration_tests/functional/test_api.py::test_api_patch_pre_boot[Sync-vmlinux-6.1.172-PCI_ON]
+PASSED integration_tests/functional/test_api.py::test_api_patch_pre_boot[Sync-vmlinux-6.1.172-PCI_OFF]
+PASSED integration_tests/functional/test_api.py::test_api_memory_hotplug[vmlinux-6.1.172-PCI_ON]
+PASSED integration_tests/functional/test_api.py::test_api_patch_pre_boot[Async-vmlinux-6.1.172-PCI_ON]
+PASSED integration_tests/functional/test_api.py::test_api_patch_pre_boot[Async-vmlinux-6.1.172-PCI_OFF]
+PASSED integration_tests/functional/test_api.py::test_negative_api_patch_post_boot[Sync-vmlinux-6.1.172-PCI_ON]
+PASSED integration_tests/functional/test_api.py::test_negative_api_patch_post_boot[Sync-vmlinux-6.1.172-PCI_OFF]
+PASSED integration_tests/functional/test_api.py::test_negative_api_patch_post_boot[Async-vmlinux-6.1.172-PCI_ON]
+PASSED integration_tests/functional/test_api.py::test_negative_api_patch_post_boot[Async-vmlinux-6.1.172-PCI_OFF]
+PASSED integration_tests/functional/test_api.py::test_drive_io_engine[Sync-vmlinux-6.1.172-PCI_OFF]
+PASSED integration_tests/functional/test_api.py::test_drive_patch[Sync-vmlinux-6.1.172-PCI_ON]
+PASSED integration_tests/functional/test_api.py::test_api_memory_hotplug[vmlinux-6.1.172-PCI_OFF]
+PASSED integration_tests/functional/test_api.py::test_drive_patch[Sync-vmlinux-6.1.172-PCI_OFF]
+PASSED integration_tests/functional/test_api.py::test_drive_patch[Async-vmlinux-6.1.172-PCI_ON]
+PASSED integration_tests/functional/test_api.py::test_drive_patch[Async-vmlinux-6.1.172-PCI_OFF]
+PASSED integration_tests/functional/test_api.py::test_api_version[vmlinux-6.1.172-PCI_ON]
+PASSED integration_tests/functional/test_api.py::test_api_version[vmlinux-6.1.172-PCI_OFF]
+PASSED integration_tests/functional/test_api.py::test_api_mmds_config[vmlinux-6.1.172-PCI_OFF]
+PASSED integration_tests/functional/test_api.py::test_api_machine_config[vmlinux-6.1.172-PCI_ON]
+PASSED integration_tests/functional/test_api.py::test_drive_io_engine[Async-vmlinux-6.1.172-PCI_ON]
+PASSED integration_tests/functional/test_api.py::test_api_machine_config[vmlinux-6.1.172-PCI_OFF]
+PASSED integration_tests/functional/test_api.py::test_negative_machine_config_api[vmlinux-6.1.172-PCI_ON]
+PASSED integration_tests/functional/test_api.py::test_negative_machine_config_api[vmlinux-6.1.172-PCI_OFF]
+PASSED integration_tests/functional/test_api.py::test_api_balloon[vmlinux-6.1.172-PCI_ON]
+PASSED integration_tests/functional/test_api.py::test_api_put_update_post_boot[vmlinux-6.1.172-PCI_ON]
+PASSED integration_tests/functional/test_api.py::test_api_put_update_post_boot[vmlinux-6.1.172-PCI_OFF]
+PASSED integration_tests/functional/test_api.py::test_pmem_rate_limiter_api[vmlinux-6.1.172-PCI_OFF]
+PASSED integration_tests/functional/test_api.py::test_drive_io_engine[Async-vmlinux-6.1.172-PCI_OFF]
+PASSED integration_tests/functional/test_api.py::test_api_put_update_pre_boot[Sync-vmlinux-6.1.172-PCI_ON]
+PASSED integration_tests/functional/test_api.py::test_api_balloon[vmlinux-6.1.172-PCI_OFF]
+PASSED integration_tests/functional/test_api.py::test_pmem_api[vmlinux-5.10.253-PCI_ON]
+PASSED integration_tests/functional/test_api.py::test_api_put_update_pre_boot[Sync-vmlinux-6.1.172-PCI_OFF]
+PASSED integration_tests/functional/test_api.py::test_pmem_api[vmlinux-5.10.253-PCI_OFF]
+PASSED integration_tests/functional/test_api.py::test_pmem_api[vmlinux-6.1.172-PCI_ON]
+PASSED integration_tests/functional/test_api.py::test_pmem_api[vmlinux-6.1.172-PCI_OFF]
+PASSED integration_tests/functional/test_api.py::test_api_put_update_pre_boot[Async-vmlinux-6.1.172-PCI_ON]
+PASSED integration_tests/functional/test_api.py::test_pmem_rate_limiter_api[vmlinux-5.10.253-PCI_ON]
+PASSED integration_tests/functional/test_api.py::test_api_put_update_pre_boot[Async-vmlinux-6.1.172-PCI_OFF]
+PASSED integration_tests/functional/test_api.py::test_pmem_rate_limiter_api[vmlinux-5.10.253-PCI_OFF]
+PASSED integration_tests/functional/test_api.py::test_net_api_put_update_pre_boot[vmlinux-6.1.172-PCI_ON]
+PASSED integration_tests/functional/test_api.py::test_pmem_rate_limiter_api[vmlinux-6.1.172-PCI_ON]
+PASSED integration_tests/functional/test_api.py::test_net_api_put_update_pre_boot[vmlinux-6.1.172-PCI_OFF]
+PASSED integration_tests/functional/test_api.py::test_map_private_seccomp_regression[vmlinux-6.1.172-PCI_ON]
+PASSED integration_tests/functional/test_api.py::test_api_mmds_config[vmlinux-6.1.172-PCI_ON]
+PASSED integration_tests/functional/test_api.py::test_map_private_seccomp_regression[vmlinux-6.1.172-PCI_OFF]
+PASSED integration_tests/functional/test_api.py::test_get_full_config[vmlinux-6.1.172-PCI_ON]
+PASSED integration_tests/functional/test_api.py::test_get_full_config_after_restoring_snapshot[vmlinux-6.1.172-PCI_ON]
+PASSED integration_tests/functional/test_api.py::test_negative_snapshot_load_api
+PASSED integration_tests/functional/test_api.py::test_get_full_config[vmlinux-6.1.172-PCI_OFF]
+PASSED integration_tests/functional/test_api.py::test_get_full_config_after_restoring_snapshot[vmlinux-6.1.172-PCI_OFF]
+SKIPPED [4] integration_tests/functional/test_api.py:757: not yet implemented on aarch64
+SKIPPED [2] integration_tests/functional/test_api.py: got empty parameter set for (custom_cpu_template)
+ERROR integration_tests/functional/test_api.py::test_get_full_config_after_restoring_snapshot[vmlinux-6.1.172-PCI_ON] - host_tools.memory.MemoryUsageExceededError: ('Memory usage (5.70 MiB) exceeded maximum threshold (7.0 MiB)', psutil.Process(pid=968, status='terminated', started='08:15:41'))
+ERROR integration_tests/functional/test_api.py::test_get_full_config_after_restoring_snapshot[vmlinux-6.1.172-PCI_OFF] - host_tools.memory.MemoryUsageExceededError: ('Memory usage (5.31 MiB) exceeded maximum threshold (7.0 MiB)', psutil.Process(pid=1333, status='terminated', started='08:15:48'))
+=================== 61 passed, 6 skipped, 2 errors in 32.43s ===================

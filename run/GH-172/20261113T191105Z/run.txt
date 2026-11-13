@@ -1,0 +1,1 @@
+rc=1 wall_s=331 collected=53 stopped=no selection=integration_tests/functional/test_cpu_template_helper.py::test_consecutive_fingerprint_consistency integration_tests/security/test_jail.py

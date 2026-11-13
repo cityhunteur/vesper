@@ -1,0 +1,28 @@
+[upstream-suite 15:09:26] revision d83d72b710361a10294480131377b1b00b163af8 (v1.16.0), container public.ecr.aws/firecracker/fcuvm:v90@sha256:657863a847acff0b52888a237173f0f6740d7ace175a2d7423cf5f0307db9698, artefacts firecracker-ci/20260603-e656faf58d6c-0/aarch64, selection: integration_tests/functional/test_snapshot_editor.py integration_tests/functional/test_snapshot_not_losing_dirty_pages.py integration_tests/functional/test_serial_io.py
+[upstream-suite 15:09:27] artefacts: 15 objects
+[upstream-suite 15:09:27] release binaries: cpu-template-helper cpu-template-helper.debug firecracker firecracker.debug jailer jailer.debug rebase-snap rebase-snap.debug seccompiler-bin seccompiler-bin.debug snapshot-editor snapshot-editor.debug 
+[upstream-suite 15:09:27] restart the System VM with 4 vCPUs, 8192 MiB and /Volumes/Workspace/github.com/cityhunteur/vesper/build/upstream-suite shared
+systemvm-up: running (pid 6732); bridge run/systemvm/vsock/3.sock; log /Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/vmlauncher.log
+{"status":"bridge-listening","elapsed_ms":108,"ready_pattern":"login:","console_log":"/Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/console.log","bridge":"run/systemvm/vsock/3.sock"}
+{"status":"ready","elapsed_ms":3004,"ready_pattern":"login:","console_log":"/Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/console.log"}
+{"status":"probe-ok","elapsed_ms":5255,"ready_pattern":"login:","console_log":"/Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/console.log"}
+systemvm-up: MOUNTED share0 /Volumes/Workspace/github.com/cityhunteur/vesper/run/vesperd-share mode=rw
+systemvm-up: MOUNTED share1 /Volumes/Workspace/github.com/cityhunteur/vesper/build/upstream-suite mode=rw
+docker-up: vesper-proxy pid 6981; DOCKER_HOST=unix:///Volumes/Workspace/github.com/cityhunteur/vesper/run/vesper/docker.sock; published ports via the guest relay (status /Volumes/Workspace/github.com/cityhunteur/vesper/run/vesper/ports.json)
+srw-------@ 1 pravin  staff  0 13 Nov 15:09 /Volumes/Workspace/github.com/cityhunteur/vesper/run/vesper/docker.sock
+[upstream-suite 15:09:40] tun loaded; data disk 48 GB free
+[upstream-suite 15:09:41] stage the tree into vesper-upstream-src
+[upstream-suite 15:10:01] build the examples and tools that tests expect in build/cargo_target/aarch64-unknown-linux-musl/release
+[upstream-suite 15:10:05] staged: build clippy-tracing clippy-tracing.d cpu-template-helper cpu-template-helper.debug deps examples firecracker firecracker.debug incremental jailer jailer.debug rebase-snap rebase-snap.debug seccompiler-bin seccompiler-bin.debug snapshot-editor snapshot-editor.debug 
+[upstream-suite 15:10:05] collect the selection
+[upstream-suite 15:10:11] run 31 tests with 3 workers, 600 s per test, 14400 s in all
+rc=1 wall_s=572 collected=31 stopped=no selection=integration_tests/functional/test_snapshot_editor.py integration_tests/functional/test_snapshot_not_losing_dirty_pages.py integration_tests/functional/test_serial_io.py
+collect: 31 tests (31 collected): {'error': 1, 'failed': 2, 'passed': 28}
+[upstream-suite 15:19:43] wiped /srv and the test results in vesper-upstream-src
+reference=all-pass partial=true total=31 passed=28 to_explain={"error": 1, "failed": 2} not_passing_on_reference=0 missing_from_run=0
+class rate-limiter-balloon-tolerance: 2
+classes that explained nothing in this run: apple-cpu-features-unknown, apple-cpu-no-cache-topology, apple-cpu-ssb-vulnerable, balloon-stats-not-refreshed, guest-ssh-timeout-under-load, max-devices-worker-timeout, no-dmi, no-userfaultfd, upstream-platform-skip, vmclock-gen-counter-flag, vmm-exit-timeout-under-load, vmm-memory-overhead, vsock-reset-after-snapshot
+UNMATCHED integration_tests/functional/test_serial_io.py::test_serial_active_tx_snapshot[vmlinux-6.1.172-PCI_ON] error 
+upstream-compare: 1 result(s) match no exception class
+[upstream-suite 15:19:44] evidence in run/GH-172/20261113T150926Z
+[upstream-suite 15:19:45] restore the previous launch config and restart the System VM

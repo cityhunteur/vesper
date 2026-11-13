@@ -1,0 +1,16 @@
+reference=all-pass partial=false total=980 passed=758 to_explain={"error": 33, "failed": 93, "skipped": 96} not_passing_on_reference=0 missing_from_run=0
+class apple-cpu-features-unknown: 8
+class apple-cpu-no-cache-topology: 24
+class apple-cpu-ssb-vulnerable: 10
+class guest-ssh-timeout-under-load: 2
+class max-devices-worker-timeout: 2
+class no-dmi: 1
+class no-userfaultfd: 8
+class rate-limiter-balloon-tolerance: 11
+class upstream-platform-skip: 96
+class vmclock-gen-counter-flag: 1
+class vmm-memory-overhead: 57
+class vsock-reset-after-snapshot: 1
+classes that explained nothing in this run: balloon-stats-not-refreshed, vmm-exit-timeout-under-load
+UNMATCHED integration_tests/functional/test_balloon.py::test_reinflate_balloon[vmlinux-5.10.253-PCI_OFF] failed assert (151656 - 126672) <= 20000
+upstream-compare: 1 result(s) match no exception class

@@ -1,0 +1,91 @@
+[Firecracker test.sh] Create TMPDIR in /srv
+mkdir: created directory '/srv/tmp'
+[Firecracker test.sh] cgroups v2: enable nesting
+[Firecracker test.sh] Copy artifacts to /srv/test_artifacts, so hardlinks work
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/.' -> '/srv/test_artifacts/'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./ubuntu-24.04.squashfs.orig' -> '/srv/test_artifacts/ubuntu-24.04.squashfs.orig'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./ubuntu-24.04.manifest' -> '/srv/test_artifacts/ubuntu-24.04.manifest'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./amazonlinux-2023.manifest' -> '/srv/test_artifacts/amazonlinux-2023.manifest'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./vmlinux-6.1.172' -> '/srv/test_artifacts/vmlinux-6.1.172'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./vmlinux-5.10.253' -> '/srv/test_artifacts/vmlinux-5.10.253'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./vmlinux-5.10.253.config' -> '/srv/test_artifacts/vmlinux-5.10.253.config'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./vmlinux-6.1.172.config' -> '/srv/test_artifacts/vmlinux-6.1.172.config'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./initramfs.cpio' -> '/srv/test_artifacts/initramfs.cpio'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./amazonlinux-2023.squashfs.orig' -> '/srv/test_artifacts/amazonlinux-2023.squashfs.orig'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./debug' -> '/srv/test_artifacts/debug'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./debug/vmlinux-6.1.172' -> '/srv/test_artifacts/debug/vmlinux-6.1.172'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./debug/vmlinux-5.10.253' -> '/srv/test_artifacts/debug/vmlinux-5.10.253'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./debug/vmlinux-5.10.253.config' -> '/srv/test_artifacts/debug/vmlinux-5.10.253.config'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./debug/vmlinux-6.1.172.config' -> '/srv/test_artifacts/debug/vmlinux-6.1.172.config'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./debug/vmlinux-6.1.172.debug' -> '/srv/test_artifacts/debug/vmlinux-6.1.172.debug'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./debug/vmlinux-5.10.253.debug' -> '/srv/test_artifacts/debug/vmlinux-5.10.253.debug'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./id_rsa' -> '/srv/test_artifacts/id_rsa'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./id_rsa.pub' -> '/srv/test_artifacts/id_rsa.pub'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./amazonlinux-2023.id_rsa' -> '/srv/test_artifacts/amazonlinux-2023.id_rsa'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./amazonlinux-2023.squashfs' -> '/srv/test_artifacts/amazonlinux-2023.squashfs'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./amazonlinux-2023.ext4' -> '/srv/test_artifacts/amazonlinux-2023.ext4'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./ubuntu-24.04.id_rsa' -> '/srv/test_artifacts/ubuntu-24.04.id_rsa'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./ubuntu-24.04.squashfs' -> '/srv/test_artifacts/ubuntu-24.04.squashfs'
+'build/artifacts/20260603-e656faf58d6c-0/aarch64/./ubuntu-24.04.ext4' -> '/srv/test_artifacts/ubuntu-24.04.ext4'
+integration_tests/functional/test_cpu_template_helper.py::test_consecutive_fingerprint_consistency
+integration_tests/security/test_jail.py::test_empty_jailer_id[vmlinux-6.1.172-PCI_ON]
+integration_tests/security/test_jail.py::test_empty_jailer_id[vmlinux-6.1.172-PCI_OFF]
+integration_tests/security/test_jail.py::test_exec_file_not_exist[vmlinux-6.1.172-PCI_ON]
+integration_tests/security/test_jail.py::test_exec_file_not_exist[vmlinux-6.1.172-PCI_OFF]
+integration_tests/security/test_jail.py::test_exec_destination_path_is_symlink[vmlinux-6.1.172-PCI_ON]
+integration_tests/security/test_jail.py::test_exec_destination_path_is_symlink[vmlinux-6.1.172-PCI_OFF]
+integration_tests/security/test_jail.py::test_exec_destination_path_is_hardlink[vmlinux-6.1.172-PCI_ON]
+integration_tests/security/test_jail.py::test_exec_destination_path_is_hardlink[vmlinux-6.1.172-PCI_OFF]
+integration_tests/security/test_jail.py::test_default_chroot_hierarchy[vmlinux-6.1.172-PCI_ON]
+integration_tests/security/test_jail.py::test_default_chroot_hierarchy[vmlinux-6.1.172-PCI_OFF]
+integration_tests/security/test_jail.py::test_arbitrary_usocket_location[vmlinux-6.1.172-PCI_ON]
+integration_tests/security/test_jail.py::test_arbitrary_usocket_location[vmlinux-6.1.172-PCI_OFF]
+integration_tests/security/test_jail.py::test_cgroups[vmlinux-6.1.172-PCI_ON]
+integration_tests/security/test_jail.py::test_cgroups[vmlinux-6.1.172-PCI_OFF]
+integration_tests/security/test_jail.py::test_cgroups_custom_parent[vmlinux-6.1.172-PCI_ON]
+integration_tests/security/test_jail.py::test_cgroups_custom_parent[vmlinux-6.1.172-PCI_OFF]
+integration_tests/security/test_jail.py::test_node_cgroups[vmlinux-6.1.172-PCI_ON]
+integration_tests/security/test_jail.py::test_node_cgroups[vmlinux-6.1.172-PCI_OFF]
+integration_tests/security/test_jail.py::test_cgroups_without_numa[vmlinux-6.1.172-PCI_ON]
+integration_tests/security/test_jail.py::test_cgroups_without_numa[vmlinux-6.1.172-PCI_OFF]
+integration_tests/security/test_jail.py::test_v1_default_cgroups[vmlinux-6.1.172-PCI_ON]
+integration_tests/security/test_jail.py::test_v1_default_cgroups[vmlinux-6.1.172-PCI_OFF]
+integration_tests/security/test_jail.py::test_cgroups_parent_cgroup_but_no_cgroup[vmlinux-6.1.172-PCI_ON-True-False]
+integration_tests/security/test_jail.py::test_cgroups_parent_cgroup_but_no_cgroup[vmlinux-6.1.172-PCI_ON-True-True]
+integration_tests/security/test_jail.py::test_cgroups_parent_cgroup_but_no_cgroup[vmlinux-6.1.172-PCI_ON-False-None]
+integration_tests/security/test_jail.py::test_cgroups_parent_cgroup_but_no_cgroup[vmlinux-6.1.172-PCI_OFF-True-False]
+integration_tests/security/test_jail.py::test_cgroups_parent_cgroup_but_no_cgroup[vmlinux-6.1.172-PCI_OFF-True-True]
+integration_tests/security/test_jail.py::test_cgroups_parent_cgroup_but_no_cgroup[vmlinux-6.1.172-PCI_OFF-False-None]
+integration_tests/security/test_jail.py::test_args_default_resource_limits[vmlinux-6.1.172-PCI_ON]
+integration_tests/security/test_jail.py::test_args_default_resource_limits[vmlinux-6.1.172-PCI_OFF]
+integration_tests/security/test_jail.py::test_args_resource_limits[vmlinux-6.1.172-PCI_ON]
+integration_tests/security/test_jail.py::test_args_resource_limits[vmlinux-6.1.172-PCI_OFF]
+integration_tests/security/test_jail.py::test_positive_file_size_limit[vmlinux-6.1.172-PCI_ON]
+integration_tests/security/test_jail.py::test_positive_file_size_limit[vmlinux-6.1.172-PCI_OFF]
+integration_tests/security/test_jail.py::test_negative_file_size_limit[vmlinux-6.1.172-PCI_ON]
+integration_tests/security/test_jail.py::test_negative_file_size_limit[vmlinux-6.1.172-PCI_OFF]
+integration_tests/security/test_jail.py::test_negative_no_file_limit[vmlinux-6.1.172-PCI_ON]
+integration_tests/security/test_jail.py::test_negative_no_file_limit[vmlinux-6.1.172-PCI_OFF]
+integration_tests/security/test_jail.py::test_new_pid_ns_resource_limits[vmlinux-6.1.172-PCI_ON]
+integration_tests/security/test_jail.py::test_new_pid_ns_resource_limits[vmlinux-6.1.172-PCI_OFF]
+integration_tests/security/test_jail.py::test_new_pid_namespace[vmlinux-6.1.172-PCI_ON]
+integration_tests/security/test_jail.py::test_new_pid_namespace[vmlinux-6.1.172-PCI_OFF]
+integration_tests/security/test_jail.py::test_firecracker_kill_by_pid[vmlinux-6.1.172-PCI_ON-True-True]
+integration_tests/security/test_jail.py::test_firecracker_kill_by_pid[vmlinux-6.1.172-PCI_ON-True-False]
+integration_tests/security/test_jail.py::test_firecracker_kill_by_pid[vmlinux-6.1.172-PCI_ON-False-True]
+integration_tests/security/test_jail.py::test_firecracker_kill_by_pid[vmlinux-6.1.172-PCI_ON-False-False]
+integration_tests/security/test_jail.py::test_firecracker_kill_by_pid[vmlinux-6.1.172-PCI_OFF-True-True]
+integration_tests/security/test_jail.py::test_firecracker_kill_by_pid[vmlinux-6.1.172-PCI_OFF-True-False]
+integration_tests/security/test_jail.py::test_firecracker_kill_by_pid[vmlinux-6.1.172-PCI_OFF-False-True]
+integration_tests/security/test_jail.py::test_firecracker_kill_by_pid[vmlinux-6.1.172-PCI_OFF-False-False]
+integration_tests/security/test_jail.py::test_cgroupsv2_written_only_once[vmlinux-6.1.172-PCI_ON]
+integration_tests/security/test_jail.py::test_cgroupsv2_written_only_once[vmlinux-6.1.172-PCI_OFF]
+
+=============================== warnings summary ===============================
+../../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: cache_dir
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+53 tests collected in 0.03s

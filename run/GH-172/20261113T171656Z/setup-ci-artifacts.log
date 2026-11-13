@@ -1,0 +1,140 @@
+[Firecracker setup-ci-artifacts.sh] Setup CI artifacts
+[Firecracker setup-ci-artifacts.sh] Generate SSH key to connect from host
+Generating public/private rsa key pair.
+Your identification has been saved in id_rsa
+Your public key has been saved in id_rsa.pub
+The key fingerprint is:
+SHA256:sXVw4H7/WSprvJWxaSqxTBUQopm5xM3VxLtl62xntL4 root@2089875a6085
+The key's randomart image is:
++---[RSA 2048]----+
+|        . *Bo    |
+|     . B + o+    |
+|      B + o .o   |
+|     . . = .o o  |
+|      . S ...+.. |
+|          o....=.|
+|         o + oB.o|
+|          + ++++=|
+|           o+=oEo|
++----[SHA256]-----+
+[Firecracker setup-ci-artifacts.sh] Include SSH key in amazonlinux-2023.squashfs
+Parallel unsquashfs: Using 4 processors
+12178 inodes (11964 blocks) to write
+
+[===========================/                                ] 11387/24142  47%[=============================================-              ] 18822/24142  77%[===========================================================-] 24142/24142 100%
+
+created 9168 files
+created 2043 directories
+created 1688 symlinks
+created 0 devices
+created 0 fifos
+created 0 sockets
+created 1322 hardlinks
+'id_rsa.pub' -> 'squashfs-root/root/.ssh/authorized_keys'
+'id_rsa' -> 'amazonlinux-2023.id_rsa'
+renamed 'amazonlinux-2023.squashfs' -> 'amazonlinux-2023.squashfs.orig'
+Parallel mksquashfs: Using 4 processors
+Creating 4.0 filesystem on amazonlinux-2023.squashfs, block size 131072.
+[===========================================================\] 11965/11965 100%
+
+Exportable Squashfs 4.0 filesystem, zstd compressed, data block size 131072
+	compressed data, compressed metadata, compressed fragments,
+	compressed xattrs, compressed ids
+	duplicates are removed
+Filesystem size 93785.43 Kbytes (91.59 Mbytes)
+	18.34% of uncompressed filesystem size (511287.10 Kbytes)
+Inode table size 128596 bytes (125.58 Kbytes)
+	26.04% of uncompressed inode table size (493868 bytes)
+Directory table size 141125 bytes (137.82 Kbytes)
+	37.50% of uncompressed directory table size (376313 bytes)
+Number of duplicate files found 1270
+Number of inodes 12900
+Number of files 9169
+Number of fragments 590
+Number of symbolic links 1688
+Number of device nodes 0
+Number of fifo nodes 0
+Number of socket nodes 0
+Number of directories 2043
+Number of hard-links 1322
+Number of ids (unique uids + gids) 1
+Number of uids 1
+	root (0)
+Number of gids 1
+	root (0)
+[Firecracker setup-ci-artifacts.sh] Converting amazonlinux-2023.squashfs to amazonlinux-2023.ext4
+mke2fs 1.47.0 (5-Feb-2023)
+Discarding device blocks:      0/128000             done                            
+Creating filesystem with 128000 4k blocks and 128000 inodes
+Filesystem UUID: e4693679-31e5-4237-aa8e-bfd01d173f69
+Superblock backups stored on blocks: 
+	32768, 98304
+
+Allocating group tables: 0/4   done                            
+Writing inode tables: 0/4   done                            
+Creating journal (4096 blocks): done
+Copying files into the device: done
+Writing superblocks and filesystem accounting information: 0/4   done
+
+[Firecracker setup-ci-artifacts.sh] Include SSH key in ubuntu-24.04.squashfs
+Parallel unsquashfs: Using 4 processors
+7783 inodes (9159 blocks) to write
+
+[=================================================/          ] 14140/16942  83%[===========================================================/] 16942/16942 100%
+
+created 7071 files
+created 1465 directories
+created 710 symlinks
+created 0 devices
+created 0 fifos
+created 0 sockets
+created 2 hardlinks
+'id_rsa.pub' -> 'squashfs-root/root/.ssh/authorized_keys'
+'id_rsa' -> 'ubuntu-24.04.id_rsa'
+renamed 'ubuntu-24.04.squashfs' -> 'ubuntu-24.04.squashfs.orig'
+Parallel mksquashfs: Using 4 processors
+Creating 4.0 filesystem on ubuntu-24.04.squashfs, block size 131072.
+[=============================================================|] 9160/9160 100%
+
+Exportable Squashfs 4.0 filesystem, zstd compressed, data block size 131072
+	compressed data, compressed metadata, compressed fragments,
+	compressed xattrs, compressed ids
+	duplicates are removed
+Filesystem size 101655.44 Kbytes (99.27 Mbytes)
+	25.46% of uncompressed filesystem size (399255.63 Kbytes)
+Inode table size 84083 bytes (82.11 Kbytes)
+	26.12% of uncompressed inode table size (321954 bytes)
+Directory table size 83144 bytes (81.20 Kbytes)
+	37.24% of uncompressed directory table size (223271 bytes)
+Number of duplicate files found 497
+Number of inodes 9247
+Number of files 7072
+Number of fragments 1306
+Number of symbolic links 710
+Number of device nodes 0
+Number of fifo nodes 0
+Number of socket nodes 0
+Number of directories 1465
+Number of hard-links 2
+Number of ids (unique uids + gids) 1
+Number of uids 1
+	root (0)
+Number of gids 1
+	root (0)
+[Firecracker setup-ci-artifacts.sh] Converting ubuntu-24.04.squashfs to ubuntu-24.04.ext4
+mke2fs 1.47.0 (5-Feb-2023)
+Discarding device blocks:      0/128000             done                            
+Creating filesystem with 128000 4k blocks and 128000 inodes
+Filesystem UUID: 96882861-9277-417a-8659-9c730ca3b7ee
+Superblock backups stored on blocks: 
+	32768, 98304
+
+Allocating group tables: 0/4   done                            
+Writing inode tables: 0/4   done                            
+Creating journal (4096 blocks): done
+Copying files into the device: done
+Writing superblocks and filesystem accounting information: 0/4   done
+
+[Firecracker setup-ci-artifacts.sh] Uncompress debuginfo files
+gunzip ./debug/vmlinux-5.10.253.debug.gz
+gunzip ./debug/vmlinux-6.1.172.debug.gz

@@ -1,0 +1,35 @@
+[upstream-suite 19:11:05] revision d83d72b710361a10294480131377b1b00b163af8 (v1.16.0), container public.ecr.aws/firecracker/fcuvm:v90@sha256:657863a847acff0b52888a237173f0f6740d7ace175a2d7423cf5f0307db9698, artefacts firecracker-ci/20260603-e656faf58d6c-0/aarch64, selection: integration_tests/functional/test_cpu_template_helper.py::test_consecutive_fingerprint_consistency integration_tests/security/test_jail.py
+[upstream-suite 19:11:06] artefacts: 15 objects
+[upstream-suite 19:11:06] release binaries: cpu-template-helper cpu-template-helper.debug firecracker firecracker.debug jailer jailer.debug rebase-snap rebase-snap.debug seccompiler-bin seccompiler-bin.debug snapshot-editor snapshot-editor.debug 
+[upstream-suite 19:11:06] restart the System VM with 4 vCPUs, 8192 MiB and /Volumes/Workspace/github.com/cityhunteur/vesper/build/upstream-suite shared
+systemvm-up: running (pid 36354); bridge run/systemvm/vsock/3.sock; log /Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/vmlauncher.log
+{"status":"bridge-listening","elapsed_ms":94,"ready_pattern":"login:","console_log":"/Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/console.log","bridge":"run/systemvm/vsock/3.sock"}
+{"status":"ready","elapsed_ms":2973,"ready_pattern":"login:","console_log":"/Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/console.log"}
+{"status":"probe-ok","elapsed_ms":5473,"ready_pattern":"login:","console_log":"/Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/console.log"}
+systemvm-up: MOUNTED share0 /Volumes/Workspace/github.com/cityhunteur/vesper/run/vesperd-share mode=rw
+systemvm-up: MOUNTED share1 /Volumes/Workspace/github.com/cityhunteur/vesper/build/upstream-suite mode=rw
+docker-up: vesper-proxy pid 36590; DOCKER_HOST=unix:///Volumes/Workspace/github.com/cityhunteur/vesper/run/vesper/docker.sock; published ports via the guest relay (status /Volumes/Workspace/github.com/cityhunteur/vesper/run/vesper/ports.json)
+srw-------@ 1 pravin  staff  0 13 Nov 19:11 /Volumes/Workspace/github.com/cityhunteur/vesper/run/vesper/docker.sock
+[upstream-suite 19:11:20] tun loaded; data disk 46 GB free
+[upstream-suite 19:11:20] stage the tree into vesper-upstream-src
+[upstream-suite 19:11:41] build the examples and tools that tests expect in build/cargo_target/aarch64-unknown-linux-musl/release
+[upstream-suite 19:11:45] staged: build clippy-tracing clippy-tracing.d cpu-template-helper cpu-template-helper.debug deps examples firecracker firecracker.debug incremental jailer jailer.debug rebase-snap rebase-snap.debug seccompiler-bin seccompiler-bin.debug snapshot-editor snapshot-editor.debug 
+[upstream-suite 19:11:45] collect the selection
+[upstream-suite 19:11:51] run 53 tests with 3 workers, 600 s per test, 14400 s in all
+rc=1 wall_s=331 collected=53 stopped=no selection=integration_tests/functional/test_cpu_template_helper.py::test_consecutive_fingerprint_consistency integration_tests/security/test_jail.py
+collect: 53 tests (53 collected): {'failed': 1, 'passed': 50, 'skipped': 2}
+reference=all-pass partial=true total=53 passed=50 to_explain={"failed": 1, "skipped": 2} not_passing_on_reference=0 missing_from_run=0
+class upstream-platform-skip: 2
+classes that explained nothing in this run: apple-cpu-features-unknown, apple-cpu-no-cache-topology, apple-cpu-ssb-vulnerable, balloon-stats-not-refreshed, guest-ssh-timeout-under-load, max-devices-worker-timeout, no-userfaultfd, rate-limiter-balloon-tolerance, vmclock-gen-counter-flag, vmm-exit-timeout-under-load, vmm-memory-overhead, vsock-reset-after-snapshot
+UNMATCHED integration_tests/functional/test_cpu_template_helper.py::test_consecutive_fingerprint_consistency failed ChildProcessError: [205] Command: /srv/firecracker/build/cargo_target/aarch64-unknown-linux-musl/release/cpu-template-helper fingerprint dump --output /srv/tmp/pytest-of-root/pytest-0/popen-gw0/test_consecutive_fingerprint_c0/fp1.json [205] stdout: [205] stderr: Failed to read /sys/devices/virtual/dmi/id/bios_version: No such file or directory (os error 2) Returned error code: 1
+upstream-compare: 1 result(s) match no exception class
+[upstream-suite 19:17:22] rerun 1 unmatched test(s) alone, one at a time
+collect: 53 tests (53 collected): {'failed': 1, 'passed': 50, 'skipped': 2}
+reference=all-pass partial=true total=53 passed=50 to_explain={"failed": 1, "skipped": 2} not_passing_on_reference=0 missing_from_run=0
+class upstream-platform-skip: 2
+classes that explained nothing in this run: apple-cpu-features-unknown, apple-cpu-no-cache-topology, apple-cpu-ssb-vulnerable, balloon-stats-not-refreshed, guest-ssh-timeout-under-load, max-devices-worker-timeout, no-userfaultfd, rate-limiter-balloon-tolerance, vmclock-gen-counter-flag, vmm-exit-timeout-under-load, vmm-memory-overhead, vsock-reset-after-snapshot
+UNMATCHED integration_tests/functional/test_cpu_template_helper.py::test_consecutive_fingerprint_consistency failed [alone: failed] ChildProcessError: [205] Command: /srv/firecracker/build/cargo_target/aarch64-unknown-linux-musl/release/cpu-template-helper fingerprint dump --output /srv/tmp/pytest-of-root/pytest-0/popen-gw0/test_consecutive_fingerprint_c0/fp1.json [205] stdout: [205] stderr: Failed to read /sys/devices/virtual/dmi/id/bios_version: No such file or directory (os error 2) Returned error code: 1
+upstream-compare: 1 result(s) match no exception class
+[upstream-suite 19:17:29] wiped /srv and the test results in vesper-upstream-src
+[upstream-suite 19:17:29] evidence in run/GH-172/20261113T191105Z
+[upstream-suite 19:17:30] restore the previous launch config and restart the System VM

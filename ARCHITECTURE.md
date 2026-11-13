@@ -99,7 +99,7 @@ allowlist and the line budgets (TD-015).
 
 | Layer | Purpose | Modules | May reference | Enforced |
 |---|---|---|---|---|
-| 0. Leaf modules | Pinned upstream contract, parity metadata, build metadata | `spec`, `baseline`, `compat`, `buildinfo` | nothing local | mechanical |
+| 0. Leaf modules | Pinned upstream contract, parity metadata, build metadata | `spec`, `baseline` (+ `baseline/upstream`, the upstream-suite pins and comparator), `compat`, `buildinfo` | nothing local | mechanical |
 | 1. Platform policy | Host capability and entitlement rules; nested-virtualization probe and backend selection (GH #17) | `platform` | nothing local | mechanical |
 | 2. Control plane: `api` | State machine, dispatch, deterministic errors | `api` | `api_matrix`, `baseline`, `buildinfo`, `compat`, `platform`, `spec` | mechanical |
 | 2. Control plane: matrices | Generated route matrices; the behaviour-matrix replay (scripts, judge) | `api_matrix`, `api_behavior_matrix`, `api_replay` | `api`, `baseline`, `spec`; `api_behavior_matrix` also `api_matrix`; `api_replay` only `api_behavior_matrix` | mechanical |

@@ -1,0 +1,23 @@
+reference=all-pass partial=false total=980 passed=757 to_explain={"error": 31, "failed": 96, "skipped": 96} not_passing_on_reference=0 missing_from_run=0
+class apple-cpu-features-unknown: 8
+class apple-cpu-no-cache-topology: 24
+class apple-cpu-ssb-vulnerable: 10
+class guest-ssh-timeout-under-load: 2
+class max-devices-worker-timeout: 2
+class no-dmi: 1
+class no-userfaultfd: 8
+class rate-limiter-balloon-tolerance: 7
+class upstream-platform-skip: 96
+class vmclock-gen-counter-flag: 1
+class vmm-memory-overhead: 54
+class vsock-reset-after-snapshot: 2
+classes that explained nothing in this run: balloon-stats-not-refreshed, vmm-exit-timeout-under-load
+UNMATCHED integration_tests/functional/test_serial_io.py::test_serial_file_output[uvm_restored-vmlinux-6.1.172-NO_CPU_TMPL-PCI_ON] error host_tools.memory.MemoryUsageExceededError: ('Memory usage (6.78 MiB) exceeded maximum threshold (5.0 MiB)', psutil.Process(pid=24798, status='terminated', started='14:49:41'))
+UNMATCHED integration_tests/functional/test_snapshot_editor.py::test_remove_regs[vmlinux-6.1.172-PCI_OFF] failed ChildProcessError: [28164] Command: ['ip', 'netns', 'exec', 'netns-gw2-0', 'ssh', '-i', '/srv/test_artifacts/amazonlinux-2023.id_rsa', '-o', 'StrictHostKeyChecking=no', '-o', 'ConnectTimeout=2', '-o', … 34315c-64f2-4a4f-9c54-c640202152e5/root/ssh-0.sock', 'root@192.168.0.2', 'true'] [28164] stdout: [28164] stderr: ssh: connect to host 192.168.0.2 port 22: Connection timed out Returned error code: 255
+UNMATCHED integration_tests/functional/test_snapshot_editor.py::test_remove_regs[vmlinux-6.1.172-PCI_ON] failed ChildProcessError: [27731] Command: ['ip', 'netns', 'exec', 'netns-gw2-2', 'ssh', '-i', '/srv/test_artifacts/amazonlinux-2023.id_rsa', '-o', 'StrictHostKeyChecking=no', '-o', 'ConnectTimeout=2', '-o', … d6d846b7-16f3-46ba-995a-cded61545fd7/root/ssh-0.sock', 'root@192.168.0.2', 'true'] [27731] stdout: [27731] stderr: ssh: connect to host 192.168.0.2 port 22: Connection refused Returned error code: 255
+UNMATCHED integration_tests/functional/test_snapshot_not_losing_dirty_pages.py::test_diff_snapshot_works_after_error[vmlinux-6.1.172] error ChildProcessError: [28853] Command: ['ip', 'netns', 'exec', 'netns-gw2-3', 'ssh', '-i', '/srv/test_artifacts/amazonlinux-2023.id_rsa', '-o', 'StrictHostKeyChecking=no', '-o', 'ConnectTimeout=2', '-o', … 0c971c-5a5a-4479-b9ce-4b740e61b1f9/root/ssh-0.sock', 'root@192.168.0.2', 'true'] [28853] stdout: [28853] stderr: ssh: connect to host 192.168.0.2 port 22: Connection timed out Returned error code: 255
+UNMATCHED integration_tests/security/test_jail.py::test_exec_destination_path_is_hardlink[vmlinux-6.1.172-PCI_OFF] failed ChildProcessError: [23328] Command: ['/srv/binaries/jailer', '--id', 'aa8d58c0-12c5-4581-909e-142f40283f37', '--exec-file', '/srv/binaries/firecracker', '--uid', '1234', '--gid', '1234', '--chroot-bas … ecracker/aa8d58c0-12c5-4581-909e-142f40283f37/root/firecracker Error: HardLink("/firecracker/build/srv/jailer/firecracker/aa8d58c0-12c5-4581-909e-142f40283f37/root/firecracker") Returned error code: 1
+UNMATCHED integration_tests/security/test_jail.py::test_exec_destination_path_is_hardlink[vmlinux-6.1.172-PCI_ON] failed ChildProcessError: [23317] Command: ['/srv/binaries/jailer', '--id', 'a0a0ccc5-f12d-4e54-b61f-c9a7aa6c548e', '--exec-file', '/srv/binaries/firecracker', '--uid', '1234', '--gid', '1234', '--chroot-bas … ecracker/a0a0ccc5-f12d-4e54-b61f-c9a7aa6c548e/root/firecracker Error: HardLink("/firecracker/build/srv/jailer/firecracker/a0a0ccc5-f12d-4e54-b61f-c9a7aa6c548e/root/firecracker") Returned error code: 1
+UNMATCHED integration_tests/security/test_jail.py::test_exec_destination_path_is_symlink[vmlinux-6.1.172-PCI_OFF] failed ChildProcessError: [23307] Command: ['/srv/binaries/jailer', '--id', '1eda5ad4-6fae-411d-9955-84ab2c57b774', '--exec-file', '/srv/binaries/firecracker', '--uid', '1234', '--gid', '1234', '--chroot-bas … or: Open("/firecracker/build/srv/jailer/firecracker/1eda5ad4-6fae-411d-9955-84ab2c57b774/root/firecracker", Os { code: 40, kind: FilesystemLoop, message: "Symbolic link loop" }) Returned error code: 1
+UNMATCHED integration_tests/security/test_jail.py::test_exec_destination_path_is_symlink[vmlinux-6.1.172-PCI_ON] failed ChildProcessError: [23296] Command: ['/srv/binaries/jailer', '--id', 'b56058a0-4b61-45c9-a3b4-8e41c6906520', '--exec-file', '/srv/binaries/firecracker', '--uid', '1234', '--gid', '1234', '--chroot-bas … or: Open("/firecracker/build/srv/jailer/firecracker/b56058a0-4b61-45c9-a3b4-8e41c6906520/root/firecracker", Os { code: 40, kind: FilesystemLoop, message: "Symbolic link loop" }) Returned error code: 1
+upstream-compare: 8 result(s) match no exception class

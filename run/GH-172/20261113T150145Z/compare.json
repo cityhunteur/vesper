@@ -1,0 +1,55 @@
+{
+  "reference": "all-pass",
+  "total": 68,
+  "passed": 58,
+  "to_explain": {
+    "failed": 8,
+    "skipped": 2
+  },
+  "per_class": {
+    "apple-cpu-features-unknown": 0,
+    "apple-cpu-no-cache-topology": 0,
+    "apple-cpu-ssb-vulnerable": 0,
+    "balloon-stats-not-refreshed": 0,
+    "guest-ssh-timeout-under-load": 0,
+    "max-devices-worker-timeout": 0,
+    "no-dmi": 0,
+    "no-userfaultfd": 8,
+    "rate-limiter-balloon-tolerance": 0,
+    "upstream-platform-skip": 2,
+    "vmclock-gen-counter-flag": 0,
+    "vmm-exit-timeout-under-load": 0,
+    "vmm-memory-overhead": 0,
+    "vsock-reset-after-snapshot": 0
+  },
+  "unmatched": [],
+  "over_max": [],
+  "stale_classes": [
+    "apple-cpu-features-unknown",
+    "apple-cpu-no-cache-topology",
+    "apple-cpu-ssb-vulnerable",
+    "balloon-stats-not-refreshed",
+    "guest-ssh-timeout-under-load",
+    "max-devices-worker-timeout",
+    "no-dmi",
+    "rate-limiter-balloon-tolerance",
+    "vmclock-gen-counter-flag",
+    "vmm-exit-timeout-under-load",
+    "vmm-memory-overhead",
+    "vsock-reset-after-snapshot"
+  ],
+  "stale_required": [
+    "apple-cpu-no-cache-topology",
+    "apple-cpu-ssb-vulnerable",
+    "apple-cpu-features-unknown",
+    "no-dmi",
+    "vmm-memory-overhead"
+  ],
+  "partial": true,
+  "meta": {
+    "exitcode": 1,
+    "collection_errors": []
+  },
+  "not_passing_on_reference": 0,
+  "missing_from_run": 0
+}

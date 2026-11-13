@@ -1,0 +1,1 @@
+rc=1 wall_s=60 collected=67 stopped=no selection=integration_tests/functional/test_api.py

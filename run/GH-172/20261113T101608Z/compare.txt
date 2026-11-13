@@ -1,0 +1,4 @@
+reference=all-pass partial=true total=8 passed=0 to_explain={"failed": 8} not_passing_on_reference=0 missing_from_run=0
+class no-userfaultfd: 8
+classes that explained nothing in this run: apple-cpu-features-unknown, apple-cpu-no-cache-topology, apple-cpu-ssb-vulnerable, guest-ssh-timeout-under-load, jail-hardlink-exdev, max-devices-worker-timeout, no-dmi, rate-limiter-balloon-tolerance, upstream-platform-skip, vmclock-gen-counter-flag, vmm-memory-overhead, vsock-reset-after-snapshot
+upstream-compare: every result is explained
