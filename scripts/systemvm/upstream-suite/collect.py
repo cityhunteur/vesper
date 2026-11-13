@@ -29,10 +29,13 @@ def phase_message(p):
 
 def result(test):
     outcome, message = test["outcome"], ""
-    for name in ("setup", "call", "teardown"):
+    # pytest-xdist reports a worker that died mid-test (a --timeout-method=thread timeout, an OOM kill) as a failed
+    # phase named "???"; its longrepr names the crash, so it is read after the usual three.
+    extra = [k for k, v in test.items() if isinstance(v, dict) and "outcome" in v and k not in ("setup", "call", "teardown")]
+    for name in ("setup", "call", "teardown", *extra):
         p = test.get(name) or {}
         if p.get("outcome") == "failed":
-            if name != "call":
+            if name in ("setup", "teardown"):
                 outcome = "error"
             message = message or phase_message(p)
         elif p.get("outcome") == "skipped" and not message:

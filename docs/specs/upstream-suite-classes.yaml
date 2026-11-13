@@ -56,12 +56,26 @@ classes:
     outcomes: [failed, error, hung]
     tracked_by: CE-0001
     reason: pytest-timeout fired under nested virtualisation (test_attach_maximum_devices and similar)
-  - id: rate-limiter-balloon-tolerance
-    kind: unexplained
-    nodeid: ["*test_serial_rate_limiting*", "*test_reinflate_balloon*", "*test_hinting_reporting_snapshot*"]
+  - id: max-devices-worker-timeout
+    kind: environment
+    nodeid: ["*test_attach_maximum_devices*"]
+    message: ["crashed while running"]
     outcomes: [failed, error]
     tracked_by: CE-0001
-    reason: rate-limiter or balloon numbers just outside tolerance, probably timing under nested virtualisation
+    reason: >-
+      the 600 s per-test timeout (--timeout-method=thread) ends the whole xdist worker, which reports a crash, not
+      "Timeout ("; in run/GH-172/20261113T081827Z the other two workers ran 577 to 662 s of tests while each crashed
+      test was running; the GH #166 trial timed the same test out at 300 s
+  - id: rate-limiter-balloon-tolerance
+    kind: unexplained
+    nodeid: ["*test_serial_rate_limiting*", "*test_reinflate_balloon*", "*test_hinting_reporting_snapshot*",
+             "*test_rng_bw_rate_limiter*"]
+    outcomes: [failed, error]
+    tracked_by: CE-0001
+    reason: >-
+      rate-limiter or balloon numbers just outside tolerance, or a rate-limited guest read that overran its 100 s
+      SSH timeout (1 of 12 test_rng_bw_rate_limiter cases in the full GH #172 run), probably timing under nested
+      virtualisation
   - id: vsock-reset-after-snapshot
     kind: unexplained
     nodeid: ["*test_vsock_transport_reset_g2h*"]

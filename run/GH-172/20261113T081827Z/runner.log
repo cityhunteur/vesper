@@ -1,0 +1,40 @@
+[upstream-suite 08:18:27] revision d83d72b710361a10294480131377b1b00b163af8 (v1.16.0), container public.ecr.aws/firecracker/fcuvm:v90, artefacts firecracker-ci/20260603-e656faf58d6c-0/aarch64, selection: integration_tests/functional integration_tests/security
+[upstream-suite 08:18:28] artefacts: 15 objects
+[upstream-suite 08:18:28] release binaries: cpu-template-helper cpu-template-helper.debug firecracker firecracker.debug jailer jailer.debug rebase-snap rebase-snap.debug seccompiler-bin seccompiler-bin.debug snapshot-editor snapshot-editor.debug 
+[upstream-suite 08:18:28] restart the System VM with 4 vCPUs, 8192 MiB and /Volumes/Workspace/github.com/cityhunteur/vesper/build/upstream-suite shared
+systemvm-up: running (pid 36069); bridge run/systemvm/vsock/3.sock; log /Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/vmlauncher.log
+{"status":"bridge-listening","elapsed_ms":99,"ready_pattern":"login:","console_log":"/Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/console.log","bridge":"run/systemvm/vsock/3.sock"}
+{"status":"ready","elapsed_ms":3238,"ready_pattern":"login:","console_log":"/Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/console.log"}
+{"status":"probe-ok","elapsed_ms":5468,"ready_pattern":"login:","console_log":"/Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/console.log"}
+systemvm-up: MOUNTED share0 /Volumes/Workspace/github.com/cityhunteur/vesper/run/vesperd-share mode=rw
+systemvm-up: MOUNTED share1 /Volumes/Workspace/github.com/cityhunteur/vesper/build/upstream-suite mode=rw
+docker-up: vesper-proxy pid 36314; DOCKER_HOST=unix:///Volumes/Workspace/github.com/cityhunteur/vesper/run/vesper/docker.sock; published ports via the guest relay (status /Volumes/Workspace/github.com/cityhunteur/vesper/run/vesper/ports.json)
+srw-------@ 1 pravin  staff  0 13 Nov 08:18 /Volumes/Workspace/github.com/cityhunteur/vesper/run/vesper/docker.sock
+[upstream-suite 08:18:40] tun loaded; data disk 48 GB free
+[upstream-suite 08:18:41] stage the tree into vesper-upstream-src
+staged
+[upstream-suite 08:19:02] build the examples and tools that tests expect in build/cargo_target/aarch64-unknown-linux-musl/release
+[upstream-suite 08:19:05] staged: build clippy-tracing clippy-tracing.d cpu-template-helper cpu-template-helper.debug deps examples firecracker firecracker.debug incremental jailer jailer.debug rebase-snap rebase-snap.debug seccompiler-bin seccompiler-bin.debug snapshot-editor snapshot-editor.debug 
+[upstream-suite 08:19:05] collect the selection
+[upstream-suite 08:19:11] run 980 tests with 3 workers, 600 s per test, 14400 s in all
+rc=1 wall_s=4616 collected=980 stopped=no selection=integration_tests/functional integration_tests/security
+collect: 980 tests (980 collected): {'error': 28, 'failed': 93, 'passed': 763, 'skipped': 96}
+[upstream-suite 09:36:11] wiped /srv and the test results in vesper-upstream-src
+reference=all-pass total=980 passed=763 to_explain={"error": 28, "failed": 93, "skipped": 96}
+class apple-cpu-features-unknown: 8
+class apple-cpu-no-cache-topology: 24
+class apple-cpu-ssb-vulnerable: 10
+class guest-ssh-timeout-under-load: 4
+class jail-hardlink-exdev: 2
+class no-dmi: 1
+class no-userfaultfd: 8
+class rate-limiter-balloon-tolerance: 7
+class upstream-platform-skip: 96
+class vmm-memory-overhead: 54
+classes that explained nothing in this run: per-test-timeout, vmclock-gen-counter-flag, vsock-reset-after-snapshot
+UNMATCHED integration_tests/functional/test_max_devices.py::test_attach_maximum_devices[vmlinux-6.1.172-PCI_OFF] failed 
+UNMATCHED integration_tests/functional/test_max_devices.py::test_attach_maximum_devices[vmlinux-6.1.172-PCI_ON] failed 
+UNMATCHED integration_tests/functional/test_rng.py::test_rng_bw_rate_limiter[vmlinux-6.1.172-PCI_OFF-uvm_with_rng_booted-1000.0 KB/sec] failed subprocess.TimeoutExpired: Command '['ip', 'netns', 'exec', 'netns-gw0-17', 'ssh', '-o', 'ControlPath=/srv/jailer/firecracker/d4525fa1-ed16-433e-a8f8-6dbbe941d505/root/ssh-0.sock', 'root@192.168.0.2', 'dd if=/dev/hwrng of=/dev/null bs=100000 count=100']' timed out after 100 seconds | subprocess.Time
+upstream-compare: 3 result(s) match no exception class
+[upstream-suite 09:36:12] evidence in run/GH-172/20261113T081827Z
+[upstream-suite 09:36:12] restore the previous launch config and restart the System VM

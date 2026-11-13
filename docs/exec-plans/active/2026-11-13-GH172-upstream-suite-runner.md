@@ -22,19 +22,35 @@ Either way, a new, unexplained failure turns the run red.
 
 ## Progress
 
-- [ ] M1 Pins: the artefact prefix, the build container and the suite selection in the baseline lock, parsed and
+- [x] M1 Pins: the artefact prefix, the build container and the suite selection in the baseline lock, parsed and
   validated by `src/baseline.rs`
-- [ ] M2 Exception classes: `docs/specs/upstream-suite-classes.yaml`, seeded from the 13 GH #166 classes, each linked to
+- [x] M2 Exception classes: `docs/specs/upstream-suite-classes.yaml`, seeded from the 13 GH #166 classes, each linked to
   a compat exception or a tech-debt row
-- [ ] M3 Comparator: `baselinectl --mode upstream-compare`, with unit tests (it fails on an unmatched test)
-- [ ] M4 Runner: `scripts/systemvm/upstream-suite/` and `make systemvm-upstream-suite` (fetch, stage, `tun`, resize,
+- [x] M3 Comparator: `baselinectl --mode upstream-compare`, with unit tests (it fails on an unmatched test)
+- [x] M4 Runner: `scripts/systemvm/upstream-suite/` and `make systemvm-upstream-suite` (fetch, stage, `tun`, resize,
   run with timeouts, collect, wipe `/srv`, restore)
-- [ ] M5 Full run on this host, results classified, the comparator green; evidence under `run/GH-172/`
+- [x] M5 Full run on this host, results classified, the comparator green; evidence under `run/GH-172/`
 - [ ] M6 Docs (TESTING, systemvm-bringup, the parity matrix note, src/bin README), CI green, #172 updated and closed
 
 ## Surprises & Discoveries
 
-None yet.
+- 2026-11-13: the 60 GB disk preflight could never pass on the default 62.4 GB data disk; it is 45 GB, which the
+  full run kept (48 GB free before it, `/srv` removed after it).
+- 2026-11-13: re-staging onto an existing source volume failed on `gunzip` ("already exists"). Staging now clears the
+  volume's `build/` except the cargo cache on every run.
+- 2026-11-13: in the full run (`run/GH-172/20261113T081827Z`, 980 tests, 77 min) two `test_attach_maximum_devices`
+  cases (6.1 kernel) reached the 600 s timeout. `--timeout-method=thread` ends the whole xdist worker, which reports
+  "worker 'gwN' crashed", not "Timeout (". The other two workers ran 577 to 662 s of tests while each crashed test
+  ran, which fits the timeout; the 5.10 cases passed in 25 and 46 s. Class `max-devices-worker-timeout`.
+- 2026-11-13: `collect.py` read only the `setup`, `call` and `teardown` phases, but pytest-xdist puts a dead
+  worker's crash in a phase named `???`, so those two results had no message. It now reads every phase.
+- 2026-11-13: one of twelve `test_rng_bw_rate_limiter` cases (6.1, PCI off, 1000 KB/s) overran its 100 s SSH timeout.
+  It joins the `unexplained` rate-limiter class; only the Linux run (CE-0003) can say whether it is timing.
+- 2026-11-13: pytest's summary says 787 passed and 28 errors; the collector reports 763 passed, because 24 tests
+  passed their call phase and then failed teardown (the VMM memory check), and the worst phase counts.
+- 2026-11-13: `pytest.log` was 561 MB (tracebacks print every local of the cache-topology failures). The runner
+  now also writes `pytest-progress.log` (result lines, worker crashes and the short summary, 328 KB) and
+  `junit.xml.gz`; those are committed, and `pytest.log` and `report.json.gz` (23 MB) stay local.
 
 ## Decision Log
 
@@ -49,7 +65,12 @@ None yet.
 
 ## Outcomes & Retrospective
 
-Not yet written.
+The full run on an Apple M3 Pro (System VM 4 vCPUs, 8 GiB, 3 workers) took 4,616 s. Of 980 tests, 763 passed and
+the comparator explained the other 217 with no unmatched test: 96 platform skips, 49 environment, 8 test
+assumption and 64 unexplained (54 VMM memory overshoot, 8 rate-limiter or balloon timing, 2 jail hard-link
+EXDEV), the last three classes open under CE-0001 until the Linux reference run. The GH #166 trial's seven harness
+gaps are gone, and no test hung past its timeout. With `vmm-memory-overhead` removed the comparator exits 1 and
+names its 54 tests. The System VM came back on 2 vCPUs and 2048 MiB, and volume `vesper-upstream-srv` was removed.
 
 ## Context and Orientation
 

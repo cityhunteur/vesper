@@ -198,7 +198,11 @@ docker rm "$NAME" >/dev/null
 echo "rc=$RC wall_s=$(( $(date +%s) - START )) collected=$COLLECTED stopped=${STOPPED:-no} selection=${SELECTION[*]}" | tee "$OUT/run.txt"
 
 # --- collect, wipe, compare --------------------------------------------------------------------------------------
-cp "$RES"/junit.xml "$OUT/" 2>/dev/null || true
+{ cp "$RES"/junit.xml "$OUT/" && gzip -kf9 "$OUT/junit.xml"; } 2>/dev/null || true
+# pytest.log runs to hundreds of MB on a full run (tracebacks print every local); pytest-progress.log keeps each
+# result line, the worker crashes and the short summary, small enough to commit beside results.json.
+{ grep -E '^\[gw[0-9]+\] |^replacing crashed|^worker .* crashed' "$OUT/pytest.log"
+  awk '/short test summary info/{f=1} f' "$OUT/pytest.log"; } > "$OUT/pytest-progress.log" || true
 if [ -s "$RES/report.json" ]; then
   python3 -I "$HERE/collect.py" "$OUT/results.json" --collected "$OUT/collected.txt" "$RES/report.json"
   gzip -c "$RES/report.json" > "$OUT/report.json.gz"
