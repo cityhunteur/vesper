@@ -24,7 +24,7 @@
 #                                             path in ID's jail or store:NAME) while ID runs; jail-side reads and writes
 #                                             run as vesperd-jail (uid 20000); never links, never overwrites; checks the
 #                                             free-space reserve first. STAGED SRC DEST copy bytes=N | ERR <reason>
-#        vesper-vesperd store-list            STORE NAME bytes=N links=L lines, then FREE avail=N reserve=N
+#        vesper-vesperd store-list            STORE NAME bytes=N links=L lines, then FREE avail=N reserve=N store=N quota=N
 #        vesper-vesperd store-rm NAME         REMOVED NAME | ERR <reason>
 #        vesper-vesperd sweep                 boot sweep (vesper-data mount): remove every jail without a record and
 #                                             every unfinished store copy; SWEPT jails=N partial=M
@@ -58,6 +58,7 @@
 #                                             /planted-dir -> the store, and /planted-root (root-owned, mode 0600) in
 #                                             ID's jail (PLANTED ID)
 #        vesper-vesperd test-reserve BYTES|clear  test hook: override the free-space reserve until reboot (RESERVE …)
+#        vesper-vesperd test-store-quota BYTES|clear  test hook: override the store quota until reboot (QUOTA …)
 #        vesper-vesperd test-listen PORT|stop  test hook: TCP and UDP listeners on every System VM address (egress suite)
 #        vesper-vesperd test-open-ns ID [filter|all]  test hook: accept everything in ID's namespace FORWARD (all:
 #                                             also no masquerade and no reverse-path check), leaving the root egress
@@ -88,6 +89,8 @@ LEASES=$STATE/leases              # one record per id: "holder=<pid>:<start> con
 LOCK=$STATE/lock                  # one flock serialises reaping, jail creation and teardown
 STORE_LOCK=$STATE/store.lock      # one flock serialises copies (and their reserve checks) and store removals
 RESERVE_OVERRIDE=$STATE/reserve   # test-reserve writes it; tmpfs, so a reboot clears it
+STORE_PCT=25                      # the store may hold at most this share of the data disk (TD-053)
+QUOTA_OVERRIDE=$STATE/store-quota # test-store-quota writes it; tmpfs, so a reboot clears it
 LOGS=/var/log/vesperd
 LOG_MAX=1048576                   # one console log file; the previous one is kept as <id>.log.1
 LOG_KEEP_S=600                    # the reaper removes the logs of a microVM gone this long
@@ -567,6 +570,17 @@ reserve_bytes() {
   awk '/^MemTotal:/{print $2 * 1024}' /proc/meminfo
 }
 avail_bytes() { df -k "$DATA" | awk 'NR==2 {print $4 * 1024}'; }
+store_quota() { # bytes the store may hold: STORE_PCT of the data disk, unless a test overrides it
+  q=$(cat "$QUOTA_OVERRIDE" 2>/dev/null)
+  digits "$q" && { echo "$q"; return; }
+  df -k "$DATA" | awk -v p="$STORE_PCT" 'NR==2 {printf "%d", $2 * 1024 * p / 100}'
+}
+store_used() { u=0; for f in "$STORE"/* "$STORE"/.partial.*; do [ -f "$f" ] && u=$((u + $(stat -c %s "$f"))); done; echo "$u"; }
+quota_check() { # BYTES (store lock held): refuse a copy into the store that would pass its quota
+  used=$(store_used); q=$(store_quota)
+  digits "$q" || { echo "store quota unknown"; return 1; }
+  [ $((used + $1)) -le "$q" ] || { echo "store quota: copying $1 bytes would bring the store to $((used + $1)) of its $q-byte quota ($STORE_PCT% of the data disk); remove files with vesperd store rm"; return 1; }
+}
 # BYTES: refuse a copy of BYTES that would leave less than the reserve free on the data disk.
 reserve_check() {
   a=$(avail_bytes); r=$(reserve_bytes)
@@ -654,6 +668,7 @@ copy_one() { # SRC DEST ROOT
     store:*)
       name=${dest#store:}; tmp="$STORE/.partial.$$"
       [ -e "$STORE/$name" ] && { echo "store:$name exists"; return 1; }
+      why=$(quota_check "$size") || { echo "$why"; return 1; }
       rm -f "$tmp"
       case "$src" in
         share:*) (umask 077; head -c "$size" < "${src#share:}" > "$tmp") ;;
@@ -753,7 +768,7 @@ store_list() {
     [ -f "$f" ] || continue
     echo "STORE ${f##*/} bytes=$(stat -c %s "$f") links=$(stat -c %h "$f")"
   done
-  echo "FREE avail=$(avail_bytes) reserve=$(reserve_bytes)"
+  echo "FREE avail=$(avail_bytes) reserve=$(reserve_bytes) store=$(store_used) quota=$(store_quota)"
 }
 store_rm() {
   [ "$#" -eq 1 ] && valid_name "$1" || { echo "ERR usage: store-rm NAME"; return 2; }
@@ -1143,6 +1158,14 @@ test_reach() { # IP PORT: whether the System VM itself reaches IP:PORT over TCP 
   ip2int "${1:-}" > /dev/null && digits "${2:-}" || { echo "ERR usage: test-reach IP PORT"; return 2; }
   if nc -z -w 3 "$1" "$2" < /dev/null > /dev/null 2>&1; then echo "REACH $1:$2 open"; else echo "REACH $1:$2 closed"; fi
 }
+test_store_quota() {
+  case "${1:-}" in
+    clear) rm -f "$QUOTA_OVERRIDE"; echo "QUOTA bytes=$(store_quota) (default)" ;;
+    *) digits "${1:-}" || { echo "ERR usage: test-store-quota BYTES|clear"; return 2; }
+       ensure_dirs; echo "$1" > "$QUOTA_OVERRIDE"; echo "QUOTA bytes=$1 used=$(store_used)" ;;
+  esac
+}
+
 test_reserve() {
   case "${1:-}" in
     clear) rm -f "$RESERVE_OVERRIDE"; echo "RESERVE bytes=$(reserve_bytes) (default)" ;;
@@ -1222,6 +1245,7 @@ case "$cmd" in
   flows) flows ;;
   test-plant) test_plant "$@" ;;
   test-reserve) test_reserve "$@" ;;
+  test-store-quota) test_store_quota "$@" ;;
   test-listen) test_listen "$@" ;;
   test-open-ns) test_open_ns "$@" ;;
   test-reach) test_reach "$@" ;;

@@ -483,10 +483,10 @@ Public symbols by file:
   `share_files` (writes `d1.img`, `d2.img` and a `link -> /etc/shadow` into `share_dir`), `start_with_share_stage`,
   `stage_into_running_jail`, `boot_with_both_drives` (`vesper_mark=1`), `refuses_symlinked_src`,
   `refuses_symlinked_dest`, `refuses_src_outside_roots`, `jail_side_read_runs_as_uid_20000`,
-  `reserve_refuses_breach`, `pause_and_create`, `copy_into_store`, `stop_original`, `new_vesperd_stages_by_link`,
+  `reserve_refuses_breach`, `store_quota_refuses_breach` (`VESPERD test-store-quota` set half a drive above the store's size; the copy is refused with `store quota` and leaves no file), `pause_and_create`, `copy_into_store`, `stop_original`, `new_vesperd_stages_by_link`,
   `load_and_resume`, `guest_state_survives` (the same token, later ticks), `create_onto_linked_file_fails` (CE-0008),
   `stop_restored`, `stage_refused_at_start`, `measure_create_at_default_ceiling` (a 640 MiB guest with 512 MiB
-  dirtied, under a tenth of the request ceiling), `store_rm` and `nothing_left`; `passed` requires all 23 steps ok.
+  dirtied, under a tenth of the request ceiling), `store_rm` and `nothing_left`; `passed` requires all 24 steps ok.
   It drives the microVMs through their sockets and `vesperd stage|store`, and uses the control channel to inspect.
 - `systemvm/packages.rs:validate_packages_lock` requires schema `2`,
   non-blank branch and arch, every requested package in the closure,

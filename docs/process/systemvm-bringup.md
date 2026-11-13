@@ -567,8 +567,10 @@ A request names jail paths, so files reach the jail through `vesperd`:
 - `vesperd stage [--id ID] SRC DEST` copies while the microVM runs: `SRC` is also allowed to be `jail:/PATH`, and
   `DEST` to be `store:NAME`. It never links and never overwrites. Exit 0 prints `STAGED SRC DEST copy bytes=N`;
   exit 1 is a refusal in the System VM (the reason on stderr); exit 2 is a bad form, refused before connecting.
-- `vesperd store list` prints `STORE NAME bytes=N links=L` lines and `FREE avail=N reserve=N`; `vesperd store rm
-  NAME` removes one file (a jail that has it linked keeps its link).
+- `vesperd store list` prints `STORE NAME bytes=N links=L` lines and `FREE avail=N reserve=N store=N quota=N`;
+  `vesperd store rm NAME` removes one file (a jail that has it linked keeps its link). The store holds at most 25% of
+  the data disk (TD-053): a copy into it that would pass the quota is refused with `store quota: …`, and nothing is
+  ever removed from the store automatically.
 
 The rules (uid 20000 for jail-side reads and writes, no symlinks, a free-space reserve) are in
 [SECURITY.md](../SECURITY.md). A snapshot cycle from macOS, with a share at `$PWD/run/vesperd-share`
