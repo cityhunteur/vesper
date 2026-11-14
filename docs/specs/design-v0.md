@@ -510,7 +510,7 @@ Inside the microVM the requirement is to mount the rootfs, set up the containerâ
 
 * NAT is the default, because it needs no restricted entitlement. ([Apple Developer][6])
 * Bridged mode for LAN-visible microVMs, where the entitlement is available. **Deferred** (until step 2 of [Next work](#next-work) is done).
-* CNI inside the System VM, with a TAP device for each microVM. **Not met** (TD-032): microVMs have no network device.
+* CNI inside the System VM, with a TAP device for each microVM. **Not met** (TD-032): microVMs have no uplink. A shim microVM launched with `--share-net` has one TAP in a namespace of its own that reaches only its future share server (ADR 0009, GH #160 M2); that is not a workload network.
 * The forwarding contract for published ports ([ADR 0005](../design-docs/adr/0005-published-ports-via-vsock-gateway.md)):
 
   * A TCP bind on `127.0.0.1`, and on `::1` when IPv6 is enabled, terminates in `vesper-proxy`. **Meets the requirement** (`make ports-suite`); IPv6 is not enabled.

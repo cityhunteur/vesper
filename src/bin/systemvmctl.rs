@@ -363,6 +363,13 @@ enum ControlAction {
         #[arg(long, default_value = "vesper-test")]
         id: String,
     },
+    /// Run the GH #160 M2 checklist (a share network per microVM that nothing else reaches) and write a JSON report.
+    SharenetSuite {
+        #[arg(long, default_value = "run/systemvm/sharenet-report.json")]
+        report: String,
+        #[arg(long, default_value = "vesper-sharenet")]
+        id: String,
+    },
     /// Run the GH #13 checklist and write a JSON report.
     Suite {
         #[arg(long, default_value = "run/systemvm/control-report.json")]
@@ -759,6 +766,17 @@ fn run_control(endpoint: vesper::control::ControlEndpoint, action: ControlAction
                 return Err(format!("restart suite failed (report: {report})"));
             }
             println!("restart suite passed (report: {report})");
+        }
+        ControlAction::SharenetSuite { report, id } => {
+            let result = control::run_sharenet_suite(&endpoint, &id);
+            control::write_report(&report, &result)?;
+            for step in &result.steps {
+                println!("{} {}: {} ({} ms)", if step.ok { "ok  " } else { "FAIL" }, step.name, step.detail.chars().take(200).collect::<String>(), step.elapsed_ms);
+            }
+            if !result.passed {
+                return Err(format!("sharenet suite failed (report: {report})"));
+            }
+            println!("sharenet suite passed (report: {report})");
         }
         ControlAction::MicrovmSuite { report, id } => {
             let result = control::run_microvm_suite(&endpoint, &id);

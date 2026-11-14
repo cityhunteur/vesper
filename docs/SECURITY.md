@@ -243,6 +243,32 @@ is the normative policy and this section the summary. No new port, socket, share
   `isolation` adds `ipv6_off`, `egress` and `egress_ok`; `list`, `status` and the reaper cover `veth` (the record
   `/run/vesper/vesperd/net/<id>` outlives the lease until the link is gone).
 
+## Share network for the shim's microVMs (ADR 0009, GH #160)
+
+Built so far (M2): the network only. No share server runs yet, and the shim does not ask for the network yet.
+
+- `vesper-microvm launch ID --share-net` gives that microVM a network namespace of its own, bound at
+  `/run/vesper/microvm/netns/<id>` (root-only, tmpfs) and joined by the jailer (`--netns`). It holds `lo` and one tap,
+  `share0`, owned by uid 10000 (user `vesper-shim-jail`), with `169.254.77.1/30` on the System VM side and
+  `169.254.77.2` for the guest. There is no veth, no route out and no forwarding. Every namespace uses the same
+  address pair, because none can see another.
+- **What can reach `169.254.77.1` in a namespace:** that microVM's guest, on TCP 2049 and 2050 only (an `INPUT` rule
+  in the namespace; both policies are `DROP`). Nothing listens in the root namespace, so a container, on the Docker
+  bridge or on the host network, privileged or not, has no route to it; nor has another microVM. The rule is defence
+  in depth for a later uplink (TD-032), not what isolation rests on.
+- **Lifecycle:** `launch` writes `records/<id>` (its pid, start time and the time) under a lock before it makes the
+  namespace, and undoes the launch on `INT`, `TERM` or `HUP`. `cleanup` removes the namespace and the record.
+  `vesper-microvm-reaper` (every 10 s, under the same lock) runs `cleanup` for a record older than 30 s whose launch,
+  shim and Firecracker are all gone, and removes a namespace that has no record. `vesper-ctr leftovers` counts
+  namespaces and records. These directories are the shim's own: `vesperd`'s namespaces and reaper use
+  `/run/vesper/vesperd`, and the helpers they share (`/usr/local/lib/vesper/netns.sh`) take the directory and the
+  tap's owner as parameters.
+- **Guest:** `vesper_share_net=169.254.77.2/30` makes the init configure `eth0` with that address and no gateway.
+- **Test hooks**, for `make systemvm-sharenet-suite` only: `launch --share-probe`, `test-share-listen`,
+  `test-share-reach`, `test-age` and `test-abort-launch`. They need root in the System VM, like every `vesper-microvm`
+  command.
+- **Evidence:** `make systemvm-sharenet-suite` (10 steps, `run/GH-160/m2-sharenet-suite.json`).
+
 ## Staging and the snapshot store (ADR 0007, slice 5)
 
 Files reach a `vesperd` jail only through `vesperd` itself: `vesperd --stage SRC:DEST` (tokens on `LAUNCHAPI`,

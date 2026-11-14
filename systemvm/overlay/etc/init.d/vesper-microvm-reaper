@@ -1,0 +1,22 @@
+#!/sbin/openrc-run
+# Reaper for the shim's microVMs that have a share network (ADR 0009): every interval it removes the namespace, jail
+# and record of any such microVM whose launch, shim and Firecracker are gone and whose record is past its grace
+# period. `vesper-microvm launch --share-net` writes the record under the same flock before it makes the namespace,
+# so a launch in progress is never reaped. Before the first pass it creates the vesper-shim-jail user (uid and gid
+# 10000, no login shell) that owns the share taps. It never looks at vesperd's namespaces, which have their own
+# directory and reaper.
+description="Vesper reaper for shim microVMs with a share network"
+supervisor=supervise-daemon
+reap_interval="${VESPER_MICROVM_REAP_INTERVAL:-10}"
+command=/usr/local/bin/vesper-microvm
+command_args="reap-loop ${reap_interval}"
+respawn_delay=1
+respawn_max=0
+
+depend() {
+  need localmount vesper-packages
+}
+
+start_pre() {
+  /usr/local/bin/vesper-microvm setup-user > /dev/null
+}

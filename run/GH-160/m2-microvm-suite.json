@@ -1,0 +1,85 @@
+{
+  "bridge_path": "run/systemvm/vsock/3.sock",
+  "port": 1024,
+  "steps": [
+    {
+      "name": "handshake",
+      "ok": true,
+      "detail": "protocol 1 host vesper",
+      "elapsed_ms": 1
+    },
+    {
+      "name": "cleanup_before",
+      "ok": true,
+      "detail": "CLEAN vesper-test",
+      "elapsed_ms": 7
+    },
+    {
+      "name": "prepare",
+      "ok": true,
+      "detail": "PREPARED kernel=34734080 initrd=9961822 firecracker=Firecracker v1.16.0",
+      "elapsed_ms": 89
+    },
+    {
+      "name": "launch",
+      "ok": true,
+      "detail": "LAUNCHED vesper-test pid=7960 boot_ms=1760",
+      "elapsed_ms": 1865
+    },
+    {
+      "name": "jailer_isolation",
+      "ok": true,
+      "detail": "uid 10000, jail files \"Image dev firecracker firecracker.pid initrd.gz run sys vm.json \", cgroup \"/firecracker/vesper-test\", seccomp mode 2",
+      "elapsed_ms": 0
+    },
+    {
+      "name": "stop",
+      "ok": true,
+      "detail": "STOPPED vesper-test",
+      "elapsed_ms": 259
+    },
+    {
+      "name": "cleanup_after_stop",
+      "ok": true,
+      "detail": "CLEAN vesper-test",
+      "elapsed_ms": 26
+    },
+    {
+      "name": "relaunch",
+      "ok": true,
+      "detail": "LAUNCHED vesper-test pid=8113 boot_ms=1760",
+      "elapsed_ms": 1883
+    },
+    {
+      "name": "abnormal_termination",
+      "ok": true,
+      "detail": "CRASHED vesper-test pid=8113",
+      "elapsed_ms": 261
+    },
+    {
+      "name": "cleanup_after_crash",
+      "ok": true,
+      "detail": "CLEAN vesper-test",
+      "elapsed_ms": 25
+    },
+    {
+      "name": "guest_poweroff_launch",
+      "ok": true,
+      "detail": "LAUNCHED vesper-test pid= boot_ms=1770",
+      "elapsed_ms": 1884
+    },
+    {
+      "name": "guest_poweroff_exits",
+      "ok": true,
+      "detail": "firecracker exited after the guest powered off",
+      "elapsed_ms": 6
+    },
+    {
+      "name": "cleanup_after_poweroff",
+      "ok": true,
+      "detail": "CLEAN vesper-test",
+      "elapsed_ms": 17
+    }
+  ],
+  "passed": true
+}

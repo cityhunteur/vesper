@@ -27,13 +27,26 @@ fi
 # udp:IP:PORT, spoof:SRC:IP:PORT from a source outside the tap subnet, dns:NAME through the gateway,
 # flood:IP:PORT:N one UDP datagram from each of N sockets, so N tracked flows, reported as sent), then
 # VESPER-PROBES-DONE. Probes only report; the test judges them.
+# The share network (ADR 0009): vesper_share_net=ADDR/PREFIX configures eth0 with that address and nothing else, no
+# gateway and no default route, so the guest reaches its share server at the other end of the tap and nowhere else.
 net=$(/bin/busybox sed -n 's/.*vesper_net=\([0-9./,]*\).*/\1/p' /proc/cmdline)
-if [ -n "$net" ]; then
+sharenet=$(/bin/busybox sed -n 's/.*vesper_share_net=\([0-9./]*\).*/\1/p' /proc/cmdline)
+if [ -n "$net" ] || [ -n "$sharenet" ]; then
   /bin/busybox modprobe -a virtio_mmio failover net_failover virtio_net >/dev/null 2>&1 || echo "VESPER-NET-MODULES-FAILED"
   for i in 1 2 3 4 5 6 7 8 9 10; do [ -e /sys/class/net/eth0 ] && break; sleep 0.2; done
   ip link set dev lo up
+fi
+if [ -n "$sharenet" ] && [ -z "$net" ]; then
+  ip link set dev eth0 up && ip addr add "$sharenet" dev eth0 && echo "VESPER-SHARE-NET-OK ${sharenet}" || echo "VESPER-SHARE-NET-FAILED"
+fi
+if [ -n "$net" ]; then
   ip link set dev eth0 up && ip addr add "${net%,*}" dev eth0 && ip route add default via "${net#*,}" \
     && mkdir -p /etc && echo "nameserver ${net#*,}" > /etc/resolv.conf && echo "VESPER-NET-OK ${net}" || echo "VESPER-NET-FAILED"
+fi
+if [ -n "$net" ] || [ -n "$sharenet" ]; then
+  # vesper_probe_delay=N waits first, so a test can start its listeners after the launch returns.
+  pdelay=$(/bin/busybox sed -n 's/.*vesper_probe_delay=\([0-9]*\).*/\1/p' /proc/cmdline)
+  [ -n "$pdelay" ] && sleep "$pdelay"
   probes=$(/bin/busybox sed -n 's/.*vesper_probe=\([A-Za-z0-9.:,_-]*\).*/\1/p' /proc/cmdline)
   for p in $(echo "$probes" | tr ',' ' '); do
     kind=${p%%:*}; rest=${p#*:}; r=closed

@@ -355,7 +355,8 @@ refused while Docker keeps working on tmpfs (GH #164; packages are still reinsta
 embedded DNS, aliases and external forwarding for a compose stack driven from macOS; `make workflow-suite` covers
 compose, build, `logs -f`, interactive `exec -it` and signals, and `--platform linux/amd64` now runs through `binfmt_misc` and the pinned `qemu-x86_64` in the
 System VM (`make crossarch-suite`, `vesper-arch mode` for native/emulated/unsupported). MicroVMs have no network
-yet (TD-032).
+yet (TD-032), apart from the share network a shim microVM can be given: one tap in a namespace of its own, with no
+route out (ADR 0009, GH #160).
 
 **Intended:** design-v0 describes a packaged macOS host process plus a Linux System VM running containerd and
 Firecracker.
