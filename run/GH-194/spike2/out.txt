@@ -1,0 +1,218 @@
+during: ["name=seccomp,profile=builtin","name=userns","name=cgroupns"] root=/var/lib/docker/100000.100000
+Loaded image: alpine:3.22
+module-under-test=nbd ifb-loaded-before=0 nbd-loaded-before=0
+crw-rw-rw-    1 root     root       10, 229 Nov 14 16:37 /dev/fuse
+crw-rw----    1 root     kvm        10, 232 Jan  1  1970 /dev/kvm
+crw-rw-rw-    1 root     netdev     10, 200 Nov 14 16:37 /dev/net/tun
+brw-rw----    1 root     disk      253,   0 Nov 14 16:37 /dev/vda
+crw-rw----    1 root     root       10, 257 Nov 14 16:37 /dev/vsock
+srw-rw----    1 root     root             0 Nov 14 16:37 /run/containerd/containerd.sock
+srw-rw----    1 root     docker           0 Nov 14 17:55 /run/docker.sock
+drwxr-xr-x    4 root     root           160 Nov 14 16:37 /run/vesper
+-rw-r--r--    1 root     root            17 Nov 14 16:37 /run/vesper/data-state
+drwxr-xr-x    2 root     root            60 Nov 14 16:37 /run/vesper/microvm
+-rw-r--r--    1 root     root             0 Nov 14 16:37 /run/vesper/net-ready
+-rw-r--r--    1 root     root             0 Nov 14 16:37 /run/vesper/packages-ready
+-rw-r--r--    1 root     root             0 Nov 14 16:37 /run/vesper/services-ready
+drwx------    3 root     root           100 Nov 14 16:37 /run/vesper/vesperd
+drwxr-xr-x    8 root     root           180 Nov 14 16:37 /var/lib/vesper
+drwxr-xr-x    2 root     root           680 Nov 14 16:37 /var/lib/vesper/apks
+-rw-r--r--    1 root     root          1827 Jan  1  1970 /var/lib/vesper/baselines.lock.yaml
+drwxr-xr-x    2 root     root            80 Nov 14 16:37 /var/lib/vesper/firecracker
+drwxr-xr-x    2 root     root          4096 Nov 14 07:06 /var/lib/vesper/rootfs
+drwxr-xr-x    2 root     root          4096 Nov 11 18:05 /var/lib/vesper/rootfs-cache
+drwxr-xr-x    3 root     root          4096 Nov 12 10:39 /var/lib/vesper/state
+drwxr-xr-x    2 root     root          4096 Nov 14 07:06 /var/lib/vesper/workloads
+drwxr-xr-x    2 root     root            40 Nov 14 16:37 /var/log/vesperd
+=== victim-write: docker run -v victim:/v alpine:3.22 sh -c echo topsecret > /v/secret; chmod 600 /v/secret; ls -ln /v
+total 4
+-rw-------    1 0        0               10 Nov 14 17:55 secret
+docker_rc=0
+=== default: docker run -v /:/host alpine:3.22 sh -c p() { out=$(sh -c "$1" 2>&1); rc=$?; [ $rc -eq 0 ] && r=OK || r=NO; echo "$r rc=$rc  $1 :: $(printf "%s" "$out" | head -c 100 | tr "\n" " ")"; }
+ grep CapEff /proc/self/status; cat /proc/self/uid_map
+ p "cat /host/run/spike-secret"
+ p "nsenter --net=/host/run/spk-ns true"
+ p "head -c1 /host/dev/vda"
+ p "head -c0 /host/dev/kvm"
+ p "head -c0 /host/dev/vsock"
+ p "head -c0 /host/dev/fuse"
+ p "head -c0 /host/dev/net/tun"
+ p "chroot /host /sbin/modprobe nbd"
+ p "ip link add i0 type ifb"
+ p "chroot /host docker ps"
+ p "chroot /host ctr -a /run/containerd/containerd.sock version"
+ p "echo PING | chroot /host timeout 3 socat -T2 - VSOCK-CONNECT:2:1024"
+ p "echo PING | chroot /host timeout 3 socat -T2 - VSOCK-CONNECT:1:1024"
+ p "echo PING | chroot /host timeout 3 socat -T2 - VSOCK-CONNECT:3:1024"
+ p "cat /host/var/lib/docker/100000.100000/volumes/victim/_data/secret"
+ p "hostname pwned"
+ p "ls /host/var/lib/vesper/workloads"
+ p "head -c 20 /host/var/log/docker.log"
+ p "ls /host/run/vesper/microvm"
+CapEff:	00000000a80425fb
+         0     100000      65536
+NO rc=1  cat /host/run/spike-secret :: cat: can't open '/host/run/spike-secret': Permission denied
+NO rc=1  nsenter --net=/host/run/spk-ns true :: nsenter: setns(): can't reassociate to namespace 'net': Operation not permitted
+NO rc=1  head -c1 /host/dev/vda :: head: /host/dev/vda: Permission denied
+NO rc=1  head -c0 /host/dev/kvm :: head: /host/dev/kvm: Permission denied
+NO rc=1  head -c0 /host/dev/vsock :: head: /host/dev/vsock: Permission denied
+NO rc=1  head -c0 /host/dev/fuse :: head: /host/dev/fuse: Operation not permitted
+OK rc=0  head -c0 /host/dev/net/tun :: 
+NO rc=1  chroot /host /sbin/modprobe nbd :: modprobe: can't load module nbd (kernel/drivers/block/nbd.ko): Operation not permitted
+NO rc=2  ip link add i0 type ifb :: ip: RTNETLINK answers: Operation not permitted
+NO rc=1  chroot /host docker ps :: WARNING: Error loading config file: open /root/.docker/config.json: permission denied permission den
+NO rc=1  chroot /host ctr -a /run/containerd/containerd.sock version :: Client:   Version:  v2.1.5   Revision: fcd43222d6b07379a4be9786bda52438f0dd16a1   Go version: go1.24
+NO rc=1  echo PING | chroot /host timeout 3 socat -T2 - VSOCK-CONNECT:2:1024 :: 2026/11/14 17:55:27 socat[76] W open("/dev/vsock", ...): Permission denied 2026/11/14 17:55:27 socat
+NO rc=1  echo PING | chroot /host timeout 3 socat -T2 - VSOCK-CONNECT:1:1024 :: 2026/11/14 17:55:27 socat[85] W open("/dev/vsock", ...): Permission denied 2026/11/14 17:55:27 socat
+NO rc=1  echo PING | chroot /host timeout 3 socat -T2 - VSOCK-CONNECT:3:1024 :: 2026/11/14 17:55:27 socat[94] W open("/dev/vsock", ...): Permission denied 2026/11/14 17:55:27 socat
+OK rc=0  cat /host/var/lib/docker/100000.100000/volumes/victim/_data/secret :: topsecret
+NO rc=1  hostname pwned :: hostname: sethostname: Operation not permitted
+OK rc=0  ls /host/var/lib/vesper/workloads :: 
+OK rc=0  head -c 20 /host/var/log/docker.log :: time="2026-11-14T16:
+OK rc=0  ls /host/run/vesper/microvm :: lock
+docker_rc=0
+after default: ifb=0 nbd=0
+=== capall: docker run --cap-add ALL --security-opt seccomp=unconfined --security-opt apparmor=unconfined -v /:/host alpine:3.22 sh -c p() { out=$(sh -c "$1" 2>&1); rc=$?; [ $rc -eq 0 ] && r=OK || r=NO; echo "$r rc=$rc  $1 :: $(printf "%s" "$out" | head -c 100 | tr "\n" " ")"; }
+ grep CapEff /proc/self/status; cat /proc/self/uid_map
+ p "cat /host/run/spike-secret"
+ p "nsenter --net=/host/run/spk-ns true"
+ p "head -c1 /host/dev/vda"
+ p "head -c0 /host/dev/kvm"
+ p "head -c0 /host/dev/vsock"
+ p "head -c0 /host/dev/fuse"
+ p "head -c0 /host/dev/net/tun"
+ p "chroot /host /sbin/modprobe nbd"
+ p "ip link add i0 type ifb"
+ p "chroot /host docker ps"
+ p "chroot /host ctr -a /run/containerd/containerd.sock version"
+ p "echo PING | chroot /host timeout 3 socat -T2 - VSOCK-CONNECT:2:1024"
+ p "echo PING | chroot /host timeout 3 socat -T2 - VSOCK-CONNECT:1:1024"
+ p "echo PING | chroot /host timeout 3 socat -T2 - VSOCK-CONNECT:3:1024"
+ p "cat /host/var/lib/docker/100000.100000/volumes/victim/_data/secret"
+ p "hostname pwned"
+ p "ls /host/var/lib/vesper/workloads"
+ p "head -c 20 /host/var/log/docker.log"
+ p "ls /host/run/vesper/microvm"
+CapEff:	000001ffffffffff
+         0     100000      65536
+NO rc=1  cat /host/run/spike-secret :: cat: can't open '/host/run/spike-secret': Permission denied
+NO rc=1  nsenter --net=/host/run/spk-ns true :: nsenter: setns(): can't reassociate to namespace 'net': Operation not permitted
+NO rc=1  head -c1 /host/dev/vda :: head: /host/dev/vda: Permission denied
+NO rc=1  head -c0 /host/dev/kvm :: head: /host/dev/kvm: Permission denied
+NO rc=1  head -c0 /host/dev/vsock :: head: /host/dev/vsock: Permission denied
+NO rc=1  head -c0 /host/dev/fuse :: head: /host/dev/fuse: Operation not permitted
+OK rc=0  head -c0 /host/dev/net/tun :: 
+NO rc=1  chroot /host /sbin/modprobe nbd :: modprobe: can't load module nbd (kernel/drivers/block/nbd.ko): Operation not permitted
+OK rc=0  ip link add i0 type ifb :: 
+NO rc=1  chroot /host docker ps :: WARNING: Error loading config file: open /root/.docker/config.json: permission denied permission den
+NO rc=1  chroot /host ctr -a /run/containerd/containerd.sock version :: Client:   Version:  v2.1.5   Revision: fcd43222d6b07379a4be9786bda52438f0dd16a1   Go version: go1.24
+NO rc=1  echo PING | chroot /host timeout 3 socat -T2 - VSOCK-CONNECT:2:1024 :: 2026/11/14 17:55:28 socat[76] W open("/dev/vsock", ...): Permission denied 2026/11/14 17:55:28 socat
+NO rc=1  echo PING | chroot /host timeout 3 socat -T2 - VSOCK-CONNECT:1:1024 :: 2026/11/14 17:55:28 socat[85] W open("/dev/vsock", ...): Permission denied 2026/11/14 17:55:28 socat
+NO rc=1  echo PING | chroot /host timeout 3 socat -T2 - VSOCK-CONNECT:3:1024 :: 2026/11/14 17:55:28 socat[94] W open("/dev/vsock", ...): Permission denied 2026/11/14 17:55:28 socat
+OK rc=0  cat /host/var/lib/docker/100000.100000/volumes/victim/_data/secret :: topsecret
+OK rc=0  hostname pwned :: 
+OK rc=0  ls /host/var/lib/vesper/workloads :: 
+OK rc=0  head -c 20 /host/var/log/docker.log :: time="2026-11-14T16:
+OK rc=0  ls /host/run/vesper/microvm :: lock
+docker_rc=0
+after capall: ifb=1 nbd=0
+=== flag[--ipc=host]: docker run --cap-add ALL --security-opt seccomp=unconfined --ipc=host -v /:/host -v /sys/fs/cgroup:/cg alpine:3.22 sh -c cat /proc/self/uid_map; hostname pwned 2>&1; mkdir /cg/spk 2>&1; ls -l /dev/kvm /dev/vsock 2>&1; head -c0 /dev/kvm 2>&1 && echo KVM-OPEN; mknod /tmp/vda b 253 0 2>&1 && head -c1 /tmp/vda >/dev/null 2>&1 && echo DISK-READ; echo done
+docker: Error response from daemon: failed to create task for container: failed to create shim task: OCI runtime create failed: runc create failed: unable to start container process: error during container init: error mounting "mqueue" to rootfs at "/dev/mqueue": mount src=mqueue, dst=/dev/mqueue, dstFd=/proc/thread-self/fd/11, flags=MS_NOSUID|MS_NODEV|MS_NOEXEC: operation not permitted
+docker_rc=125
+=== flag[--uts=host]: docker run --cap-add ALL --security-opt seccomp=unconfined --uts=host -v /:/host -v /sys/fs/cgroup:/cg alpine:3.22 sh -c cat /proc/self/uid_map; hostname pwned 2>&1; mkdir /cg/spk 2>&1; ls -l /dev/kvm /dev/vsock 2>&1; head -c0 /dev/kvm 2>&1 && echo KVM-OPEN; mknod /tmp/vda b 253 0 2>&1 && head -c1 /tmp/vda >/dev/null 2>&1 && echo DISK-READ; echo done
+         0     100000      65536
+hostname: sethostname: Operation not permitted
+mkdir: can't create directory '/cg/spk': Permission denied
+ls: /dev/kvm: No such file or directory
+ls: /dev/vsock: No such file or directory
+head: /dev/kvm: No such file or directory
+mknod: /tmp/vda: Operation not permitted
+done
+docker_rc=0
+=== flag[--cgroupns=host]: docker run --cap-add ALL --security-opt seccomp=unconfined --cgroupns=host -v /:/host -v /sys/fs/cgroup:/cg alpine:3.22 sh -c cat /proc/self/uid_map; hostname pwned 2>&1; mkdir /cg/spk 2>&1; ls -l /dev/kvm /dev/vsock 2>&1; head -c0 /dev/kvm 2>&1 && echo KVM-OPEN; mknod /tmp/vda b 253 0 2>&1 && head -c1 /tmp/vda >/dev/null 2>&1 && echo DISK-READ; echo done
+         0     100000      65536
+mkdir: can't create directory '/cg/spk': Permission denied
+ls: /dev/kvm: No such file or directory
+ls: /dev/vsock: No such file or directory
+head: /dev/kvm: No such file or directory
+mknod: /tmp/vda: Operation not permitted
+done
+docker_rc=0
+=== flag[--device /dev/kvm]: docker run --cap-add ALL --security-opt seccomp=unconfined --device /dev/kvm -v /:/host -v /sys/fs/cgroup:/cg alpine:3.22 sh -c cat /proc/self/uid_map; hostname pwned 2>&1; mkdir /cg/spk 2>&1; ls -l /dev/kvm /dev/vsock 2>&1; head -c0 /dev/kvm 2>&1 && echo KVM-OPEN; mknod /tmp/vda b 253 0 2>&1 && head -c1 /tmp/vda >/dev/null 2>&1 && echo DISK-READ; echo done
+         0     100000      65536
+mkdir: can't create directory '/cg/spk': Permission denied
+ls: /dev/vsock: No such file or directory
+crw-rw----    1 nobody   nobody     10, 232 Jan  1  1970 /dev/kvm
+head: /dev/kvm: Permission denied
+mknod: /tmp/vda: Operation not permitted
+done
+docker_rc=0
+=== flag[--device /dev/vsock]: docker run --cap-add ALL --security-opt seccomp=unconfined --device /dev/vsock -v /:/host -v /sys/fs/cgroup:/cg alpine:3.22 sh -c cat /proc/self/uid_map; hostname pwned 2>&1; mkdir /cg/spk 2>&1; ls -l /dev/kvm /dev/vsock 2>&1; head -c0 /dev/kvm 2>&1 && echo KVM-OPEN; mknod /tmp/vda b 253 0 2>&1 && head -c1 /tmp/vda >/dev/null 2>&1 && echo DISK-READ; echo done
+         0     100000      65536
+mkdir: can't create directory '/cg/spk': Permission denied
+ls: /dev/kvm: No such file or directory
+crw-rw----    1 nobody   nobody     10, 257 Nov 14 16:37 /dev/vsock
+head: /dev/kvm: No such file or directory
+mknod: /tmp/vda: Operation not permitted
+done
+docker_rc=0
+=== flag[--device-cgroup-rule=b 253:* rwm]: docker run --cap-add ALL --security-opt seccomp=unconfined --device-cgroup-rule=b 253:* rwm -v /:/host -v /sys/fs/cgroup:/cg alpine:3.22 sh -c cat /proc/self/uid_map; hostname pwned 2>&1; mkdir /cg/spk 2>&1; ls -l /dev/kvm /dev/vsock 2>&1; head -c0 /dev/kvm 2>&1 && echo KVM-OPEN; mknod /tmp/vda b 253 0 2>&1 && head -c1 /tmp/vda >/dev/null 2>&1 && echo DISK-READ; echo done
+invalid argument "b" for "--device-cgroup-rule" flag: invalid device cgroup format 'b'
+Usage:  docker run [OPTIONS] IMAGE [COMMAND] [ARG...]
+docker_rc=125
+=== flag[--privileged]: docker run --cap-add ALL --security-opt seccomp=unconfined --privileged -v /:/host -v /sys/fs/cgroup:/cg alpine:3.22 sh -c cat /proc/self/uid_map; hostname pwned 2>&1; mkdir /cg/spk 2>&1; ls -l /dev/kvm /dev/vsock 2>&1; head -c0 /dev/kvm 2>&1 && echo KVM-OPEN; mknod /tmp/vda b 253 0 2>&1 && head -c1 /tmp/vda >/dev/null 2>&1 && echo DISK-READ; echo done
+docker: Error response from daemon: privileged mode is incompatible with user namespaces.  You must run the container in the host namespace when running privileged mode
+docker_rc=125
+=== flag[--pid=host]: docker run --cap-add ALL --security-opt seccomp=unconfined --pid=host -v /:/host -v /sys/fs/cgroup:/cg alpine:3.22 sh -c cat /proc/self/uid_map; hostname pwned 2>&1; mkdir /cg/spk 2>&1; ls -l /dev/kvm /dev/vsock 2>&1; head -c0 /dev/kvm 2>&1 && echo KVM-OPEN; mknod /tmp/vda b 253 0 2>&1 && head -c1 /tmp/vda >/dev/null 2>&1 && echo DISK-READ; echo done
+docker: Error response from daemon: cannot share the host PID namespace when user namespaces are enabled
+docker_rc=125
+=== flag[--network=host]: docker run --cap-add ALL --security-opt seccomp=unconfined --network=host -v /:/host -v /sys/fs/cgroup:/cg alpine:3.22 sh -c cat /proc/self/uid_map; hostname pwned 2>&1; mkdir /cg/spk 2>&1; ls -l /dev/kvm /dev/vsock 2>&1; head -c0 /dev/kvm 2>&1 && echo KVM-OPEN; mknod /tmp/vda b 253 0 2>&1 && head -c1 /tmp/vda >/dev/null 2>&1 && echo DISK-READ; echo done
+docker: Error response from daemon: cannot share the host's network namespace when user namespaces are enabled
+docker_rc=125
+=== flag[--security-opt systempaths=unconfined]: docker run --cap-add ALL --security-opt seccomp=unconfined --security-opt systempaths=unconfined -v /:/host -v /sys/fs/cgroup:/cg alpine:3.22 sh -c cat /proc/self/uid_map; hostname pwned 2>&1; mkdir /cg/spk 2>&1; ls -l /dev/kvm /dev/vsock 2>&1; head -c0 /dev/kvm 2>&1 && echo KVM-OPEN; mknod /tmp/vda b 253 0 2>&1 && head -c1 /tmp/vda >/dev/null 2>&1 && echo DISK-READ; echo done
+         0     100000      65536
+mkdir: can't create directory '/cg/spk': Permission denied
+ls: /dev/kvm: No such file or directory
+ls: /dev/vsock: No such file or directory
+head: /dev/kvm: No such file or directory
+mknod: /tmp/vda: Operation not permitted
+done
+docker_rc=0
+=== build
+docker: unknown command: docker buildx
+DEPRECATED: The legacy builder is deprecated and will be removed in a future release.
+            Install the buildx component to build images with BuildKit:
+            https://docs.docker.com/go/buildx/
+
+unknown flag: --progress
+
+Usage:  docker build [OPTIONS] PATH | URL | -
+
+Run 'docker build --help' for more information
+build_rc=0
+            Install the buildx component to build images with BuildKit:
+            https://docs.docker.com/go/buildx/
+
+unknown flag: --progress
+
+Usage:  docker build [OPTIONS] PATH | URL | -
+
+Run 'docker build --help' for more information
+Step 2/2 : RUN cat /proc/self/uid_map; cat /proc/self/status | grep CapEff
+ ---> Running in ba5c03553072
+         0     100000      65536
+CapEff:	00000000a80425fb
+ ---> Removed intermediate container ba5c03553072
+ ---> 3909157101da
+Successfully built 3909157101da
+Successfully tagged spkb3:latest
+=== usernshost (must be refused by Vesper)
+=== usernshost: docker run --userns=host -v /:/host alpine:3.22 sh -c cat /proc/self/uid_map; cat /host/run/spike-secret
+         0          0 4294967295
+rootonly
+docker_rc=0
+=== restore
+after: ["name=seccomp,profile=builtin","name=cgroupns"] root=/var/lib/docker
+drwx--x---   14 root     root          4096 Nov 14 17:55 /var/lib/docker
+drwx--x---   14 root     root          4096 Nov 14 17:55 /var/lib/docker
+SPIKE-DONE

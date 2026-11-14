@@ -273,7 +273,7 @@ Built so far (M2): the network only. No share server runs yet, and the shim does
   the host pid namespace). It is root on the System VM: it can enter any namespace there, this one included, and
   trace any process. The owner put this actor inside ADR 0009's threat table on 2026-11-14 (D-034). dockerd grants
   such requests today, so the row is open until [ADR 0010](design-docs/adr/0010-no-container-is-systemvm-root.md)
-  (proposed, GH #194) runs every container in a remapped user namespace. `/run/vesper/microvm` is also
+  (accepted, D-035; GH #194, not built yet) runs every container in a remapped user namespace. `/run/vesper/microvm` is also
   world-readable today and becomes owner-only with that work.
 - **Guest:** `vesper_share_net=169.254.77.2/30` makes the init configure `eth0` with that address and no gateway.
 - **Test hooks**, for `make systemvm-sharenet-suite` only: `launch --share-probe`, `test-share-listen`,
