@@ -30,7 +30,12 @@ B="$ROOT/build/upstream-suite"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 OUT="$ROOT/run/GH-172/$STAMP"
 CFG="$ROOT/build/systemvm/launch-config.json"
-SAVED="$B/launch-config.saved.json"
+# Outside every shared directory: $B is shared read-write into the suite's boot, and the saved config is what the
+# next normal boot starts from (ADR 0010).
+SAVED="$ROOT/build/systemvm/launch-config.upstream-saved.json"
+# The suite's containers need real root and /dev/kvm, so its boot runs unmapped containers, on a data disk of its
+# own: a disk records its container mode, and a normal disk refuses an unmapped boot (vesper-containers).
+DATA_DISK="${UPSTREAM_DATA_DISK:-$ROOT/run/systemvm/upstream-data.img}"
 SRC_VOL=vesper-upstream-src
 CARGO_VOL=vesper-upstream-cargo
 NAME=vesper-upstream-run
@@ -220,10 +225,19 @@ if [ "${UPSTREAM_KEEP_SIZE:-0}" != 1 ]; then
   make -s systemvm-down >/dev/null 2>&1 || { say "systemvm-down failed; the run needs a resized System VM"; exit 2; }
   # Write the resized config beside the live one and record its hash before it replaces the live one, so restore
   # can always tell which config is live.
-  python3 -I - "$SAVED" "$CFG.new" "$B" "${UPSTREAM_CPUS:-4}" "${UPSTREAM_MEMORY_MIB:-8192}" <<'PY'
+  if [ ! -f "$DATA_DISK" ]; then
+    dd if=/dev/zero of="$DATA_DISK" bs=1 count=0 seek="${VESPER_DATA_DISK_GIB:-64}g" 2>/dev/null \
+      || { say "cannot create the suite's data disk $DATA_DISK"; exit 2; }
+    say "created the suite's sparse data disk ${DATA_DISK#"$ROOT"/}"
+  fi
+  python3 -I - "$SAVED" "$CFG.new" "$B" "${UPSTREAM_CPUS:-4}" "${UPSTREAM_MEMORY_MIB:-8192}" "$DATA_DISK" <<'PY'
 import json, sys
-src, dst, share, cpus, mem = sys.argv[1:6]
+src, dst, share, cpus, mem, disk = sys.argv[1:7]
 c = json.load(open(src))
+# One boot with unmapped containers, on the suite's own disk. The token lives only in this temporary config.
+c["data_disk_path"] = disk
+words = [w for w in c.get("kernel_cmdline", "").split() if not w.startswith("vesper.containers=")]
+c["kernel_cmdline"] = " ".join(words + ["vesper.containers=unmapped"])
 c["cpu_count"], c["memory_mib"] = int(cpus), int(mem)
 shares = [s for s in c.get("shared_directories", []) if s.get("host_path") != share]
 shares.append({"tag": f"share{len(shares)}", "host_path": share, "read_only": False, "watch": False})
@@ -237,6 +251,10 @@ PY
   make -s systemvm-up && make -s docker-up
 fi
 docker info >/dev/null || { say "the System VM's Docker is not reachable at $DOCKER_HOST"; exit 2; }
+if docker info --format '{{json .SecurityOptions}}' | grep -q 'name=userns'; then
+  say "this System VM runs remapped containers; the suite needs its own unmapped boot (do not set UPSTREAM_KEEP_SIZE)"
+  exit 2
+fi
 if [ "$CLEAN" = 1 ]; then docker volume rm -f "$SRC_VOL" "$CARGO_VOL" >/dev/null; fi
 with_timeout 600 docker pull -q "$HELPER_IMAGE" >/dev/null || { say "pull of $HELPER_IMAGE failed or took over 600 s"; exit 2; }
 FREE_GB="$(docker run --rm -v "$SRC_VOL":/v "$HELPER_IMAGE" df -Pk /v | awk 'NR==2 {print int($4 / 1048576)}')"

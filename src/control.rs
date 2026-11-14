@@ -277,6 +277,11 @@ impl Session {
         self.guest_tool("DATA", args)
     }
 
+    /// Runs `vesper-containers <args>` in the guest (container mode and authorisation plugin, ADR 0010).
+    pub fn containers(&mut self, args: &[&str]) -> Result<(i32, Vec<String>), String> {
+        self.guest_tool("CONTAINERS", args)
+    }
+
     /// Runs `vesper-arch <args>` in the guest (execution-mode metadata); returns its exit code and output lines.
     pub fn arch(&mut self, args: &[&str]) -> Result<(i32, Vec<String>), String> {
         self.guest_tool("ARCH", args)

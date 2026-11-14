@@ -1,0 +1,99 @@
+#!/bin/sh
+# Container confinement for dockerd in the System VM (ADR 0010, GH #194). A normal boot runs every container in a
+# remapped user namespace: container root is uid 100000 here, never root on the System VM, and the authorisation
+# plugin vesper-authz refuses the requests that would start a container outside that mapping.
+#
+# One boot can ask for unmapped containers, with vesper.containers=unmapped on the kernel command line. Only the
+# launcher on macOS writes that line. The upstream Firecracker suite needs it (real root and /dev/kvm in
+# containers), and ADR 0009's host-root row does not hold in such a boot.
+#
+# A data disk records the mode of the first dockerd that used it, in $REC. A boot in the other mode is refused:
+# dockerd does not start. So a disk that normal boots use never runs unmapped, where its old containers with a
+# restart policy would start as root, and the suite's disk never serves a normal boot. A disk from before this
+# change has an unmapped store and no record; it is a normal disk, so it is recorded as mapped and its old store
+# is left alone (see `legacy`).
+#
+# usage: vesper-containers prepare   decide the mode, check the disk's record and write dockerd's configuration;
+#                                    CONTAINERS mapped | CONTAINERS unmapped | CONTAINERS refused <reason> (rc 1)
+#        vesper-containers status    CONTAINERS <mapped|unmapped|refused <reason>|unknown> authz=<state>
+#                                    legacy=<absent|present volumes=N containers=M>
+#        vesper-containers test-authz stop|start   suite hook: stop or start the plugin, to show that dockerd
+#                                    refuses every request without it; AUTHZ <state>
+set -u
+REC=/var/lib/vesper/state/containers-mode
+RUN=/run/vesper/containers
+CONF=/etc/docker/daemon.json
+SOCK=/run/docker/plugins/vesper-authz.sock
+STORE=/var/lib/docker
+REMAP=dockremap
+BASE=100000
+COUNT=65536
+
+asked() {
+  if tr ' ' '\n' < /proc/cmdline | grep -qx 'vesper.containers=unmapped'; then echo unmapped; else echo mapped; fi
+}
+finish() { mkdir -p /run/vesper; echo "$*" > "$RUN"; echo "CONTAINERS $*"; }
+refuse() { rm -f "$CONF"; finish "refused $*"; exit 1; }
+
+prepare() {
+  mode=$(asked)
+  mkdir -p "$(dirname "$REC")" || refuse no-state-directory
+  rec=$(cat "$REC" 2>/dev/null)
+  case "$rec" in
+    mapped|unmapped) ;;
+    '')
+      # No record. A disk that already holds a Docker store has served normal boots, so it is a mapped disk.
+      if [ -d "$STORE/image" ] || [ -d "$STORE/$BASE.$BASE" ]; then rec=mapped; else rec=$mode; fi
+      echo "$rec" > "$REC" || refuse cannot-record-mode ;;
+    *) refuse bad-record ;;
+  esac
+  [ "$rec" = "$mode" ] || refuse "disk-is-$rec:boot-asked-$mode"
+  mkdir -p /etc/docker
+  if [ "$mode" = unmapped ]; then
+    rm -f "$CONF"
+    finish unmapped
+    return 0
+  fi
+  grep -q "^$REMAP:" /etc/group || addgroup -S "$REMAP" || refuse "addgroup-$REMAP"
+  grep -q "^$REMAP:" /etc/passwd || adduser -S -D -H -G "$REMAP" -s /sbin/nologin -h / -g "container root" "$REMAP" \
+    || refuse "adduser-$REMAP"
+  for f in /etc/subuid /etc/subgid; do
+    grep -q "^$REMAP:$BASE:$COUNT\$" "$f" 2>/dev/null && continue
+    { grep -v "^$REMAP:" "$f" 2>/dev/null; echo "$REMAP:$BASE:$COUNT"; } > "$f.new" && mv -f "$f.new" "$f" \
+      || refuse "write-$f"
+  done
+  printf '{"userns-remap":"default","authorization-plugins":["vesper-authz"]}\n' > "$CONF.new" \
+    && mv -f "$CONF.new" "$CONF" || refuse write-daemon-json
+  finish mapped
+}
+
+status() {
+  st=$(cat "$RUN" 2>/dev/null || echo unknown)
+  authz=n/a
+  case "$st" in
+    mapped)
+      authz=$(rc-service vesper-authz status 2>/dev/null | awk '{print $NF}')
+      [ -S "$SOCK" ] || authz="${authz:-stopped}:no-socket" ;;
+  esac
+  legacy=absent
+  if [ "${st%% *}" != unmapped ] && [ -d "$STORE/image" ]; then
+    v=$(find "$STORE/volumes" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)
+    c=$(find "$STORE/containers" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)
+    legacy="present volumes=$((v)) containers=$((c))"
+  fi
+  echo "CONTAINERS $st authz=${authz:-stopped} legacy=$legacy"
+}
+
+test_authz() {
+  case "${1:-}" in stop|start) ;; *) echo "ERR usage: vesper-containers test-authz stop|start"; return 2 ;; esac
+  [ "$(cat "$RUN" 2>/dev/null)" = mapped ] || { echo "ERR containers are not mapped in this boot"; return 1; }
+  rc-service vesper-authz "$1" > /dev/null 2>&1
+  echo "AUTHZ $(rc-service vesper-authz status 2>/dev/null | awk '{print $NF}')"
+}
+
+case "${1:-}" in
+  test-authz) test_authz "${2:-}" ;;
+  prepare) prepare ;;
+  status) status ;;
+  *) echo "ERR usage: vesper-containers prepare|status|test-authz stop|start"; exit 2 ;;
+esac

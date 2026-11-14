@@ -339,7 +339,7 @@ pub fn run_snapshot_suite(endpoint: &ControlEndpoint, run: &SnapshotRun, id: &st
             let statef = jail_file(&mut control, b, "/snap.vmstate")?;
             let drive = jail_file(&mut control, b, "/d1.img")?;
             for linked in [&memf, &statef] {
-                if !linked.contains("uid=0 mode=444 links=2") {
+                if !linked.contains("uid=0 mode=440 links=2") {
                     return Err(format!("not a root-owned read-only link: {linked}"));
                 }
             }

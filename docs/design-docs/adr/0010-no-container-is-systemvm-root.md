@@ -167,11 +167,16 @@ turns remapping off, and it is default-deny so that a new Docker route is refuse
   remapping and stay root-only.
 - **ADR 0009's condition 3** is then tested with the broadest request Docker accepts.
 
-Unknown, each resolved by a milestone of GH #194:
+Found while building it (2026-11-14):
 
-- Whether Compose, published ports, the cross-architecture path and the DNS suite pass unchanged.
-- Whether BuildKit builds stay mapped, and so whether `/session` and `/grpc` can join the allow-list.
-- Whether an unconfined remapped container can connect a vsock socket at all.
+- **Ownership on shares flickers (TD-062).** The share reports the asking uid as each file's owner and the System
+  VM caches that for about a second across uids. Container root is no longer the System VM's root, so after dockerd
+  resolves a bind at container start a container sees the mount as owned by `nobody` for up to a second, and
+  ownership-checking tools such as `git` can fail in that window. Reads and writes are unaffected.
+- Compose, published ports, the cross-architecture path and the DNS suite pass unchanged.
+- An unconfined remapped container can make a vsock socket; its connects reach no listener.
+
+Still unknown: whether BuildKit builds stay mapped, and so whether `/session` and `/grpc` can join the allow-list.
 
 ## Implementation and migration impact
 

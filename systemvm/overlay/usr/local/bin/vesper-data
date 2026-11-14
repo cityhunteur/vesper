@@ -8,6 +8,11 @@
 # usage: vesper-data mount     DATA mounted|formatted <dev> | DATA absent | DATA refused <dev> <reason> | ERR ...
 #        vesper-data status    DATA <state> [<dev>] used=<KiB> avail=<KiB>   (state from the last mount)
 #        vesper-data stop      sync and unmount; DATA stopped
+#        vesper-data binds     BINDS <n> of <total>: how many state directories are ext4 mounts from the disk
+#        vesper-data label     LABEL <dev> <type> <label> | LABEL <dev> none | LABEL absent
+#        vesper-data test-relabel LABEL   suite hook: give the disk another label, so the next boot refuses it;
+#                                         RELABELLED <dev> <label>
+# The last three exist so the data-disk suite needs no root shell in a container (ADR 0010).
 set -u
 LABEL=vesper-data
 MNT=/var/lib/vesper-data
@@ -53,6 +58,10 @@ mount_() {
     mkdir -p "$sub" "$d"
     mount --bind "$sub" "$d" || { record refused "$dev" "bind-failed:$d"; return 1; }
   done
+  # ADR 0010: the Vesper stores are owner-only; the state directory lets the vesperd jail uid pass through to its
+  # jails. Docker's and containerd's directories keep the modes those daemons give them.
+  chmod 0700 /var/lib/vesper/rootfs /var/lib/vesper/rootfs-cache /var/lib/vesper/workloads
+  chmod 0711 /var/lib/vesper/state
   # Boot sweep (ADR 0007 section 4): vesperd jails on the disk never outlive a boot; only the store does.
   /usr/local/bin/vesper-vesperd sweep > /dev/null 2>&1
   record "$how" "$dev"
@@ -75,9 +84,33 @@ stop() {
   echo "DATA stopped"
 }
 
+binds() {
+  n=0; t=0
+  for d in $DIRS; do t=$((t + 1)); grep -q " $d ext4 " /proc/mounts && n=$((n + 1)); done
+  echo "BINDS $n of $t"
+}
+
+label() {
+  dev=$(device)
+  [ -n "$dev" ] && [ -b "$dev" ] || { echo "LABEL absent"; return 0; }
+  echo "LABEL $dev $(probe "$dev")"
+}
+
+test_relabel() {
+  case "${1:-}" in ''|*[!A-Za-z0-9-]*) echo "ERR label: letters, digits and - only"; return 2 ;; esac
+  [ "${#1}" -le 16 ] || { echo "ERR label: at most 16 characters"; return 2; }
+  dev=$(device)
+  [ -n "$dev" ] && [ -b "$dev" ] || { echo "ERR no data disk"; return 1; }
+  e2label "$dev" "$1" || { echo "ERR e2label failed"; return 1; }
+  echo "RELABELLED $dev $1"
+}
+
 case "${1:-}" in
+  binds) binds ;;
+  label) label ;;
+  test-relabel) test_relabel "${2:-}" ;;
   mount) mount_ ;;
   status) status ;;
   stop) stop ;;
-  *) echo "ERR usage: vesper-data mount|status|stop"; exit 2 ;;
+  *) echo "ERR usage: vesper-data mount|status|stop|binds|label|test-relabel LABEL"; exit 2 ;;
 esac

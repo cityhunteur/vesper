@@ -10,6 +10,10 @@
 #                                                               PERF n= boot_p50_ms= boot_p95_ms= boot_max_ms= cycle_p50_ms=
 #                                                               create_rate_per_min= wall_ms= failures=
 set -u
+# ADR 0010: containers run as an unprivileged uid of the System VM, and dockerd can bind any single file into
+# one whatever its parent directory allows. So nothing this tool writes is readable by other uids unless a line
+# says why it must be.
+umask 077
 MV=/usr/local/bin/vesper-microvm
 FC=/var/lib/vesper/firecracker/firecracker
 JAIL=/srv/jailer/firecracker

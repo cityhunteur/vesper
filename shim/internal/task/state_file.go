@@ -33,7 +33,7 @@ func (t *Task) persist() error {
 		return err
 	}
 	tmp := filepath.Join(t.Bundle, StateFileName+".tmp")
-	if err := os.WriteFile(tmp, raw, 0o644); err != nil {
+	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
 		return err
 	}
 	return os.Rename(tmp, filepath.Join(t.Bundle, StateFileName))

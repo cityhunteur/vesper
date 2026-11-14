@@ -85,6 +85,7 @@ func (m *MicroVM) Prepare(ctx context.Context, task, bundleDir string, mounts []
 		if err := os.MkdirAll(m.cacheDir, 0o700); err != nil {
 			return "", meta, diagnose("create the rootfs cache directory", err, "the cache lives in "+m.cacheDir+"; check permissions and free space")
 		}
+		_ = os.Chmod(m.cacheDir, 0o700) // MkdirAll leaves a directory that vesper-data made on the disk as it is
 		if ok, _ := cacheValid(cached); ok {
 			meta.Cached = true
 		} else {
@@ -98,7 +99,7 @@ func (m *MicroVM) Prepare(ctx context.Context, task, bundleDir string, mounts []
 			if err != nil {
 				return "", meta, diagnose("digest the root drive", err, "")
 			}
-			if err := os.WriteFile(tmp+".sha256", []byte(sum), 0o644); err != nil {
+			if err := os.WriteFile(tmp+".sha256", []byte(sum), 0o600); err != nil {
 				return "", meta, diagnose("record the root drive digest", err, "")
 			}
 			if err := os.Rename(tmp, cached); err != nil {
@@ -160,6 +161,11 @@ func mkfs(ctx context.Context, rootfs, image string) error {
 	cmd := exec.CommandContext(ctx, "mke2fs", "-q", "-F", "-t", "ext4", "-d", rootfs, "-L", "vesper-task", "-E", "root_owner=0:0", image, strconv.FormatInt(size, 10)+"K")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("mke2fs: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	// The image holds a container's files. dockerd can bind a single file into a container whatever its parent
+	// directory allows, and containers run as another uid (ADR 0010), so the file itself is owner-only.
+	if err := os.Chmod(image, 0o600); err != nil {
+		return fmt.Errorf("chmod root drive: %w", err)
 	}
 	return nil
 }

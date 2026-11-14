@@ -1,0 +1,14 @@
+bash scripts/systemvm/confine-suite.sh
+ok   every_container_is_remapped
+ok   host_root_flags_refused
+ok   broadest_container_is_not_root
+ok   single_file_binds_unreadable
+ok   share_server_closed_to_containers
+ok   vsock_listeners_serve_the_host_only
+ok   plugin_refuses_unreadable_and_unlisted
+ok   driver_options_and_runtimes_refused
+ok   plugin_latency_is_small
+ok   plugin_loss_fails_closed
+ok   mapped_disk_refuses_unmapped_boot
+ok   next_normal_boot_is_mapped
+confine suite: passed=true (report: /Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/confine-report.json)

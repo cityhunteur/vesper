@@ -1,0 +1,34 @@
+rebuild rc=0 32s
+confine rc=0 211s
+sharenet rc=0 19s
+microvm rc=0 7s
+shim rc=0 15s
+workload rc=0 10s
+launchapi rc=0 15s
+vesperd rc=0 147s
+egress rc=0 131s
+bounds rc=0 187s
+exec rc=0 41s
+bundle rc=0 13s
+restart rc=0 8s
+rootfs rc=0 3s
+snapshot rc=0 16s
+docker-smoke rc=2 2s
+docker-conformance rc=2 23s
+ports-suite rc=0 10s
+dns-suite rc=0 7s
+workflow-suite rc=2 30s
+crossarch-suite rc=0 10s
+ctr-conformance rc=0 76s
+data-disk rc=0 96s
+up-shares rc=0 11s
+binds rc=2 40s
+restore rc=0 12s
+BATTERY-DONE
+
+Reruns after the first pass (their logs replace the first ones):
+docker-smoke rc=0, docker-conformance rc=0  first pass failed no_raw_host_sockets on a socket file the egress suite's
+                                            last step leaves under run/egress-suite/ (it kills a vesperd holder); removed, rerun
+workflow-suite rc=0                         first pass used BuildKit, which the plugin refuses; the suite now uses DOCKER_BUILDKIT=0
+binds rc=0                                  first pass saw a file as nobody:nobody within a second of dockerd's bind (TD-062);
+                                            the two ownership checks now look after 1.5 s

@@ -12,6 +12,10 @@
 #        vesper-memadmit test-reserve BYTES|clear test hook: override the reserve until reboot
 # OWNER is shim (cgroup /sys/fs/cgroup/firecracker/ID) or vesperd (cgroup /sys/fs/cgroup/vesperd/ID).
 set -u
+# ADR 0010: containers run as an unprivileged uid of the System VM, and dockerd can bind any single file into
+# one whatever its parent directory allows. So nothing this tool writes is readable by other uids unless a line
+# says why it must be.
+umask 077
 # Tests run this hermetically as an ordinary user under VESPER_MEMADMIT_ROOT; as root (in the System VM) it is ignored.
 R=""; [ "$(id -u)" != 0 ] && R=${VESPER_MEMADMIT_ROOT:-}
 DIR=$R/run/vesper/mem
@@ -45,7 +49,7 @@ committed() {
   echo "$sum $n"
 }
 
-with_lock() { mkdir -p "$DIR" && exec 7>"$LOCK" && flock 7; }
+with_lock() { mkdir -p "$DIR" && chmod 0700 "$DIR" && exec 7>"$LOCK" && flock 7; }
 
 cmd=${1:-}; shift 2>/dev/null
 case "$cmd" in

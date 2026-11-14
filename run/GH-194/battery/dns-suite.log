@@ -1,0 +1,14 @@
+bash scripts/systemvm/dns-suite.sh
+ok   default_bridge_resolver: /etc/resolv.conf: nameserver 192.168.64.1 
+ok   external_dns_default_bridge: registry-1.docker.io -> 2600:1f18:2148:bc00:9532:aa6b:353d:e6c3
+ok   external_tcp_egress: registry-1.docker.io:443 reachable through the System VM NAT
+ok   compose_embedded_resolver: client resolv.conf: nameserver 127.0.0.11 (dockerd embedded DNS); network 172.18.0.0/16
+ok   service_discovery_resolves: web -> 172.18.0.2
+ok   service_discovery_connects: http://web/ -> web-ok
+ok   alias_api_resolves: api -> 172.18.0.2 (same as web)
+ok   alias_backend_internal_resolves: backend.internal -> 172.18.0.2 (same as web)
+ok   external_dns_from_compose_network: registry-1.docker.io via 127.0.0.11 -> 2600:1f18:2148:bc00:9532:aa6b:353d:e6c3
+ok   nxdomain_is_clean: does-not-exist.invalid -> no address, getent rc=2 (NXDOMAIN)
+ok   deterministic_across_runs: second compose up: same resolver nameserver 127.0.0.11 and subnet 172.18.0.0/16; web 172.18.0.2 then 172.18.0.2 (address order within the subnet is no
+ok   compose_down_cleans_network: no vesper-dns networks left
+dns suite: passed=true (report: /Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/dns-report.json)

@@ -1,0 +1,20 @@
+cargo run --bin systemvmctl -- control workload-suite
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.17s
+     Running `target/debug/systemvmctl control workload-suite`
+ok   handshake: protocol 1 host vesper (2 ms)
+ok   import_trivial_image: IMPORTED cc1f57d7830af1a8459d3c56b2a868bd0fc761ad76462d04f320db9428af7b08 (172 ms)
+ok   run_wa: STARTED wa microvm=wl-wa pid=7960 image=cc1f57d7830af1a8459d3c56b2a868bd0fc761ad76462d04f320db9428af7b08 (2195 ms)
+ok   run_wb_concurrent: STARTED wb microvm=wl-wb pid=8116 image=cc1f57d7830af1a8459d3c56b2a868bd0fc761ad76462d04f320db9428af7b08 (1959 ms)
+ok   run_wc_concurrent: STARTED wc microvm=wl-wc pid=8299 image=cc1f57d7830af1a8459d3c56b2a868bd0fc761ad76462d04f320db9428af7b08 (1966 ms)
+ok   three_microvms_running: 3 running, pids {"8116", "7960", "8299"} (29 ms)
+ok   isolation_between_microvms: 3 distinct cgroups {"/firecracker/wl-wc", "/firecracker/wl-wa", "/firecracker/wl-wb"}; wb cannot see wa's /tmp/x (private rootfs copies) (20 ms)
+ok   stop_wa_tears_down_its_microvm: STOPPED wa teardown=CLEAN (283 ms)
+ok   others_unaffected_by_stop: wa STOPPED, wb and wc still RUNNING, wl-wa CLEAN (37 ms)
+ok   run_wd_short: STARTED wd microvm=wl-wd pid=? image=cc1f57d7830af1a8459d3c56b2a868bd0fc761ad76462d04f320db9428af7b08 (1947 ms)
+ok   wait_maps_exit_code_and_output: EXITED wd code=3; output hello-from-microvm; microVM torn down (26 ms)
+ok   rm_wa: REMOVED wa (13 ms)
+ok   rm_wb: REMOVED wb (288 ms)
+ok   rm_wc: REMOVED wc (802 ms)
+ok   rm_wd: REMOVED wd (18 ms)
+ok   nothing_left: no workloads, no microVMs (1 ms)
+workload suite passed (report: run/systemvm/workload-report.json)

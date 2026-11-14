@@ -191,8 +191,9 @@ serialises reaping, jail creation and teardown.
 
 A default Docker container cannot reach the agent from inside the System VM: Docker's default seccomp profile denies
 `socket(AF_VSOCK)` (`make systemvm-launchapi-suite`, step `default_container_cannot_open_vsock`). A container with
-`seccomp=unconfined` can open the socket, but its connects to CID 1 and 3 fail because no vsock loopback transport
-is loaded; a privileged container that can load kernel modules is not covered.
+`seccomp=unconfined` can open the socket, but its connects fail because no vsock loopback transport is loaded, the
+module is blacklisted, and no container can load a module (ADR 0010). The agent also refuses a peer that is not the
+macOS host.
 
 ## Network interfaces for `vesperd` microVMs (CE-0010)
 
@@ -269,17 +270,72 @@ Built so far (M2): the network only. No share server runs yet, and the shim does
   line and its cgroup (`/firecracker/<id>`), and a shim by its binary's device and inode and an exact `-id` argument.
   A container process with a look-alike command line, or one run as uid 10000, passes for neither, so it cannot
   keep an orphan's namespace alive.
-- **Not met: a container that is given the System VM's root** (`--privileged` together with a host bind mount or
-  the host pid namespace). It is root on the System VM: it can enter any namespace there, this one included, and
-  trace any process. The owner put this actor inside ADR 0009's threat table on 2026-11-14 (D-034). dockerd grants
-  such requests today, so the row is open until [ADR 0010](design-docs/adr/0010-no-container-is-systemvm-root.md)
-  (accepted, D-035; GH #194, not built yet) runs every container in a remapped user namespace. `/run/vesper/microvm` is also
-  world-readable today and becomes owner-only with that work.
+- **A container started with any flags Docker accepts** cannot enter this namespace, reach the address or touch a
+  process in it, because no container is root on the System VM
+  ([Container confinement](#container-confinement-adr-0010-gh-194); D-034). `make systemvm-confine-suite` starts a
+  container with every capability, no seccomp filter and the System VM bound at `/host`, and shows that `setns` into
+  the namespace, a connect to `169.254.77.1:2049` and a read of the launch record all fail. The one exception is the
+  upstream suite's unmapped boot, described in that section.
 - **Guest:** `vesper_share_net=169.254.77.2/30` makes the init configure `eth0` with that address and no gateway.
 - **Test hooks**, for `make systemvm-sharenet-suite` only: `launch --share-probe`, `test-share-listen`,
   `test-share-reach`, `test-age`, `test-abort-launch`, `test-drop-record` and `test-impostor`. They need root in the System VM, like every `vesper-microvm`
   command.
 - **Evidence:** `make systemvm-sharenet-suite` (12 steps, `run/GH-160/m2-sharenet-suite.json`).
+
+## Container confinement (ADR 0010, GH #194)
+
+No container is root on the System VM, whatever flags started it. This is what keeps a container out of a microVM's
+share namespace (ADR 0009, D-034) and away from Vesper's own state.
+
+- **Remapping:** dockerd runs with `userns-remap`. Container root is uid 100000 on the System VM
+  (`vesper-containers prepare`, called by `vesper-services` before dockerd starts). Capabilities a container is
+  given hold only inside its own user namespace.
+- **Refused by dockerd under remapping:** `--privileged`, `--pid=host`, `--network=host`. `--ipc=host` fails to
+  start.
+- **The authorisation plugin** (`vesper-authz`, `shim/internal/authz`) closes the switch that turns remapping off,
+  and it is default-deny:
+  - A request whose method and cleaned, version-stripped path are not on its list is refused. Swarm, managed
+    plugins, checkpoints and BuildKit (`/session`, `/grpc`, `/build?version=2`) are not on the list.
+  - A container create is refused unless dockerd passed its body (dockerd withholds a body of 1 MiB or more) and
+    the body has no `UsernsMode`, no runtime but the default, and no volume driver options. Volume create follows
+    the same rule.
+  - dockerd refuses every request while the plugin does not answer. The plugin runs under `supervise-daemon`,
+    starts before dockerd, and logs each refusal (method, path, reason; no query or body) to the bounded
+    `/var/log/vesper-authz.log`.
+- **Owner-only state.** dockerd can bind any single file into a container whatever its parent directory allows, so
+  the files themselves are closed, not only their directories:
+  - console logs (`vesper-boundlog`, also after rotation), launch records, leases, the memory ledger;
+  - workload records and images, the rootfs store and the shim's rootfs cache, bundle metadata;
+  - everything in a shim jail; files Firecracker writes (it runs with umask 077);
+  - snapshot store files, now `root:vesperd-jail` mode 0440 instead of world-readable 0444;
+  - the logs of dockerd and containerd.
+  `/var/log/messages` stays world-readable; it holds reaper lines with task ids.
+- **vsock:** the agent, the port relay and the share notifier refuse a peer that is not the macOS host (CID 2), and
+  `vsock_loopback` is blacklisted. A container without a seccomp filter can still make a vsock socket. Its connects
+  to CIDs 1 and 2 go to the macOS host, which has no listener and resets them; a connect to the System VM's own CID
+  fails with "no such device". The Docker relay has no peer check of its own and rests on that.
+- **Data disk:** a disk records the container mode of the first dockerd that used it
+  (`/var/lib/vesper/state/containers-mode`). A boot in the other mode does not start dockerd.
+- **The one unmapped boot.** `vesper.containers=unmapped` on the kernel command line starts dockerd without
+  remapping and without the plugin. Only the launch config on macOS carries that line. The upstream Firecracker
+  suite sets it in its temporary config, with a data disk of its own (`run/systemvm/upstream-data.img`), and keeps
+  the saved normal config outside every shared directory. **In that boot a container can be root on the System VM
+  and ADR 0009's host-root row does not hold.** `make docker-up` prints the mode and refuses to serve Docker when
+  the System VM's mode differs from the launch config's.
+- **What is not guaranteed:** isolation between containers. They share one mapping and one kernel: a container
+  given `/` reads other containers' volumes and every macOS share (virtio-fs does not check uids), and a kernel
+  exploit is out of scope here. A microVM per container (GH #53) answers both.
+- **Ownership on shares flickers (TD-062).** The share reports every file as owned by whoever asks, and the System
+  VM caches the answer for about a second for all uids. Container root is no longer the System VM's root, so for
+  up to a second after another uid looked at a file (dockerd resolving a bind when a container starts, the
+  host-edit replay) a container sees it as owned by `nobody`, and `chmod` or `touch` on it fails. Reads and writes
+  are not affected. A command that checks ownership in the first second of a container, such as `git` on a
+  bind-mounted repository, can fail.
+- **Docker data from before this change** stays in `/var/lib/docker` on the data disk, unused. dockerd's mapped
+  store is `/var/lib/docker/100000.100000`. `HEALTH` and `make docker-up` report the old store; nothing deletes it.
+- **Test hooks:** `vesper-containers test-authz stop|start`, `vesper-data test-relabel`. Both need the agent.
+- **Evidence:** `make systemvm-confine-suite` (12 steps, `run/GH-194/m5-confine-report.json`); `cd shim && go test
+  ./internal/authz`; 23 other System VM and Docker suites from the same overlay (`run/GH-194/battery/summary.txt`).
 
 ## Staging and the snapshot store (ADR 0007, slice 5)
 
@@ -306,7 +362,7 @@ A compromised microVM controls the files in its jail (Firecracker owns the jail 
 - writes a new file only (`set -C`, so `O_EXCL`, which also refuses a symlink as the last component) and never
   overwrites, in the jail or the store; a store copy is written to `.partial.<pid>` and renamed;
 - hard-links into a jail only from `--stage`, into a fresh jail before Firecracker exists there, and only store files
-  named `*.mem` or `*.vmstate`; they stay root-owned and mode 0444, so the microVM can read but not change them, and
+  named `*.mem` or `*.vmstate`; they stay root-owned, with the jail's group and mode 0440, so the microVM can read but not change them and no other uid can read them (ADR 0010), and
   one store copy serves several restores. Everything else is copied, and out of a jail files are only copied;
 - checks a free-space reserve before every copy (the System VM's `MemTotal`, so the data disk keeps room for one more
   full memory file of the largest guest), under one `flock` with the copy itself (step `reserve_refuses_breach`).

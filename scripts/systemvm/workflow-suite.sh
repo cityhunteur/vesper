@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # GH #31 developer workflow suite from macOS through the ingress: compose up of a multi-service stack,
-# docker build (BuildKit) from a host context, `docker logs -f` streaming, an interactive `docker exec -it`
+# docker build (the legacy builder, see step 2) from a host context, `docker logs -f` streaming, an interactive `docker exec -it`
 # driven through a pty by expect, stop/kill signal propagation, and the `--platform linux/amd64` probe
 # (a known gap until GH #39). The report carries the baseline lock revisions. Needs `make systemvm-up &&
 # make docker-up`, docker compose, expect and outbound network. Writes run/systemvm/workflow-report.json.
@@ -32,8 +32,9 @@ out="$(compose exec -T client sh -c 'wget -qO- -T 5 http://web/ | tr -d "\r"' 2>
 [ "${running}" = "client web " ] && [ "${out}" = "web-ok" ] && record compose_up_multi_service true "services running: ${running}; client -> http://web/ -> ${out}" || record compose_up_multi_service false "running: ${running}; web: ${out}"
 compose down -t 1 >/dev/null 2>&1
 
-# 2. docker build with a host context through the proxy, then run the result.
-start=$(date +%s); out="$("${DOCKER}" build -q --build-arg BASE="${IMAGE}" -t vesper/wf:1 "${BUILD_CTX}" 2>&1 | tail -1)"; rc=${PIPESTATUS[0]}; took=$(( $(date +%s) - start ))
+# 2. docker build with a host context through the proxy, then run the result. The legacy builder: BuildKit is
+# refused by the authorisation plugin until a test shows its builds stay remapped (ADR 0010).
+start=$(date +%s); out="$(DOCKER_BUILDKIT=0 "${DOCKER}" build -q --build-arg BASE="${IMAGE}" -t vesper/wf:1 "${BUILD_CTX}" 2>&1 | tail -1)"; rc=${PIPESTATUS[0]}; took=$(( $(date +%s) - start ))
 run_out="$("${DOCKER}" run --rm vesper/wf:1 2>&1 | tr '\n' ' ')"
 [ $rc -eq 0 ] && [ "${run_out}" = "built-in-system-vm payload-from-host " ] && record docker_build_from_host_context true "built ${out} in ${took}s; run -> ${run_out}" || record docker_build_from_host_context false "rc=${rc} ${out}; run -> ${run_out}"
 layers="$("${DOCKER}" image inspect --format '{{len .RootFS.Layers}}' vesper/wf:1 2>/dev/null)"

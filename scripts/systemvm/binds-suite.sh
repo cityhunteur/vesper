@@ -29,11 +29,15 @@ if echo "${out}" | grep -q "SHARE share0 ${SHARE} mode=rw" && echo "${out}" | gr
 out="$(run -v "${SHARE}:/data" "${IMAGE}" cat /data/hello.txt 2>&1)"
 [ "${out}" = "from-host" ] && record host_file_readable_in_container true "cat /data/hello.txt -> ${out}" || record host_file_readable_in_container false "${out}"
 
-host_owner="$(stat -f '%u:%g' "${SHARE}/hello.txt")"; guest_owner="$(run -v "${SHARE}:/data" "${IMAGE}" stat -c '%u:%g' /data/hello.txt 2>&1)"
+# The share reports every file as owned by whoever asks, and the System VM caches that answer for about a second
+# for all uids. Since ADR 0010 container root is not the System VM's root, so within a second of a look by another
+# uid (dockerd resolving the bind at start, the host-edit replay) a container sees "nobody" (TD-062). The checks
+# below look after that second.
+host_owner="$(stat -f '%u:%g' "${SHARE}/hello.txt")"; guest_owner="$(run -v "${SHARE}:/data" "${IMAGE}" sh -c 'sleep 1.5; stat -c %u:%g /data/hello.txt' 2>&1)"
 [ "${guest_owner}" = "0:0" ] && record ownership_mapped_to_root_in_guest true "host ${host_owner} appears as ${guest_owner} in the container (the sharing user owns the share; containers see root)" || record ownership_mapped_to_root_in_guest false "host ${host_owner}, guest ${guest_owner}"
 
 run -v "${SHARE}:/data" "${IMAGE}" sh -c 'echo from-container > /data/c.txt && chmod 640 /data/c.txt && chown 1000:1000 /data/c.txt' >/dev/null 2>&1
-h="$(stat -f '%u:%g %Lp' "${SHARE}/c.txt" 2>&1)"; c="$(cat "${SHARE}/c.txt" 2>&1)"; g="$(run -v "${SHARE}:/data" "${IMAGE}" stat -c '%u:%g %a' /data/c.txt 2>&1)"
+h="$(stat -f '%u:%g %Lp' "${SHARE}/c.txt" 2>&1)"; c="$(cat "${SHARE}/c.txt" 2>&1)"; g="$(run -v "${SHARE}:/data" "${IMAGE}" sh -c 'sleep 1.5; stat -c "%u:%g %a" /data/c.txt' 2>&1)"
 if [ "${c}" = "from-container" ] && [ "${h}" = "${host_owner} 640" ] && [ "${g}" = "0:0 640" ]; then record container_write_owned_by_host_user true "container wrote c.txt, chmod 640 kept, chown 1000:1000 ignored; host sees ${h}, guest sees ${g}"; else record container_write_owned_by_host_user false "host ${h} content ${c}; guest ${g}"; fi
 
 out="$(run -v "${SHARE_RO}:/ro" "${IMAGE}" sh -c 'cat /ro/ro.txt && echo x > /ro/y.txt' 2>&1 | tr '\n' ' ')"

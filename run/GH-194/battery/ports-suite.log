@@ -1,0 +1,14 @@
+bash scripts/systemvm/ports-suite.sh
+ok   publisher_active: status file /Volumes/Workspace/github.com/cityhunteur/vesper/run/vesper/ports.json present: host loopback -> vesper-proxy -> bridge -> Syste
+ok   localhost_port_reachable: 127.0.0.1:18080 -> port-80
+ok   multiple_mappings: 127.0.0.1:18081 -> port-81 (second mapping of pp1)
+ok   status_lists_mappings: pp1 127.0.0.1:18080 listening ;pp1 127.0.0.1:18081 listening ;
+ok   docker_level_conflict_error: rc=125: docker: Error response from daemon: failed to set up container networking: driver failed programming external connectivity on endpoi
+ok   host_level_conflict_reported: pp3 127.0.0.1:18090 conflict cannot listen on 127.0.0.1:18090: Address already in use (os error 48); the container port is reachable only in
+ok   cleanup_on_stop: 18080 and 18081 closed after docker stop
+ok   status_cleared_on_stop: no pp1 mappings in /Volumes/Workspace/github.com/cityhunteur/vesper/run/vesper/ports.json
+ok   launcher_survives_proxy_restart: vesper-vmlauncher pid 95703 still running after the proxy dropped a live event stream
+ok   republished_after_proxy_restart: 127.0.0.1:18091 -> port-80 after docker-down/docker-up (reconciliation)
+ok   cleanup_on_rm: 18091 closed after docker rm -f
+ok   half_closed_client_gets_late_reply: reply 2 s after the client shut its write side: late-reply
+ports suite: passed=true (report: /Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/ports-report.json)

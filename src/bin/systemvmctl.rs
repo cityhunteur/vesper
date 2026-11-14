@@ -235,6 +235,10 @@ enum ControlAction {
     Data {
         args: Vec<String>,
     },
+    /// Run `vesper-containers <args>` in the guest (the container mode of this boot and the authorisation plugin, ADR 0010).
+    Containers {
+        args: Vec<String>,
+    },
     /// Run `vesper-ctr <args>` in the guest (import|run NAME CMD...|start|state|kill|delete|try CTR-ARGS...|leftovers).
     Ctr {
         args: Vec<String>,
@@ -699,6 +703,17 @@ fn run_control(endpoint: vesper::control::ControlEndpoint, action: ControlAction
             }
             if rc != 0 {
                 return Err(format!("vesper-data exited with {rc}"));
+            }
+        }
+        ControlAction::Containers { args } => {
+            let mut session = control::connect(&endpoint)?;
+            let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+            let (rc, lines) = session.containers(&refs)?;
+            for line in &lines {
+                println!("{line}");
+            }
+            if rc != 0 {
+                return Err(format!("vesper-containers exited with {rc}"));
             }
         }
         ControlAction::Share { args } => {

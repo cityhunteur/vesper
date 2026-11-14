@@ -1,0 +1,11 @@
+bash scripts/systemvm/crossarch-suite.sh
+ok   binfmt_qemu_registered: NATIVE aarch64 binfmt_misc=enabled;INTERP qemu-x86_64 enabled flags=OCF interpreter=/usr/bin/qemu-x86_64 version=10.0.0;
+ok   execution_mode_surfaced: MODE arm64 native; MODE amd64 emulated:qemu-x86_64
+ok   unsupported_arch_mode_clear: MODE riscv64 unsupported (no binfmt_misc interpreter for riscv64; supported: aarch64 native, x86_64 emulated)
+ok   run_platform_amd64: docker run --platform linux/amd64 busybox:1.37 uname -m -> x86_64
+ok   image_inspect_architecture: busybox:1.37: linux/amd64; alpine:3.22: linux/arm64
+ok   container_inspect_architecture: container xa-c: platform linux, image 30ecbe150909 is linux/amd64 (host arm64)
+ok   unsupported_platform_docker_error: linux/riscv64 busybox:1.37: exec /bin/uname: exec format error (vesper-arch mode: MODE riscv64 unsupported (no binfmt_misc interpreter for riscv64; su
+ok   emulated_cost_within_limit: 20k-iteration shell loop incl. container start: native 479 ms, emulated 622 ms, ratio 1.3x (limit 40x)
+ok   native_image_untouched: alpine:3.22 still arm64
+crossarch suite: passed=true (report: /Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/crossarch-report.json)

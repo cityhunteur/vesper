@@ -61,6 +61,28 @@ Virtualization.framework (macOS, Apple silicon). `make systemvm-prepare` runs al
 then exposes the guest's Docker on `run/vesper/docker.sock` for the host Docker CLI
 (see [process/systemvm-bringup.md](process/systemvm-bringup.md)).
 
+### Containers are not root on the System VM (ADR 0010)
+
+`make docker-up` prints `containers mapped`. dockerd runs every container in a remapped user namespace, behind an
+authorisation plugin, so some `docker` commands that work on other hosts fail here:
+
+| Command | Result |
+|---|---|
+| `docker run --privileged`, `--pid=host`, `--network=host`, `--ipc=host`, `--userns=host` | refused |
+| `docker run --runtime <name>`, volumes with driver options (`docker volume create -o …`, Compose `driver_opts`) | refused |
+| `docker build` with BuildKit | refused; use `DOCKER_BUILDKIT=0` |
+| `docker swarm`, `docker service`, `docker plugin` | refused |
+| a container create whose request is 1 MiB or more | refused |
+| `-v /var/run/docker.sock:…` | mounts, but the container cannot open the socket |
+| a command that checks file ownership on a bind mount in the first second of a container (`git status` in a mounted repository) | can fail: files briefly appear owned by `nobody` (TD-062) |
+
+Images, volumes and containers made before this change are still on the data disk, unused; `make docker-up` says
+so. Pull or build images again.
+
+The upstream Firecracker suite (`make systemvm-upstream-suite`) is the one exception: it restarts the System VM
+with unmapped containers on a data disk of its own (`run/systemvm/upstream-data.img`) and puts the normal
+configuration back afterwards. Do not run other workloads during it.
+
 ## Build and run
 
 ```sh
