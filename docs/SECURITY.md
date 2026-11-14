@@ -1,7 +1,7 @@
 ---
 status: verified
 owner: cityhunteur
-last_reviewed: 2026-11-12
+last_reviewed: 2026-11-14
 ---
 
 # Vesper Security Review Map
@@ -269,10 +269,12 @@ Built so far (M2): the network only. No share server runs yet, and the shim does
   line and its cgroup (`/firecracker/<id>`), and a shim by its binary's device and inode and an exact `-id` argument.
   A container process with a look-alike command line, or one run as uid 10000, passes for neither, so it cannot
   keep an orphan's namespace alive.
-- **Outside the boundary:** a container that is given the System VM's root (`--privileged` together with a host bind
-  mount or the host pid namespace) is root on the System VM. It can enter any namespace there, this one included, as
-  it can read every share directly. ADR 0009's threat table covers containers confined by runc; a host-root
-  container is the Docker daemon's own trust boundary, not this design's.
+- **Not met: a container that is given the System VM's root** (`--privileged` together with a host bind mount or
+  the host pid namespace). It is root on the System VM: it can enter any namespace there, this one included, and
+  trace any process. The owner put this actor inside ADR 0009's threat table on 2026-11-14 (D-034). dockerd grants
+  such requests today, so the row is open until [ADR 0010](design-docs/adr/0010-no-container-is-systemvm-root.md)
+  (proposed, GH #194) runs every container in a remapped user namespace. `/run/vesper/microvm` is also
+  world-readable today and becomes owner-only with that work.
 - **Guest:** `vesper_share_net=169.254.77.2/30` makes the init configure `eth0` with that address and no gateway.
 - **Test hooks**, for `make systemvm-sharenet-suite` only: `launch --share-probe`, `test-share-listen`,
   `test-share-reach`, `test-age`, `test-abort-launch`, `test-drop-record` and `test-impostor`. They need root in the System VM, like every `vesper-microvm`

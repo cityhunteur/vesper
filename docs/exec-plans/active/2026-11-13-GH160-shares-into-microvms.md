@@ -58,6 +58,13 @@ microVM, can reach the file server or another microVM's export.
 
 ## Surprises & Discoveries
 
+- 2026-11-14 (after M2): the owner put the host-root container in scope (D-034). A spike of dockerd `userns-remap`
+  (`run/GH-160/spike-userns-remap/out.txt`) showed two things this plan uses. The System VM's virtio-fs mounts do not
+  check the caller's uid: uid 100000 read a `0600` file root had created and wrote beside it, so M3's non-root
+  server is likely to pass its `0600` test. And a container on the unmapped daemon that asks for `--privileged
+  --pid=host -v /:/host` enters any namespace, so M2's "privileged container cannot reach it" steps prove routing
+  only, not confinement.
+
 - 2026-11-14 (M1): `unfs3` 0.10.0-r2 brings seven more packages: `rpcbind`, `libtirpc`, `libtirpc-conf`, `krb5-libs`,
   `krb5-conf`, `libverto` and `keyutils-libs` (Alpine's `libtirpc` links Kerberos), about 3 MB installed. `rpcbind` is
   installed because the package depends on it; nothing starts it, and `unfsd -p` never registers with it.
@@ -89,6 +96,10 @@ microVM, can reach the file server or another microVM's export.
   nothing listens on 111, 2049 or 2050. `shim-suite` (22 of 22) and `workload-suite` (16 of 16) pass.
 
 ## Decision Log
+
+- 2026-11-14: a container given the System VM's root is in scope (D-034, owner). The defence is not in this plan:
+  ADR 0010 (proposed, GH #194) remaps every container. M3 to M7 continue; #160's closing test gains a step that
+  starts a container with the broadest flags Docker then accepts, and #160 closes only after GH #194.
 
 - 2026-11-13: one server per microVM, inside that microVM's own network namespace (ADR 0009), not one server in the
   root namespace bound to a share address. A container can route to any System VM address whatever the server binds,
@@ -169,7 +180,7 @@ unless the owner changes that acceptance criterion.
 
 #160's acceptance criteria, each shown by a suite step:
 - `unfs3` is pinned and supervised and is reachable only on the share network.
-- A container cannot connect.
+- A container cannot connect, whatever flags it was started with (D-034; needs GH #194).
 - A microVM mounts only its own exports.
 - Writes reach macOS with the right owner, and read-only shares are enforced.
 - A macOS edit gives `IN_MODIFY` in the microVM.
