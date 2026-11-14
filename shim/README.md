@@ -25,6 +25,11 @@ The Go module pins containerd 2.1.5 and builds static Linux arm64 binaries with 
   Every init transition updates `vesper-task.json`. Exec records remain in memory; a dead shim destroys
   the entire microVM. `Stats` reports the VMM's cgroup v2 metrics. `Pids` reports its System VM pid.
   `Pause`, `Resume`, `Checkpoint` and `Update` remain unsupported.
+- `cmd/vesper-authz` and `internal/authz`: dockerd's authorisation plugin in the System VM (ADR 0010, GH #194),
+  standard library only. `internal/authz/policy.go` holds the allow-list of Docker API routes and the body rules
+  for container and volume create; a request that is not listed, or a create whose body dockerd did not pass, is
+  refused. `go test ./internal/authz` covers path handling, key case, duplicate keys and missing bodies. Built by
+  `build-shim.sh`; not yet installed in the overlay (GH #194 M2).
 - `cmd/vesper-console`: uses the already pinned containerd `go-runc` and `console` libraries to receive
   runc's terminal master. It runs detached `runc create/start` or `exec`, reaps the guest process and
   relays its terminal through stdin/stdout. A private Unix socket applies terminal resize.
