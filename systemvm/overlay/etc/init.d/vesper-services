@@ -65,6 +65,7 @@ start() {
         exit 1
       fi
     done
+    # The start scripts of the two packages set their logs back to 0644; close them again.
     chmod 0600 /var/log/containerd.log /var/log/docker.log 2>/dev/null
     touch /run/vesper/services-ready
   ' < /dev/null > /dev/null 2>&1 &

@@ -30,8 +30,8 @@ B="$ROOT/build/upstream-suite"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 OUT="$ROOT/run/GH-172/$STAMP"
 CFG="$ROOT/build/systemvm/launch-config.json"
-# Outside every shared directory: $B is shared read-write into the suite's boot, and the saved config is what the
-# next normal boot starts from (ADR 0010).
+# Not in $B, which this runner shares read-write into the suite's boot: the saved config is what the next normal
+# boot starts from (ADR 0010). A launch config that shares build/systemvm itself is outside what this protects.
 SAVED="$ROOT/build/systemvm/launch-config.upstream-saved.json"
 # The suite's containers need real root and /dev/kvm, so its boot runs unmapped containers, on a data disk of its
 # own: a disk records its container mode, and a normal disk refuses an unmapped boot (vesper-containers).
@@ -226,10 +226,11 @@ if [ "${UPSTREAM_KEEP_SIZE:-0}" != 1 ]; then
   # Write the resized config beside the live one and record its hash before it replaces the live one, so restore
   # can always tell which config is live.
   if [ ! -f "$DATA_DISK" ]; then
-    dd if=/dev/zero of="$DATA_DISK" bs=1 count=0 seek="${VESPER_DATA_DISK_GIB:-64}g" 2>/dev/null \
+    (umask 077; dd if=/dev/zero of="$DATA_DISK" bs=1 count=0 seek="${VESPER_DATA_DISK_GIB:-64}g" 2>/dev/null) \
       || { say "cannot create the suite's data disk $DATA_DISK"; exit 2; }
     say "created the suite's sparse data disk ${DATA_DISK#"$ROOT"/}"
   fi
+  chmod 600 "$DATA_DISK"
   python3 -I - "$SAVED" "$CFG.new" "$B" "${UPSTREAM_CPUS:-4}" "${UPSTREAM_MEMORY_MIB:-8192}" "$DATA_DISK" <<'PY'
 import json, sys
 src, dst, share, cpus, mem, disk = sys.argv[1:7]
@@ -248,7 +249,8 @@ json.dump(c, open(dst, "w"), indent=2)
 PY
   sha "$CFG.new" > "$SAVED.resized"
   mv "$CFG.new" "$CFG"
-  make -s systemvm-up && make -s docker-up
+  # Only this runner serves Docker from an unmapped boot (docker-up.sh refuses otherwise).
+  make -s systemvm-up && VESPER_ALLOW_UNMAPPED=1 make -s docker-up
 fi
 docker info >/dev/null || { say "the System VM's Docker is not reachable at $DOCKER_HOST"; exit 2; }
 if docker info --format '{{json .SecurityOptions}}' | grep -q 'name=userns'; then

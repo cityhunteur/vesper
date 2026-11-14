@@ -299,6 +299,9 @@ share namespace (ADR 0009, D-034) and away from Vesper's own state.
   - A container create is refused unless dockerd passed its body (dockerd withholds a body of 1 MiB or more) and
     the body has no `UsernsMode`, no runtime but the default, and no volume driver options. Volume create follows
     the same rule.
+  - A bind whose source does not exist is refused unless the source lies inside a shared macOS directory. dockerd
+    creates a missing source and gives it to container root; on the System VM's own filesystems that would hand a
+    container a directory a root tool later adopts.
   - dockerd refuses every request while the plugin does not answer. The plugin runs under `supervise-daemon`,
     starts before dockerd, and logs each refusal (method, path, reason; no query or body) to the bounded
     `/var/log/vesper-authz.log`.
@@ -310,7 +313,13 @@ share namespace (ADR 0009, D-034) and away from Vesper's own state.
   - snapshot store files, now `root:vesperd-jail` mode 0440 instead of world-readable 0444;
   - the logs of dockerd and containerd.
   `/var/log/messages` stays world-readable; it holds reaper lines with task ids.
-- **vsock:** the agent, the port relay and the share notifier refuse a peer that is not the macOS host (CID 2), and
+- **Before the first container** (`vesper-containers prepare`, every boot; a failure refuses the boot): every
+  state directory a root tool would otherwise make lazily exists, root-owned and 0700, and files that a build
+  before this change left on the data disk get their modes (images and records 0600, snapshots
+  `root:vesperd-jail` 0440). `vesper-microvm prepare`, `vesper-memadmit` and `vesper-ctr` also refuse a state
+  directory that root does not own.
+- **vsock:** the agent, the port relay and the share notifier refuse a peer that is not the macOS host (CID 2), or a
+  socat handler with no peer address (`tests/vsock_peer.rs`), and
   `vsock_loopback` is blacklisted. A container without a seccomp filter can still make a vsock socket. Its connects
   to CIDs 1 and 2 go to the macOS host, which has no listener and resets them; a connect to the System VM's own CID
   fails with "no such device". The Docker relay has no peer check of its own and rests on that.
@@ -321,7 +330,9 @@ share namespace (ADR 0009, D-034) and away from Vesper's own state.
   suite sets it in its temporary config, with a data disk of its own (`run/systemvm/upstream-data.img`), and keeps
   the saved normal config outside every shared directory. **In that boot a container can be root on the System VM
   and ADR 0009's host-root row does not hold.** `make docker-up` prints the mode and refuses to serve Docker when
-  the System VM's mode differs from the launch config's.
+  the System VM's mode differs from the launch config's, and refuses an unmapped boot altogether unless the
+  upstream runner started it (`VESPER_ALLOW_UNMAPPED=1`), so a run that was killed cannot leave Docker served
+  unmapped. A refused boot writes a dockerd configuration that names a plugin that does not exist.
 - **What is not guaranteed:** isolation between containers. They share one mapping and one kernel: a container
   given `/` reads other containers' volumes and every macOS share (virtio-fs does not check uids), and a kernel
   exploit is out of scope here. A microVM per container (GH #53) answers both.
@@ -334,7 +345,7 @@ share namespace (ADR 0009, D-034) and away from Vesper's own state.
 - **Docker data from before this change** stays in `/var/lib/docker` on the data disk, unused. dockerd's mapped
   store is `/var/lib/docker/100000.100000`. `HEALTH` and `make docker-up` report the old store; nothing deletes it.
 - **Test hooks:** `vesper-containers test-authz stop|start`, `vesper-data test-relabel`. Both need the agent.
-- **Evidence:** `make systemvm-confine-suite` (12 steps, `run/GH-194/m5-confine-report.json`); `cd shim && go test
+- **Evidence:** `make systemvm-confine-suite` (14 steps, `run/GH-194/m5-confine-report.json`); `cd shim && go test
   ./internal/authz`; 23 other System VM and Docker suites from the same overlay (`run/GH-194/battery/summary.txt`).
 
 ## Staging and the snapshot store (ADR 0007, slice 5)

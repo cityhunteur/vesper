@@ -17,8 +17,10 @@ umask 077
 f=${1:?usage: vesper-boundlog FILE [MAXBYTES]}
 max=${2:-1048576}
 case "$max" in ''|*[!0-9]*) echo "vesper-boundlog: bad MAXBYTES $max" >&2; exit 2 ;; esac
-n=0
 exec 3>>"$f"
+# Start from what the file already holds: a restarted bounder must not let it grow past MAXBYTES again.
+n=$(wc -c < "$f" 2>/dev/null) || n=0
+case "$n" in ''|*[!0-9]*) n=0 ;; esac
 while IFS= read -r -n 4096 line || [ -n "$line" ]; do
   printf '%s\n' "$line" >&3
   n=$((n + ${#line} + 1))

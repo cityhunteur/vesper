@@ -77,6 +77,9 @@ the System VM, and we will refuse every Docker API request that is not known to 
      other than the default is refused, so dockerd cannot be asked to start another runtime by name. Volume driver
      options, and drivers other than `local`, are refused on volume create and on a container's mounts: with
      options, the `local` driver makes dockerd, as root, perform a mount that the client describes.
+   - **No directory is made for a container on the System VM.** dockerd creates a missing bind source and gives
+     it to container root. The plugin refuses a bind whose source does not exist unless it lies inside a shared
+     macOS directory.
    - **Fail closed.** dockerd refuses every request when the plugin does not answer. The plugin is an OpenRC
      service under `supervise-daemon`, started before dockerd, which removes a stale socket before it binds;
      `vesper-services` waits for its activation before it starts dockerd.

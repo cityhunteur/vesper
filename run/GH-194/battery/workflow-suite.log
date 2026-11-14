@@ -1,6 +1,6 @@
 bash scripts/systemvm/workflow-suite.sh
 ok   compose_up_multi_service: services running: client web ; client -> http://web/ -> web-ok
-ok   docker_build_from_host_context: built sha256:169561097b6d6c79d1668a26cd2f176126004dafc45900edb6abde7078582274 in 2s; run -> built-in-system-vm payload-from-host 
+ok   docker_build_from_host_context: built sha256:faf5297df3ef3ba62ace4dca7f06be6bef7be07c5bf43251d3fbb169006cc50e in 1s; run -> built-in-system-vm payload-from-host 
 ok   build_layers_present: 3 layers (base + RUN + COPY)
 ok   logs_follow_streams: 5 lines over 4s: tick-1 tick-2 tick-3 tick-4 tick-5 
 ok   exec_it_interactive_tty: pty inside: /dev/pts/0; prompt loop answered interactive-23

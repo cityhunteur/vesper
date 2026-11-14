@@ -23,7 +23,12 @@ def request(sock_path, raw):
         pass  # the server may answer and close before it has read a large body
     data = b""
     try:
-        while b"\r\n\r\n" not in data or not data.split(b"\r\n\r\n", 1)[1]:
+        while True:
+            if b"\r\n\r\n" in data:
+                head, body = data.split(b"\r\n\r\n", 1)
+                # An answer without a body (a redirect, 204, Content-Length: 0) is complete with its headers.
+                if body or b"content-length: 0" in head.lower() or head[9:12] in (b"204", b"301", b"304"):
+                    break
             chunk = s.recv(65536)
             if not chunk:
                 break
@@ -53,8 +58,10 @@ def main():
     lower = json.dumps({"image": image, "hostconfig": {"usernsmode": "host"}}).encode()
     merged = b'{"Image":"%s","HostConfig":{"UsernsMode":"host"},"hostconfig":{"Runtime":"runc"}}' % image.encode()
     chunked = b"%x\r\n%s\r\n0\r\n\r\n" % (len(small), small)
+    missing = json.dumps({"Image": image, "HostConfig": {"Binds": ["/var/lib/vesper/confine-missing:/m"]}}).encode()
     create = "/v1.51/containers/create"
-    refused = [
+    # Refused by the plugin: 403 with its own message.
+    plugin = [
         ("host user namespace", send(sock_path, "POST", create, small)),
         ("padded past 1 MiB", send(sock_path, "POST", create, padded)),
         ("chunked", send(sock_path, "POST", create, chunked, "Transfer-Encoding: chunked\r\n")),
@@ -62,8 +69,7 @@ def main():
         ("two HostConfig objects", send(sock_path, "POST", create, merged)),
         ("no API version", send(sock_path, "POST", "/containers/create", small)),
         ("not declared as JSON", send(sock_path, "POST", create, small, ctype="text/plain")),
-        ("doubled slash", send(sock_path, "POST", "//v1.51/containers/create", small)),
-        ("dot segment", send(sock_path, "POST", "/v1.51/images/../containers/create", small)),
+        ("missing bind source", send(sock_path, "POST", create, missing)),
         ("managed plugins", send(sock_path, "GET", "/v1.51/plugins")),
         ("plugin pull", send(sock_path, "POST", "/v1.51/plugins/pull?remote=x")),
         ("swarm", send(sock_path, "POST", "/v1.51/swarm/init", b"{}")),
@@ -71,13 +77,21 @@ def main():
         ("BuildKit session", send(sock_path, "POST", "/v1.51/session")),
         ("BuildKit grpc", send(sock_path, "POST", "/v1.51/grpc")),
         ("build on the host network", send(sock_path, "POST", "/v1.51/build?networkmode=host", ctype="application/x-tar")),
-        ("unknown route", send(sock_path, "GET", "/v1.51/nothing")),
+    ]
+    # Never reach a handler: dockerd's router redirects a path that is not canonical and has no such route.
+    router = [
+        ("doubled slash", send(sock_path, "POST", "//v1.51/containers/create", small), 301),
+        ("dot segment", send(sock_path, "POST", "/v1.51/images/../containers/create", small), 301),
+        ("unknown route", send(sock_path, "GET", "/v1.51/nothing"), 404),
     ]
     ok = True
     notes = []
-    for name, (status, body) in refused:
-        # 403 is the plugin's refusal. A 3xx or 4xx from dockerd's own router also means no container was made.
-        good = status == 403 or (300 <= status < 500 and '"Id"' not in body)
+    for name, (status, body) in plugin:
+        good = status == 403 and "vesper:" in body
+        ok &= good
+        notes.append(f"{name}={status}" if good else f"{name}=UNEXPECTED {status} {body}")
+    for name, (status, body), want in router:
+        good = status == want
         ok &= good
         notes.append(f"{name}={status}" if good else f"{name}=UNEXPECTED {status} {body}")
     status, body = send(sock_path, "POST", create, json.dumps({"Image": image, "Cmd": ["true"]}).encode())

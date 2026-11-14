@@ -19,6 +19,9 @@
 #                                    legacy=<absent|present volumes=N containers=M>
 #        vesper-containers test-authz stop|start   suite hook: stop or start the plugin, to show that dockerd
 #                                    refuses every request without it; AUTHZ <state>
+#        vesper-containers test-legacy plant|check   suite hook: plant files with the modes a build before ADR 0010
+#                                    left in the stores (plant), and after a reboot report and remove them (check);
+#                                    PLANTED | LEGACY image=<mode> snapshot=<mode>:<uid>:<gid>
 set -u
 REC=/var/lib/vesper/state/containers-mode
 RUN=/run/vesper/containers
@@ -33,9 +36,59 @@ asked() {
   if tr ' ' '\n' < /proc/cmdline | grep -qx 'vesper.containers=unmapped'; then echo unmapped; else echo mapped; fi
 }
 finish() { mkdir -p /run/vesper; echo "$*" > "$RUN"; echo "CONTAINERS $*"; }
-refuse() { rm -f "$CONF"; finish "refused $*"; exit 1; }
+# A refused boot must not serve Docker even if someone starts dockerd by hand: the configuration names a plugin
+# that does not exist, so dockerd refuses every request.
+refuse() {
+  mkdir -p /etc/docker
+  printf '{"userns-remap":"default","authorization-plugins":["vesper-refused"]}\n' > "$CONF"
+  finish "refused $*"; exit 1
+}
+
+# Vesper's state, made private before dockerd can run a container (GH #194 council review).
+#  - dockerd creates a missing bind source and gives it to container root, and the root tools adopt their state
+#    directories with mkdir -p. So every such directory exists, owned by root, before the first container; the
+#    authorisation plugin also refuses to create a source outside a shared macOS directory.
+#  - dockerd binds a single file whatever its parent allows. Files that a build before this change left on the
+#    data disk were world-readable, so their modes are set here on every boot.
+JGID=20000 # the vesperd jail's group (vesper-vesperd)
+private_state() {
+  for d in /run/vesper/microvm /run/vesper/mem /run/vesper/ctr /run/vesper/vesperd /var/log/vesperd \
+      /var/lib/vesper/microvm /srv/jailer /srv/jailer/firecracker /run/docker /run/docker/plugins \
+      /var/lib/vesper/rootfs /var/lib/vesper/rootfs-cache /var/lib/vesper/workloads; do
+    [ -L "$d" ] && return 1
+    mkdir -p "$d" && chown 0:0 "$d" && chmod 0700 "$d" || return 1
+  done
+  mkdir -p /var/lib/vesper/state && chown 0:0 /var/lib/vesper/state && chmod 0711 /var/lib/vesper/state || return 1
+  for d in /var/lib/vesper/rootfs /var/lib/vesper/rootfs-cache /var/lib/vesper/workloads; do
+    find "$d" -xdev -type f ! -perm 0600 -exec chmod 0600 {} + || return 1
+  done
+  store=/var/lib/vesper/state/vesperd/store
+  if [ -d "$store" ]; then
+    chown 0:0 "$store" && chmod 0700 "$store" || return 1
+    find "$store" -xdev -type f \( ! -perm 0440 -o ! -group "$JGID" -o ! -user 0 \) -exec chown "0:$JGID" {} + -exec chmod 0440 {} + || return 1
+  fi
+  for d in /var/lib/vesper/state/vesperd /var/lib/vesper/state/vesperd/jailer /var/lib/vesper/state/vesperd/jailer/firecracker; do
+    [ -d "$d" ] || continue
+    chown 0:0 "$d" && chmod 0711 "$d" || return 1
+  done
+  # The daemons' logs: made here, owner-only, so they are never world-readable while the services start.
+  for f in /var/log/containerd.log /var/log/docker.log; do
+    [ -L "$f" ] && return 1
+    : >> "$f" && chown 0:0 "$f" && chmod 0600 "$f" || return 1
+  done
+}
+legacy_store() {
+  if [ -d "$STORE/image" ]; then
+    v=$(find "$STORE/volumes" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)
+    c=$(find "$STORE/containers" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)
+    echo "present volumes=$((v)) containers=$((c))"
+  else
+    echo absent
+  fi
+}
 
 prepare() {
+  private_state || refuse private-state
   mode=$(asked)
   mkdir -p "$(dirname "$REC")" || refuse no-state-directory
   rec=$(cat "$REC" 2>/dev/null)
@@ -51,6 +104,7 @@ prepare() {
   mkdir -p /etc/docker
   if [ "$mode" = unmapped ]; then
     rm -f "$CONF"
+    echo absent > "$RUN.legacy"
     finish unmapped
     return 0
   fi
@@ -64,6 +118,7 @@ prepare() {
   done
   printf '{"userns-remap":"default","authorization-plugins":["vesper-authz"]}\n' > "$CONF.new" \
     && mv -f "$CONF.new" "$CONF" || refuse write-daemon-json
+  legacy_store > "$RUN.legacy" # counted once a boot; HEALTH reads it on every poll
   finish mapped
 }
 
@@ -75,12 +130,7 @@ status() {
       authz=$(rc-service vesper-authz status 2>/dev/null | awk '{print $NF}')
       [ -S "$SOCK" ] || authz="${authz:-stopped}:no-socket" ;;
   esac
-  legacy=absent
-  if [ "${st%% *}" != unmapped ] && [ -d "$STORE/image" ]; then
-    v=$(find "$STORE/volumes" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)
-    c=$(find "$STORE/containers" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)
-    legacy="present volumes=$((v)) containers=$((c))"
-  fi
+  legacy=$(cat "$RUN.legacy" 2>/dev/null || echo unknown)
   echo "CONTAINERS $st authz=${authz:-stopped} legacy=$legacy"
 }
 
@@ -91,9 +141,24 @@ test_authz() {
   echo "AUTHZ $(rc-service vesper-authz status 2>/dev/null | awk '{print $NF}')"
 }
 
+test_legacy() {
+  img=/var/lib/vesper/rootfs/confine-legacy.ext4; snap=/var/lib/vesper/state/vesperd/store/confine-legacy.mem
+  case "${1:-}" in
+    plant)
+      mkdir -p "$(dirname "$snap")" || return 1
+      echo old-image > "$img" && chmod 0644 "$img" && echo old-memory > "$snap" && chown 0:0 "$snap" && chmod 0444 "$snap" || { echo "ERR plant"; return 1; }
+      echo PLANTED ;;
+    check)
+      echo "LEGACY image=$(stat -c %a "$img" 2>/dev/null || echo missing) snapshot=$(stat -c %a:%u:%g "$snap" 2>/dev/null || echo missing)"
+      rm -f "$img" "$snap" ;;
+    *) echo "ERR usage: vesper-containers test-legacy plant|check"; return 2 ;;
+  esac
+}
+
 case "${1:-}" in
+  test-legacy) test_legacy "${2:-}" ;;
   test-authz) test_authz "${2:-}" ;;
   prepare) prepare ;;
   status) status ;;
-  *) echo "ERR usage: vesper-containers prepare|status|test-authz stop|start"; exit 2 ;;
+  *) echo "ERR usage: vesper-containers prepare|status|test-authz stop|start|test-legacy plant|check"; exit 2 ;;
 esac

@@ -1,34 +1,17 @@
-rebuild rc=0 32s
-confine rc=0 211s
-sharenet rc=0 19s
-microvm rc=0 7s
-shim rc=0 15s
-workload rc=0 10s
-launchapi rc=0 15s
-vesperd rc=0 147s
-egress rc=0 131s
-bounds rc=0 187s
-exec rc=0 41s
-bundle rc=0 13s
-restart rc=0 8s
-rootfs rc=0 3s
-snapshot rc=0 16s
-docker-smoke rc=2 2s
-docker-conformance rc=2 23s
-ports-suite rc=0 10s
-dns-suite rc=0 7s
-workflow-suite rc=2 30s
-crossarch-suite rc=0 10s
-ctr-conformance rc=0 76s
-data-disk rc=0 96s
-up-shares rc=0 11s
-binds rc=2 40s
-restore rc=0 12s
-BATTERY-DONE
+GH #194 M2-M5 regression, after the council review's fixes (2026-11-14). Every log here is from the last run of its suite.
 
-Reruns after the first pass (their logs replace the first ones):
-docker-smoke rc=0, docker-conformance rc=0  first pass failed no_raw_host_sockets on a socket file the egress suite's
-                                            last step leaves under run/egress-suite/ (it kills a vesperd holder); removed, rerun
-workflow-suite rc=0                         first pass used BuildKit, which the plugin refuses; the suite now uses DOCKER_BUILDKIT=0
-binds rc=0                                  first pass saw a file as nobody:nobody within a second of dockerd's bind (TD-062);
-                                            the two ownership checks now look after 1.5 s
+Final overlay (after the mke2fs umask fix): confine 14/14, sharenet, microvm, shim, workload, bundle, exec, restart, rootfs,
+vesperd, ctr-conformance, binds: all rc=0.
+
+One overlay earlier (differs only in how vesper-rootfs and the shim set the umask around mke2fs): launchapi, egress, bounds,
+snapshot, docker-smoke, docker-conformance, ports-suite, dns-suite, workflow-suite, crossarch-suite, data-disk: all rc=0.
+
+Failures on the way, and what each was:
+- rootfs: reproducible_rebuild failed when the image file was created before mke2fs; fixed by setting umask 077 around mke2fs instead.
+- binds: unshared_path_is_guest_local expected Docker to create /tmp/vesper-not-shared in the System VM; the plugin now refuses
+  that by design, and the step is unshared_path_is_refused. Earlier, two ownership checks saw nobody:nobody within a second of
+  dockerd's bind (TD-062); they now look after 1.5 s.
+- vesperd: firecracker_connection_limit_passes_through failed once ("connection 11 got ''") and passed on the rerun with no
+  change to anything it uses; treated as a flake, not explained.
+- workflow: BuildKit is refused by the plugin; the suite builds with DOCKER_BUILDKIT=0.
+- docker-smoke, docker-conformance: no_raw_host_sockets tripped on a socket file the egress suite's last step leaves behind.

@@ -55,7 +55,40 @@ func TestRoutes(t *testing.T) {
 	}
 }
 
+func TestBindSources(t *testing.T) {
+	old := MissingSourceOK
+	defer func() { MissingSourceOK = old }()
+	// /present exists; anything under /share may be created; the rest is missing on the System VM itself.
+	MissingSourceOK = func(p string) (bool, bool) {
+		return p == "/present" || p == "/", strings.HasPrefix(p, "/share/")
+	}
+	const uri = "/v1.51/containers/create"
+	for _, b := range []string{
+		`{"HostConfig":{"Binds":["/present:/x","/:/host:ro","/share/new/dir:/y","named:/v"]}}`,
+		`{"HostConfig":{"Mounts":[{"Type":"bind","Source":"/present","Target":"/x"},{"Type":"volume","Source":"named","Target":"/v"}]}}`,
+	} {
+		if d := decide("POST", uri, b); !d.Allow {
+			t.Errorf("create %s refused: %s", b, d.Reason)
+		}
+	}
+	for name, b := range map[string]string{
+		"missing source":       `{"HostConfig":{"Binds":["/var/lib/vesper/microvm:/m"]}}`,
+		"missing among others": `{"HostConfig":{"Binds":["/present:/x","/srv/jailer:/j:ro"]}}`,
+		"not canonical":        `{"HostConfig":{"Binds":["/present/../run/vesper/mem:/m"]}}`,
+		"trailing slash":       `{"HostConfig":{"Binds":["/run/vesper/mem/:/m"]}}`,
+		"missing bind mount":   `{"HostConfig":{"Mounts":[{"Type":"BIND","Source":"/run/vesper/mem","Target":"/m"}]}}`,
+		"lower-case binds":     `{"hostconfig":{"binds":["/run/vesper/mem:/m"]}}`,
+	} {
+		if d := decide("POST", uri, b); d.Allow {
+			t.Errorf("create with %s allowed: %s", name, b)
+		}
+	}
+}
+
 func TestCreateBody(t *testing.T) {
+	old := MissingSourceOK
+	defer func() { MissingSourceOK = old }()
+	MissingSourceOK = func(p string) (bool, bool) { return p == "/", false }
 	const uri = "/v1.51/containers/create?name=x"
 	allowed := []string{
 		`{"Image":"alpine"}`,

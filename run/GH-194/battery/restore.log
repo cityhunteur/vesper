@@ -1,22 +1,16 @@
-bash scripts/systemvm/docker-down.sh
 docker-down: stopped
-bash scripts/systemvm/down.sh
 guest acknowledged shutdown
 systemvm-down: guest acknowledged shutdown
 systemvm-down: stopped
-mkdir -p run/vesperd-share
-VESPER_SHARES="/Volumes/Workspace/github.com/cityhunteur/vesper/run/vesperd-share" bash scripts/systemvm/generate-launch-config.sh
     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.04s
      Running `target/debug/systemvmctl launch-config --from-lock --dir /Volumes/Workspace/github.com/cityhunteur/vesper/build/systemvm --console-log /Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/console.log --out /Volumes/Workspace/github.com/cityhunteur/vesper/build/systemvm/launch-config.json --share /Volumes/Workspace/github.com/cityhunteur/vesper/run/vesperd-share --data-disk /Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/data.img`
 wrote launch config: /Volumes/Workspace/github.com/cityhunteur/vesper/build/systemvm/launch-config.json (1 shared directory)
-bash scripts/systemvm/up.sh
-systemvm-up: running (pid 24854); bridge run/systemvm/vsock/3.sock; log /Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/vmlauncher.log
-{"status":"bridge-listening","elapsed_ms":93,"ready_pattern":"login:","console_log":"/Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/console.log","bridge":"run/systemvm/vsock/3.sock"}
-{"status":"ready","elapsed_ms":2888,"ready_pattern":"login:","console_log":"/Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/console.log"}
-{"status":"probe-ok","elapsed_ms":5115,"ready_pattern":"login:","console_log":"/Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/console.log"}
+systemvm-up: running (pid 61756); bridge run/systemvm/vsock/3.sock; log /Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/vmlauncher.log
+{"status":"bridge-listening","elapsed_ms":95,"ready_pattern":"login:","console_log":"/Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/console.log","bridge":"run/systemvm/vsock/3.sock"}
+{"status":"ready","elapsed_ms":2924,"ready_pattern":"login:","console_log":"/Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/console.log"}
+{"status":"probe-ok","elapsed_ms":5184,"ready_pattern":"login:","console_log":"/Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/console.log"}
 systemvm-up: MOUNTED share0 /Volumes/Workspace/github.com/cityhunteur/vesper/run/vesperd-share mode=rw
-bash scripts/systemvm/docker-up.sh
 docker-up: containers mapped: no container is root on the System VM (ADR 0010)
 docker-up: the data disk also holds a Docker store from before container remapping (volumes=6 containers=0); it is not used and not deleted
-docker-up: vesper-proxy pid 25098; DOCKER_HOST=unix:///Volumes/Workspace/github.com/cityhunteur/vesper/run/vesper/docker.sock; published ports via the guest relay (status /Volumes/Workspace/github.com/cityhunteur/vesper/run/vesper/ports.json)
-srw-------@ 1 pravin  staff  0 14 Nov 18:44 /Volumes/Workspace/github.com/cityhunteur/vesper/run/vesper/docker.sock
+docker-up: vesper-proxy pid 62011; DOCKER_HOST=unix:///Volumes/Workspace/github.com/cityhunteur/vesper/run/vesper/docker.sock; published ports via the guest relay (status /Volumes/Workspace/github.com/cityhunteur/vesper/run/vesper/ports.json)
+srw-------@ 1 pravin  staff  0 14 Nov 19:53 /Volumes/Workspace/github.com/cityhunteur/vesper/run/vesper/docker.sock

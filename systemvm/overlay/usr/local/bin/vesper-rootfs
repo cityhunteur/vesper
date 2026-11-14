@@ -76,7 +76,9 @@ build() {
   size=$(( used + used / 5 + 4096 )); [ "$size" -lt "$MIN_KB" ] && size=$MIN_KB
   uuid=$(uuid_from "$id")
   rm -f "$out.tmp"
-  if ! E2FSPROGS_FAKE_TIME=0 mke2fs -q -F -t ext4 -d "$work/root" -U "$uuid" -E hash_seed="$uuid",root_owner=0:0 -L vesper-rootfs "$out.tmp" "${size}K" >"$work/mke2fs.log" 2>&1; then
+  # mke2fs runs with umask 077, so the image is owner-only from its first byte. (Making the file first changes
+  # what mke2fs writes: the rootfs suite's reproducible rebuild caught that.)
+  if ! (umask 077; E2FSPROGS_FAKE_TIME=0 mke2fs -q -F -t ext4 -d "$work/root" -U "$uuid" -E hash_seed="$uuid",root_owner=0:0 -L vesper-rootfs "$out.tmp" "${size}K") >"$work/mke2fs.log" 2>&1; then
     echo "ERR mke2fs failed: $(tail -2 "$work/mke2fs.log" | tr '\n' ' ')"; rm -rf "$work" "$out.tmp"; return 1
   fi
   rm -rf "$work"

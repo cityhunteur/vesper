@@ -2,11 +2,11 @@ bash scripts/systemvm/docker-conformance.sh
 ok   api_ping: GET /_ping -> OK
 ok   api_version: GET /version -> 28.3.3 1.51 linux/arm64
 ok   context_management: context vesper-conformance -> server 28.3.3
-ok   images_import: sha256:c212aa0d10a32a5a6edc38bed54856c4c8944c9a106308507951e544d38753c0
+ok   images_import: sha256:4407620fe85252f2fa6dd07a89da429621a392b73023a5dc400fe142da86c252
 ok   images_list: docker images lists vesper/trivial:conf
 ok   images_inspect_arch: linux/arm64
 ok   run_exit_code_and_streams: rc=7 stdout=to-stdout stderr=to-stderr
-ok   run_detached: vc1 bda05ebf102b
+ok   run_detached: vc1 9ac28d6302ce
 ok   ps_running: vc1 Up Less than a second
 ok   exec_non_tty: output exec-ok, rc=3
 ok   stop_sigterm_propagates: stop in 1s, exit 0, logs: started got-term 

@@ -29,7 +29,7 @@ volumes that must be pulled or imported once.
 - [x] M4 (2026-11-14) Callers and the unmapped boot: `test-share-reach`, `data-disk-suite.sh` on `vesper-data
   binds|label|test-relabel`, the upstream runner's token, own data disk and saved config outside the share,
   `docker-up.sh` comparing the launch config's mode with the System VM's
-- [x] M5 (2026-11-14) `make systemvm-confine-suite`: 12 of 12 from a rebuilt overlay
+- [x] M5 (2026-11-14) `make systemvm-confine-suite`: 14 of 14 from a rebuilt overlay, after the council review's fixes
   (`run/GH-194/m5-confine-report.json`). The same overlay passes 23 other suites
   (`run/GH-194/battery/summary.txt`): sharenet, microvm, shim, workload, launchapi, vesperd, egress, bounds, exec,
   bundle, restart, rootfs, snapshot, docker-smoke, docker-conformance, ports, dns, workflow, crossarch,
@@ -115,6 +115,29 @@ it, and that a chunked create reaches the plugin without a body.
   leaks into a tree whose modes become a guest's (`vesper-microvm prepare`, `vesper-rootfs`).
 - 2026-11-14 (M3): snapshot store files change from 0444 to `root:vesperd-jail` 0440. The jail still reads them
   through its hard link and cannot change them; other uids no longer read guest memory.
+
+- 2026-11-14 (council review of M2 to M5, `run/GH-194/council-m2-m5.md`: 2 High, 8 Medium, 10 Low). Fixed before
+  merge:
+  - **High 1, a container could own a directory a root tool adopts.** dockerd creates a missing bind source for
+    container root, and `/var/lib/vesper/microvm` (the kernel and initramfs every microVM boots), `/srv/jailer` and
+    `/run/vesper/mem` were made lazily. Now `vesper-containers prepare` makes every state directory before
+    dockerd, the tools refuse one root does not own, and the plugin refuses to create a source outside a share.
+  - **High 2, old files kept their modes after an upgrade.** `prepare` sets them on every boot, and refuses the
+    boot if it cannot.
+  - Medium and Low: `docker-up` serves an unmapped boot only to the upstream runner; the vsock step requires six
+    recognised denials and the peer check has a hermetic test and fails closed under socat; images are owner-only
+    while `mke2fs` writes them; the suite disk is created 0600; the guest's own probe is the positive control for
+    the share server; probes that fail for another reason than a refusal fail the step; raw requests must get the
+    plugin's own 403; `up.sh` says why a refused boot failed; a refused boot cannot serve; `vesper-boundlog`
+    counts from the file's size; `vesper-ctr` leaves `/tmp`; jail parents are 0711; `HEALTH` no longer walks the
+    old store.
+  - Not fixed here: the share-ownership flicker (finding 7, TD-062, with the owner); a peer check and a child cap
+    on the Docker relay (finding 20); a suite config without a data disk (finding 19). Both are in TD-061.
+
+- 2026-11-14: creating the image file before `mke2fs` (to make it owner-only at once) changed the bytes `mke2fs`
+  wrote, and the rootfs suite's reproducible rebuild failed. The umask is set around `mke2fs` instead.
+- 2026-11-14: the vesperd suite's `firecracker_connection_limit_passes_through` failed once in the second battery
+  ("connection 11 got ''") and passed on a rerun with nothing it uses changed. Not explained.
 
 ## Outcomes & Retrospective
 

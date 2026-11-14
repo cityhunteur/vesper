@@ -3,8 +3,9 @@
 # managed to connect (a container without a seccomp filter can open a vsock socket) is turned away. socat sets
 # SOCAT_PEERADDR for the handler; a handler run by hand, as root, has no such variable and is not a connection.
 vsock_host_only() {
-  [ -z "${SOCAT_PEERADDR+set}" ] && return 0
-  [ "$SOCAT_PEERADDR" = 2 ] && return 0
+  # SOCAT_PID marks a handler that socat started; such a handler without a peer address is refused, not trusted.
+  [ -z "${SOCAT_PEERADDR+set}" ] && [ -z "${SOCAT_PID+set}" ] && return 0
+  [ "${SOCAT_PEERADDR:-}" = 2 ] && return 0
   echo "ERR this endpoint serves the macOS host only"
   exit 1
 }

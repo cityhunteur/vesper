@@ -259,7 +259,7 @@ share is configured by default. Semantics, recorded by `make binds-suite` (20 st
 host files appear owned by uid 0 in the guest, guest writes appear on the host owned by the sharing user, `chmod`
 round-trips, `chown` is ignored, read-only is enforced by the share flag and by `:ro`, host edits are visible on
 the next access, inotify fires for guest writes and, on watched read-write shares, for host edits (below), and a
-`-v` path outside the configured shares is a guest-local directory. `make systemvm-up-shares` boots with the three suite shares (read-write watched, read-only, read-write `:nowatch`).
+`-v` path outside the configured shares is a path in the System VM: one that exists there is bound as it is, and one that does not is refused (ADR 0010; Docker would otherwise create it for the container). `make systemvm-up-shares` boots with the three suite shares (read-write watched, read-only, read-write `:nowatch`).
 
 Host edits and inotify (GH #150). virtio-fs tells the guest kernel nothing about host-side edits, so the launcher
 watches every read-write share with FSEvents (`"watch": true` in the launch config; `PATH:nowatch` opts a share

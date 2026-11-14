@@ -135,7 +135,7 @@ pub fn run_sharenet_suite(endpoint: &ControlEndpoint, id: &str) -> SuiteReport {
     step(&mut steps, "nothing_outside_reaches_the_server_address", || {
         for port in [NFS_PORT, OTHER_PORT] {
             let (rc, l) = control.microvm(&["test-share-listen", &a, port])?;
-            if rc != 0 {
+            if rc != 0 || !first(&l).ends_with("alive=yes") {
                 return Err(format!("listener on {port}: {}", first(&l)));
             }
         }

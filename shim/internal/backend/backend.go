@@ -158,7 +158,8 @@ func mkfs(ctx context.Context, rootfs, image string) error {
 	if size < minSizeKiB {
 		size = minSizeKiB
 	}
-	cmd := exec.CommandContext(ctx, "mke2fs", "-q", "-F", "-t", "ext4", "-d", rootfs, "-L", "vesper-task", "-E", "root_owner=0:0", image, strconv.FormatInt(size, 10)+"K")
+	// mke2fs runs with umask 077, so the image is owner-only from its first byte. The shell only sets the umask.
+	cmd := exec.CommandContext(ctx, "sh", "-c", `umask 077; exec "$@"`, "sh", "mke2fs", "-q", "-F", "-t", "ext4", "-d", rootfs, "-L", "vesper-task", "-E", "root_owner=0:0", image, strconv.FormatInt(size, 10)+"K")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("mke2fs: %w: %s", err, strings.TrimSpace(string(out)))
 	}

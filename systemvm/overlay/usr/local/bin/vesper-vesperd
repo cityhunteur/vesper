@@ -157,7 +157,7 @@ ensure_dirs() { # the tmpfs side; the data-disk side is data_dirs
 data_ok() { awk -v d="$DATA" '$2 == d && $3 == "ext4" {f=1} END {exit !f}' /proc/mounts; }
 data_dirs() { # jails and store on the data disk; refused when the disk is not in use (ADR 0007 section 5)
   data_ok || return 1
-  mkdir -p "$JAILS" "$STORE" && chmod 0755 "$DATA/vesperd" "$BASE" "$JAILS" && chmod 0700 "$STORE"
+  mkdir -p "$JAILS" "$STORE" && chmod 0711 "$DATA/vesperd" "$BASE" "$JAILS" && chmod 0700 "$STORE"
 }
 lock() { exec 9>"$LOCK" && flock 9; }
 unlock() { flock -u 9 2>/dev/null; exec 9>&-; }

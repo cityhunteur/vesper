@@ -6,6 +6,6 @@ ok   run_platform_amd64: docker run --platform linux/amd64 busybox:1.37 uname -m
 ok   image_inspect_architecture: busybox:1.37: linux/amd64; alpine:3.22: linux/arm64
 ok   container_inspect_architecture: container xa-c: platform linux, image 30ecbe150909 is linux/amd64 (host arm64)
 ok   unsupported_platform_docker_error: linux/riscv64 busybox:1.37: exec /bin/uname: exec format error (vesper-arch mode: MODE riscv64 unsupported (no binfmt_misc interpreter for riscv64; su
-ok   emulated_cost_within_limit: 20k-iteration shell loop incl. container start: native 479 ms, emulated 622 ms, ratio 1.3x (limit 40x)
+ok   emulated_cost_within_limit: 20k-iteration shell loop incl. container start: native 459 ms, emulated 596 ms, ratio 1.3x (limit 40x)
 ok   native_image_untouched: alpine:3.22 still arm64
 crossarch suite: passed=true (report: /Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/crossarch-report.json)

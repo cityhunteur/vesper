@@ -49,7 +49,8 @@ committed() {
   echo "$sum $n"
 }
 
-with_lock() { mkdir -p "$DIR" && chmod 0700 "$DIR" && exec 7>"$LOCK" && flock 7; }
+# The ledger directory must be root's own: dockerd would create a missing one for a container (GH #194).
+with_lock() { mkdir -p "$DIR" && [ ! -L "$DIR" ] && [ "$(stat -c %u "$DIR")" = 0 ] && chmod 0700 "$DIR" && exec 7>"$LOCK" && flock 7; }
 
 cmd=${1:-}; shift 2>/dev/null
 case "$cmd" in

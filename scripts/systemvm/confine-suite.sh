@@ -63,13 +63,20 @@ done
 
 # --- 3. The broadest container Docker still starts is not root on the System VM --------------------------------
 ctl microvm -- cleanup "${ID}" --logs >/dev/null
-launched="$(ctl microvm -- launch "${ID}" --share-net)"
+# The guest probes the server address 8 s after boot: the positive control that the stand-in server answers its
+# own microVM, without which "closed to containers" would prove nothing.
+launched="$(ctl microvm -- launch "${ID}" --share-net --share-probe "8:tcp:${SRV}:${PORT}")"
 listening="$(ctl microvm test-share-listen "${ID}" "${PORT}")"
 REC="/run/vesper/microvm/records/${ID}"; NS="/run/vesper/microvm/netns/${ID}"; LOG="/var/log/vesper-microvm-${ID}.log"
 BROAD=(--cap-add ALL --security-opt seccomp=unconfined --security-opt apparmor=unconfined
   --security-opt systempaths=unconfined --uts=host --cgroupns=host --device /dev/kvm --device /dev/vsock -v /:/host)
 # One line per attempt: GOT when the command succeeded (the container did what it must not), NO when it failed.
-PROBE='p() { if out=$(sh -c "$1" 2>&1); then echo "GOT $1 :: $(printf "%s" "$out" | head -c 80 | tr "\n" " ")"; else echo "NO $1"; fi; }
+PROBE='p() { # NO: refused by the kernel or a daemon. GOT: it worked. ODD: it failed for another reason, which proves nothing.
+  if out=$(sh -c "$1" 2>&1); then echo "GOT $1 :: $(printf "%s" "$out" | head -c 80 | tr "\n" " ")"; return; fi
+  case "$out" in *"ermission denied"*|*"not permitted"*|*"Read-only file system"*) echo "NO $1" ;;
+    *) echo "ODD $1 :: $(printf "%s" "$out" | tail -c 120 | tr "\n" " ")" ;; esac; }
+closed() { if sh -c "$1" >/dev/null 2>&1; then echo "GOT $1"; else echo "NO $1"; fi; }
+cat /host/etc/hostname >/dev/null 2>&1 && echo "CONTROL the System VM is bound at /host"
 p "cat /host'"${REC}"'"
 p "cat /host'"${LOG}"'"
 p "cat /host/var/log/vesper-authz.log"
@@ -79,7 +86,7 @@ p "ls /host/var/lib/vesper/workloads"
 p "ls /host/srv/jailer"
 p "cat /host/etc/shadow"
 p "nsenter --net=/host'"${NS}"' true"
-p "nc -z -w 2 '"${SRV} ${PORT}"'"
+closed "nc -z -w 2 '"${SRV} ${PORT}"'"
 p "head -c1 /host/dev/vda"
 p "head -c0 /host/dev/kvm"
 p "head -c0 /dev/kvm"
@@ -91,19 +98,20 @@ p "chroot /host /sbin/modprobe nbd"
 p "hostname confine-pwned"
 p "mkdir /host/sys/fs/cgroup/confine-pwned"
 p "mknod /tmp/vda b 253 0"'
-if case "${launched}" in *"LAUNCHED ${ID} "*) true ;; *) false ;; esac && case "${listening}" in *"LISTEN ${ID} tcp=${SRV}:${PORT}"*) true ;; *) false ;; esac; then
+if case "${launched}" in *"LAUNCHED ${ID} "*) true ;; *) false ;; esac && case "${listening}" in *"LISTEN ${ID} tcp=${SRV}:${PORT} alive=yes"*) true ;; *) false ;; esac \
+  && ctl microvm status "${ID}" | grep -q "RUNNING ${ID} .*sharenet=present" && [ -n "$(ctl microvm log "${ID}" 1)" ]; then # the record, namespace and log exist
   out="$("${DOCKER}" run --rm "${BROAD[@]}" "${IMAGE}" sh -c "${PROBE}" 2>&1)"
-  got="$(printf '%s\n' "${out}" | grep '^GOT ' | tr '\n' ';')"; n="$(printf '%s\n' "${out}" | grep -c '^NO ')"
-  [ -z "${got}" ] && [ "${n}" = 21 ] && record broadest_container_is_not_root true "${n} attempts failed with ${BROAD[*]}: root-only record, console log, plugin and Docker logs, share namespace, share server ${SRV}:${PORT}, disk, kvm, vsock, Docker and containerd sockets, modprobe, hostname, cgroup, mknod" \
-    || record broadest_container_is_not_root false "${n} of 21 failed; succeeded: ${got:-none}; output: $(printf '%s' "${out}" | tail -3)"
-  # The fixture is real: root in the System VM does reach the stand-in server inside the namespace.
+  got="$(printf '%s\n' "${out}" | grep '^GOT \|^ODD ' | tr '\n' ';')"; n="$(printf '%s\n' "${out}" | grep -c '^NO ')"
+  [ -z "${got}" ] && [ "${n}" = 21 ] && printf '%s\n' "${out}" | grep -q '^CONTROL ' && record broadest_container_is_not_root true "${n} attempts failed with ${BROAD[*]}: root-only record, console log, plugin and Docker logs, share namespace, share server ${SRV}:${PORT}, disk, kvm, vsock, Docker and containerd sockets, modprobe, hostname, cgroup, mknod" \
+    || record broadest_container_is_not_root false "${n} of 21 refused; succeeded or failed for another reason: ${got:-none}; output: $(printf '%s' "${out}" | tail -3)"
   reach="$(ctl microvm test-share-reach "${PORT}")"
+  guest=""; for _ in $(seq 1 40); do guest="$(ctl microvm log "${ID}" 200 | grep -a 'VESPER-PROBE ' | tr -d '\r' | tail -1)"; [ -n "${guest}" ] && break; sleep 1; done
   out="$("${DOCKER}" run --rm -v "${LOG}:/x:ro" "${IMAGE}" cat /x 2>&1)"; rc1=$?
   out2="$("${DOCKER}" run --rm -v "${REC}:/x:ro" "${IMAGE}" cat /x 2>&1)"; rc2=$?
   [ "${rc1}" != 0 ] && [ "${rc2}" != 0 ] && record single_file_binds_unreadable true "a console log and a launch record bound as single files: cat failed (rc ${rc1}, ${rc2}): $(printf '%s' "${out}" | head -1)" \
     || record single_file_binds_unreadable false "console log rc ${rc1}: ${out}; record rc ${rc2}: ${out2}"
-  case "${reach}" in *"REACH container-bridge closed"*"REACH container-host refused"*) record share_server_closed_to_containers true "$(printf '%s' "${reach}" | tr '\n' ';')" ;;
-    *) record share_server_closed_to_containers false "$(printf '%s' "${reach}" | tr '\n' ';')" ;; esac
+  case "${guest}:${reach}" in *"VESPER-PROBE tcp:${SRV}:${PORT} open"*":"*"REACH container-bridge closed"*"REACH container-host refused"*) record share_server_closed_to_containers true "the microVM's own guest: ${guest#*VESPER-PROBE }; $(printf '%s' "${reach}" | tr '\n' ';')" ;;
+    *) record share_server_closed_to_containers false "guest: ${guest:-no probe line}; $(printf '%s' "${reach}" | tr '\n' ';')" ;; esac
 else
   record broadest_container_is_not_root false "fixture: launch: $(printf '%s' "${launched}" | tail -1); listen: ${listening}"
 fi
@@ -115,7 +123,11 @@ out="$("${DOCKER}" run --rm "${BROAD[@]}" "${IMAGE}" sh -c '
     r=$(printf "PING\nGET /_ping HTTP/1.0\r\n\r\n" | chroot /host timeout 4 socat -T3 - VSOCK-CONNECT:$c:$port 2>&1 | grep -v "W open" | sed "s/^[0-9/: ]*socat\[[0-9]*\] //" | head -c 160 | tr "\n" " ")
     echo "cid $c port $port: $r"
   done; done' 2>&1)"
-if printf '%s' "${out}" | grep -q 'VESPER-AGENT\|PONG\|HTTP/1'; then record vsock_listeners_serve_the_host_only false "${out}"; else record vsock_listeners_serve_the_host_only true "${out}"; fi
+vrc=$?
+# Six connects, each ended by the transport: reset by the macOS host (no listener there), or no device for the
+# System VM's own CID. A container that failed to start, or any answer from a listener, fails the step.
+den="$(printf '%s\n' "${out}" | grep -c '^cid [0-9]* port [0-9]*: E connect.*\(Connection reset by peer\|No such device\|Connection refused\|Permission denied\)')"
+if [ "${vrc}" = 0 ] && [ "${den}" = 6 ] && ! printf '%s' "${out}" | grep -q 'VESPER-AGENT\|PONG\|HTTP/1'; then record vsock_listeners_serve_the_host_only true "${out}"; else record vsock_listeners_serve_the_host_only false "rc ${vrc}, ${den} of 6 denied: ${out}"; fi
 
 # --- 5. The plugin refuses what it cannot read and what it does not list ----------------------------------------
 out="$(python3 -I "${ROOT_DIR}/scripts/systemvm/confine-requests.py" "${SOCKET}" "${IMAGE}" 2>&1)"; rc=$?
@@ -127,6 +139,25 @@ o3="$("${DOCKER}" run --rm --mount 'type=volume,dst=/v,volume-driver=local,volum
 o4="$("${DOCKER}" volume create confine-vol 2>&1)" || bad="${bad} plain-volume-refused"
 [ -z "${bad}" ] && record driver_options_and_runtimes_refused true "volume options: ${o}; runtime: $(printf '%s' "${o2}" | head -1); a plain volume is created" \
   || record driver_options_and_runtimes_refused false "wrong:${bad}; ${o}; ${o2}; ${o3}; ${o4}"
+
+# --- 5b. dockerd never creates a directory for a container on the System VM's own filesystems ------------------
+SHARE="$(python3 -c 'import json,sys
+print(next((s["host_path"] for s in json.load(open(sys.argv[1])).get("shared_directories", []) if not s.get("read_only")), ""))' "${CFG}")"
+o1="$("${DOCKER}" run --rm -v /var/lib/vesper/confine-missing:/m "${IMAGE}" true 2>&1)"; r1=$?
+o2="$("${DOCKER}" run --rm -v /run/vesper/mem:/m "${IMAGE}" sh -c 'touch /m/x' 2>&1)"; r2=$?
+o3="$("${DOCKER}" run --rm -v /var/lib/vesper/microvm:/m "${IMAGE}" sh -c 'touch /m/Image' 2>&1)"; r3=$?
+r4=0; o4="no read-write share in the launch config"
+if [ -n "${SHARE}" ]; then
+  new="${SHARE}/confine-new-$$"; rm -rf "${new:?}"
+  o4="$("${DOCKER}" run --rm -v "${new}/sub:/m" "${IMAGE}" sh -c 'echo made > /m/f && cat /m/f' 2>&1)"; r4=$?
+  [ "${o4}" = made ] && [ -f "${new}/sub/f" ] || r4=1
+  rm -rf "${new:?}"
+fi
+if [ "${r1}" = 125 ] && case "${o1}" in *"does not exist"*) true ;; *) false ;; esac && [ "${r2}" != 0 ] && [ "${r3}" != 0 ] && [ "${r4}" = 0 ]; then
+  record no_directory_made_for_a_container true "a missing System VM path is refused ($(printf '%s' "${o1}" | sed 's/.*vesper: //' | head -c 90)); /run/vesper/mem and /var/lib/vesper/microvm exist, root-owned, and a container cannot write there (rc ${r2}, ${r3}); a missing directory inside a share is created (${o4})"
+else
+  record no_directory_made_for_a_container false "missing rc ${r1}: ${o1}; mem rc ${r2}: ${o2}; microvm rc ${r3}: ${o3}; share rc ${r4}: ${o4}"
+fi
 
 # --- 6. Cost of the plugin on every call ------------------------------------------------------------------------
 ms="$(python3 -I -c 'import subprocess, sys, time
@@ -157,6 +188,7 @@ fi
 if [ "${CONFINE_REBOOT:-1}" = 1 ]; then
   cleanup_fixture() { ctl microvm test-share-listen "${ID}" stop >/dev/null; ctl microvm -- cleanup "${ID}" --logs >/dev/null; }
   cleanup_fixture
+  planted="$(ctl containers test-legacy plant)"
   cp "${CFG}" "${SAVED}"
   python3 -I -c 'import json, sys
 c = json.load(open(sys.argv[1]))
@@ -165,10 +197,10 @@ json.dump(c, open(sys.argv[1], "w"), indent=2)' "${CFG}"
   bash scripts/systemvm/docker-down.sh >/dev/null 2>&1; bash scripts/systemvm/down.sh >/dev/null 2>&1
   # dockerd does not start, so the launcher's boot probe fails and `make systemvm-up` fails with it. The System
   # VM's console says why.
-  up="$(bash scripts/systemvm/up.sh 100 2>&1 | tail -1)"; uprc=$?
+  upout="$(bash scripts/systemvm/up.sh 100 2>&1)"; uprc=$?; up="$(printf '%s' "${upout}" | grep 'did not start Docker' | head -1)"
   con="${ROOT_DIR}/run/systemvm/console.log"
   why="$(grep -a 'vesper: CONTAINERS ' "${con}" | tail -1 | tr -d '\r')"
-  if [ "${uprc}" != 0 ] && [ "${why}" = "vesper: CONTAINERS refused disk-is-mapped:boot-asked-unmapped" ] && ! grep -aq 'vesper: service docker started' "${con}"; then
+  if [ "${uprc}" != 0 ] && [ "${why}" = "vesper: CONTAINERS refused disk-is-mapped:boot-asked-unmapped" ] && ! grep -aq 'vesper: service docker started' "${con}" && [ -n "${up}" ]; then
     record mapped_disk_refuses_unmapped_boot true "console: ${why}; dockerd was not started; systemvm-up failed (rc ${uprc}): ${up}"
   else
     record mapped_disk_refuses_unmapped_boot false "console: ${why:-no CONTAINERS line}; systemvm-up rc ${uprc}: ${up}"
@@ -180,6 +212,10 @@ json.dump(c, open(sys.argv[1], "w"), indent=2)' "${CFG}"
   map="$("${DOCKER}" run --rm "${IMAGE}" cat /proc/self/uid_map 2>&1 | tr -s ' ')"
   [ "${map}" = " 0 100000 65536" ] && case "${up}" in *"containers mapped"*) true ;; *) false ;; esac \
     && record next_normal_boot_is_mapped true "${up}; uid_map:${map}" || record next_normal_boot_is_mapped false "${up}; uid_map:${map}"
+  # Files that an older build left world-readable on the data disk are closed at boot, before dockerd starts.
+  legacy="$(ctl containers test-legacy check)"
+  case "${planted}:${legacy}" in *PLANTED*":"*"LEGACY image=600 snapshot=440:0:20000"*) record old_files_closed_at_boot true "planted an image 0644 and a snapshot 0444 root:root; after the reboot: ${legacy}" ;;
+    *) record old_files_closed_at_boot false "${planted}; ${legacy}" ;; esac
 fi
 
 passed=true; for s in "${steps[@]}"; do case "$s" in *'"ok":false'*) passed=false ;; esac; done

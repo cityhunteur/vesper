@@ -198,7 +198,11 @@ test_share_listen() { # ID PORT | ID stop: a TCP listener on the server address 
   setsid nsenter --net="$NETNS/$id" socat "TCP-LISTEN:$2,bind=$SHARE_SRV,fork,reuseaddr" SYSTEM:'echo vesper-share' < /dev/null > /dev/null 2>&1 &
   echo "$! $(cat "$pf" 2>/dev/null)" > "$pf"
   sleep 0.3
-  echo "LISTEN $id tcp=$SHARE_SRV:$2"
+  # Say whether the listener is still running: a suite that finds the address closed must not be looking at a
+  # listener that never started. (The namespace accepts connections from the tap only, so only the guest can show
+  # that the listener answers; the suites read the guest's own probe for that.)
+  if kill -0 "$!" 2>/dev/null; then r=yes; else r=no; fi
+  echo "LISTEN $id tcp=$SHARE_SRV:$2 alive=$r"
 }
 test_share_reach() { # PORT [OTHER_ID]: can anything outside a namespace reach the server address? REACH <from> open|closed
   digits "${1:-}" || { echo "ERR usage: test-share-reach PORT [OTHER_ID]"; return 2; }
@@ -265,6 +269,9 @@ reap_loop() { # INTERVAL: what the vesper-microvm-reaper service runs
 }
 
 prepare() {
+  # The kernel and initramfs every microVM boots come from $MVM. It must be root's own directory: dockerd would
+  # create a missing one for a container, which could then plant them (GH #194).
+  mkdir -p "$MVM" && [ ! -L "$MVM" ] && [ "$(stat -c %u "$MVM")" = 0 ] || { echo "ERR $MVM is not a root-owned directory"; return 1; }
   umask 022 # the initramfs tree keeps ordinary modes: they become the guest's (runs in a subshell or as the last act)
   mkdir -p "$MVM"
   if [ ! -f "$MVM/Image" ]; then

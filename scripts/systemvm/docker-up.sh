@@ -44,6 +44,10 @@ print("unmapped" if "vesper.containers=unmapped" in c.split() else "mapped")' "$
     echo "docker-up: the launch config asks for ${want} containers but the System VM reports ${got}; not serving Docker" >&2
     return 1
   fi
+  if [ "${got}" = unmapped ] && [ "${VESPER_ALLOW_UNMAPPED:-0}" != 1 ]; then
+    echo "docker-up: this boot runs unmapped containers (a container can be root on the System VM), which only the upstream suite's runner may serve. An interrupted run leaves this behind: restore build/systemvm/launch-config.upstream-saved.json over build/systemvm/launch-config.json, or run make systemvm-prepare, then make systemvm-down systemvm-up docker-up" >&2
+    return 1
+  fi
   if [ "${got}" = unmapped ]; then
     echo "docker-up: containers unmapped: this boot is for the upstream Firecracker suite only; a container can be root on the System VM (ADR 0010)"
   else
