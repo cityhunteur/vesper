@@ -122,6 +122,18 @@ microVM, can reach the file server or another microVM's export.
   microVM's; #160 closes only with the event hop. One finding was out of date: `vesper-memadmit` exists since W4.
   The report is a working paper (`run/` is not tracked); its conclusions are here and in the ADR.
 - 2026-11-13: the owner accepted ADR 0009 with those fixes (D-032). M1 can start.
+- 2026-11-14 (M2 council review, no blocker, 2 Medium, 11 Low): (1) the lock covered only the record and the
+  namespace, so a reaper pass could give back a new launch's memory admission; every launch now holds the lock from
+  its already-running check to its namespace, clears an earlier run's record and namespace first, and `cleanup`
+  takes the lock. (2) A process with the shim's name on its command line could hold the reaper off an orphan; a
+  shim now counts by its binary's device and inode and an exact `-id`, and a Firecracker by its cgroup. Also fixed:
+  the reaper logs errors and prints `KEPT` for a removal that was not clean; `cleanup` validates the id and the
+  socket check treats `-` as part of a word; the record write is checked; `launch --share-net` waits for the
+  guest's interface; the `sharenet` sensor cannot report `fc_in_ns=yes` from two empty reads. Three suite steps
+  were added. Left as TD-060: the jailer pid in `launch`, and pruning reaped microVMs' logs.
+- 2026-11-14: a container given the System VM's root (`--privileged` with a host bind mount or the host pid
+  namespace) can enter any namespace there. That is outside ADR 0009's threat table, which covers containers
+  confined by runc; such a container already reads every share directly. `docs/SECURITY.md` states the boundary.
 - 2026-11-14 (owner, D-033): the dependency closure of `unfs3` is approved as listed in Surprises, and the sandbox
   tool is util-linux `setpriv`, because one tool covers both the non-root server and the root fallback with a
   reduced bounding set. `su-exec` covers only the first; a helper of our own would be new privileged code.

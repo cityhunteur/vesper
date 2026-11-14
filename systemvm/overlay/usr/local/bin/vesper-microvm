@@ -37,7 +37,14 @@ MARKER="VESPER-MICROVM-OK"
 
 # The jailer execs the binary by its chroot-relative name, so match on "firecracker --id <ID> ". The uid filter
 # keeps the shim's lookups off vesperd microVMs, which run as uid 20000 and may use the same id (ADR 0007).
-fcpid() { pgrep -u "$JUID" -f "firecracker --id $1 " 2>/dev/null | head -1; }
+# A match must also sit in the microVM's own cgroup (the jailer puts it there before it execs): a container process
+# run as uid 10000 with a look-alike command line is in Docker's cgroup, so it can neither pass for a microVM nor
+# hold the reaper off one.
+fcpid() {
+  for fp in $(pgrep -u "$JUID" -f "firecracker --id $1 " 2>/dev/null); do
+    grep -q "^0::.*/firecracker/$1\$" "/proc/$fp/cgroup" 2>/dev/null && { echo "$fp"; return 0; }
+  done
+}
 now_ms() { awk '{printf "%d", $1 * 1000}' /proc/uptime; }
 logfile() { echo "/var/log/vesper-microvm-$1.log"; }
 # memory.max of each microVM, counted in the shared budget (TD-056): the 256 MiB guest plus 96 MiB for Firecracker,
@@ -70,8 +77,12 @@ LAUNCHING=""                       # the id whose launch must be undone if this 
 
 digits() { case "${1:-}" in ''|*[!0-9]*) return 1 ;; esac; }
 valid_id() { case "${1:-}" in ''|*[!A-Za-z0-9-]*) return 1 ;; esac; [ "${#1}" -le 64 ]; }
-lock() { mkdir -p "$STATE" && exec 9>"$LOCK" && flock 9; }
-unlock() { flock -u 9 2>/dev/null; exec 9>&-; }
+# One lock serialises launch (from the already-running check to the namespace), cleanup and the reaper, so none of
+# them acts on a half-made or half-removed microVM of the same id. The boot itself runs outside it. LOCKED lets
+# cleanup be called by a function that already holds the lock (reap, launch's failure paths, an interrupted launch).
+LOCKED=0
+lock() { mkdir -p "$STATE" && exec 9>"$LOCK" && flock 9 && LOCKED=1; }
+unlock() { flock -u 9 2>/dev/null; exec 9>&-; LOCKED=0; }
 proc_stat() { # PID -> "<state> <starttime>" from /proc/PID/stat (fields 3 and 22); fails when absent
   digits "${1:-}" || return 1
   ps_s=$(cat "/proc/$1/stat" 2>/dev/null) || return 1
@@ -85,8 +96,17 @@ proc_alive() { # PID START -> 0 when PID runs and started at START (a reused pid
   pa=$(proc_stat "${1:-}") || return 1
   [ "${pa% *}" != Z ] && [ "${pa#* }" = "${2:-}" ]
 }
-# The shim serving a task (its command line names the task id); a stopped task's shim may still need the jail.
-shim_for() { pgrep -f "containerd-shim-vesper-v2 .*-id $1( |\$)" 2>/dev/null | head -1; }
+# The shim serving a task; a stopped task's shim may still need the jail. A process counts only when it runs the
+# System VM's own shim binary (same device and inode as /usr/bin/containerd-shim-vesper-v2, so a container's copy or
+# a look-alike command line does not) and its arguments hold "-id" followed by exactly the task id.
+SHIM_BIN=/usr/bin/containerd-shim-vesper-v2
+shim_for() {
+  sf_want=$(stat -L -c %d:%i "$SHIM_BIN" 2>/dev/null) || return 0
+  for sf in $(pgrep -f "containerd-shim-vesper-v2 " 2>/dev/null); do
+    [ "$(stat -L -c %d:%i "/proc/$sf/exe" 2>/dev/null)" = "$sf_want" ] || continue
+    tr '\0' '\n' < "/proc/$sf/cmdline" 2>/dev/null | grep -x -A1 -e '-id' | tail -n 1 | grep -qx -e "$1" && { echo "$sf"; return 0; }
+  done
+}
 setup_user() {
   grep -q "^$JUSER:" /etc/group || addgroup -S -g "$JGID" "$JUSER" || { echo "ERR addgroup $JUSER"; return 1; }
   grep -q "^$JUSER:" /etc/passwd || adduser -S -D -H -u "$JUID" -G "$JUSER" -s /sbin/nologin -h / -g "vesper shim jail" "$JUSER" \
@@ -122,11 +142,13 @@ sharenet() { # ID: what the namespace holds, for the suites and for diagnosis
   input=$(printf '%s\n' "$rules" | sed -n 's/^-P INPUT //p'); forward=$(printf '%s\n' "$rules" | sed -n 's/^-P FORWARD //p')
   nrules=$(printf '%s\n' "$rules" | grep -c '^-A ')
   in_ns=no; pid=$(fcpid "$id")
-  [ -n "$pid" ] && [ "$(stat -L -c %i "/proc/$pid/ns/net" 2>/dev/null)" = "$(stat -L -c %i "$f" 2>/dev/null)" ] && in_ns=yes
+  ns_a=""; [ -n "$pid" ] && ns_a=$(stat -L -c %i "/proc/$pid/ns/net" 2>/dev/null); ns_b=$(stat -L -c %i "$f" 2>/dev/null)
+  [ -n "$ns_a" ] && [ "$ns_a" = "$ns_b" ] && in_ns=yes
   echo "SHARENET $id links=${links:-none} addr=${addr:-none} owner=${owner:-none} routes=$routes default=$default input=${input:-?} forward=${forward:-?} rules=$nrules fc_in_ns=$in_ns"
 }
-launch_abort() { # INT, TERM or HUP during a --share-net launch: undo it; the reaper covers a SIGKILL
+launch_abort() { # INT, TERM or HUP during a launch: undo it; the reaper covers a SIGKILL of a --share-net launch
   [ -n "$LAUNCHING" ] && cleanup "$LAUNCHING" > /dev/null 2>&1
+  [ "$LOCKED" = 1 ] && unlock
   exit 1
 }
 reap() { # one pass under the lock launch takes
@@ -135,20 +157,26 @@ reap() { # one pass under the lock launch takes
   for r in "$REC"/*; do
     [ -f "$r" ] || continue
     rid=${r##*/}
+    valid_id "$rid" || continue
     rp=$(sed -n 's/^pid=\([0-9]*\) .*/\1/p' "$r"); rs=$(sed -n 's/.* start=\([0-9]*\) .*/\1/p' "$r"); rt=$(sed -n 's/.* t=\([0-9]*\)$/\1/p' "$r")
     [ -n "$(fcpid "$rid")" ] && continue
     proc_alive "$rp" "$rs" && continue
     [ -n "$(shim_for "$rid")" ] && continue
     digits "$rt" && [ $((now - rt)) -lt "$REAP_GRACE" ] && [ $((now - rt)) -ge 0 ] && continue
-    echo "REAPED $rid $(cleanup "$rid" | head -1)"; reaped=$((reaped + 1))
+    out=$(cleanup "$rid" | head -1)
+    # Only a clean removal counts; anything else is tried again on the next pass and shows in the log meanwhile.
+    if [ "$out" = "CLEAN $rid" ]; then echo "REAPED $rid $out"; reaped=$((reaped + 1)); else echo "KEPT $rid $out"; fi
   done
   # launch writes the record first, so a namespace without one is not a launch in progress.
   for f in "$NETNS"/*; do
     [ -e "$f" ] || continue
     nid=${f##*/}
+    valid_id "$nid" || continue
     [ -f "$REC/$nid" ] && continue
     [ -n "$(fcpid "$nid")" ] && continue
-    vnetns_down "$NETNS" "$nid"; echo "REAPED $nid namespace without a record"; reaped=$((reaped + 1))
+    vnetns_down "$NETNS" "$nid"
+    if [ -e "$f" ]; then echo "KEPT $nid namespace without a record, still bound"
+    else echo "REAPED $nid namespace without a record"; reaped=$((reaped + 1)); fi
   done
   unlock
   echo "REAP $reaped"
@@ -190,6 +218,23 @@ test_age() { # ID SECONDS: make ID's record that much older (the reaper's grace 
   t=$(sed -n 's/.* t=\([0-9]*\)$/\1/p' "$REC/$id")
   sed -i "s/ t=[0-9]*\$/ t=$((t - $2))/" "$REC/$id" && echo "AGED $id $(cat "$REC/$id")"
 }
+test_drop_record() { # ID: remove ID's record and keep its namespace (a state launch cannot leave)
+  id=${1:-}; valid_id "$id" && [ -f "$REC/$id" ] || { echo "ERR usage: test-drop-record ID (with a record)"; return 2; }
+  rm -f "$REC/$id" && echo "DROPPED $id namespace=$(vnetns_mounted "$NETNS" "$id" && echo bound || echo missing)"
+}
+test_impostor() { # ID | stop: a process that is not the shim but whose command line names it and ID
+  pf="$STATE/test-impostor"
+  if [ "${1:-}" = stop ]; then
+    # shellcheck disable=SC2046
+    [ -f "$pf" ] && kill $(cat "$pf") 2>/dev/null; rm -f "$pf"; echo "IMPOSTOR stopped"; return 0
+  fi
+  valid_id "${1:-}" || { echo "ERR usage: test-impostor ID|stop"; return 2; }
+  mkdir -p "$STATE"
+  setsid sh -c 'sleep 300; :' "containerd-shim-vesper-v2 -namespace vesper -id $1 -address x" < /dev/null > /dev/null 2>&1 &
+  echo "$!" > "$pf"
+  sleep 0.2
+  echo "IMPOSTOR $1 pid=$(cat "$pf") pgrep=$(pgrep -f "containerd-shim-vesper-v2 .*-id $1" | wc -l | tr -d ' ') shim_for=$(shim_for "$1")"
+}
 test_abort_launch() { # ID: a --share-net launch killed (SIGKILL) just after its namespace exists; what the reaper must clear
   id=${1:-}; valid_id "$id" || { echo "ERR bad id"; return 2; }
   setup_user > /dev/null && mkdir -p "$REC" && lock || { echo "ERR setup"; return 1; }
@@ -202,7 +247,8 @@ test_abort_launch() { # ID: a --share-net launch killed (SIGKILL) just after its
 }
 reap_loop() { # INTERVAL: what the vesper-microvm-reaper service runs
   digits "${1:-}" && [ "$1" -ge 1 ] || { echo "ERR usage: reap-loop SECONDS"; return 2; }
-  while :; do reap 2>&1 | grep '^REAPED' | logger -t vesper-microvm-reaper; sleep "$1"; done
+  # Everything but the count goes to syslog: what was reaped, what was kept and why, and any error of the pass.
+  while :; do reap 2>&1 | grep -v '^REAP [0-9]*$' | logger -t vesper-microvm-reaper; sleep "$1"; done
 }
 
 prepare() {
@@ -278,7 +324,6 @@ launch() {
   done
   prep=$(prepare) || { echo "$prep"; return 1; }
   if [ -n "$rootfs" ] && [ ! -f "$rootfs" ]; then echo "ERR rootfs $rootfs missing"; return 1; fi
-  if [ -n "$(fcpid "$id")" ]; then echo "ERR $id already running"; return 1; fi
   # Every check that can refuse the request comes before the memory admission, so a bad request takes nothing.
   if [ "$runc_smoke" = 1 ]; then
     [ -n "$rootfs" ] && [ -z "$cmd64" ] && [ -z "$mode" ] || { echo "ERR --runc-smoke needs --rootfs and excludes --cmd/--exit"; return 2; }
@@ -298,21 +343,33 @@ launch() {
   # the cgroup: book them with the ceiling.
   copies=0
   for f in "$MVM/Image" "$MVM/initrd.gz" ${rootfs:+"$rootfs"}; do s=$(stat -c %s "$f" 2>/dev/null) && copies=$((copies + s)); done
-  adm=$(/usr/local/bin/vesper-memadmit acquire shim "$id" $((CEILING + copies))) || { echo "$adm" | head -1; return 1; }
+  # From here to the namespace the launch holds the lifecycle lock, so a reaper pass or a cleanup of the same id
+  # cannot run in between and give back this launch's admission or remove its jail.
+  trap launch_abort INT TERM HUP
+  lock || { echo "ERR lifecycle lock"; return 1; }
+  if [ -n "$(fcpid "$id")" ]; then unlock; echo "ERR $id already running"; return 1; fi
+  # What an earlier run of this id left (a record, a namespace) goes first, whichever kind of launch this is.
+  if [ -e "$REC/$id" ] || [ -e "$NETNS/$id" ]; then
+    old=$(cleanup "$id") || { unlock; echo "ERR $id: leftovers of an earlier run: $old"; return 1; }
+  fi
+  adm=$(/usr/local/bin/vesper-memadmit acquire shim "$id" $((CEILING + copies))) || { unlock; echo "$adm" | head -1; return 1; }
+  LAUNCHING=$id
   nsarg=""; netcfg=""
   if [ "$sharenet" = 1 ]; then
-    # The record comes first, under the lock, so the reaper never takes a half-made namespace for an orphan. The lock
-    # covers the record and the namespace only, not the boot.
-    trap launch_abort INT TERM HUP
-    made=$(setup_user) && mkdir -p "$REC" && lock || { echo "ERR share network: ${made:-setup}"; cleanup "$id" > /dev/null; return 1; }
-    LAUNCHING=$id
-    echo "pid=$$ start=$(proc_stat $$ | cut -d' ' -f2) t=$(date +%s)" > "$REC/$id"
-    why=$(sharenet_up "$id"); src=$?
-    unlock
-    [ "$src" = 0 ] || { echo "ERR share network: $why"; cleanup "$id" > /dev/null; LAUNCHING=""; return 1; }
+    # The record comes before the namespace, so the reaper never takes a half-made namespace for an orphan.
+    why=""
+    made=$(setup_user) || why="user: $made"
+    [ -z "$why" ] && { mkdir -p "$REC" || why="record directory"; }
+    [ -z "$why" ] && { echo "pid=$$ start=$(proc_stat $$ | cut -d' ' -f2) t=$(date +%s)" > "$REC/$id" && [ -s "$REC/$id" ] || why="record not written"; }
+    [ -z "$why" ] && { why=$(sharenet_up "$id") && why=""; }
+    if [ -n "$why" ]; then
+      cleanup "$id" > /dev/null; unlock; LAUNCHING=""
+      echo "ERR share network: $why"; return 1
+    fi
     nsarg="--netns $NETNS/$id"
     netcfg=",\"network-interfaces\":[{\"iface_id\":\"$SHARE_TAP\",\"host_dev_name\":\"$SHARE_TAP\",\"guest_mac\":\"06:00:a9:fe:4d:02\"}]"
   fi
+  unlock
   root="$JAIL/firecracker/$id/root"
   rm -rf "$JAIL/firecracker/$id"
   mkdir -p "$root"
@@ -358,11 +415,14 @@ launch() {
     --chroot-base-dir "$JAIL" --cgroup-version 2 --cgroup pids.max=256 --cgroup "memory.max=$CEILING" \
     -- --config-file /vm.json --api-sock /run/firecracker.socket \
     > "$pipe" 2>&1 < /dev/null &
+  # With a share network the guest must also report its interface up (it prints that after the marker).
+  ready() { grep -q "$MARKER" "$lf" && { [ "$sharenet" = 0 ] || grep -q "VESPER-SHARE-NET-OK" "$lf"; }; }
   for _ in $(seq 1 120); do
-    grep -q "$MARKER" "$lf" && break
+    ready && break
+    grep -q "VESPER-SHARE-NET-FAILED" "$lf" && break
     sleep 0.25
   done
-  if grep -q "$MARKER" "$lf"; then
+  if ready; then
     end=$(now_ms)
     LAUNCHING=""
     echo "LAUNCHED $id pid=$(fcpid "$id") boot_ms=$((end - start))"
@@ -424,7 +484,15 @@ crash() {
   echo "CRASHED $id pid=$pid"
 }
 
-cleanup() {
+cleanup() { # ID [--logs]: under the lifecycle lock, taken here unless the caller holds it
+  valid_id "${1:-}" || { echo "ERR bad id"; return 2; }
+  if [ "$LOCKED" = 1 ]; then cleanup_locked "$@"; return $?; fi
+  lock || { echo "ERR lifecycle lock"; return 1; }
+  cleanup_locked "$@"; crc=$?
+  unlock
+  return $crc
+}
+cleanup_locked() {
   id=$1; pid=$(fcpid "$id")
   [ -n "$pid" ] && { kill -KILL "$pid" 2>/dev/null; sleep 0.5; }
   rm -rf "$JAIL/firecracker/$id"
@@ -443,10 +511,10 @@ cleanup() {
   [ -e "$JAIL/firecracker/$id" ] && dirty="$dirty chroot"
   [ -d "/sys/fs/cgroup/firecracker/$id" ] && dirty="$dirty cgroup"
   grep -q "/firecracker/$id/" /proc/mounts 2>/dev/null && dirty="$dirty mount"
-  # A socket named after the id, as a whole word: a bare substring also matched other tasks' sockets (containerd
+  # A socket named after the id, as a whole word (ids are letters, digits and hyphens): a bare substring also matched other tasks' sockets (containerd
   # names shim sockets by a hex digest, which often contains a short id such as "ca"), and the false DIRTY kept the
   # memory admitted for another 30 s.
-  find /run -type s 2>/dev/null | sed 's|.*/||' | grep -Eq "(^|[^A-Za-z0-9])$id([^A-Za-z0-9]|\$)" && dirty="$dirty socket"
+  find /run -type s 2>/dev/null | sed 's|.*/||' | grep -Eq "(^|[^A-Za-z0-9-])$id([^A-Za-z0-9-]|\$)" && dirty="$dirty socket"
   # The memory stays admitted while anything of the microVM is left (D-029); vesper-memadmit drops a DIRTY entry
   # itself once the cgroup and jail are gone.
   if [ -z "$dirty" ]; then rm -f "$REC/$id"; /usr/local/bin/vesper-memadmit release shim "$id" 2>/dev/null; echo "CLEAN $id"
@@ -473,5 +541,7 @@ case "$cmd" in
   test-share-reach) test_share_reach "$@" ;;
   test-age) test_age "$@" ;;
   test-abort-launch) test_abort_launch "$@" ;;
+  test-drop-record) test_drop_record "$@" ;;
+  test-impostor) test_impostor "$@" ;;
   *) echo "ERR usage: vesper-microvm prepare|launch|status|isolation|stop|crash|cleanup|log|sharenet|reap|setup-user"; exit 2 ;;
 esac

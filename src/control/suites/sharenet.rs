@@ -4,7 +4,9 @@
 //! A test listener stands in for the share server (M3) on the server address. The microVM's own guest reaches it on
 //! the NFS port and on no other port; the System VM's root namespace, a privileged container on the Docker bridge,
 //! a privileged container on the host network, another microVM's namespace and another microVM's guest do not.
-//! A launch killed after its namespace exists is left alone during its grace period and reaped after it.
+//! A launch killed after its namespace exists is left alone during its grace period and reaped after it, even while
+//! a process that only looks like its shim runs; a running microVM is never reaped, however old its record; and a
+//! namespace with no record is removed.
 
 use super::launchapi::first;
 use super::super::Session;
@@ -13,7 +15,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 /// Steps a full run records.
-const STEPS: usize = 10;
+const STEPS: usize = 12;
 const SERVER: &str = "169.254.77.1";
 /// The NFS port, which the namespace's INPUT rule accepts from the tap, and one it does not.
 const NFS_PORT: &str = "2049";
@@ -74,13 +76,23 @@ fn probes(control: &mut Session, id: &str) -> Result<Vec<(String, bool)>, String
     }
 }
 
+/// Whether `line` was printed by this suite's own reaper pass or, when the reaper service got there first, by the
+/// service (its lines go to syslog).
+fn reaped_line(control: &mut Session, manual: &[String], line: &str) -> Result<bool, String> {
+    if manual.iter().any(|l| l == line) {
+        return Ok(true);
+    }
+    Ok(control.logs("messages", 400)?.iter().any(|l| l.ends_with(line)))
+}
+
 fn probe(results: &[(String, bool)], port: &str) -> Option<bool> {
     results.iter().find(|(p, _)| *p == format!("tcp:{SERVER}:{port}")).map(|(_, open)| *open)
 }
 
 pub fn run_sharenet_suite(endpoint: &ControlEndpoint, id: &str) -> SuiteReport {
     let mut steps: Vec<SuiteStep> = Vec::new();
-    let [a, b, plain, aborted] = [format!("{id}-a"), format!("{id}-b"), format!("{id}-plain"), format!("{id}-aborted")];
+    let [a, b, plain, aborted, bare] =
+        [format!("{id}-a"), format!("{id}-b"), format!("{id}-plain"), format!("{id}-aborted"), format!("{id}-bare")];
     let control = step(&mut steps, "handshake", || {
         let session = connect(endpoint)?;
         Ok((session, "connected".to_string()))
@@ -88,7 +100,8 @@ pub fn run_sharenet_suite(endpoint: &ControlEndpoint, id: &str) -> SuiteReport {
     let Some(mut control) = control else {
         return report(endpoint, steps, false);
     };
-    for each in [&a, &b, &plain, &aborted] {
+    let _ = control.microvm(&["test-impostor", "stop"]);
+    for each in [&a, &b, &plain, &aborted, &bare] {
         let _ = control.microvm(&["cleanup", each, "--logs"]);
     }
 
@@ -169,6 +182,19 @@ pub fn run_sharenet_suite(endpoint: &ControlEndpoint, id: &str) -> SuiteReport {
         Ok(((), format!("{}; {}; {}", first(&status), first(&net), first(&clean))))
     });
 
+    step(&mut steps, "reaper_spares_a_running_microvm", || {
+        let (rc, aged) = control.microvm(&["test-age", &a, "3600"])?;
+        if rc != 0 {
+            return Err(format!("test-age: {}", first(&aged)));
+        }
+        let (_, reap) = control.microvm(&["reap"])?;
+        let (_, status) = control.microvm(&["status", &a])?;
+        if reap.iter().any(|l| l.contains(a.as_str())) || !first(&status).starts_with("RUNNING ") {
+            return Err(format!("reap: {}; status: {}", reap.join(" | "), first(&status)));
+        }
+        Ok(((), format!("record aged an hour, launch gone, Firecracker running: {}; {}", reap.join(" | "), first(&status))))
+    });
+
     step(&mut steps, "cleanup_removes_the_namespace", || {
         let mut detail = Vec::new();
         for each in [&a, &b] {
@@ -191,13 +217,36 @@ pub fn run_sharenet_suite(endpoint: &ControlEndpoint, id: &str) -> SuiteReport {
         if early.iter().any(|l| l.starts_with(&format!("REAPED {aborted} "))) {
             return Err(format!("reaped inside the grace period: {}", early.join(" | ")));
         }
+        // A process that is not the shim, with the shim's name and this id on its command line, must not hold
+        // the reaper off.
+        let (_, impostor) = control.microvm(&["test-impostor", &aborted])?;
         let (_, aged) = control.microvm(&["test-age", &aborted, "60"])?;
         let (_, late) = control.microvm(&["reap"])?;
         let (net_rc, net) = control.microvm(&["sharenet", &aborted])?;
-        if !late.iter().any(|l| *l == format!("REAPED {aborted} CLEAN {aborted}")) || net_rc == 0 {
+        let _ = control.microvm(&["test-impostor", "stop"]);
+        let line = first(&impostor);
+        if !line.starts_with("IMPOSTOR ") || line.contains("pgrep=0") || !line.ends_with("shim_for=") {
+            return Err(format!("the impostor did not look like a shim to pgrep, or passed for one: {line}"));
+        }
+        if !reaped_line(&mut control, &late, &format!("REAPED {aborted} CLEAN {aborted}"))? || net_rc == 0 {
             return Err(format!("reap after {}: {}; sharenet: {}", first(&aged), late.join(" | "), first(&net)));
         }
-        Ok(((), format!("{}; left alone while recent; after 60 s: {}", first(&made), late.join(" | "))))
+        Ok(((), format!("{}; left alone while recent; {line}; after 60 s: {}", first(&made), late.join(" | "))))
+    });
+
+    step(&mut steps, "namespace_without_a_record_is_reaped", || {
+        let (rc, made) = control.microvm(&["test-abort-launch", &bare])?;
+        if rc != 0 {
+            return Err(format!("test-abort-launch: {}", made.join(" | ")));
+        }
+        let (_, dropped) = control.microvm(&["test-drop-record", &bare])?;
+        let (_, reap) = control.microvm(&["reap"])?;
+        let (net_rc, net) = control.microvm(&["sharenet", &bare])?;
+        let gone = reaped_line(&mut control, &reap, &format!("REAPED {bare} namespace without a record"))?;
+        if !first(&dropped).starts_with("DROPPED ") || !gone || net_rc == 0 {
+            return Err(format!("{}; reap: {}; sharenet: {}", first(&dropped), reap.join(" | "), first(&net)));
+        }
+        Ok(((), format!("{}; {}", first(&dropped), reap.join(" | "))))
     });
 
     step(&mut steps, "nothing_left", || {
