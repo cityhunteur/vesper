@@ -49,7 +49,7 @@ updates `design-v0.md` and `docs/SECURITY.md`, which still say shim microVMs hav
 
 The last container row is **not met** by this ADR alone. Root on the System VM can enter any namespace and trace any
 process, so no placement of the server defends against it. [ADR 0010](0010-no-container-is-systemvm-root.md)
-(proposed, GH #194) removes that root from every container; GH #160 closes only after GH #194, with a step that
+(accepted, D-035; GH #194) removes that root from every container; GH #160 closes only after GH #194, with a step that
 starts a container with the broadest flags Docker then accepts.
 
 ## Decision

@@ -1,12 +1,13 @@
 ---
-status: proposed
+status: accepted
 owner: cityhunteur
 last_reviewed: 2026-11-14
 ---
 
 # 0010. No container is root on the System VM: dockerd remaps every container to an unprivileged user namespace
 
-Date: 2026-11-14. Supersedes: none. Superseded by: none.
+Date: 2026-11-14. Supersedes: none. Superseded by: none. Revised the same day after an llm-council design review
+(`run/GH-194/council-adr0010.md`: 2 High, 9 Medium, 4 Low) and accepted by the owner with those fixes (D-035).
 
 ## Context and problem
 
@@ -23,117 +24,171 @@ The requests come from a process of the same user on macOS, which the threat tab
 workload inside the container, which the user may not trust, and which must not gain the System VM by being started
 with broad flags.
 
-A spike on the live System VM (dockerd 28.3.3, kernel 6.12.115-virt; `run/GH-160/spike-userns-remap/out.txt`)
-measured what `userns-remap` does there:
+Two spikes on the live System VM (dockerd 28.3.3, kernel 6.12.115-virt) measured what `userns-remap` does there.
+The second (`run/GH-194/spike2/out.txt`) ran each probe once and kept its exit status; the table cites it. The first
+(`run/GH-160/spike-userns-remap/out.txt`) is kept as history: three of its probes did not test what they claimed.
 
-| Request | Without remapping | With `userns-remap` |
-|---|---|---|
-| `-v /:/host`, default capabilities | reads `/etc/shadow` and a root-only file under `/run` | both denied; `setns` into a namespace bound under `/run` denied |
-| the same with `--cap-add ALL --security-opt seccomp=unconfined` | root on the System VM in all but name | the same denials; the capabilities hold only inside the container's user namespace |
-| `--privileged` | root on the System VM | dockerd refuses the request |
-| `--pid=host`, `--network=host` | granted | dockerd refuses the request |
-| `--device /dev/vda` | reads the disk | the node belongs to an unmapped uid; open denied |
-| a `local` volume bound to `/run` | reads root-only files | denied |
-| `docker exec --privileged` | root on the System VM | full capabilities inside the user namespace only |
-| `-v <macOS share>:/s` | reads and writes | reads a `0600` file, writes, and `:ro` stays read-only |
-| `--userns=host` with any of the above | — | **everything above is granted again** |
+| Request, always with `-v /:/host` | With `userns-remap` |
+|---|---|
+| default capabilities | a root-only file under `/run`, the disk, `/dev/kvm`, `/dev/vsock`, the Docker and containerd sockets: all denied; `setns` into a namespace bound under `/run`: denied |
+| `--cap-add ALL`, seccomp and AppArmor unconfined | the same denials; `modprobe nbd` denied (`lsmod` before and after agrees); `sethostname` changes the container's own name only |
+| `--uts=host`, `--cgroupns=host`, `--security-opt systempaths=unconfined`, each with all capabilities | accepted; cannot set the System VM's hostname, cannot write the cgroup tree, cannot `mknod` |
+| `--device /dev/kvm`, `--device /dev/vsock` | accepted; the node belongs to an unmapped uid and cannot be opened |
+| `--privileged`, `--pid=host`, `--network=host` | dockerd refuses the request |
+| `--ipc=host` | the container fails to start (runc cannot mount `mqueue`) |
+| `docker build` with the legacy builder | build steps run remapped |
+| `-v <macOS share>:/s` | reads a `0600` file, writes, and `:ro` stays read-only |
+| `--userns=host` | **root on the System VM again**: it read the root-only file |
 
-Two more facts from the spike:
+What a remapped container can still do, from the same run:
 
-- The System VM's virtio-fs mounts do not check the caller's uid. Uid 100000 read a `0600` file that root had
-  created. Shares therefore keep working for a remapped container, and uid is no protection for share contents.
-- A remapped container with `CAP_NET_ADMIN` in its own namespace made the kernel load a link-type module
-  (`ip link add … type dummy`). It cannot load a module of its choice.
+- **Read another container's named volume** through `/host/var/lib/docker/100000.100000/volumes/…`, because every
+  container shares one mapping.
+- **Read world-readable state:** `/run/vesper/microvm`, `/var/lib/vesper/workloads` and `/var/log/docker.log`.
+- **Read and write every macOS share** it is given a path to. The System VM's virtio-fs mounts do not check the
+  caller's uid.
+- **Make the kernel load a link-type module** (`ip link add … type ifb` loaded `ifb`), and open `/dev/net/tun`,
+  which gives it devices in its own network namespace only.
+
+Not measured: whether an unconfined container can connect a vsock socket. The spike's connects to CIDs 1, 2 and 3
+failed, but its output does not show whether the socket or the connect failed. BuildKit (`/session`, `/grpc`) was
+not measured either: the System VM has no `buildx`.
 
 ## Decision
 
 We will run dockerd in the System VM with `userns-remap`, so that every container's root is an unprivileged uid on
-the System VM, and we will refuse every request that would start a container outside that mapping.
+the System VM, and we will refuse every Docker API request that is not known to stay inside that mapping.
 
-1. **Remapping is the default and the only shipped mode.** The overlay creates the `dockremap` user and its
-   subordinate uid and gid ranges and sets `userns-remap` in dockerd's configuration.
-2. **`--userns=host` is refused before dockerd acts on it**, by an authorisation plugin that Vesper owns (dockerd's
-   `--authorization-plugin` interface; a small Go program in this repository, standard library only). It refuses a
-   container create whose `HostConfig.UsernsMode` is `host`, and the plugin endpoints (`/plugins/…`), because a
-   managed plugin runs outside the mapping. If the plugin is not running, dockerd refuses every request; that is the
-   interface's own behaviour and the one we want. The first milestone of GH #194 lists every Docker API route to an
-   unmapped container and proves each one closed; the two named here are the known ones, not the proven set.
-3. **What `docker run` no longer accepts** is stated to the user, not hidden: `--privileged`, `--pid=host`,
-   `--network=host` and `--userns=host` fail with dockerd's or the plugin's message. `--cap-add`, `--device` and
-   `--security-opt` are accepted and confer nothing on the System VM.
-4. **Vesper's own tools stop using a privileged container as a root shell.** `scripts/systemvm/data-disk-suite.sh`
-   and the operator's shell move to the agent channel (vsock port 1024), which only a macOS process of the same user
-   can reach.
-5. **One switch for the upstream Firecracker suite.** That suite runs Firecracker in containers that need
-   `/dev/kvm`, TAP devices and real root (`scripts/systemvm/upstream-suite/run.sh`). The launch config gains a field
-   that starts dockerd without remapping for that boot. Only the macOS side can set it, the System VM reports it in
-   `HEALTH`, and `docs/SECURITY.md` states that ADR 0009's row does not hold in that mode. No shipped default or
-   documented user workflow sets it.
-6. **Directories under `/run/vesper` that hold per-microVM state become owner-only.** The spike listed
-   `/run/vesper/microvm` from a remapped container.
+1. **Remapping is the default and the only mode a normal boot has.** The overlay creates the `dockremap` user and
+   its subordinate ranges and sets `userns-remap` in dockerd's configuration.
+
+2. **A default-deny authorisation plugin.** Vesper owns it: a Go program in this repository, standard library only,
+   on dockerd's `--authorization-plugin` interface.
+   - It parses the request URI, cleans the path and strips the API version, then looks the method and path up in
+     an allow-list. A request that is not listed is refused. Swarm, services, nodes, tasks, secrets, configs and
+     managed plugins are not listed. A route joins the list only with a test that shows it cannot start an
+     unmapped container; BuildKit's `/session` and `/grpc` start outside the list for that reason.
+   - **Container create is refused unless the plugin can read it.** dockerd passes a body to a plugin only when
+     it is JSON, has a declared length and is under 1 MiB, yet dockerd itself decodes any body. So the plugin
+     refuses a create with no body, decodes the body with Go's `encoding/json` into a struct with dockerd's field
+     names (the same case-insensitive, last-key-wins rules dockerd applies), and refuses unless
+     `HostConfig.UsernsMode` is empty.
+   - **Fail closed.** dockerd refuses every request when the plugin does not answer. The plugin is an OpenRC
+     service under `supervise-daemon`, started before dockerd, which removes a stale socket before it binds;
+     `vesper-services` waits for its activation before it starts dockerd.
+   - It logs each refusal (method, path, reason; never a body) to a bounded log.
+
+3. **What `docker run` no longer accepts** is stated to the user: `--privileged`, `--pid=host`, `--network=host`,
+   `--ipc=host` and `--userns=host` fail. `--cap-add`, `--device` and `--security-opt` are accepted and give
+   nothing on the System VM beyond what the list above measures.
+
+4. **Vesper's own callers of a privileged container change.** There are four:
+   - `vesper-microvm test-share-reach` (the share-network suite) uses `--cap-add ALL --security-opt
+     seccomp=unconfined` on the bridge; its host-network row becomes "refused by dockerd".
+   - `scripts/systemvm/data-disk-suite.sh` uses new read-only `vesper-data` verbs over the agent.
+   - `scripts/systemvm/upstream-suite/run.sh` (two calls) runs in the unmapped boot below.
+   - No general root shell is added to the agent. Diagnosis uses the agent's named verbs and the serial console.
+
+5. **One unmapped boot, for the upstream Firecracker suite only.** That suite needs `/dev/kvm` and real root in
+   containers.
+   - The switch is a kernel command-line token, `vesper.containers=unmapped`. The runner already writes a
+     temporary launch config for its boot; the token goes in that config's command line, so it lasts one boot and
+     nothing inside the System VM can set it.
+   - **Its own data disk.** Each data disk records the mode of the first dockerd that used it (`mapped` or
+     `unmapped`). A boot in the other mode does not start dockerd and says why in `HEALTH`. The suite gets a
+     separate disk image. A normal disk therefore never runs unmapped, and old containers with a restart policy
+     never start as root.
+   - The runner keeps its saved launch config outside every shared directory. Today it sits in a directory shared
+     read-write into the suite's boot.
+   - The launcher prints the mode it booted with; `HEALTH` repeats it from inside as a cross-check. A test shows
+     that `make systemvm-up` after a suite run is remapped.
+   - `docs/SECURITY.md` states that ADR 0009's host-root row does not hold in that boot.
+
+6. **Private state is not readable by other uids.** The work inventories what Vesper writes under `/run/vesper`,
+   `/var/lib/vesper` and `/var/log` (console logs, workload records, leases, launch records) and creates each as
+   owner-only, including on log rotation. Tests bind both the directory and a single file into a container.
+
+7. **vsock.** The agent and the other vsock listeners refuse a peer that is not the macOS host (CID 2), and the
+   `vsock_loopback` module is blocked from loading. A test with an unconfined container connects to CIDs 1, 2 and
+   the System VM's own.
+
+8. **Existing Docker data is not adopted silently.** dockerd keeps a separate store per mapping, so images, named
+   volumes and stopped containers from before the change are invisible afterwards. Images are rebuilt or pulled.
+   Volumes are data: `vesper-data legacy status` counts them, `HEALTH` and `make docker-up` report a populated old
+   store, and `vesper-data legacy import-volume NAME` copies one into the new store with its ownership shifted.
+   The old store is never deleted without the owner's approval. Going back to an older build shows the old store
+   and none of the writes made since; the release note says so.
+
+## What this guarantees, and what it does not
+
+- **Guaranteed:** no container, whatever flags started it, is root on the System VM. It cannot enter a microVM's
+  share namespace, signal or trace a share server, read root-owned microVM state, or reach the Docker, containerd
+  or agent endpoints.
+- **Not guaranteed: isolation between containers.** They share one mapping and one kernel. A container given `/`
+  reads other containers' volumes and every macOS share. That is Docker's model, and a microVM per container
+  (GH #53) is the answer to it.
+- **Not a kernel boundary.** A remapped container reaches more of the kernel with capabilities in its own
+  namespace. A kernel exploit stays the risk that GH #53 answers.
 
 ## Alternatives considered
 
 - **Refuse the dangerous flags and keep containers in the host user namespace.** Smaller, and containers are
-  otherwise unchanged. It is a deny-list over a large API: a missed field (volume driver options, a new mount type)
-  gives root back. With remapping a missed field yields uid 100000.
-- **A microVM per container (GH #53).** The strongest boundary, and still the mechanism `design-v0.md` requires
-  against a container that attacks the shared kernel. It is the largest piece of work, and it depends on the shares
-  ADR 0009 builds, so GH #160 could not close first.
-- **Keep the actor out of scope** and document it, as Docker does for `--privileged`. Rejected by the owner (D-034).
-- **A second System VM for runc containers.** It isolates them from microVMs completely and doubles the memory,
-  image store and share plumbing. Not pursued.
-- **A hardened runtime such as Sysbox,** which runs `--privileged` workloads inside a user namespace. It would keep
-  more flags working at the cost of a new runtime dependency with a kernel-version contract of its own.
+  otherwise unchanged. A missed field gives root back; with remapping a missed field yields uid 100000.
+- **Rootless dockerd.** The daemon itself runs unprivileged, so `--userns=host` and `--privileged` mean the
+  daemon's own namespace and no plugin is needed. It brings new runtime dependencies (RootlessKit and a user-mode
+  network stack), routes all container networking through them, which the port relay, DNS and Compose suites would
+  have to be proven on again, and loses cgroup limits without delegation. It is the fallback if the plugin's
+  allow-list proves unmaintainable.
+- **A microVM per container (GH #53).** The strongest boundary. It depends on the shares ADR 0009 builds, so
+  GH #160 could not close first.
+- **Keep the actor out of scope,** as Docker does for `--privileged`. Rejected by the owner (D-034).
+- **A second System VM for runc containers.** Doubles the memory, image store and share plumbing.
+- **Sysbox,** which confines `--privileged` in a user namespace: a new runtime with a kernel contract of its own.
+- **Patch dockerd to drop the `host` user-namespace mode.** No plugin, at the cost of carrying a fork.
 
 ## Rationale and consequences
 
 Remapping moves the guarantee from "we listed every dangerous request" to "a container's root is not the System
-VM's root", which the kernel enforces for every request we did not think of. The plugin then has one job with a
-small surface.
+VM's root", which the kernel enforces for requests we did not think of. The plugin closes the one switch that
+turns remapping off, and it is default-deny so that a new Docker route is refused until someone tests it.
 
-- **Compatibility cost, stated plainly.** Under remapping dockerd refuses `--privileged` outright; it does not
-  confine it. Workloads that need it (Docker-in-Docker, tools that mount filesystems or load modules) do not run on
-  the Docker path. `--network=host` is refused as well. These are deviations from Docker and get entries in the
-  conformance notes and, where the parity matrix covers them, `compat-exceptions.yaml`.
-- **Not a kernel boundary.** A remapped container still shares the System VM's kernel and can reach more of it with
-  capabilities in its own namespace (module autoload is one example). A kernel exploit stays the risk that GH #53
-  answers. This ADR closes the configured route to root, not the exploited one.
-- **Shares are readable by whoever is given their path.** A container started with `-v /:/host` sees every macOS
-  directory shared with the System VM, because that is the bind the user asked for and virtio-fs does not check
-  uids. What it cannot do is reach a microVM's share server or another task's private state.
-- **Image store.** dockerd keeps a separate store per mapping (`/var/lib/docker/100000.100000`). Images and volumes
-  in the old store are not visible after the change and are pulled or built again. The old store stays on the data
-  disk until the owner approves deleting it.
-- **ADR 0009's condition 3** ("a test proves that a Docker container cannot reach it") is then tested with the
-  broadest request Docker accepts, not only with a default container.
+- **Compatibility cost.** dockerd refuses `--privileged` under remapping; it does not confine it. Docker-in-Docker
+  and tools that mount filesystems do not run on the Docker path, and neither does `--network=host`. Routes outside
+  the allow-list (Swarm, managed plugins, at first BuildKit) fail. Each is a recorded deviation.
+- **Every Docker call passes through the plugin** twice (request and response). Its latency and its behaviour
+  while dockerd or the plugin restarts are measured in the work, not assumed.
+- **The Vesper runtime is not affected.** `io.containerd.vesper.v2` is reached through `ctr` on containerd's
+  root-only socket, never through dockerd, so remapping does not change the tree the shim builds from. The
+  containerd socket and its other namespaces are outside remapping and stay root-only.
+- **ADR 0009's condition 3** is then tested with the broadest request Docker accepts.
 
-Unknown, each resolved by a milestone of GH #194 before this ADR is accepted as built:
+Unknown, each resolved by a milestone of GH #194:
 
-- Whether the Vesper runtime (`io.containerd.vesper.v2`) works when dockerd passes it a remapped root filesystem and
-  uid mappings. The shim builds a guest image from that tree; ownership shifted by 100000 would be wrong inside the
-  guest.
-- Whether `docker build`, Compose, published ports, the cross-architecture path and the DNS suite pass unchanged.
-- Whether the plugin sees every route (BuildKit, Swarm services, `docker cp`, container update).
+- Whether Compose, published ports, the cross-architecture path and the DNS suite pass unchanged.
+- Whether BuildKit builds stay mapped, and so whether `/session` and `/grpc` can join the allow-list.
+- Whether an unconfined remapped container can connect a vsock socket at all.
 
 ## Implementation and migration impact
 
-Tracked in GH #194; an ExecPlan follows acceptance.
+The ExecPlan is `docs/exec-plans/active/2026-11-14-GH194-no-container-is-systemvm-root.md`. In order:
 
-1. Enumerate the Docker API routes to an unmapped or host-root container, with a failing test for each.
-2. Overlay: `dockremap`, subordinate ranges, dockerd configuration; the authorisation plugin and its service.
-3. Agent-channel replacements for the privileged root shell; the launch-config switch for the upstream suite.
-4. A runtime suite (`make systemvm-confine-suite`) with the rows of the table above, and the ADR 0009 step: a
-   container started with every accepted flag cannot connect to a share server or enter its namespace.
-5. Rerun the Docker suites; record each new refusal as a deviation; update `design-v0.md`, `docs/SECURITY.md` and
-   the conformance notes.
+1. The plugin, with unit tests for the body rules and path handling, and the route inventory.
+2. Overlay: remapping, the plugin service and its ordering, the disk mode record, `HEALTH` fields.
+3. Private state modes and the vsock peer check.
+4. The four callers, the unmapped boot and its disk, and the saved-config move.
+5. `make systemvm-confine-suite`: the rows of the table above, the body-size and path cases against the live
+   plugin, plugin loss, and the ADR 0009 step.
+6. The legacy-store verbs; rerun every Docker suite; record deviations; update `design-v0.md`, `docs/SECURITY.md`
+   and the conformance notes.
 
-GH #160 milestones 3 to 7 do not depend on this work and continue. GH #160 closes only after GH #194.
+GH #160 milestones 3 to 7 do not depend on this work. GH #160 closes only after GH #194.
 
 ## References
 
-- D-034, D-021 and D-032 in `docs/design-docs/decision-log.md`; ADR 0009; GH #194, GH #160, GH #53.
-- `run/GH-160/spike-userns-remap/` (the spike script and its output).
+- D-034, D-035, D-021 and D-032 in `docs/design-docs/decision-log.md`; ADR 0009; GH #194, GH #160, GH #53.
+- `run/GH-194/spike2/` (script and output), `run/GH-160/spike-userns-remap/` (first spike),
+  `run/GH-194/council-adr0010.md` (the review).
+- moby v28.3.3 `pkg/authorization/authz.go` (when a plugin is given the body).
 - `docs/specs/design-v0.md` (threat table), `docs/SECURITY.md`.
-- `scripts/systemvm/data-disk-suite.sh`, `scripts/systemvm/upstream-suite/run.sh`,
-  `systemvm/overlay/etc/init.d/vesper-services`.
+- `systemvm/overlay/usr/local/bin/vesper-microvm` (`test_share_reach`), `scripts/systemvm/data-disk-suite.sh`,
+  `scripts/systemvm/upstream-suite/run.sh`, `systemvm/overlay/etc/init.d/vesper-services`.
