@@ -53,7 +53,7 @@ virtualization, so the fallback path is exercised on every change.
 
 `systemvm/overlay/` is an Alpine `apkovl` tree applied over the tmpfs root at boot. `make systemvm-overlay`
 downloads the packages pinned in `docs/specs/systemvm-packages.lock.yaml` (`socat`, `containerd` with `ctr`,
-Docker and their closure, 19 files, verified by digest), packs the tree plus the packages into
+Docker, `unfs3`, `setpriv` and their closure, 32 files, verified by digest), packs the tree plus the packages into
 `build/systemvm/localhost.apkovl.tar.gz` with owner root and mtime 0, appends it to the pinned initramfs as a
 second cpio archive at `/vesper/localhost.apkovl.tar.gz` (`build/systemvm/initramfs-vesper`), and re-verifies the
 image. The kernel command line names it with `apkovl=`; `etc/local.d/10-vesper-packages.start` installs the
@@ -99,7 +99,7 @@ To add a package: run `python3 -I scripts/systemvm/resolve-apks.py` with the thr
    `max_duration_ms`, `mean_duration_ms`, `boot_ms`, `max_boot_ms`, `max_boot_allowed_ms`). An iteration fails when
    the launcher exits non-zero or `boot_ms` exceeds the threshold. On 2026-11-06 a MacBook Pro (M3, macOS 27.0.1)
    reached the login prompt in about 1.05 s and finished the probe and power-off in about 3.5 s per iteration;
-   with the overlay installing 19 packages the login prompt appears at about 2.2 s and the full probe (NAT,
+   with the overlay installing 19 packages the login prompt appeared at about 2.2 s (32 packages on 2026-11-14: about 2.9 s) and the full probe (NAT,
    packages, agent, services) plus power-off takes about 7 s.
 
 6. Re-verify the fetched files or digest explicit ones into a manifest:

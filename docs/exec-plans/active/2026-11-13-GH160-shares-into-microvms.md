@@ -19,7 +19,7 @@ microVM, can reach the file server or another microVM's export.
   llm-council design reviews before any code. First review 2026-11-13 (4 High, 5 Medium, 5 Low); second, with a
   comparison of alternatives, the same day (2 High, 8 Medium, 6 Low). All are in the ADR and the milestones, and the
   owner accepted it with those fixes (D-032)
-- [ ] M1 `unfs3` pinned in `docs/specs/systemvm-packages.lock.yaml` and listed in `THIRD_PARTY_NOTICES.md`, with its
+- [x] M1 (2026-11-14, D-033) `unfs3` pinned in `docs/specs/systemvm-packages.lock.yaml` and listed in `THIRD_PARTY_NOTICES.md`, with its
   dependency closure, each licence and the uid-dropping tool; anything beyond `unfs3` goes to the owner in this
   PR; no server starts at boot
 - [ ] M2 Share network per shim microVM with shares: `netns_up` and `netns_down` moved to the sourced
@@ -58,7 +58,17 @@ microVM, can reach the file server or another microVM's export.
 
 ## Surprises & Discoveries
 
-None yet.
+- 2026-11-14 (M1): `unfs3` 0.10.0-r2 brings seven more packages: `rpcbind`, `libtirpc`, `libtirpc-conf`, `krb5-libs`,
+  `krb5-conf`, `libverto` and `keyutils-libs` (Alpine's `libtirpc` links Kerberos), about 3 MB installed. `rpcbind` is
+  installed because the package depends on it; nothing starts it, and `unfsd -p` never registers with it.
+- 2026-11-14 (M1): BusyBox `setpriv` has neither `--reuid` nor `--bounding-set`, so it can drop neither the server's
+  uid nor its capabilities. util-linux `setpriv` 2.41.6 (with `libcap-ng`) does both and installs at `/bin/setpriv`,
+  replacing the applet, which nothing in the overlay used. `run/GH-160/m1-packages.txt` shows uid 65534 with an
+  empty bounding set, and root with exactly the ADR's six capabilities (`CapBnd` `0xdb`), both with `NoNewPrivs`.
+- 2026-11-14 (M1): regenerating the lock from today's Alpine indexes would also move `runc` from 1.3.4-r1 to
+  1.3.7-r0. The old package is still published, so its entry is kept as it was; a `runc` bump is its own change.
+- 2026-11-14 (M1): after boot with the new overlay no `unfsd` or `rpcbind` runs, no OpenRC service names them, and
+  nothing listens on 111, 2049 or 2050. `shim-suite` (22 of 22) and `workload-suite` (16 of 16) pass.
 
 ## Decision Log
 
@@ -94,6 +104,9 @@ None yet.
   microVM's; #160 closes only with the event hop. One finding was out of date: `vesper-memadmit` exists since W4.
   The report is a working paper (`run/` is not tracked); its conclusions are here and in the ADR.
 - 2026-11-13: the owner accepted ADR 0009 with those fixes (D-032). M1 can start.
+- 2026-11-14 (owner, D-033): the dependency closure of `unfs3` is approved as listed in Surprises, and the sandbox
+  tool is util-linux `setpriv`, because one tool covers both the non-root server and the root fallback with a
+  reduced bounding set. `su-exec` covers only the first; a helper of our own would be new privileged code.
 
 ## Outcomes & Retrospective
 

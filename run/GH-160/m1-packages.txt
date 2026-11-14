@@ -1,0 +1,28 @@
+# M1 check in the System VM after boot, 2026-11-14T06:23Z, 6.12.115-0-virt
+/run/vesper/packages-ready
+keyutils-libs krb5-conf krb5-libs libcap-ng libtirpc libtirpc-conf libverto rpcbind setpriv unfs3 
+unfsd: /usr/sbin/unfsd
+UNFS3 unfsd 0.10.0 (C) 2009, Pascal Schmidt <unfs3-server@ewetel.net>
+Usage: unfsd [options]
+	-h          display this short option summary
+setpriv on PATH: /bin/setpriv -> /bin/setpriv
+ls: /usr/bin/setpriv: No such file or directory
+-rwxr-xr-x    1 root     root         67392 Sep  5 13:11 /bin/setpriv
+sh: /usr/bin/setpriv: not found
+sh: /usr/bin/setpriv: not found
+running servers: (none expected)
+rc services: (none expected)
+listeners on 111, 2049, 2050:
+  none
+
+# util-linux setpriv replaces the BusyBox applet at /bin/setpriv (nothing in the overlay used the applet)
+setpriv from util-linux 2.41.6
+non-root variant:
+uid=65534(nobody) gid=65534(nobody)
+CapEff:	0000000000000000
+CapBnd:	0000000000000000
+NoNewPrivs:	1
+root variant, ADR 0009 capability set:
+0
+CapBnd:	00000000000000db
+NoNewPrivs:	1

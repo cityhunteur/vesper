@@ -104,7 +104,10 @@ obligations of each component's licence, including offering the corresponding so
 | readline | GPL-3.0 |
 | libmnl, libnftnl | LGPL-2.1 / GPL-2.0 |
 | tini | MIT |
-| unfs3 (once added, GH #160) | BSD-3-Clause |
+| unfs3, with rpcbind (installed, never started), libtirpc and libtirpc-conf (GH #160, D-021, D-033) | BSD-3-Clause |
+| krb5-libs, krb5-conf, libverto (linked by libtirpc) | MIT |
+| keyutils-libs (linked by krb5-libs) | GPL-2.0-or-later / LGPL-2.0-or-later |
+| util-linux `setpriv`, libcap-ng (drop the share server's uid and capabilities) | GPL-2.0-or-later (libcap-ng library LGPL-2.1-or-later) |
 | ca-certificates | MPL-2.0 (certificate data) |
 | Upstream Firecracker CI images and test artefacts (only for parity runs) | Apache-2.0 and the licences of each guest image |
 """
