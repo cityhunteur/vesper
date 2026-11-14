@@ -1,7 +1,7 @@
 ---
 status: verified
 owner: cityhunteur
-last_reviewed: 2026-11-11
+last_reviewed: 2026-11-14
 ---
 
 # Architecture decision records
@@ -23,6 +23,7 @@ new ADR, and the old ADR then links forward to it. The repository had no ADR ser
 | [0007](0007-vesperd-to-backend-a.md) | Connect `vesperd` to Backend A as a relay to one jailed Firecracker per socket | accepted | 2026-11-11 | none |
 | [0008](0008-vesperd-microvm-egress.md) | Egress for `vesperd` microVMs: opt-in NAT to public addresses only | accepted | 2026-11-13 | none |
 | [0009](0009-shares-into-microvms-over-nfs.md) | Host shares into shim microVMs: one `unfs3` server per microVM, inside that microVM's network namespace | accepted | 2026-11-13 | none |
+| [0010](0010-no-container-is-systemvm-root.md) | No container is root on the System VM: dockerd remaps every container to an unprivileged user namespace | proposed | 2026-11-14 | none |
 
 ## Candidates
 

@@ -1,14 +1,15 @@
 ---
 status: accepted
 owner: cityhunteur
-last_reviewed: 2026-11-13
+last_reviewed: 2026-11-14
 ---
 
 # 0009. Host shares into shim microVMs: one `unfs3` server per microVM, inside that microVM's network namespace
 
 Date: 2026-11-13. Supersedes: none. Superseded by: none. Revised twice the same day after two llm-council design
 reviews (`docs/exec-plans/active/2026-11-13-GH160-shares-into-microvms.md`, Decision Log) and accepted by the owner
-with the second review's fixes (D-032).
+with the second review's fixes (D-032). On 2026-11-14 the owner added the host-root container to the threat table
+(D-034); [ADR 0010](0010-no-container-is-systemvm-root.md) is the mechanism.
 
 ## Context and problem
 
@@ -42,8 +43,14 @@ updates `design-v0.md` and `docs/SECURITY.md`, which still say shim microVMs hav
 | Actor | Must not |
 |---|---|
 | Hostile container (runc, Docker bridge) | connect to any share server |
+| Hostile container started with any flags Docker accepts, including those that today give it the System VM's root (`--privileged`, `--pid=host`, `-v /:/host`) | connect to any share server, enter a share namespace, or read or signal a share server (D-034) |
 | Hostile microVM workload | reach another microVM's server, or any path outside its own bind-mount sources, or write to a source mounted read-only |
 | Same-user process on macOS | gains nothing new: it already reads the shared directories directly |
+
+The last container row is **not met** by this ADR alone. Root on the System VM can enter any namespace and trace any
+process, so no placement of the server defends against it. [ADR 0010](0010-no-container-is-systemvm-root.md)
+(proposed, GH #194) removes that root from every container; GH #160 closes only after GH #194, with a step that
+starts a container with the broadest flags Docker then accepts.
 
 ## Decision
 
@@ -231,5 +238,6 @@ device. Rollback is the removal of the shim mapping, after which shares again re
 - D-020 and D-021 in `docs/design-docs/decision-log.md`; GH #159 (prototype), GH #160 (this work), GH #150 (event
   replay), GH #53 and TD-032 (microVM networking), TD-049.
 - `docs/exec-plans/completed/2026-11-11-GH159-share-into-microvm-prototype.md` (evidence under `run/GH-159/`).
+- ADR 0010 (no container is root on the System VM), D-034 and GH #194.
 - ADR 0008 (egress for `vesperd` microVMs) and CE-0010 (a network namespace per `vesperd` microVM).
 - `systemvm/overlay/usr/local/bin/vesper-microvm`, `vesper-vesperd` (`netns_up`, `netns_down`, `reap_pass`), `shim/`.

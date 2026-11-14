@@ -1,0 +1,208 @@
++ docker save alpine:3.22 -o /tmp/spike-alpine.tar
++ addgroup -S dockremap
++ adduser -S -D -H -G dockremap dockremap
++ echo dockremap:100000:65536
++ echo dockremap:100000:65536
++ mkdir -p /etc/docker
++ echo '{"userns-remap":"default"}'
++ rc-service docker restart
+ * Stopping Docker Daemon ... [ ok ]
+ * Starting Docker Daemon ... [ ok ]
++ i=0
++ docker info
++ '[' 0 -ge 60 ]
++ sleep 1
++ i=1
++ docker info
++ docker info --format '{{json .SecurityOptions}} root={{.DockerRootDir}}'
+["name=seccomp,profile=builtin","name=userns","name=cgroupns"] root=/var/lib/docker/100000.100000
++ docker load -i /tmp/spike-alpine.tar
+Loaded image: alpine:3.22
++ touch /run/spk-ns
++ unshare '--net=/run/spk-ns' true
++ ls -ld /var/lib/docker /var/lib/docker/100000.100000
+drwx--x---   14 root     100000        4096 Nov 14 16:38 /var/lib/docker
+drwx--x---   12 root     100000        4096 Nov 14 16:38 /var/lib/docker/100000.100000
++ echo rootonly
++ chmod 600 /run/spike-secret
++ mkdir -p /Volumes/Workspace/github.com/cityhunteur/vesper/run/vesperd-share/spike-userns/d
++ echo secret
++ chmod 600 /Volumes/Workspace/github.com/cityhunteur/vesper/run/vesperd-share/spike-userns/d/f600
++ set +x
+=== plain: docker run alpine:3.22 sh -c id; cat /proc/self/uid_map
+uid=0(root) gid=0(root) groups=0(root),0(root),1(bin),2(daemon),3(sys),4(adm),6(disk),10(wheel),11(floppy),20(dialout),26(tape),27(video)
+         0     100000      65536
+rc=0
+=== share: docker run -v /Volumes/Workspace/github.com/cityhunteur/vesper/run/vesperd-share/spike-userns/d:/s alpine:3.22 sh -c ls -ln /s; cat /s/f600; echo w > /s/new && echo WRITE-OK; ls -ln /s
+total 4
+-rw-------    1 0        0                7 Nov 14 16:38 f600
+secret
+WRITE-OK
+total 8
+-rw-------    1 0        0                7 Nov 14 16:38 f600
+-rw-r--r--    1 0        0                2 Nov 14 16:38 new
+rc=0
+=== share-ro: docker run -v /Volumes/Workspace/github.com/cityhunteur/vesper/run/vesperd-share/spike-userns/d:/s:ro alpine:3.22 sh -c echo w > /s/new2 || echo RO-HELD
+sh: can't create /s/new2: Read-only file system
+RO-HELD
+rc=0
+=== hostbind: docker run -v /:/host alpine:3.22 sh -c id; cat /proc/self/uid_map; grep Cap /proc/self/status | tr "\n" " "; echo;
+ for c in "cat /host/run/spike-secret" "cat /host/etc/shadow" "nsenter --net=/host/run/spk-ns true" "nsenter -t 1 -n true" "nsenter -t 1 -m true" "head -c1 /dev/vda" "head -c0 /dev/kvm" "ls /host/run/vesper/microvm" "cat /host/proc/1/environ" "mount -t tmpfs x /mnt" "ip link add d0 type dummy" "chroot /host /sbin/modprobe dummy" "ls /host/sys/kernel/security"; do
+   if out=$(sh -c "$c" 2>&1 | head -c 120 | tr "\n" " "); then :; fi; sh -c "$c" >/dev/null 2>&1 && echo "ALLOWED  $c" || echo "DENIED   $c :: $out"; done
+uid=0(root) gid=0(root) groups=0(root),0(root),1(bin),2(daemon),3(sys),4(adm),6(disk),10(wheel),11(floppy),20(dialout),26(tape),27(video)
+         0     100000      65536
+CapInh:	0000000000000000 CapPrm:	00000000a80425fb CapEff:	00000000a80425fb CapBnd:	00000000a80425fb CapAmb:	0000000000000000 
+DENIED   cat /host/run/spike-secret :: cat: can't open '/host/run/spike-secret': Permission denied 
+DENIED   cat /host/etc/shadow :: cat: can't open '/host/etc/shadow': Permission denied 
+DENIED   nsenter --net=/host/run/spk-ns true :: nsenter: setns(): can't reassociate to namespace 'net': Operation not permitted 
+DENIED   nsenter -t 1 -n true :: nsenter: setns(): can't reassociate to namespace 'net': Operation not permitted 
+DENIED   nsenter -t 1 -m true :: nsenter: setns(): can't reassociate to namespace 'mnt': Operation not permitted 
+DENIED   head -c1 /dev/vda :: head: /dev/vda: No such file or directory 
+DENIED   head -c0 /dev/kvm :: head: /dev/kvm: No such file or directory 
+ALLOWED  ls /host/run/vesper/microvm
+DENIED   cat /host/proc/1/environ :: cat: can't open '/host/proc/1/environ': Permission denied 
+DENIED   mount -t tmpfs x /mnt :: mount: permission denied (are you root?) 
+DENIED   ip link add d0 type dummy :: ip: RTNETLINK answers: Operation not permitted 
+DENIED   chroot /host /sbin/modprobe dummy :: modprobe: can't load module dummy (kernel/drivers/net/dummy.ko): Operation not permitted 
+ALLOWED  ls /host/sys/kernel/security
+rc=0
+=== privileged: docker run --privileged -v /:/host alpine:3.22 sh -c id; cat /proc/self/uid_map; grep Cap /proc/self/status | tr "\n" " "; echo;
+ for c in "cat /host/run/spike-secret" "cat /host/etc/shadow" "nsenter --net=/host/run/spk-ns true" "nsenter -t 1 -n true" "nsenter -t 1 -m true" "head -c1 /dev/vda" "head -c0 /dev/kvm" "ls /host/run/vesper/microvm" "cat /host/proc/1/environ" "mount -t tmpfs x /mnt" "ip link add d0 type dummy" "chroot /host /sbin/modprobe dummy" "ls /host/sys/kernel/security"; do
+   if out=$(sh -c "$c" 2>&1 | head -c 120 | tr "\n" " "); then :; fi; sh -c "$c" >/dev/null 2>&1 && echo "ALLOWED  $c" || echo "DENIED   $c :: $out"; done
+docker: Error response from daemon: privileged mode is incompatible with user namespaces.  You must run the container in the host namespace when running privileged mode
+
+Run 'docker run --help' for more information
+rc=0
+=== pidhost: docker run --pid=host -v /:/host alpine:3.22 sh -c id; cat /proc/self/uid_map; grep Cap /proc/self/status | tr "\n" " "; echo;
+ for c in "cat /host/run/spike-secret" "cat /host/etc/shadow" "nsenter --net=/host/run/spk-ns true" "nsenter -t 1 -n true" "nsenter -t 1 -m true" "head -c1 /dev/vda" "head -c0 /dev/kvm" "ls /host/run/vesper/microvm" "cat /host/proc/1/environ" "mount -t tmpfs x /mnt" "ip link add d0 type dummy" "chroot /host /sbin/modprobe dummy" "ls /host/sys/kernel/security"; do
+   if out=$(sh -c "$c" 2>&1 | head -c 120 | tr "\n" " "); then :; fi; sh -c "$c" >/dev/null 2>&1 && echo "ALLOWED  $c" || echo "DENIED   $c :: $out"; done
+docker: Error response from daemon: cannot share the host PID namespace when user namespaces are enabled
+
+Run 'docker run --help' for more information
+rc=0
+=== nethost: docker run --net=host -v /:/host alpine:3.22 sh -c id; cat /proc/self/uid_map; grep Cap /proc/self/status | tr "\n" " "; echo;
+ for c in "cat /host/run/spike-secret" "cat /host/etc/shadow" "nsenter --net=/host/run/spk-ns true" "nsenter -t 1 -n true" "nsenter -t 1 -m true" "head -c1 /dev/vda" "head -c0 /dev/kvm" "ls /host/run/vesper/microvm" "cat /host/proc/1/environ" "mount -t tmpfs x /mnt" "ip link add d0 type dummy" "chroot /host /sbin/modprobe dummy" "ls /host/sys/kernel/security"; do
+   if out=$(sh -c "$c" 2>&1 | head -c 120 | tr "\n" " "); then :; fi; sh -c "$c" >/dev/null 2>&1 && echo "ALLOWED  $c" || echo "DENIED   $c :: $out"; done
+docker: Error response from daemon: cannot share the host's network namespace when user namespaces are enabled
+
+Run 'docker run --help' for more information
+rc=0
+=== priv-pid-net: docker run --privileged --pid=host --net=host --cgroupns=host -v /:/host alpine:3.22 sh -c id; cat /proc/self/uid_map; grep Cap /proc/self/status | tr "\n" " "; echo;
+ for c in "cat /host/run/spike-secret" "cat /host/etc/shadow" "nsenter --net=/host/run/spk-ns true" "nsenter -t 1 -n true" "nsenter -t 1 -m true" "head -c1 /dev/vda" "head -c0 /dev/kvm" "ls /host/run/vesper/microvm" "cat /host/proc/1/environ" "mount -t tmpfs x /mnt" "ip link add d0 type dummy" "chroot /host /sbin/modprobe dummy" "ls /host/sys/kernel/security"; do
+   if out=$(sh -c "$c" 2>&1 | head -c 120 | tr "\n" " "); then :; fi; sh -c "$c" >/dev/null 2>&1 && echo "ALLOWED  $c" || echo "DENIED   $c :: $out"; done
+docker: Error response from daemon: privileged mode is incompatible with user namespaces.  You must run the container in the host namespace when running privileged mode
+
+Run 'docker run --help' for more information
+rc=0
+=== capadd: docker run --cap-add ALL --security-opt seccomp=unconfined --security-opt apparmor=unconfined -v /:/host alpine:3.22 sh -c id; cat /proc/self/uid_map; grep Cap /proc/self/status | tr "\n" " "; echo;
+ for c in "cat /host/run/spike-secret" "cat /host/etc/shadow" "nsenter --net=/host/run/spk-ns true" "nsenter -t 1 -n true" "nsenter -t 1 -m true" "head -c1 /dev/vda" "head -c0 /dev/kvm" "ls /host/run/vesper/microvm" "cat /host/proc/1/environ" "mount -t tmpfs x /mnt" "ip link add d0 type dummy" "chroot /host /sbin/modprobe dummy" "ls /host/sys/kernel/security"; do
+   if out=$(sh -c "$c" 2>&1 | head -c 120 | tr "\n" " "); then :; fi; sh -c "$c" >/dev/null 2>&1 && echo "ALLOWED  $c" || echo "DENIED   $c :: $out"; done
+uid=0(root) gid=0(root) groups=0(root),0(root),1(bin),2(daemon),3(sys),4(adm),6(disk),10(wheel),11(floppy),20(dialout),26(tape),27(video)
+         0     100000      65536
+CapInh:	0000000000000000 CapPrm:	000001ffffffffff CapEff:	000001ffffffffff CapBnd:	000001ffffffffff CapAmb:	0000000000000000 
+DENIED   cat /host/run/spike-secret :: cat: can't open '/host/run/spike-secret': Permission denied 
+DENIED   cat /host/etc/shadow :: cat: can't open '/host/etc/shadow': Permission denied 
+DENIED   nsenter --net=/host/run/spk-ns true :: nsenter: setns(): can't reassociate to namespace 'net': Operation not permitted 
+ALLOWED  nsenter -t 1 -n true
+ALLOWED  nsenter -t 1 -m true
+DENIED   head -c1 /dev/vda :: head: /dev/vda: No such file or directory 
+DENIED   head -c0 /dev/kvm :: head: /dev/kvm: No such file or directory 
+ALLOWED  ls /host/run/vesper/microvm
+DENIED   cat /host/proc/1/environ :: cat: can't open '/host/proc/1/environ': Permission denied 
+ALLOWED  mount -t tmpfs x /mnt
+DENIED   ip link add d0 type dummy :: 
+ALLOWED  chroot /host /sbin/modprobe dummy
+ALLOWED  ls /host/sys/kernel/security
+rc=0
+=== device: docker run --device /dev/vda alpine:3.22 sh -c ls -ln /dev/vda; head -c1 /dev/vda >/dev/null && echo DISK-READ || echo DISK-DENIED
+brw-rw----    1 65534    65534     253,   0 Nov 14 16:37 /dev/vda
+head: /dev/vda: Permission denied
+DISK-DENIED
+rc=0
+=== usernshost: docker run --userns=host --privileged --pid=host --net=host -v /:/host alpine:3.22 sh -c id; cat /proc/self/uid_map; grep Cap /proc/self/status | tr "\n" " "; echo;
+ for c in "cat /host/run/spike-secret" "cat /host/etc/shadow" "nsenter --net=/host/run/spk-ns true" "nsenter -t 1 -n true" "nsenter -t 1 -m true" "head -c1 /dev/vda" "head -c0 /dev/kvm" "ls /host/run/vesper/microvm" "cat /host/proc/1/environ" "mount -t tmpfs x /mnt" "ip link add d0 type dummy" "chroot /host /sbin/modprobe dummy" "ls /host/sys/kernel/security"; do
+   if out=$(sh -c "$c" 2>&1 | head -c 120 | tr "\n" " "); then :; fi; sh -c "$c" >/dev/null 2>&1 && echo "ALLOWED  $c" || echo "DENIED   $c :: $out"; done
+uid=0(root) gid=0(root) groups=0(root),0(root),1(bin),2(daemon),3(sys),4(adm),6(disk),10(wheel),11(floppy),20(dialout),26(tape),27(video)
+         0          0 4294967295
+CapInh:	0000000000000000 CapPrm:	000001ffffffffff CapEff:	000001ffffffffff CapBnd:	000001ffffffffff CapAmb:	0000000000000000 
+ALLOWED  cat /host/run/spike-secret
+ALLOWED  cat /host/etc/shadow
+ALLOWED  nsenter --net=/host/run/spk-ns true
+ALLOWED  nsenter -t 1 -n true
+ALLOWED  nsenter -t 1 -m true
+ALLOWED  head -c1 /dev/vda
+ALLOWED  head -c0 /dev/kvm
+ALLOWED  ls /host/run/vesper/microvm
+ALLOWED  cat /host/proc/1/environ
+ALLOWED  mount -t tmpfs x /mnt
+DENIED   ip link add d0 type dummy :: 
+ALLOWED  chroot /host /sbin/modprobe dummy
+ALLOWED  ls /host/sys/kernel/security
+rc=0
+=== usernshost-plain: docker run --userns=host -v /:/host alpine:3.22 sh -c id; cat /proc/self/uid_map; grep Cap /proc/self/status | tr "\n" " "; echo;
+ for c in "cat /host/run/spike-secret" "cat /host/etc/shadow" "nsenter --net=/host/run/spk-ns true" "nsenter -t 1 -n true" "nsenter -t 1 -m true" "head -c1 /dev/vda" "head -c0 /dev/kvm" "ls /host/run/vesper/microvm" "cat /host/proc/1/environ" "mount -t tmpfs x /mnt" "ip link add d0 type dummy" "chroot /host /sbin/modprobe dummy" "ls /host/sys/kernel/security"; do
+   if out=$(sh -c "$c" 2>&1 | head -c 120 | tr "\n" " "); then :; fi; sh -c "$c" >/dev/null 2>&1 && echo "ALLOWED  $c" || echo "DENIED   $c :: $out"; done
+uid=0(root) gid=0(root) groups=0(root),0(root),1(bin),2(daemon),3(sys),4(adm),6(disk),10(wheel),11(floppy),20(dialout),26(tape),27(video)
+         0          0 4294967295
+CapInh:	0000000000000000 CapPrm:	00000000a80425fb CapEff:	00000000a80425fb CapBnd:	00000000a80425fb CapAmb:	0000000000000000 
+ALLOWED  cat /host/run/spike-secret
+ALLOWED  cat /host/etc/shadow
+DENIED   nsenter --net=/host/run/spk-ns true :: nsenter: setns(): can't reassociate to namespace 'net': Operation not permitted 
+DENIED   nsenter -t 1 -n true :: nsenter: setns(): can't reassociate to namespace 'net': Operation not permitted 
+DENIED   nsenter -t 1 -m true :: nsenter: setns(): can't reassociate to namespace 'mnt': Operation not permitted 
+DENIED   head -c1 /dev/vda :: head: /dev/vda: No such file or directory 
+DENIED   head -c0 /dev/kvm :: head: /dev/kvm: No such file or directory 
+ALLOWED  ls /host/run/vesper/microvm
+DENIED   cat /host/proc/1/environ :: cat: can't open '/host/proc/1/environ': Permission denied 
+DENIED   mount -t tmpfs x /mnt :: mount: permission denied (are you root?) 
+DENIED   ip link add d0 type dummy :: ip: RTNETLINK answers: Operation not permitted 
+ALLOWED  chroot /host /sbin/modprobe dummy
+ALLOWED  ls /host/sys/kernel/security
+rc=0
+=== volume bind via local driver
+spkvol
+=== volbind: docker run -v spkvol:/v alpine:3.22 sh -c cat /v/spike-secret
+cat: can't open '/v/spike-secret': Permission denied
+rc=0
+spkvol
+=== exec --privileged
+28113180f55b7518c2d1a66ddcd9531cdcc37f365852317f9fa824bdefd3b6f2
+         0     100000      65536
+CapEff:	000001ffffffffff
+spk
+=== ls after
+total 8
+-rw-------    1 0        0                7 Nov 14 16:38 f600
+-rw-r--r--    1 0        0                2 Nov 14 16:38 new
+=== restore
++ rm -f /etc/docker/daemon.json
++ rc-service docker restart
+ * Stopping Docker Daemon ... [ ok ]
+ * Starting Docker Daemon ... [ ok ]
++ i=0
++ docker info
++ '[' 0 -ge 60 ]
++ sleep 1
++ i=1
++ docker info
++ docker info --format '{{json .SecurityOptions}}'
+["name=seccomp,profile=builtin","name=cgroupns"]
++ docker+ head images --format -5
+ '{{.Repository}}:{{.Tag}}'
+vesper/trivial:guest
+<none>:<none>
+<none>:<none>
+<none>:<none>
+<none>:<none>
++ umount /run/spk-ns
++ rm -f /run/spk-ns
++ rm -f /run/spike-secret /tmp/spike-alpine.tar
++ ls -d /var/lib/docker/100000.100000
+/var/lib/docker/100000.100000
++ rm -rf /var/lib/docker/100000.100000
++ rm -rf /Volumes/Workspace/github.com/cityhunteur/vesper/run/vesperd-share/spike-userns/d
++ sed -i /^dockremap:/d /etc/subuid /etc/subgid
++ deluser dockremap
++ delgroup dockremap
++ echo SPIKE-DONE
+SPIKE-DONE
