@@ -15,3 +15,6 @@ echo "built ${OUT} ($(stat -f %z "${OUT}" 2>/dev/null || stat -c %s "${OUT}") by
 
 GOOS=linux GOARCH=arm64 CGO_ENABLED=0 GOFLAGS=-mod=mod go build -trimpath \
   -ldflags="-s -w -buildid=" -o "${ROOT_DIR}/build/shim/vesper-console" ./cmd/vesper-console
+
+GOOS=linux GOARCH=arm64 CGO_ENABLED=0 GOFLAGS=-mod=mod go build -trimpath \
+  -ldflags="-s -w -buildid=" -o "${ROOT_DIR}/build/shim/vesper-authz" ./cmd/vesper-authz

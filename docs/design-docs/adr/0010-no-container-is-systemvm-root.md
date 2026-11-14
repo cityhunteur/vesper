@@ -73,6 +73,10 @@ the System VM, and we will refuse every Docker API request that is not known to 
      refuses a create with no body, decodes the body with Go's `encoding/json` into a struct with dockerd's field
      names (the same case-insensitive, last-key-wins rules dockerd applies), and refuses unless
      `HostConfig.UsernsMode` is empty.
+   - **Two more create rules,** each a way to act as root outside the mapping that no test bounds yet. A runtime
+     other than the default is refused, so dockerd cannot be asked to start another runtime by name. Volume driver
+     options, and drivers other than `local`, are refused on volume create and on a container's mounts: with
+     options, the `local` driver makes dockerd, as root, perform a mount that the client describes.
    - **Fail closed.** dockerd refuses every request when the plugin does not answer. The plugin is an OpenRC
      service under `supervise-daemon`, started before dockerd, which removes a stale socket before it binds;
      `vesper-services` waits for its activation before it starts dockerd.
@@ -158,8 +162,9 @@ turns remapping off, and it is default-deny so that a new Docker route is refuse
 - **Every Docker call passes through the plugin** twice (request and response). Its latency and its behaviour
   while dockerd or the plugin restarts are measured in the work, not assumed.
 - **The Vesper runtime is not affected.** `io.containerd.vesper.v2` is reached through `ctr` on containerd's
-  root-only socket, never through dockerd, so remapping does not change the tree the shim builds from. The
-  containerd socket and its other namespaces are outside remapping and stay root-only.
+  root-only socket. The plugin refuses `--runtime` with any other value than the default, so dockerd never hands
+  the shim a remapped tree; GH #53 revisits that rule. The containerd socket and its other namespaces are outside
+  remapping and stay root-only.
 - **ADR 0009's condition 3** is then tested with the broadest request Docker accepts.
 
 Unknown, each resolved by a milestone of GH #194:

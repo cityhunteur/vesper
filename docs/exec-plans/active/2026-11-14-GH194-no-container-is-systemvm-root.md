@@ -16,9 +16,10 @@ volumes that must be pulled or imported once.
 
 - [x] M0 (2026-11-14) Design: ADR 0010, two spikes on the live System VM, one llm-council design review (2 High,
   9 Medium, 4 Low, all carried into the ADR), accepted by the owner (D-035)
-- [ ] M1 The authorisation plugin (`vesper-authz`, Go, standard library only): route allow-list, the create-body
-  rules, refusal log; unit tests for path cleaning, version prefixes, missing and oversized bodies, key case and
-  duplicate keys; the route inventory in this plan
+- [x] M1 (2026-11-14) The authorisation plugin (`shim/cmd/vesper-authz`, `shim/internal/authz`, standard library
+  only): route allow-list, the create-body rules, refusal log without queries or bodies; unit tests for path
+  cleaning, version prefixes, missing bodies, key case, folded letters, duplicate keys, merged objects and
+  unreadable plugin messages; the route inventory below. Built by `build-shim.sh`, not installed yet
 - [ ] M2 Overlay: `dockremap` and subordinate ranges, dockerd configuration, the plugin's OpenRC service ordered
   before dockerd with an activation wait, the data disk's mode record, `HEALTH` fields (`containers`, plugin
   state, legacy store)
@@ -57,6 +58,37 @@ volumes that must be pulled or imported once.
   mapping is shared, so a container given `/` reads other containers' volumes (council finding 7).
 - 2026-11-14: rootless dockerd is the recorded fallback if the allow-list proves unmaintainable. It needs no
   plugin but brings new dependencies and a user-mode network path.
+
+- 2026-11-14 (M1): the plugin also refuses a runtime other than the default, and volume driver options or a
+  driver other than `local`, on container create and volume create. With options the `local` driver makes dockerd,
+  as root, perform a mount the client describes (a block device, another filesystem type), and a runtime name
+  makes dockerd start a different runtime. Neither has a test that bounds it, so neither is allowed. Compose files
+  that declare `driver_opts` volumes (NFS, tmpfs) stop working; that is a recorded deviation.
+- 2026-11-14 (M1): a path that `path.Clean` would change is refused, not normalised, so the plugin and dockerd's
+  router can never read one request two ways.
+
+## Route inventory
+
+Allowed (`shim/internal/authz/policy.go`, version prefix optional): `/_ping`, `/version`, `/info`, `/events`,
+`/system/df`, `/auth`; containers (list, create, prune, inspect, top, logs, changes, export, stats, attach,
+archive, start, stop, restart, kill, pause, unpause, wait, resize, rename, update, exec, delete); exec (start,
+resize, inspect); `/commit`; images (list, search, get, create, load, prune, inspect, history, push, tag, delete);
+`/distribution/…/json`; `/build` with the legacy builder and not on the host network, `/build/prune`; networks
+(list, create, prune, inspect, delete, connect, disconnect); volumes (list, create, prune, inspect, delete).
+
+Refused until a test shows each stays inside the mapping:
+
+| Route | Why it is not listed |
+|---|---|
+| `/plugins/…` | a managed plugin runs outside the mapping |
+| `/swarm`, `/services`, `/nodes`, `/tasks`, `/secrets`, `/configs` | service tasks are created by the daemon, not through container create |
+| `/session`, `/grpc`, `/build?version=2` | BuildKit; not measured (the System VM has no `buildx`) |
+| `/build?networkmode=host` | not measured under remapping |
+| `/containers/{id}/checkpoints` | experimental; runs CRIU as root |
+| anything else | unknown routes are refused by default |
+
+Still to check against the running daemon in M5: that dockerd passes `RequestUri` exactly as this table parses
+it, and that a chunked create reaches the plugin without a body.
 
 ## Outcomes & Retrospective
 
