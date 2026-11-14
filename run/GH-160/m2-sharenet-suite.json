@@ -1,0 +1,79 @@
+{
+  "bridge_path": "run/systemvm/vsock/3.sock",
+  "port": 1024,
+  "steps": [
+    {
+      "name": "handshake",
+      "ok": true,
+      "detail": "connected",
+      "elapsed_ms": 1
+    },
+    {
+      "name": "namespace_holds_lo_and_one_tap",
+      "ok": true,
+      "detail": "SHARENET vesper-sharenet-a links=lo,share0 addr=169.254.77.1/30 owner=10000 routes=1 default=no input=DROP forward=DROP rules=2 fc_in_ns=yes",
+      "elapsed_ms": 3104
+    },
+    {
+      "name": "second_microvm_gets_its_own",
+      "ok": true,
+      "detail": "the same address pair in a second namespace: SHARENET vesper-sharenet-b links=lo,share0 addr=169.254.77.1/30 owner=10000 routes=1 default=no input=DROP forward=DROP rules=2 fc_in_ns=yes",
+      "elapsed_ms": 1914
+    },
+    {
+      "name": "nothing_outside_reaches_the_server_address",
+      "ok": true,
+      "detail": "a listener on 169.254.77.1:2049 in vesper-sharenet-a's namespace: REACH root closed; REACH namespace:vesper-sharenet-b closed; REACH container-bridge closed; REACH container-host closed",
+      "elapsed_ms": 9696
+    },
+    {
+      "name": "its_own_guest_reaches_the_nfs_port_only",
+      "ok": true,
+      "detail": "vesper-sharenet-a's guest: 2049 open, 2051 closed by the INPUT rule (a listener is on both)",
+      "elapsed_ms": 526
+    },
+    {
+      "name": "another_guest_does_not_reach_it",
+      "ok": true,
+      "detail": "vesper-sharenet-b's guest: 169.254.77.1:2049 closed (its own namespace has no listener)",
+      "elapsed_ms": 8
+    },
+    {
+      "name": "a_plain_launch_has_no_network",
+      "ok": true,
+      "detail": "RUNNING vesper-sharenet-plain pid=4543 vsock=absent; ABSENT vesper-sharenet-plain; CLEAN vesper-sharenet-plain",
+      "elapsed_ms": 2434
+    },
+    {
+      "name": "reaper_spares_a_running_microvm",
+      "ok": true,
+      "detail": "record aged an hour, launch gone, Firecracker running: REAP 0; RUNNING vesper-sharenet-a pid=3587 vsock=absent sharenet=present",
+      "elapsed_ms": 20
+    },
+    {
+      "name": "cleanup_removes_the_namespace",
+      "ok": true,
+      "detail": "CLEAN vesper-sharenet-a, ABSENT vesper-sharenet-a; CLEAN vesper-sharenet-b, ABSENT vesper-sharenet-b",
+      "elapsed_ms": 1074
+    },
+    {
+      "name": "aborted_launch_is_reaped_after_its_grace_period",
+      "ok": true,
+      "detail": "ABORTED vesper-sharenet-aborted record=pid=4755 start=1 t=1794639950 namespace=bound; left alone while recent; IMPOSTOR vesper-sharenet-aborted pid=4809 pgrep=1 shim_for=; after 60 s: REAPED vesper-sharenet-aborted CLEAN vesper-sharenet-aborted | REAP 1",
+      "elapsed_ms": 272
+    },
+    {
+      "name": "namespace_without_a_record_is_reaped",
+      "ok": true,
+      "detail": "DROPPED vesper-sharenet-bare namespace=bound; REAPED vesper-sharenet-bare namespace without a record | REAP 1",
+      "elapsed_ms": 40
+    },
+    {
+      "name": "nothing_left",
+      "ok": true,
+      "detail": "no Firecracker, jail, share namespace or record",
+      "elapsed_ms": 15
+    }
+  ],
+  "passed": true
+}

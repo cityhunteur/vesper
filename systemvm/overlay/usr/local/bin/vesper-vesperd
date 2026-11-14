@@ -219,32 +219,14 @@ teardown() { # ID (caller holds the lock) -> CLEAN ID | DIRTY ID <what>
 # is owned by uid 20000 (the kernel's tun owner check). The namespace has no uplink: the guest reaches its tap and
 # nothing else, and the System VM's own interfaces stay out of the jail's reach.
 ns_ino() { stat -L -c %i "$1" 2>/dev/null; } # a namespace file -> its inode, empty when unreadable
-netns_mounted() { awk -v f="$NETNS/$1" '$2 == f && $3 == "nsfs" {m=1} END {exit !m}' /proc/mounts; }
-netns_down() { # ID: unbind and remove; the taps go with the namespace once Firecracker is gone
-  f="$NETNS/$1"
-  # -l: an inspection (net, isolation) may hold the file open; the namespace itself lives on until its last user goes.
-  netns_mounted "$1" && umount -l "$f" 2>/dev/null
-  netns_mounted "$1" || rm -f "$f"
-}
-netns_up() { # ID TAP... (the lease record exists, so the reaper leaves the namespace alone) -> a reason on failure
-  nid=$1; shift; f="$NETNS/$nid"
-  mkdir -p "$NETNS" && chmod 0700 "$NETNS" || { echo "netns directory"; return 1; }
-  netns_down "$nid"
-  [ -e "$f" ] && { echo "netns $nid still bound"; return 1; }
-  : > "$f" && unshare --net="$f" true || { rm -f "$f"; echo "netns create failed"; return 1; }
-  # Before any interface but lo exists, so every later one inherits "default": IPv6 off, strict reverse-path
-  # filtering, no ICMP redirects (ADR 0008).
-  # shellcheck disable=SC2016
-  nsenter --net="$f" sh -c 'for k in all default lo; do
-      echo 1 > /proc/sys/net/ipv6/conf/$k/disable_ipv6 && echo 1 > /proc/sys/net/ipv4/conf/$k/rp_filter \
-        && echo 0 > /proc/sys/net/ipv4/conf/$k/accept_redirects && echo 0 > /proc/sys/net/ipv4/conf/$k/send_redirects || exit 1
-    done' || { echo "namespace sysctls"; return 1; }
-  out=$(nsenter --net="$f" ip link set dev lo up 2>&1) || { echo "lo: $(printf '%s' "$out" | oneline)"; return 1; }
-  for t in "$@"; do
-    out=$(nsenter --net="$f" tunctl -t "$t" -u "$JUSER" 2>&1) || { echo "tap $t: $(printf '%s' "$out" | oneline)"; return 1; }
-    out=$(nsenter --net="$f" ip link set dev "$t" up 2>&1) || { echo "tap $t up: $(printf '%s' "$out" | oneline)"; return 1; }
-  done
-}
+# The helpers are shared with vesper-microvm (ADR 0009): /usr/local/lib/vesper/netns.sh, found beside this script's
+# directory so the hermetic tests can run it from the source tree.
+LIBDIR=$(dirname "$0")/../lib/vesper; [ -r "$LIBDIR/netns.sh" ] || LIBDIR=/usr/local/lib/vesper
+# shellcheck source=/dev/null
+. "$LIBDIR/netns.sh"
+netns_mounted() { vnetns_mounted "$NETNS" "$1"; }
+netns_down() { vnetns_down "$NETNS" "$1"; } # ID
+netns_up() { vnetns_up "$NETNS" "$JUSER" "$@"; } # ID TAP... (the lease record exists, so the reaper leaves it alone) -> a reason on failure
 
 # ---- egress (ADR 0008, TD-058) -----------------------------------------------------------------------------
 # --network nat joins a lease's namespace to the System VM with one veth pair (root end vpd<N>, namespace end up.<N>,

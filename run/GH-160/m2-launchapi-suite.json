@@ -1,0 +1,127 @@
+{
+  "bridge_path": "run/systemvm/vsock/3.sock",
+  "port": 1024,
+  "steps": [
+    {
+      "name": "handshake",
+      "ok": true,
+      "detail": "protocol 1 host vesper",
+      "elapsed_ms": 1
+    },
+    {
+      "name": "launch",
+      "ok": true,
+      "detail": "READY vesper-launchapi pid=8787 firecracker_version=1.16.0",
+      "elapsed_ms": 213
+    },
+    {
+      "name": "duplicate_id_refused",
+      "ok": true,
+      "detail": "LAUNCHAPI vesper-launchapi: busy vesper-launchapi",
+      "elapsed_ms": 13
+    },
+    {
+      "name": "fcapi_get_not_started",
+      "ok": true,
+      "detail": "GET / -> 200 {\"id\":\"vesper-launchapi\",\"state\":\"Not started\",\"vmm_version\":\"1.16.0\",\"app_name\":\"Firecracker\"}",
+      "elapsed_ms": 5
+    },
+    {
+      "name": "boot_through_api",
+      "ok": true,
+      "detail": "PUT /machine-config, PUT /boot-source, PUT /actions InstanceStart -> 204 on one keep-alive connection",
+      "elapsed_ms": 11
+    },
+    {
+      "name": "get_root_running",
+      "ok": true,
+      "detail": "GET / -> 200 {\"id\":\"vesper-launchapi\",\"state\":\"Running\",\"vmm_version\":\"1.16.0\",\"app_name\":\"Firecracker\"}",
+      "elapsed_ms": 7
+    },
+    {
+      "name": "guest_boots",
+      "ok": true,
+      "detail": "the guest init printed VESPER-MICROVM-OK on the serial console",
+      "elapsed_ms": 2048
+    },
+    {
+      "name": "jailer_isolation",
+      "ok": true,
+      "detail": "uid 20000, own network namespace, cgroup \"/vesperd/vesper-launchapi\", memory.max \"671088640\", seccomp mode 2, jail \"/var/lib/vesper/state/vesperd/jailer/firecracker/vesper-launchapi/root\"",
+      "elapsed_ms": 7
+    },
+    {
+      "name": "fcapi_refuses_bad_and_unknown_ids",
+      "ok": true,
+      "detail": "FCAPI ../x: bad id; FCAPI vesper-launchapi-none: no vesperd microVM vesper-launchapi-none",
+      "elapsed_ms": 6
+    },
+    {
+      "name": "fcparity_refuses_bad_id",
+      "ok": true,
+      "detail": "rc 2: STATUS 000 | ERR bad id",
+      "elapsed_ms": 1
+    },
+    {
+      "name": "shim_namespace_separate",
+      "ok": true,
+      "detail": "shim LAUNCHED vesper-launchapi pid= boot_ms=1770; shim cleanup CLEAN vesper-launchapi; vesperd microVM still RUNNING vesper-launchapi pid=8787 holder=8697",
+      "elapsed_ms": 1905
+    },
+    {
+      "name": "teardown_lease_closed",
+      "ok": true,
+      "detail": "lease closed; jail, cgroup, record and process gone in 530 ms",
+      "elapsed_ms": 530
+    },
+    {
+      "name": "reused_id_after_teardown",
+      "ok": true,
+      "detail": "relaunched vesper-launchapi pid=9414 234 ms after the lease closed (0 ERR busy while the old jail was removed)",
+      "elapsed_ms": 481
+    },
+    {
+      "name": "cleanup_reused_id",
+      "ok": true,
+      "detail": "ABSENT vesper-launchapi after 527 ms",
+      "elapsed_ms": 527
+    },
+    {
+      "name": "teardown_firecracker_killed",
+      "ok": true,
+      "detail": "SIGKILL to pid 9586; the agent closed the lease after 1028 ms; clean 6 ms later",
+      "elapsed_ms": 1285
+    },
+    {
+      "name": "teardown_lease_shell_killed_reaped",
+      "ok": true,
+      "detail": "KILLED-HOLDER vesper-launchapi-reap pid=9660; Firecracker pid 9754 outlived it until the periodic reaper closed the lease after 6649 ms; clean 6 ms later",
+      "elapsed_ms": 6885
+    },
+    {
+      "name": "reaper_ignores_reused_pid",
+      "ok": true,
+      "detail": "FORGED vesper-launchapi-reuse holder=9865 start=1 was=7258; the holder pid still runs but with another start time; reaped by this pass, clean after 3 ms, lease closed",
+      "elapsed_ms": 261
+    },
+    {
+      "name": "reaper_spares_new_unrecorded_jail",
+      "ok": true,
+      "detail": "KEPT vesper-launchapi-orphan reason=grace age=0; after 120 s: REAPED vesper-launchapi-orphan reason=no-record age=120 CLEAN vesper-launchapi-orphan",
+      "elapsed_ms": 28
+    },
+    {
+      "name": "default_container_cannot_open_vsock",
+      "ok": true,
+      "detail": "VSOCK default=denied cid=1 detail=2026/11/14 07:06:36 socat[1] E socket(40, 1, 0): Operation not permitted  | VSOCK default=denied cid=3 detail=2026/11/14 07:06:36 socat[1] E socket(40, 1, 0): Operation not permitted  | VSOCK unconfined=allowed cid=1 detail=2026/11/14 07:06:37 socat[1] E connect(6, AF=40 cid:1 port:1024, 16): Connection reset by peer  | VSOCK unconfined=allowed cid=3 detail=2026/11/14 07:06:37 socat[1] E connect(6, AF=40 cid:3 port:1024, 16): No such device ",
+      "elapsed_ms": 1635
+    },
+    {
+      "name": "nothing_left",
+      "ok": true,
+      "detail": "no lease or jail for vesper-launchapi, vesper-launchapi-fcexit, vesper-launchapi-reap, vesper-launchapi-reuse, vesper-launchapi-orphan",
+      "elapsed_ms": 3
+    }
+  ],
+  "passed": true
+}

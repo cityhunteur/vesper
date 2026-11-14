@@ -185,6 +185,9 @@ leftovers() {
   n=$(pgrep -u 10000 -f "firecracker --id " 2>/dev/null | wc -l | tr -d ' '); [ "$n" = 0 ] || what="$what firecracker=$n"
   n=$(pgrep -f containerd-shim-vesper-v2 2>/dev/null | wc -l | tr -d ' '); [ "$n" = 0 ] || what="$what shims=$n"
   n=$(ls -d /srv/jailer/firecracker/*/ 2>/dev/null | wc -l | tr -d ' '); [ "$n" = 0 ] || what="$what jails=$n"
+  # Share networks (ADR 0009): a namespace or a launch record with no microVM left is a leak.
+  n=$(ls /run/vesper/microvm/netns 2>/dev/null | wc -l | tr -d ' '); [ "$n" = 0 ] || what="$what sharenets=$n"
+  n=$(ls /run/vesper/microvm/records 2>/dev/null | wc -l | tr -d ' '); [ "$n" = 0 ] || what="$what sharerecords=$n"
   n=$(ctr_ task ls 2>/dev/null | tail -n +2 | wc -l | tr -d ' '); [ "$n" = 0 ] || what="$what tasks=$n"
   n=$(ctr_ containers ls -q 2>/dev/null | wc -l | tr -d ' '); [ "$n" = 0 ] || what="$what containers=$n"
   if [ -z "$what" ]; then echo CLEAN; else echo "DIRTY$what"; return 1; fi

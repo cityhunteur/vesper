@@ -22,7 +22,7 @@ microVM, can reach the file server or another microVM's export.
 - [x] M1 (2026-11-14, D-033) `unfs3` pinned in `docs/specs/systemvm-packages.lock.yaml` and listed in `THIRD_PARTY_NOTICES.md`, with its
   dependency closure, each licence and the uid-dropping tool; anything beyond `unfs3` goes to the owner in this
   PR; no server starts at boot
-- [ ] M2 Share network per shim microVM with shares: `netns_up` and `netns_down` moved to the sourced
+- [x] M2 (2026-11-14) Share network per shim microVM with shares: `netns_up` and `netns_down` moved to the sourced
   `/usr/local/lib/vesper/netns.sh` (TAP owner uid and state directory as parameters, `vesperd` unchanged); a
   namespace under `/run/vesper/microvm/netns/` holding `lo` and one TAP owned by uid 10000 (`169.254.77.1/30`
   server, `.2` guest) and the in-namespace `INPUT` rule, joined by the jailer with `--netns`; a per-id record
@@ -67,6 +67,24 @@ microVM, can reach the file server or another microVM's export.
   empty bounding set, and root with exactly the ADR's six capabilities (`CapBnd` `0xdb`), both with `NoNewPrivs`.
 - 2026-11-14 (M1): regenerating the lock from today's Alpine indexes would also move `runc` from 1.3.4-r1 to
   1.3.7-r0. The old package is still published, so its entry is kept as it was; a `runc` bump is its own change.
+- 2026-11-14 (M2): busybox `tunctl -u` takes a user name, not a uid, and no user had uid 10000. `vesper-microvm
+  setup-user` creates `vesper-shim-jail` (the reaper service does it at boot, and `launch --share-net` checks it).
+- 2026-11-14 (M2): `nsenter --net` does not change what `/sys` shows, so the `sharenet` sensor first listed the root
+  namespace's interfaces. It mounts a fresh sysfs inside the namespace.
+- 2026-11-14 (M2): the guest side of the network (`vesper_share_net=`, planned for M4) was needed to prove that the
+  microVM's own guest reaches the server address and another guest does not, so the init configures `eth0` now.
+  M4 keeps the NFS modules and the mounts.
+- 2026-11-14 (M2): the reaper also skips an id whose shim still runs. A stopped task keeps its jail until the shim
+  deletes it, and reaping on "Firecracker gone" alone would take it from under a live shim.
+- 2026-11-14 (M2): `make systemvm-sharenet-suite` passes 10 of 10 (`run/GH-160/m2-sharenet-suite.json`): with a test
+  listener in one microVM's namespace, its guest reaches port 2049 and not 2051; the root namespace, another
+  namespace, another guest, and privileged containers on the bridge and on the host network do not.
+- 2026-11-14 (M2): the regression run found an older fault. `cleanup` looked for leftover sockets with
+  `find /run -name "*ID*"`, and containerd names shim sockets by a hex digest, so a short id such as `ca` often
+  matched another task's socket. The false `DIRTY` skipped the memory release (W4 releases only on `CLEAN`), the
+  entry stayed for 30 s, and a suite that started straight after `shim-suite` was refused for memory. The check now
+  matches the id as a whole word. From a clean boot `sharenet`, `shim`, `workload`, `microvm`, `launchapi`,
+  `vesperd` and `egress` suites pass back to back, and the ledger is empty after them.
 - 2026-11-14 (M1): after boot with the new overlay no `unfsd` or `rpcbind` runs, no OpenRC service names them, and
   nothing listens on 111, 2049 or 2050. `shim-suite` (22 of 22) and `workload-suite` (16 of 16) pass.
 
@@ -104,6 +122,18 @@ microVM, can reach the file server or another microVM's export.
   microVM's; #160 closes only with the event hop. One finding was out of date: `vesper-memadmit` exists since W4.
   The report is a working paper (`run/` is not tracked); its conclusions are here and in the ADR.
 - 2026-11-13: the owner accepted ADR 0009 with those fixes (D-032). M1 can start.
+- 2026-11-14 (M2 council review, no blocker, 2 Medium, 11 Low): (1) the lock covered only the record and the
+  namespace, so a reaper pass could give back a new launch's memory admission; every launch now holds the lock from
+  its already-running check to its namespace, clears an earlier run's record and namespace first, and `cleanup`
+  takes the lock. (2) A process with the shim's name on its command line could hold the reaper off an orphan; a
+  shim now counts by its binary's device and inode and an exact `-id`, and a Firecracker by its cgroup. Also fixed:
+  the reaper logs errors and prints `KEPT` for a removal that was not clean; `cleanup` validates the id and the
+  socket check treats `-` as part of a word; the record write is checked; `launch --share-net` waits for the
+  guest's interface; the `sharenet` sensor cannot report `fc_in_ns=yes` from two empty reads. Three suite steps
+  were added. Left as TD-060: the jailer pid in `launch`, and pruning reaped microVMs' logs.
+- 2026-11-14: a container given the System VM's root (`--privileged` with a host bind mount or the host pid
+  namespace) can enter any namespace there. That is outside ADR 0009's threat table, which covers containers
+  confined by runc; such a container already reads every share directly. `docs/SECURITY.md` states the boundary.
 - 2026-11-14 (owner, D-033): the dependency closure of `unfs3` is approved as listed in Surprises, and the sandbox
   tool is util-linux `setpriv`, because one tool covers both the non-root server and the root fallback with a
   reduced bounding set. `su-exec` covers only the first; a helper of our own would be new privileged code.

@@ -5,7 +5,7 @@ CYCLES ?= 50
 .PHONY: build systemvm-upstream-suite third-party-notices third-party-notices-check test contract-generate contract-check contract-test surface-matrix-generate \
 	surface-matrix-check behavior-matrix-generate behavior-matrix-check \
 	validate-entitlements dev-up dev-down vmlauncher-build systemvm-fetch systemvm-overlay systemvm-prepare systemvm-build systemvm-launch-config \
-	systemvm-boot-smoke systemvm-up systemvm-down systemvm-control-suite systemvm-services-suite systemvm-trivial-image docker-up docker-down docker-smoke docker-conformance ports-suite binds-suite data-disk-suite share-notify-selftest share-watch-selftest systemvm-up-shares dns-suite workflow-suite crossarch-suite ctr-conformance ctr-conformance-check systemvm-reliability systemvm-microvm-suite systemvm-rootfs-suite systemvm-workload-suite systemvm-parity-baseline parity-baseline-check shim-build shim-test systemvm-exec-suite systemvm-shim-suite systemvm-bundle-suite systemvm-restart-suite systemvm-launchapi-suite systemvm-vesperd-suite systemvm-up-snapshot systemvm-snapshot-suite systemvm-replay-suite systemvm-replay-publish behavior-replay-check systemvm-egress-suite systemvm-bounds-suite
+	systemvm-boot-smoke systemvm-up systemvm-down systemvm-control-suite systemvm-services-suite systemvm-trivial-image docker-up docker-down docker-smoke docker-conformance ports-suite binds-suite data-disk-suite share-notify-selftest share-watch-selftest systemvm-up-shares dns-suite workflow-suite crossarch-suite ctr-conformance ctr-conformance-check systemvm-reliability systemvm-microvm-suite systemvm-rootfs-suite systemvm-workload-suite systemvm-parity-baseline parity-baseline-check shim-build shim-test systemvm-exec-suite systemvm-shim-suite systemvm-bundle-suite systemvm-restart-suite systemvm-launchapi-suite systemvm-vesperd-suite systemvm-up-snapshot systemvm-snapshot-suite systemvm-replay-suite systemvm-replay-publish behavior-replay-check systemvm-egress-suite systemvm-bounds-suite systemvm-sharenet-suite
 
 build:
 	$(CARGO) build --bins
@@ -78,6 +78,9 @@ systemvm-services-suite:
 
 systemvm-microvm-suite:
 	$(CARGO) run --bin systemvmctl -- control microvm-suite
+
+systemvm-sharenet-suite:
+	$(CARGO) run --bin systemvmctl -- control sharenet-suite
 
 systemvm-rootfs-suite:
 	$(CARGO) run --bin systemvmctl -- control rootfs-suite

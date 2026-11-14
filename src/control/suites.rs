@@ -19,6 +19,8 @@ pub use launchapi::run_launchapi_suite;
 mod restart;
 mod replay;
 pub use replay::{fixture_names, ReplayResponse, ReplayRun, ReplaySession, ReplayStep};
+mod sharenet;
+pub use sharenet::run_sharenet_suite;
 mod snapshot;
 pub use snapshot::{prepare_workdir, run_snapshot_suite, SnapshotRun, DEFAULT_CEILING_MIB, MEASURE_FILL_MIB, MEASURE_GUEST_MIB};
 mod vesperd;

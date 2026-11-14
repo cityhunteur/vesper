@@ -1,0 +1,29 @@
+# M2 council checks, run by hand in the System VM on the built overlay, 2026-11-14T07:11Z
+## 1. A reaper pass must not give back a new admission of the same id (council #1 verify step)
+ABORTED review160-race record=pid=22426 start=1 t=1794640273
+AGED review160-race pid=22426 start=1 t=
+ADMIT shim review160-race bytes=369098752 committed=369098752 budget=1800491008
+REAPED review160-race CLEAN review160-race
+REAP 1
+(that sequence takes the admission outside launch, so the reaper is right to release it with the orphan;
+ a real launch holds the lock from admission to namespace, shown next)
+## 2. A launch over a stale record and namespace: cleared first, under the lock, and the admission is kept
+ABORTED review160-stale record=pid=22520 start=1 t=179464027
+AGED review160-stale pid=22520 start=1 t
+LAUNCHED review160-stale pid=22658 boot_ms=1770
+REAP 0
+shim.review160-stale
+MEMBUDGET total=2068926464 reserve=268435456 budget=1800491008 committed=413794675 entries=1
+CLEAN review160-stale
+MEMBUDGET total=2068926464 reserve=268435456 budget=1800491008 committed=0 entries=0
+## 3. The real shim is recognised, an impostor is not
+STARTED ca pid=22852
+SHIMPID ca 22791
+IMPOSTOR ca pid=22951 pgrep=2 shim_for=22791
+IMPOSTOR stopped
+KILLED ca
+DELETED ca
+CLEAN
+## 4. cleanup refuses a bad id
+ERR bad id
+ERR bad id

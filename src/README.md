@@ -466,6 +466,13 @@ Public symbols by file:
   microVMs with `--tap tap0 --tap tap1`, each namespace holding exactly `lo` and the two taps owned by uid 20000, an
   unlisted tap Firecracker's own 400, `netns_ok`, the namespace gone after SIGTERM; CE-0010) and `nothing_left`
   (leases, jails and network namespaces); `passed` requires all 19 steps ok. It uses the control channel only to inspect and fault the guest.
+- `control/suites/sharenet.rs:run_sharenet_suite` (GH #160 M2) cleans its four ids, then `namespace_holds_lo_and_one_tap`
+  (`SHARENET` line checked field by field), `second_microvm_gets_its_own`,
+  `nothing_outside_reaches_the_server_address` (`REACH root|namespace:<b>|container-bridge|container-host closed`),
+  `its_own_guest_reaches_the_nfs_port_only`, `another_guest_does_not_reach_it`, `a_plain_launch_has_no_network`,
+  `reaper_spares_a_running_microvm`, `cleanup_removes_the_namespace`,
+  `aborted_launch_is_reaped_after_its_grace_period` (with a `test-impostor` process running),
+  `namespace_without_a_record_is_reaped`, `nothing_left`.
 - `control/suites/bounds.rs:run_bounds_suite` (TD-055, TD-056) ages and reaps its ids, then `console_log_bounded`
   (a guest with `vesper_console_flood=2500000`; `VESPERD logsize` shows both files within 1 MiB plus one line),
   `log_pruned_after_keep_time` (`VESPERD test-age-log`, then `reap` prints `PRUNED`), `budget_refuses_a_second_vesperd`
