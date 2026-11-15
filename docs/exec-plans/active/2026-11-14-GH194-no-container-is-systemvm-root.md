@@ -34,8 +34,13 @@ volumes that must be pulled or imported once.
   (`run/GH-194/battery/summary.txt`): sharenet, microvm, shim, workload, launchapi, vesperd, egress, bounds, exec,
   bundle, restart, rootfs, snapshot, docker-smoke, docker-conformance, ports, dns, workflow, crossarch,
   ctr-conformance, data-disk, binds. Not rerun: the upstream Firecracker suite in its new unmapped boot
-- [ ] M6 `legacy import-volume`; a short upstream-suite run in its unmapped boot on its own disk; the ownership
-  flicker on shares (TD-062); deviations recorded in the conformance notes; council review of the code
+- [x] M5b (2026-11-15) TD-062 fixed before merge (D-036): dockerd's default runtime is `vesper-runc`, which asks
+  each bind source on a share for its owner again as the container's uid after `runc create`; the host-edit
+  replay runs as container root with `CAP_FOWNER` only. `make binds-suite` 25 of 25 with no waits; plain runc and a
+  root replay fail the same checks (`run/GH-194/td062/control.txt`). Confine 14 of 14 and 23 other suites pass on
+  that overlay (`run/GH-194/td062/battery/summary.txt`; the snapshot suite on a rerun in its own boot config)
+- [ ] M6 `legacy import-volume`; a short upstream-suite run in its unmapped boot on its own disk; deviations
+  recorded in the conformance notes; council review of the code
 
 ## Surprises & Discoveries
 
@@ -131,9 +136,15 @@ it, and that a chunked create reaches the plugin without a body.
     plugin's own 403; `up.sh` says why a refused boot failed; a refused boot cannot serve; `vesper-boundlog`
     counts from the file's size; `vesper-ctr` leaves `/tmp`; jail parents are 0711; `HEALTH` no longer walks the
     old store.
-  - Not fixed here: the share-ownership flicker (finding 7, TD-062, with the owner); a peer check and a child cap
+  - Not fixed here: the share-ownership flicker (finding 7, TD-062; fixed in M5b after the owner chose to fix
+    it first); a peer check and a child cap
     on the Docker relay (finding 20); a suite config without a data disk (finding 19). Both are in TD-061.
 
+- 2026-11-15 (M5b): the share-ownership fault happened on every container start, not now and then: a probe saw
+  `nobody` and `EPERM` from `chmod` in 4 of 4 starts, for container root and for `-u 1000`. One
+  `statx(AT_STATX_FORCE_SYNC)` with the container's ids ends it. A share's root directory refuses `chmod` from
+  uid 100000 even with the right owner cached, as it did from root in GH #150, so the suite binds a directory
+  inside the share.
 - 2026-11-14: creating the image file before `mke2fs` (to make it owner-only at once) changed the bytes `mke2fs`
   wrote, and the rootfs suite's reproducible rebuild failed. The umask is set around `mke2fs` instead.
 - 2026-11-14: the vesperd suite's `firecracker_connection_limit_passes_through` failed once in the second battery

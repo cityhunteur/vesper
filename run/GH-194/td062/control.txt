@@ -1,0 +1,14 @@
+TD-062 negative controls, 2026-11-15, branch gh194-m2-remap (uncommitted fix on top of c85e16b).
+
+1. Probe before the fix (overlay of c85e16b, normal mapped boot), bind of run/vesperd-share/td062, probe.go as container root:
+plain=65534:65534 chmod=operation not permitted force=0:0 plain2=0:0 chmod2=<nil>   (4 of 4 runs)
+-u 1000: plain=65534:65534 chmod=operation not permitted force=1000:0 plain2=1000:0 chmod2=<nil>
+
+2. With the fix, bind of a directory in run/WOR-39/share:
+vesper-runc sub: plain=0:0 chmod=<nil> force=0:0 plain2=0:0 chmod2=<nil>
+runc sub:        plain=65534:65534 chmod=operation not permitted force=0:0 plain2=0:0 chmod2=<nil>
+share root, either runtime: plain=0:0 chmod=operation not permitted (no uid can set attributes on a share root; TD-038)
+
+3. Replay step (replay-own.sh) with the fix: PASS, 5 handler lines "0 chmod-ok".
+   Same overlay with as_container disabled (replay as root): FAIL, 5 handler lines
+   "65534 chmod: /data/owned.txt: Operation not permitted".

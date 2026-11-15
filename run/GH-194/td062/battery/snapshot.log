@@ -1,0 +1,10 @@
+cargo build --bin vesperd
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+cargo run --bin systemvmctl -- control snapshot-suite
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.04s
+     Running `target/debug/systemvmctl control snapshot-suite`
+ok   handshake: protocol 1 host vesper (1 ms)
+ok   data_disk_and_user: DATA mounted /dev/vdb used=11740604 avail=50365760; USER vesperd-jail 20000 (4 ms)
+FAIL share_files: /Volumes/Workspace/github.com/cityhunteur/vesper/run/vesperd-share is in no mounted share: SHARE share0 /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share mode=rw | SHARE share1 /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share-ro mode=ro | SHARE share2 /Volumes/Workspace/github.com/cityh (1 ms)
+snapshot suite failed (report: run/systemvm/snapshot-report.json)
+make: *** [systemvm-snapshot-suite] Error 1

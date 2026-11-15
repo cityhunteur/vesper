@@ -69,13 +69,14 @@ authorisation plugin, so some `docker` commands that work on other hosts fail he
 | Command | Result |
 |---|---|
 | `docker run --privileged`, `--pid=host`, `--network=host`, `--ipc=host`, `--userns=host` | refused |
-| `docker run --runtime <name>`, volumes with driver options (`docker volume create -o …`, Compose `driver_opts`) | refused |
+| `docker run --runtime <name>` other than `vesper-runc` (the default) or `runc`, volumes with driver options (`docker volume create -o …`, Compose `driver_opts`) | refused |
 | `docker build` with BuildKit | refused; use `DOCKER_BUILDKIT=0` |
 | `docker swarm`, `docker service`, `docker plugin` | refused |
 | a container create whose request is 1 MiB or more | refused |
 | `-v /var/run/docker.sock:…` | mounts, but the container cannot open the socket |
 | `-v /some/new/path:…` where the path does not exist and is not inside a shared macOS directory | refused; Docker would create it on the System VM |
-| a command that checks file ownership on a bind mount in the first second of a container (`git status` in a mounted repository) | can fail: files briefly appear owned by `nobody` (TD-062) |
+| `docker run --runtime runc` with a bind mount from a share | for its first second the bind can appear owned by `nobody`; `chmod` and `git` can fail (TD-062: the default runtime refreshes the owner, runc does not) |
+| `chmod` or `touch` of a share's root directory, bound as a whole | fails for every uid (TD-038); bind a directory inside the share |
 
 Images, volumes and containers made before this change are still on the data disk, unused; `make docker-up` says
 so. Pull or build images again.

@@ -18,3 +18,6 @@ GOOS=linux GOARCH=arm64 CGO_ENABLED=0 GOFLAGS=-mod=mod go build -trimpath \
 
 GOOS=linux GOARCH=arm64 CGO_ENABLED=0 GOFLAGS=-mod=mod go build -trimpath \
   -ldflags="-s -w -buildid=" -o "${ROOT_DIR}/build/shim/vesper-authz" ./cmd/vesper-authz
+
+GOOS=linux GOARCH=arm64 CGO_ENABLED=0 GOFLAGS=-mod=mod go build -trimpath \
+  -ldflags="-s -w -buildid=" -o "${ROOT_DIR}/build/shim/vesper-runc" ./cmd/vesper-runc

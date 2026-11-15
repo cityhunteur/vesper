@@ -175,8 +175,9 @@ func checkCreate(_ *url.URL, body []byte) Decision {
 	if h.UsernsMode != "" {
 		return deny("--userns=%s is refused: every container runs in the remapped user namespace", h.UsernsMode)
 	}
-	if h.Runtime != "" && h.Runtime != "runc" {
-		return deny("--runtime=%s is refused: only the default runtime is known to stay in the remapped user namespace", h.Runtime)
+	// vesper-runc is the default (TD-062); runc is the same runtime without the share-ownership refresh.
+	if h.Runtime != "" && h.Runtime != "vesper-runc" && h.Runtime != "runc" {
+		return deny("--runtime=%s is refused: only vesper-runc and runc are known to stay in the remapped user namespace", h.Runtime)
 	}
 	if h.VolumeDriver != "" && h.VolumeDriver != "local" {
 		return deny("volume driver %q is not allowed", h.VolumeDriver)

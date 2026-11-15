@@ -172,10 +172,12 @@ turns remapping off, and it is default-deny so that a new Docker route is refuse
 
 Found while building it (2026-11-14):
 
-- **Ownership on shares flickers (TD-062).** The share reports the asking uid as each file's owner and the System
-  VM caches that for about a second across uids. Container root is no longer the System VM's root, so after dockerd
-  resolves a bind at container start a container sees the mount as owned by `nobody` for up to a second, and
-  ownership-checking tools such as `git` can fail in that window. Reads and writes are unaffected.
+- **Ownership on shares flickered (TD-062, resolved 2026-11-15).** The share reports the asking uid as each file's
+  owner and the System VM caches that for about a second across uids. Container root is no longer the System VM's
+  root, so after dockerd resolved a bind at container start, or the host-edit replay touched a file, a container
+  saw it as owned by `nobody` for up to a second, and `chmod`, `touch` and `git` could fail. dockerd's default
+  runtime is now `vesper-runc`, which asks the share for each bind source again as the container's uid after
+  `runc create`, and the replay runs as container root with `CAP_FOWNER` only (D-036, SECURITY.md).
 - Compose, published ports, the cross-architecture path and the DNS suite pass unchanged.
 - An unconfined remapped container can make a vsock socket; its connects reach no listener.
 

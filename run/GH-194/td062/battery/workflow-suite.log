@@ -1,0 +1,10 @@
+bash scripts/systemvm/workflow-suite.sh
+ok   compose_up_multi_service: services running: client web ; client -> http://web/ -> web-ok
+ok   docker_build_from_host_context: built sha256:65bffdb16088fb2efde8046d6ab290ca3f70db3778c926afef2e9e03d0023b64 in 1s; run -> built-in-system-vm payload-from-host 
+ok   build_layers_present: 3 layers (base + RUN + COPY)
+ok   logs_follow_streams: 5 lines over 4s: tick-1 tick-2 tick-3 tick-4 tick-5 
+ok   exec_it_interactive_tty: pty inside: /dev/pts/0; prompt loop answered interactive-23
+ok   stop_signals_propagate: HUP then TERM reached the process; stop in 1s, exit 0; logs: ready got-hup got-term 
+ok   sigkill_exit_code: docker kill -> exit 137
+ok   platform_amd64: uname -m -> x86_64
+workflow suite: passed=true (report: /Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/workflow-report.json)

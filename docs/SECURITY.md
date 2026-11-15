@@ -124,6 +124,12 @@ The first step exists because a single-step replay moved host mtimes backwards b
 was edited twice within the guest's attribute cache lifetime (found by the council rework of 2026-11-11;
 [decision log](design-docs/decision-log.md) D-005).
 
+In a boot with remapped containers (ADR 0010) the sink does not run as root. Before its first lookup it changes to
+container root, uid and gid 100000 from `dockremap` in `/etc/subuid` and `/etc/subgid`, with `setpriv`, no
+supplementary groups, `no_new_privs`, and `CAP_FOWNER` as its only capability, which it needs to set the times of
+a file it does not own. The share reports each file as owned by whoever asks, so the owner the replay leaves in
+the System VM's attribute cache is the one a container expects (TD-062). In an unmapped boot it stays root.
+
 Two sequences in the sink are not atomic. The path check and the touch: a container that can write to a share
 could swap in a symlink between them, and the worst outcome is that one guest file outside the share has its
 atime and mtime rewritten; its contents do not change. The read of the mtime and the write that sets it: this is
@@ -297,7 +303,7 @@ share namespace (ADR 0009, D-034) and away from Vesper's own state.
   - A request whose method and cleaned, version-stripped path are not on its list is refused. Swarm, managed
     plugins, checkpoints and BuildKit (`/session`, `/grpc`, `/build?version=2`) are not on the list.
   - A container create is refused unless dockerd passed its body (dockerd withholds a body of 1 MiB or more) and
-    the body has no `UsernsMode`, no runtime but the default, and no volume driver options. Volume create follows
+    the body has no `UsernsMode`, no runtime but `vesper-runc` (the default) or `runc`, and no volume driver options. Volume create follows
     the same rule.
   - A bind whose source does not exist is refused unless the source lies inside a shared macOS directory. dockerd
     creates a missing source and gives it to container root; on the System VM's own filesystems that would hand a
@@ -336,17 +342,29 @@ share namespace (ADR 0009, D-034) and away from Vesper's own state.
 - **What is not guaranteed:** isolation between containers. They share one mapping and one kernel: a container
   given `/` reads other containers' volumes and every macOS share (virtio-fs does not check uids), and a kernel
   exploit is out of scope here. A microVM per container (GH #53) answers both.
-- **Ownership on shares flickers (TD-062).** The share reports every file as owned by whoever asks, and the System
-  VM caches the answer for about a second for all uids. Container root is no longer the System VM's root, so for
-  up to a second after another uid looked at a file (dockerd resolving a bind when a container starts, the
-  host-edit replay) a container sees it as owned by `nobody`, and `chmod` or `touch` on it fails. Reads and writes
-  are not affected. A command that checks ownership in the first second of a container, such as `git` on a
-  bind-mounted repository, can fail.
+- **Ownership on shares (TD-062, resolved).** The share reports every file as owned by whoever asks, and the System
+  VM caches the answer for about a second for all uids. Container root is not the System VM's root, so a look by
+  root left a container seeing the file as owned by `nobody`, unable to `chmod` or `touch` it, for up to a second.
+  Two lookups by root did this, and neither does now:
+  - dockerd and runc look up each bind source while they create a container. dockerd's default runtime is
+    `vesper-runc` (`shim/cmd/vesper-runc`): runc, and after `runc create`, before the process starts, a
+    `statx(AT_STATX_FORCE_SYNC)` of each bind source on a share with the container process's uid and gid as the
+    thread's filesystem ids. The step never fails a create and gives up after 2 s; its last result is in
+    `/run/vesper/runc-refresh`. Every other runc command is runc itself.
+  - The host-edit replay runs as container root (see the share notification sink above).
+
+  What remains: a container running as another user (`-u 1000`) sees a file the replay touched as owned by its
+  own root for up to a second; two containers with different users on one bind see each other's uid for up to a
+  second after the other looked; `docker exec -u` gets no refresh; `--runtime runc` gets none; and no uid can
+  change the attributes of a share's root directory (TD-038).
 - **Docker data from before this change** stays in `/var/lib/docker` on the data disk, unused. dockerd's mapped
   store is `/var/lib/docker/100000.100000`. `HEALTH` and `make docker-up` report the old store; nothing deletes it.
 - **Test hooks:** `vesper-containers test-authz stop|start`, `vesper-data test-relabel`. Both need the agent.
 - **Evidence:** `make systemvm-confine-suite` (14 steps, `run/GH-194/m5-confine-report.json`); `cd shim && go test
-  ./internal/authz`; 23 other System VM and Docker suites from the same overlay (`run/GH-194/battery/summary.txt`).
+  ./internal/authz ./internal/runcwrap`; 23 other System VM and Docker suites from the same overlay
+  (`run/GH-194/td062/battery/summary.txt`). `make binds-suite` checks ownership in a container's first command
+  and in an inotify handler on a replayed host edit, with no wait; with `--runtime runc`, or with the replay as
+  root, the same checks fail (`run/GH-194/td062/control.txt`).
 
 ## Staging and the snapshot store (ADR 0007, slice 5)
 
