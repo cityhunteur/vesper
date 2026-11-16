@@ -103,8 +103,14 @@ if case "${launched}" in *"LAUNCHED ${ID} "*) true ;; *) false ;; esac && case "
   && ctl microvm status "${ID}" | grep -q "RUNNING ${ID} .*sharenet=present" && [ -n "$(ctl microvm log "${ID}" 1)" ]; then # the record, namespace and log exist
   out="$("${DOCKER}" run --rm "${BROAD[@]}" "${IMAGE}" sh -c "${PROBE}" 2>&1)"
   got="$(printf '%s\n' "${out}" | grep '^GOT \|^ODD ' | tr '\n' ';')"; n="$(printf '%s\n' "${out}" | grep -c '^NO ')"
-  [ -z "${got}" ] && [ "${n}" = 21 ] && printf '%s\n' "${out}" | grep -q '^CONTROL ' && record broadest_container_is_not_root true "${n} attempts failed with ${BROAD[*]}: root-only record, console log, plugin and Docker logs, share namespace, share server ${SRV}:${PORT}, disk, kvm, vsock, Docker and containerd sockets, modprobe, hostname, cgroup, mknod" \
-    || record broadest_container_is_not_root false "${n} of 21 refused; succeeded or failed for another reason: ${got:-none}; output: $(printf '%s' "${out}" | tail -3)"
+  # The same probes again through docker exec --privileged into that container (the plugin does not read exec bodies).
+  xc="$("${DOCKER}" run -d "${BROAD[@]}" "${IMAGE}" sleep 300 2>&1)"
+  xout="$("${DOCKER}" exec --privileged "${xc}" sh -c "${PROBE}" 2>&1)"
+  "${DOCKER}" rm -f "${xc}" >/dev/null 2>&1
+  xgot="$(printf '%s\n' "${xout}" | grep '^GOT \|^ODD ' | tr '\n' ';')"; xn="$(printf '%s\n' "${xout}" | grep -c '^NO ')"
+  [ -z "${got}" ] && [ "${n}" = 21 ] && printf '%s\n' "${out}" | grep -q '^CONTROL ' \
+    && [ -z "${xgot}" ] && [ "${xn}" = 21 ] && printf '%s\n' "${xout}" | grep -q '^CONTROL ' && record broadest_container_is_not_root true "${n} attempts failed with ${BROAD[*]}, and ${xn} again through docker exec --privileged: root-only record, console log, plugin and Docker logs, share namespace, share server ${SRV}:${PORT}, disk, kvm, vsock, Docker and containerd sockets, modprobe, hostname, cgroup, mknod" \
+    || record broadest_container_is_not_root false "run: ${n} of 21 refused, other: ${got:-none}; exec --privileged: ${xn} of 21 refused, other: ${xgot:-none}; output: $(printf '%s' "${out}" | tail -3) / $(printf '%s' "${xout}" | tail -3)"
   reach="$(ctl microvm test-share-reach "${PORT}")"
   guest=""; for _ in $(seq 1 40); do guest="$(ctl microvm log "${ID}" 200 | grep -a 'VESPER-PROBE ' | tr -d '\r' | tail -1)"; [ -n "${guest}" ] && break; sleep 1; done
   out="$("${DOCKER}" run --rm -v "${LOG}:/x:ro" "${IMAGE}" cat /x 2>&1)"; rc1=$?

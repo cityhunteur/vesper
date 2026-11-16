@@ -61,6 +61,9 @@ volumes that must be pulled or imported once.
     volume is created with a one-time label and is used or removed only when it carries it; `flock` and signal
     traps replace the `mkdir` lock. The suite fixture gained the boundary ids, set-uid, outward and dangling links,
     a leading-dash name and a dead import's leftovers. Remaining coverage gaps are TD-064
+  - [x] (2026-11-16) Acceptance check against GH #194: `docker exec --privileged` was the one listed flag no step
+    ran. Step 3 now runs its 21 probes again through `docker exec --privileged` into the broadest container; all 21
+    are refused (`run/GH-194/m6/exec-privileged-confine-report.json`, run without the two restarts)
 
 ## Surprises & Discoveries
 
