@@ -53,7 +53,7 @@ print("unmapped" if "vesper.containers=unmapped" in c.split() else "mapped")' "$
   else
     echo "docker-up: containers mapped: no container is root on the System VM (ADR 0010)"
   fi
-  case "${legacy}" in present*) echo "docker-up: the data disk also holds a Docker store from before container remapping (${legacy#present }); it is not used and not deleted" ;; esac
+  case "${legacy}" in present*) echo "docker-up: the data disk also holds a Docker store from before container remapping (${legacy#present }); it is not used and not deleted. List its volumes with 'cargo run -q --bin systemvmctl -- control data legacy status'; import one with '... legacy import-volume NAME'" ;; esac
 }
 
 mkdir -p "${RUN_DIR}"

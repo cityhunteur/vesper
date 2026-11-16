@@ -1,0 +1,12 @@
+bash scripts/systemvm/data-disk-suite.sh
+ok   data_disk_in_use: DATA mounted /dev/vdb used=11740664 avail=50365700; ready in 2836 ms
+ok   state_dirs_on_disk: all 6 state directories (Docker, containerd and the Vesper stores) are on the data disk
+ok   vesperd_store_survives_jails_swept: before: STAGED jail:/initrd.gz store:vesper-data-store copy bytes=9961397; ORPHAN vesper-data-orphan; after the reboot: STORE vesper-data-store bytes=9961397 links=1; 0 vesperd jails
+ok   data_disk_not_reformatted: DATA mounted /dev/vdb used=11750508 avail=50355856
+ok   image_survives_reboot: alpine:3.22 present after reboot without a pull
+ok   container_survives_reboot: the stopped container started after reboot and printed: hello
+ok   volume_survives_reboot: named volume kept persist-1794850636
+ok   boot_within_budget: ready in 2843 ms with the disk mounted
+ok   foreign_disk_not_formatted: DATA refused /dev/vdb foreign:ext4:not-vesper; label still not-vesper
+ok   docker_works_without_disk: containers run on tmpfs when the disk is refused
+data disk suite: passed=true (report: /Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/data-disk-report.json)

@@ -79,7 +79,19 @@ authorisation plugin, so some `docker` commands that work on other hosts fail he
 | `chmod` or `touch` of a share's root directory, bound as a whole | fails for every uid (TD-038); bind a directory inside the share |
 
 Images, volumes and containers made before this change are still on the data disk, unused; `make docker-up` says
-so. Pull or build images again.
+so. Pull or build images again. Volumes hold data, so they can be copied into the remapped store:
+
+```sh
+cargo run -q --bin systemvmctl -- control data legacy status               # VOLUME <name> kib=<n> imported|not-imported|has-options
+cargo run -q --bin systemvmctl -- control data legacy import-volume NAME   # IMPORTED <name> entries=N kib=N unmapped=N
+```
+
+`import-volume` copies one volume into a new volume of the same name; the old one stays as it was. Each owner is
+shifted into the container range, so a file owned by root or by uid 1000 in the old volume has the same owner in a
+container. An owner outside 0 to 65535 becomes `nobody` (counted as `unmapped`). Hard links, symbolic links,
+modes and set-id bits are kept; extended attributes, ACLs and file capabilities are not. It refuses a name that
+already exists in the remapped store, a volume with driver options (bind, tmpfs or NFS: create it again) and a
+copy that would not fit. Stop the containers that use the volume first. Nothing deletes the old store.
 
 The upstream Firecracker suite (`make systemvm-upstream-suite`) is the one exception: it restarts the System VM
 with unmapped containers on a data disk of its own (`run/systemvm/upstream-data.img`) and puts the normal

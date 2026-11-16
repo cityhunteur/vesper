@@ -41,6 +41,9 @@ volumes that must be pulled or imported once.
   that overlay (`run/GH-194/td062/battery/summary.txt`; the snapshot suite on a rerun in its own boot config)
 - [ ] M6 `legacy import-volume`; a short upstream-suite run in its unmapped boot on its own disk; deviations
   recorded in the conformance notes; council review of the code
+  - [x] (2026-11-16) `vesper-data legacy status|import-volume NAME`; the confinement suite's 15th step imports a
+    planted volume and checks the owners in the store and in a container (`run/GH-194/m6/`). The real old store
+    lists 6 volumes; none was imported (that is the owner's choice per volume)
 
 ## Surprises & Discoveries
 
@@ -69,9 +72,15 @@ volumes that must be pulled or imported once.
   `/session` is refused, so the plugin's refusal names `--userns=host`. `DOCKER_BUILDKIT=0 docker build` works.
 - 2026-11-14 (M5): the egress suite's last step kills a `vesperd` holder and leaves its socket file under
   `run/egress-suite/`; `docker-smoke` then fails `no_raw_host_sockets`. An ordering artefact, older than this work.
+- 2026-11-16 (M6): BusyBox `cp -a` keeps hard links, so shifting owners by path shifted a file with two names
+  twice and left it owned by `nobody`. The suite's planted hard link caught it; each inode is now shifted once.
 
 ## Decision Log
 
+- 2026-11-16: `import-volume` gives an owner outside 0 to 65535 the container's `nobody` (System VM uid 165534)
+  rather than refusing the volume or keeping the raw id. A raw id would be a System VM uid outside the mapping;
+  refusing would block a volume over one stray file. The count is printed as `unmapped=N`. It copies (BusyBox
+  `cp -a`) rather than moving, so the old store stays readable by a downgrade, as ADR 0010 point 8 requires.
 - 2026-11-14: the plugin is default-deny over routes, and refuses a create whose body it cannot read. dockerd
   hands a plugin the body only under 1 MiB, so "refuse a visible `host`" can be bypassed with padding (council
   finding 1).

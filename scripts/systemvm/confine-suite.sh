@@ -33,6 +33,7 @@ health() { ctl health | sed -n "s/.*\"$1\":\"\\([^\"]*\\)\".*/\\1/p"; }
 cleanup() {
   ctl microvm test-share-listen "${ID}" stop >/dev/null; ctl microvm -- cleanup "${ID}" --logs >/dev/null
   "${DOCKER}" rm -f confine-probe >/dev/null 2>&1; "${DOCKER}" volume rm -f confine-vol >/dev/null 2>&1
+  ctl data test-import clean >/dev/null
   if [ -f "${SAVED}" ]; then # a reboot step was interrupted: put the launch config back
     cp "${SAVED}" "${CFG}" && rm -f "${SAVED}"
     bash scripts/systemvm/docker-down.sh >/dev/null 2>&1; bash scripts/systemvm/down.sh >/dev/null 2>&1
@@ -182,6 +183,28 @@ if case "${out}" in 0\ *|timeout) false ;; *) true ;; esac && [ -n "${back}" ] &
   record plugin_loss_fails_closed true "${stopped}; docker version -> ${out}; HEALTH authz=${h}; ${started}; docker version -> ${back}"
 else
   record plugin_loss_fails_closed false "${stopped}; docker version -> ${out}; HEALTH authz=${h}; ${started}; after: ${back:-no answer}"
+fi
+
+# --- 7b. An old volume is imported with its owners shifted into the container range (ADR 0010 point 8) ----------
+planted="$(ctl data test-import plant)"
+imported="$(ctl data test-import import)"
+again="$(ctl data test-import import)"
+badname="$(ctl data legacy import-volume ../etc)"
+check="$(ctl data test-import check | tr '\n' ' ')"
+seen="$("${DOCKER}" run --rm -v vesper-legacy-test:/v "${IMAGE}" sh -c 'stat -c "%u:%g:%a %n" /v/root.txt /v/sub/user.txt /v/far.txt /v/setgid; echo more >> /v/root.txt && echo wrote' 2>&1 | tr '\n' ' ')"
+status="$(ctl data legacy status | head -1)"
+ctl data test-import clean >/dev/null
+want_check="IMPORT-TEST . 100000:100000:755 IMPORT-TEST root.txt 100000:100000:644 IMPORT-TEST sub/user.txt 101000:101000:600 IMPORT-TEST far.txt 165534:165534:644 IMPORT-TEST setgid 100000:100050:2755 IMPORT-TEST link 101000:101000:777 IMPORT-TEST links 2 IMPORT-TEST source 0:0"
+want_seen="0:0:644 /v/root.txt 1000:1000:600 /v/sub/user.txt 65534:65534:644 /v/far.txt 0:50:2755 /v/setgid wrote"
+if case "${planted}:${imported}" in *"IMPORT-TEST planted"*":"*"IMPORTED vesper-legacy-test entries=8 "*"unmapped=2"*) true ;; *) false ;; esac \
+  && case "${again}" in *"exists in the remapped store"*) true ;; *) false ;; esac \
+  && case "${badname}" in *"ERR volume name"*) true ;; *) false ;; esac \
+  && case "${check}" in *"${want_check}"*) true ;; *) false ;; esac \
+  && case "${seen}" in *"${want_seen}"*) true ;; *) false ;; esac \
+  && case "${status}" in *LEGACY\ *) true ;; *) false ;; esac; then
+  record old_volume_imported_with_owners_shifted true "${imported}; in the store: ${check}; in a container: ${seen}; again: ${again}; ../etc: ${badname}; ${status}"
+else
+  record old_volume_imported_with_owners_shifted false "${planted}; ${imported}; again: ${again}; ../etc: ${badname}; store: ${check}; container: ${seen}; ${status}"
 fi
 
 # --- 8. A normal data disk refuses an unmapped boot, and the next normal boot is mapped -------------------------

@@ -1,0 +1,7 @@
+LEGACY present volumes=6 containers=0
+VOLUME gh166-cargo-git kib=1172 not-imported
+VOLUME gh166-cargo-registry kib=195080 not-imported
+VOLUME gh166-cargo-target kib=586532 not-imported
+VOLUME gh166-src kib=3399156 not-imported
+VOLUME vesper-upstream-cargo kib=200288 not-imported
+VOLUME vesper-upstream-src kib=2696260 not-imported
