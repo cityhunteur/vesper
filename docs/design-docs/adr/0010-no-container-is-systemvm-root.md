@@ -77,6 +77,9 @@ the System VM, and we will refuse every Docker API request that is not known to 
      other than the default is refused, so dockerd cannot be asked to start another runtime by name. Volume driver
      options, and drivers other than `local`, are refused on volume create and on a container's mounts: with
      options, the `local` driver makes dockerd, as root, perform a mount that the client describes.
+   - **No directory is made for a container on the System VM.** dockerd creates a missing bind source and gives
+     it to container root. The plugin refuses a bind whose source does not exist unless it lies inside a shared
+     macOS directory.
    - **Fail closed.** dockerd refuses every request when the plugin does not answer. The plugin is an OpenRC
      service under `supervise-daemon`, started before dockerd, which removes a stale socket before it binds;
      `vesper-services` waits for its activation before it starts dockerd.
@@ -167,11 +170,18 @@ turns remapping off, and it is default-deny so that a new Docker route is refuse
   remapping and stay root-only.
 - **ADR 0009's condition 3** is then tested with the broadest request Docker accepts.
 
-Unknown, each resolved by a milestone of GH #194:
+Found while building it (2026-11-14):
 
-- Whether Compose, published ports, the cross-architecture path and the DNS suite pass unchanged.
-- Whether BuildKit builds stay mapped, and so whether `/session` and `/grpc` can join the allow-list.
-- Whether an unconfined remapped container can connect a vsock socket at all.
+- **Ownership on shares flickered (TD-062, resolved 2026-11-15).** The share reports the asking uid as each file's
+  owner and the System VM caches that for about a second across uids. Container root is no longer the System VM's
+  root, so after dockerd resolved a bind at container start, or the host-edit replay touched a file, a container
+  saw it as owned by `nobody` for up to a second, and `chmod`, `touch` and `git` could fail. dockerd's default
+  runtime is now `vesper-runc`, which asks the share for each bind source again as the container's uid after
+  `runc create`, and the replay runs as container root with `CAP_FOWNER` only (D-036, SECURITY.md).
+- Compose, published ports, the cross-architecture path and the DNS suite pass unchanged.
+- An unconfined remapped container can make a vsock socket; its connects reach no listener.
+
+Still unknown: whether BuildKit builds stay mapped, and so whether `/session` and `/grpc` can join the allow-list.
 
 ## Implementation and migration impact
 

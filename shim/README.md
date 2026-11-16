@@ -29,7 +29,14 @@ The Go module pins containerd 2.1.5 and builds static Linux arm64 binaries with 
   standard library only. `internal/authz/policy.go` holds the allow-list of Docker API routes and the body rules
   for container and volume create; a request that is not listed, or a create whose body dockerd did not pass, is
   refused. `go test ./internal/authz` covers path handling, key case, duplicate keys and missing bodies. Built by
-  `build-shim.sh`; not yet installed in the overlay (GH #194 M2).
+  `build-shim.sh` and installed as `/usr/bin/vesper-authz`.
+- `cmd/vesper-runc` and `internal/runcwrap`: dockerd's default runtime in a normal boot (TD-062, D-036). Every
+  runc command but `create` replaces itself with `/usr/bin/runc`. For `create` it runs runc, and then asks each
+  bind source on a macOS share for its attributes with `statx(AT_STATX_FORCE_SYNC)`, as the container process's
+  uid and gid (mapped through the spec's id mappings) on a locked thread with changed filesystem ids, so the
+  System VM caches the owner the container sees rather than uid 0. It skips a process that is root on the System
+  VM, never fails a create, gives up after 2 s and writes one line to `/run/vesper/runc-refresh`. `go test
+  ./internal/runcwrap` covers runc's argument forms and the id mapping. Installed as `/usr/bin/vesper-runc`.
 - `cmd/vesper-console`: uses the already pinned containerd `go-runc` and `console` libraries to receive
   runc's terminal master. It runs detached `runc create/start` or `exec`, reaps the guest process and
   relays its terminal through stdin/stdout. A private Unix socket applies terminal resize.

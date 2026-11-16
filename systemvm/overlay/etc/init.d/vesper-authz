@@ -1,0 +1,16 @@
+#!/sbin/openrc-run
+# dockerd's authorisation plugin (ADR 0010): every Docker API request is put to it, and dockerd refuses the
+# request when it says no or does not answer. vesper-services starts it before dockerd in a mapped boot; it is
+# not in a runlevel, because an unmapped boot (the upstream Firecracker suite) runs without it.
+description="Vesper authorisation plugin for dockerd"
+supervisor=supervise-daemon
+command=/usr/bin/vesper-authz
+# Refusals go to a bounded log (TD-055): a client that is refused in a loop cannot fill the tmpfs.
+error_logger="/usr/local/bin/vesper-boundlog /var/log/vesper-authz.log"
+respawn_delay=1
+respawn_max=0
+
+depend() {
+  need localmount vesper-packages
+  before docker
+}

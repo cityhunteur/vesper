@@ -2,8 +2,9 @@
 //! namespace of its own that holds `lo` and one tap, and nothing outside that microVM reaches an address in it.
 //!
 //! A test listener stands in for the share server (M3) on the server address. The microVM's own guest reaches it on
-//! the NFS port and on no other port; the System VM's root namespace, a privileged container on the Docker bridge,
-//! a privileged container on the host network, another microVM's namespace and another microVM's guest do not.
+//! the NFS port and on no other port; the System VM's root namespace, a container on the Docker bridge with every
+//! capability, another microVM's namespace and another microVM's guest do not; and dockerd refuses a container on
+//! the host network (ADR 0010).
 //! A launch killed after its namespace exists is left alone during its grace period and reaped after it, even while
 //! a process that only looks like its shim runs; a running microVM is never reaped, however old its record; and a
 //! namespace with no record is removed.
@@ -134,7 +135,7 @@ pub fn run_sharenet_suite(endpoint: &ControlEndpoint, id: &str) -> SuiteReport {
     step(&mut steps, "nothing_outside_reaches_the_server_address", || {
         for port in [NFS_PORT, OTHER_PORT] {
             let (rc, l) = control.microvm(&["test-share-listen", &a, port])?;
-            if rc != 0 {
+            if rc != 0 || !first(&l).ends_with("alive=yes") {
                 return Err(format!("listener on {port}: {}", first(&l)));
             }
         }
@@ -142,11 +143,15 @@ pub fn run_sharenet_suite(endpoint: &ControlEndpoint, id: &str) -> SuiteReport {
         if rc != 0 {
             return Err(format!("test-share-reach: {}", reach.join(" | ")));
         }
-        let from = ["root", &format!("namespace:{b}"), "container-bridge", "container-host"].map(String::from);
+        let from = ["root", &format!("namespace:{b}"), "container-bridge"].map(String::from);
         for who in &from {
             if !reach.iter().any(|l| *l == format!("REACH {who} closed")) {
                 return Err(format!("{who} is not closed: {}", reach.join(" | ")));
             }
+        }
+        // ADR 0010: dockerd refuses the host network for a remapped container, so no container is ever there.
+        if !reach.iter().any(|l| l == "REACH container-host refused") {
+            return Err(format!("a container on the host network was not refused: {}", reach.join(" | ")));
         }
         Ok(((), format!("a listener on {SERVER}:{NFS_PORT} in {a}'s namespace: {}", reach.join("; "))))
     });

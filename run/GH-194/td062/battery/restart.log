@@ -1,0 +1,22 @@
+cargo run --bin systemvmctl -- control restart-suite
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.04s
+     Running `target/debug/systemvmctl control restart-suite`
+ok   handshake: protocol 1 host vesper (1 ms)
+ok   import_image: IMPORTED docker.io/vesper/trivial:guest (12 ms)
+ok   start_rs1: STARTED rs1 pid=2875 (2197 ms)
+ok   state_file_running: vesper-task.json: phase running, VMM pid recorded (1 ms)
+ok   containerd_killed_and_respawned: containerd pid 2818 SIGKILLed; containerd respawned and healthy (576 ms)
+ok   task_survives_restart: after restart: STATE rs1 RUNNING pid=2875 (same VMM pid) (7 ms)
+ok   kill_after_restart: KILLED rs1 (126 ms)
+ok   delete_after_restart: DELETED rs1 (551 ms)
+ok   start_rs2: STARTED rs2 pid=3479 (2201 ms)
+ok   kill_shim_rs2: KILLED-SHIM rs2 3368 (2 ms)
+ok   task_gone_after_shim_crash: GONE rs2 (9 ms)
+ok   no_orphaned_microvm: microVM EXITED rs2; jail CLEAN rs2 (540 ms)
+ok   container_delete_after_crash: container record removed (30 ms)
+ok   inflight_start_rs3: INFLIGHT rs3 (273 ms)
+ok   containerd_killed_during_inflight: containerd pid 3047 SIGKILLed; containerd respawned and healthy (1150 ms)
+ok   inflight_fails_gracefully: ctr exited 1: ctr: error reading from server: EOF (2 ms)
+ok   inflight_task_reconciled: after restart the task was ABSENT; killed and deleted (43 ms)
+ok   no_leftovers: CLEAN (12 ms)
+restart suite passed (report: run/systemvm/restart-report.json)

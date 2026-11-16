@@ -72,6 +72,10 @@
 #                                             internal: the uid 20000 side of stage; refused for any other uid
 # Values (docs/exec-plans/completed/2026-11-12-GH156-vesperd-backend-a.md gives the reason for each):
 set -u
+# ADR 0010: containers run as an unprivileged uid of the System VM, and dockerd can bind any single file into
+# one whatever its parent directory allows. So nothing this tool writes is readable by other uids unless a line
+# says why it must be.
+umask 077
 FC_DIR=/var/lib/vesper/firecracker
 FC=$FC_DIR/firecracker
 JAILER=$FC_DIR/jailer
@@ -148,12 +152,12 @@ is_fc_for() { # PID ID -> 0 when PID is a Firecracker running as uid 20000 with 
 fc_by_id() { pgrep -u "$JUID" -f "firecracker --id $1 " 2>/dev/null | head -1; }
 
 ensure_dirs() { # the tmpfs side; the data-disk side is data_dirs
-  mkdir -p "$LEASES" "$LOGS" && chmod 0700 "$STATE" "$LEASES"
+  mkdir -p "$LEASES" "$LOGS" && chmod 0700 "$STATE" "$LEASES" "$LOGS"
 }
 data_ok() { awk -v d="$DATA" '$2 == d && $3 == "ext4" {f=1} END {exit !f}' /proc/mounts; }
 data_dirs() { # jails and store on the data disk; refused when the disk is not in use (ADR 0007 section 5)
   data_ok || return 1
-  mkdir -p "$JAILS" "$STORE" && chmod 0755 "$DATA/vesperd" "$BASE" "$JAILS" && chmod 0700 "$STORE"
+  mkdir -p "$JAILS" "$STORE" && chmod 0711 "$DATA/vesperd" "$BASE" "$JAILS" && chmod 0700 "$STORE"
 }
 lock() { exec 9>"$LOCK" && flock 9; }
 unlock() { flock -u 9 2>/dev/null; exec 9>&-; }
@@ -666,7 +670,7 @@ copy_one() { # SRC DEST ROOT
       [ -n "${err:-}" ] && { rm -f "$tmp"; echo "${err#ERR }" | head -1; return 1; }
       got=$(stat -c %s "$tmp" 2>/dev/null)
       [ "$got" = "$size" ] || { rm -f "$tmp"; echo "copied ${got:-0} of $size bytes from $src"; return 1; }
-      chmod 0444 "$tmp" && mv -f "$tmp" "$STORE/$name" || { rm -f "$tmp"; echo "store:$name: rename failed"; return 1; }
+      chown "0:$JGID" "$tmp" && chmod 0440 "$tmp" && mv -f "$tmp" "$STORE/$name" || { rm -f "$tmp"; echo "store:$name: rename failed"; return 1; }
       ;;
     *)
       case "$src" in
@@ -741,7 +745,7 @@ launch_stage() { # ROOT SPEC...
           [ -d "$d" ] || { mkdir "$d" && chown "$JUID:$JGID" "$d"; } || { echo "stage $s: mkdir"; return 1; }
         done
         [ -e "$lroot$dest" ] && { echo "stage $s: $dest exists"; return 1; }
-        chown 0:0 "$f" && chmod 0444 "$f" && ln "$f" "$lroot$dest" || { echo "stage $s: link failed"; return 1; } ;;
+        chown "0:$JGID" "$f" && chmod 0440 "$f" && ln "$f" "$lroot$dest" || { echo "stage $s: link failed"; return 1; } ;;
       *)
         store_lock
         out=$(copy_one "$src" "$dest" "$lroot"); rc=$?
@@ -861,7 +865,8 @@ launch() {
   trap 'exit 130' INT
   trap 'exit 143' TERM
   root="$JAILS/$LID/root"
-  mkdir -p "$root" || launch_fail "jail"
+  # uid 20000 walks to its jail root (as_jail), so the jail directory lets others pass through, not list.
+  mkdir -p "$root" && chmod 0711 "$JAILS/$LID" && chmod 0700 "$root" || launch_fail "jail"
   cp "$MVM/Image" "$root/Image" && cp "$MVM/initrd.gz" "$root/initrd.gz" && chmod 0644 "$root/Image" "$root/initrd.gz" \
     || launch_fail "stage kernel"
   chown "$JUID:$JGID" "$root"

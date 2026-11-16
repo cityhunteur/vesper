@@ -1,0 +1,23 @@
+cargo run --bin systemvmctl -- control exec-suite
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.16s
+     Running `target/debug/systemvmctl control exec-suite`
+ok   handshake: connected (4 ms)
+ok   import: IMPORTED docker.io/vesper/trivial:guest (12 ms)
+ok   stdin_stdout_stderr_exit7: RC 7 | OUT stdin-roundtrip | ERR stderr-only (2793 ms)
+ok   interactive_shell: RC 7 | OUT echo interactive-ok; exit 7 | OUT echo interactive-ok; exit 7 | OUT ~ # echo interactive-ok; exit 7 | OUT interactive-ok (2827 ms)
+ok   run_tty_resize_exit7: RC 7 | OUT /dev/pts/0 | OUT BEFORE | OUT 24 80 | OUT AFTER | OUT 37 101 (4892 ms)
+ok   start_exec_host: STARTED ex-host pid=31215 (2196 ms)
+ok   exec_no_shell_exit7: RC 7 | OUT exec-output | OUT exec-stderr (123 ms)
+ok   exec_tty_resize_exit7: RC 7 | OUT /dev/pts/0 | OUT BEFORE | OUT 24 80 | OUT AFTER | OUT 37 101 (5147 ms)
+ok   exec_signal_kill137: RC 137 | OUT exec-signal-ready (324 ms)
+ok   exec_runtime_error_is_structured: RC 1 | OUT exec failed: unable to start container process: exec: "/no-such-vesper-program": stat /no-such-vesper-program: no such file or directory | OUT ctr: guest session p1044: guest start p1044: ERROR {"level":"error (140 ms)
+ok   kill_exec_host: KILLED ex-host (134 ms)
+ok   delete_exec_host: DELETED ex-host (585 ms)
+ok   signal_TERM_plain_exit143: RC 143 (3071 ms)
+ok   signal_TERM_trap_exit0: RC 0 | OUT signal-ready | OUT TERM-caught (3059 ms)
+ok   signal_KILL_plain_exit137: RC 137 (3075 ms)
+ok   init_reaps_orphan: RC 7 | OUT orphan-started (2740 ms)
+ok   tty_init_reaps_orphan: RC 7 | OUT orphan-started (2848 ms)
+ok   init_exit_terminates_exec: RC 7 | OUT init-ready (5886 ms)
+ok   no_leftovers: CLEAN (16 ms)
+exec suite passed (report: run/systemvm/exec-report.json)

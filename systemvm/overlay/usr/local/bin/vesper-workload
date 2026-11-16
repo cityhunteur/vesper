@@ -8,10 +8,14 @@
 #        vesper-workload rm NAME                     stop if needed, remove the jail, cgroup, rootfs copy and record
 #        vesper-workload isolation NAME              the microVM manager's isolation JSON
 set -u
+# ADR 0010: containers run as an unprivileged uid of the System VM, and dockerd can bind any single file into
+# one whatever its parent directory allows. So nothing this tool writes is readable by other uids unless a line
+# says why it must be.
+umask 077
 WL=/var/lib/vesper/workloads
 MV=/usr/local/bin/vesper-microvm
 RF=/usr/local/bin/vesper-rootfs
-mkdir -p "$WL"
+mkdir -p "$WL" && chmod 0700 "$WL"
 
 rec() { echo "${WL:?}/${1:?}.json"; }
 field() { sed -n "s/.*\"$2\":\"\([^\"]*\)\".*/\1/p" "$(rec "$1")" 2>/dev/null; }

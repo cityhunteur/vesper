@@ -55,13 +55,47 @@ func TestRoutes(t *testing.T) {
 	}
 }
 
+func TestBindSources(t *testing.T) {
+	old := MissingSourceOK
+	defer func() { MissingSourceOK = old }()
+	// /present exists; anything under /share may be created; the rest is missing on the System VM itself.
+	MissingSourceOK = func(p string) (bool, bool) {
+		return p == "/present" || p == "/", strings.HasPrefix(p, "/share/")
+	}
+	const uri = "/v1.51/containers/create"
+	for _, b := range []string{
+		`{"HostConfig":{"Binds":["/present:/x","/:/host:ro","/share/new/dir:/y","named:/v"]}}`,
+		`{"HostConfig":{"Mounts":[{"Type":"bind","Source":"/present","Target":"/x"},{"Type":"volume","Source":"named","Target":"/v"}]}}`,
+	} {
+		if d := decide("POST", uri, b); !d.Allow {
+			t.Errorf("create %s refused: %s", b, d.Reason)
+		}
+	}
+	for name, b := range map[string]string{
+		"missing source":       `{"HostConfig":{"Binds":["/var/lib/vesper/microvm:/m"]}}`,
+		"missing among others": `{"HostConfig":{"Binds":["/present:/x","/srv/jailer:/j:ro"]}}`,
+		"not canonical":        `{"HostConfig":{"Binds":["/present/../run/vesper/mem:/m"]}}`,
+		"trailing slash":       `{"HostConfig":{"Binds":["/run/vesper/mem/:/m"]}}`,
+		"missing bind mount":   `{"HostConfig":{"Mounts":[{"Type":"BIND","Source":"/run/vesper/mem","Target":"/m"}]}}`,
+		"lower-case binds":     `{"hostconfig":{"binds":["/run/vesper/mem:/m"]}}`,
+	} {
+		if d := decide("POST", uri, b); d.Allow {
+			t.Errorf("create with %s allowed: %s", name, b)
+		}
+	}
+}
+
 func TestCreateBody(t *testing.T) {
+	old := MissingSourceOK
+	defer func() { MissingSourceOK = old }()
+	MissingSourceOK = func(p string) (bool, bool) { return p == "/", false }
 	const uri = "/v1.51/containers/create?name=x"
 	allowed := []string{
 		`{"Image":"alpine"}`,
 		`{"Image":"alpine","HostConfig":{}}`,
 		`{"Image":"alpine","HostConfig":null}`,
 		`{"Image":"alpine","HostConfig":{"UsernsMode":"","Runtime":"runc","Privileged":true,"PidMode":"host"}}`,
+		`{"Image":"alpine","HostConfig":{"Runtime":"vesper-runc"}}`,
 		`{"Image":"alpine","HostConfig":{"Binds":["/:/host"],"CapAdd":["ALL"],"VolumeDriver":"local"}}`,
 		`{"HostConfig":{"Mounts":[{"Type":"volume","Source":"v","Target":"/v","VolumeOptions":{"DriverConfig":{"Name":"local"}}}]}}`,
 		`{"HostConfig":{"Mounts":[{"Type":"bind","Source":"/","Target":"/host"}]}}`,
@@ -85,6 +119,7 @@ func TestCreateBody(t *testing.T) {
 		"host userns kept by a merge": `{"HostConfig":{"UsernsMode":"host"},"hostconfig":{"Runtime":"runc"}}`,
 		"another runtime":             `{"HostConfig":{"Runtime":"io.containerd.vesper.v2"}}`,
 		"runtime by path":             `{"HostConfig":{"Runtime":"/usr/bin/runc"}}`,
+		"wrapper by path":             `{"HostConfig":{"Runtime":"/usr/bin/vesper-runc"}}`,
 		"volume driver":               `{"HostConfig":{"VolumeDriver":"nfs"}}`,
 		"mount driver options":        `{"HostConfig":{"Mounts":[{"Type":"volume","Target":"/v","VolumeOptions":{"DriverConfig":{"Options":{"type":"ext4","device":"/dev/vdb"}}}}]}}`,
 		"mount driver name":           `{"HostConfig":{"Mounts":[{"Type":"volume","Target":"/v","VolumeOptions":{"DriverConfig":{"Name":"x"}}}]}}`,

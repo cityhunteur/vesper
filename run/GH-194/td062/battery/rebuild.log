@@ -1,0 +1,26 @@
+bash scripts/systemvm/docker-down.sh
+docker-down: stopped
+bash scripts/systemvm/down.sh
+guest acknowledged shutdown
+systemvm-down: guest acknowledged shutdown
+systemvm-down: stopped
+bash scripts/systemvm/fetch-packages.sh
+fetch-packages: 0 downloaded
+verified 32 pinned packages in /Volumes/Workspace/github.com/cityhunteur/vesper/build/systemvm/cache/apks and 2 archive members in /Volumes/Workspace/github.com/cityhunteur/vesper/build/systemvm/cache/archives
+bash scripts/systemvm/build-overlay.sh
+apkovl /Volumes/Workspace/github.com/cityhunteur/vesper/build/systemvm/localhost.apkovl.tar.gz sha256=1d28c14a4bb1a83b9167b9a1b5759591a6cb75ff2123fe584b058f047ddd5561 size=78225934
+initrd /Volumes/Workspace/github.com/cityhunteur/vesper/build/systemvm/initramfs-vesper sha256=7d8c80cb2c071030386d23f7ff56b6e3c829de7a85dde87593a0112a7e12f099 size=87930206
+verified alpine 3.22.8 aarch64 image in /Volumes/Workspace/github.com/cityhunteur/vesper/build/systemvm: image_id=b1965de508d579c75a9f55c761a9114d42e6220a81d0d101517733ff546e8abe (manifest: /Volumes/Workspace/github.com/cityhunteur/vesper/build/systemvm/image-manifest.json)
+bash scripts/systemvm/up.sh
+systemvm-up: running (pid 20911); bridge run/systemvm/vsock/3.sock; log /Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/vmlauncher.log
+{"status":"bridge-listening","elapsed_ms":108,"ready_pattern":"login:","console_log":"/Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/console.log","bridge":"run/systemvm/vsock/3.sock"}
+{"status":"ready","elapsed_ms":3325,"ready_pattern":"login:","console_log":"/Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/console.log"}
+{"status":"probe-ok","elapsed_ms":5585,"ready_pattern":"login:","console_log":"/Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/console.log"}
+systemvm-up: MOUNTED share0 /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share mode=rw
+systemvm-up: MOUNTED share1 /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share-ro mode=ro
+systemvm-up: MOUNTED share2 /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share-nowatch mode=rw
+bash scripts/systemvm/docker-up.sh
+docker-up: containers mapped: no container is root on the System VM (ADR 0010)
+docker-up: the data disk also holds a Docker store from before container remapping (volumes=6 containers=0); it is not used and not deleted
+docker-up: vesper-proxy pid 21371; DOCKER_HOST=unix:///Volumes/Workspace/github.com/cityhunteur/vesper/run/vesper/docker.sock; published ports via the guest relay (status /Volumes/Workspace/github.com/cityhunteur/vesper/run/vesper/ports.json)
+srw-------@ 1 pravin  staff  0 15 Nov 09:33 /Volumes/Workspace/github.com/cityhunteur/vesper/run/vesper/docker.sock

@@ -28,14 +28,14 @@ reboot() {
   sed -n 's/.*"status":"ready","elapsed_ms":\([0-9]*\).*/\1/p' run/systemvm/vmlauncher.log | tail -1
 }
 vv() { cargo run -q --bin systemvmctl -- control vesperd "$@" 2>&1; }
-in_vm() { "${DOCKER}" run --rm --privileged --pid=host "${IMAGE}" nsenter -t 1 -m sh -c "$1" 2>&1; }
 
 # 1. The default disk is formatted or mounted, and the state directories live on it.
 ms="$(reboot "${ROOT_DIR}/run/systemvm/data.img")"; st="$(data_state)"; docker_ready
 case "${st}" in *"DATA formatted /dev/"*|*"DATA mounted /dev/"*) record data_disk_in_use true "${st}; ready in ${ms} ms" ;; *) record data_disk_in_use false "${st}" ;; esac
 "${DOCKER}" pull -q "${IMAGE}" >/dev/null 2>&1
-binds="$(in_vm 'for d in /var/lib/docker /var/lib/containerd /var/lib/vesper/rootfs-cache; do grep -q " $d ext4 " /proc/mounts && echo ok; done' | grep -c ok)"
-[ "${binds}" = 3 ] && record state_dirs_on_disk true "/var/lib/docker, /var/lib/containerd and /var/lib/vesper/rootfs-cache are on the data disk" || record state_dirs_on_disk false "${binds} of 3 state directories are on the disk"
+# No root shell in a container (ADR 0010): the System VM answers through vesper-data's own verbs.
+binds="$(data binds | sed -n 's/.*BINDS \([0-9]* of [0-9]*\).*/\1/p')"
+[ -n "${binds}" ] && [ "${binds% of *}" = "${binds#* of }" ] && record state_dirs_on_disk true "all ${binds#* of } state directories (Docker, containerd and the Vesper stores) are on the data disk" || record state_dirs_on_disk false "${binds:-none} state directories are on the disk"
 
 # 2. An image, a stopped container and a volume survive a reboot, and the disk is not formatted again.
 "${DOCKER}" rm -f vesper-data-probe >/dev/null 2>&1; "${DOCKER}" volume rm -f vesper-data-probe >/dev/null 2>&1
@@ -73,9 +73,9 @@ out="$("${DOCKER}" run --rm -v vesper-data-probe:/v "${IMAGE}" cat /v/stamp 2>&1
 reboot "${SCRATCH}" >/dev/null; data_state >/dev/null; docker_ready
 dev="$(data status | sed -n 's/.*DATA [a-z]* \(\/dev\/[a-z]*\).*/\1/p')"
 "${DOCKER}" pull -q "${IMAGE}" >/dev/null 2>&1
-in_vm "e2label ${dev:-/dev/vdb} not-vesper" >/dev/null
+data test-relabel not-vesper >/dev/null
 reboot "${SCRATCH}" >/dev/null; st="$(data_state)"; docker_ready
-label="$("${DOCKER}" pull -q "${IMAGE}" >/dev/null 2>&1; in_vm "blkid ${dev:-/dev/vdb}" | sed -n 's/.*LABEL="\([^"]*\)".*/\1/p')"
+label="$(data label | sed -n 's/.*LABEL [^ ]* [^ ]* \(.*\)$/\1/p')"
 case "${st}" in *"DATA refused /dev/"*"foreign:ext4:not-vesper"*)
   [ "${label}" = not-vesper ] && record foreign_disk_not_formatted true "${st}; label still ${label}" || record foreign_disk_not_formatted false "${st}; label now ${label}" ;;
   *) record foreign_disk_not_formatted false "${st}" ;; esac

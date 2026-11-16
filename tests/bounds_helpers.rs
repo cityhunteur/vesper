@@ -151,17 +151,20 @@ fn the_default_store_quota_is_a_quarter_of_a_large_disk() {
     let d = scratch("quota");
     let bin = d.join("bin");
     fs::create_dir_all(&bin).unwrap();
-    let df = bin.join("df");
-    fs::write(&df, "#!/bin/sh\necho 'Filesystem 1K-blocks Used Available Use% Mounted on'\necho '/dev/vdb 67108864 0 67108864 0% /data'\n").unwrap();
-    make_executable(&df);
+    let src = d.join("df.sh");
+    fs::write(&src, "#!/bin/sh\necho 'Filesystem 1K-blocks Used Available Use% Mounted on'\necho '/dev/vdb 67108864 0 67108864 0% /data'\n").unwrap();
+    install_executable(&src, &bin.join("df"));
     let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap());
     let out = Command::new("sh").arg(helper("vesper-vesperd")).args(["test-store-quota", "clear"]).env("PATH", path).output().unwrap();
-    let out = String::from_utf8_lossy(&out.stdout);
+    let (stdout, stderr) = (String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
     let want = 67_108_864u64 * 1024 / 100 * 25;
-    assert!(out.contains(&format!("QUOTA bytes={want} ")), "{out}");
+    assert!(stdout.contains(&format!("QUOTA bytes={want} ")), "stdout: {stdout}\nstderr: {stderr}");
 }
 
-fn make_executable(p: &Path) {
-    use std::os::unix::fs::PermissionsExt;
-    fs::set_permissions(p, fs::Permissions::from_mode(0o755)).unwrap();
+/// Copies `src` to `dst` as an executable in a child process, so this process never holds `dst` open for writing.
+/// Tests run on threads that fork; a child forked while `fs::write` held a fresh file open keeps that descriptor until
+/// it execs, and running the file then fails with ETXTBSY (TD-063).
+fn install_executable(src: &Path, dst: &Path) {
+    let st = Command::new("install").arg("-m").arg("755").arg(src).arg(dst).status().unwrap();
+    assert!(st.success(), "install {} {}: {st}", src.display(), dst.display());
 }

@@ -51,7 +51,7 @@ errors to stderr and exits with code 1 on failure.
   `systemvmctl launch-config --data-disk PATH` (absolute path to a disk image on macOS, GH #164) sets
   `data_disk_path` and appends `vesper_data=/dev/vdX` to the kernel command line
   (`vesper::systemvm::attach_data_disk`);
-  `systemvmctl control share <args…>` runs `vesper-share` in the guest; `control data mount|status|stop` runs
+  `systemvmctl control share <args…>` runs `vesper-share` in the guest; `control containers status|test-authz stop|start` runs `vesper-containers` (ADR 0010); `control data mount|status|stop|binds|label|test-relabel LABEL` runs
   `vesper-data` (the persistent data disk); `control arch status|mode ARCH` runs
   `vesper-arch` (execution mode per architecture).
 - `vesper-proxy.rs:main` (binary `vesper-proxy`, `#[tokio::main]`). `--publish-ports` adds the GH #28

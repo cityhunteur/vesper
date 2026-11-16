@@ -33,8 +33,19 @@ nohup "${LAUNCHER}" --config "${LAUNCH_CONFIG}" --keep-running --timeout-seconds
 PID=$!
 echo "${PID}" > "${PID_FILE}"
 
+# A boot whose data disk belongs to the other container mode does not start Docker (ADR 0010), so the launcher's
+# probe fails. Say so, from the System VM's console.
+refused_reason() {
+  local console why
+  console="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("console_log_path") or "")' "${LAUNCH_CONFIG}" 2>/dev/null || true)"
+  [ -n "${console}" ] || return 0
+  why="$(grep -a 'vesper: CONTAINERS refused' "${console}" 2>/dev/null | tail -1 | tr -d '\r')"
+  [ -n "${why}" ] && echo "systemvm-up: the System VM did not start Docker: ${why#vesper: } (the data disk belongs to the other container mode)" >&2
+  return 0
+}
 for _ in $(seq 1 "${TIMEOUT}"); do
   if ! kill -0 "${PID}" 2>/dev/null; then
+    refused_reason
     echo "systemvm-up: launcher exited early; see ${LOG_FILE}" >&2
     tail -5 "${LOG_FILE}" >&2
     rm -f "${PID_FILE}"
@@ -57,6 +68,7 @@ for s in json.load(open(sys.argv[1])).get("shared_directories", []):
   fi
   sleep 1
 done
+refused_reason
 echo "systemvm-up: timed out after ${TIMEOUT}s waiting for ${WANT}; see ${LOG_FILE}" >&2
 kill "${PID}" 2>/dev/null || true
 rm -f "${PID_FILE}"

@@ -7,6 +7,11 @@
 # Reproducible for one image id: file mtimes and filesystem timestamps are forced to epoch 0, the UUID and hash seed
 # derive from the image id, and the embedded provenance carries only deterministic facts.
 set -u
+# The image tree is unpacked and repacked here, and its modes become the guest's, so this tool keeps the ordinary
+# umask whoever calls it. What it leaves on the System VM (the store, each image and its provenance) is made
+# owner-only where it is written: containers run as another uid there, and dockerd can bind a single file into one
+# whatever its parent directory allows (ADR 0010).
+umask 022
 STORE=/var/lib/vesper/rootfs
 BASELINES=/var/lib/vesper/baselines.lock.yaml
 MIN_KB=16384
@@ -41,7 +46,7 @@ build() {
   tags=$(printf '%s' "$info" | cut -d'|' -f3)
   created=$(printf '%s' "$info" | cut -d'|' -f4)
   arch=$(printf '%s' "$info" | cut -d'|' -f5); os=$(printf '%s' "$info" | cut -d'|' -f6)
-  mkdir -p "$STORE"
+  mkdir -p "$STORE" && chmod 0700 "$STORE"
   out="$STORE/$(echo "$id" | cut -c1-16).ext4"
   side="$out.provenance.json"
   if [ "$nocache" = 0 ] && [ -f "$out" ] && [ -f "$side" ]; then
@@ -71,14 +76,16 @@ build() {
   size=$(( used + used / 5 + 4096 )); [ "$size" -lt "$MIN_KB" ] && size=$MIN_KB
   uuid=$(uuid_from "$id")
   rm -f "$out.tmp"
-  if ! E2FSPROGS_FAKE_TIME=0 mke2fs -q -F -t ext4 -d "$work/root" -U "$uuid" -E hash_seed="$uuid",root_owner=0:0 -L vesper-rootfs "$out.tmp" "${size}K" >"$work/mke2fs.log" 2>&1; then
+  # mke2fs runs with umask 077, so the image is owner-only from its first byte. (Making the file first changes
+  # what mke2fs writes: the rootfs suite's reproducible rebuild caught that.)
+  if ! (umask 077; E2FSPROGS_FAKE_TIME=0 mke2fs -q -F -t ext4 -d "$work/root" -U "$uuid" -E hash_seed="$uuid",root_owner=0:0 -L vesper-rootfs "$out.tmp" "${size}K") >"$work/mke2fs.log" 2>&1; then
     echo "ERR mke2fs failed: $(tail -2 "$work/mke2fs.log" | tr '\n' ' ')"; rm -rf "$work" "$out.tmp"; return 1
   fi
   rm -rf "$work"
-  mv "$out.tmp" "$out"
+  chmod 0600 "$out.tmp" && mv "$out.tmp" "$out"
   sha=$(sha256sum "$out" | cut -d' ' -f1)
   # Sidecar: the embedded document plus the output digest (debugfs from e2fsprogs-extra reads it without mounting).
-  if ! debugfs -R "cat /etc/vesper-provenance.json" "$out" 2>/dev/null | sed "s/}}\$/},\"output_sha256\":\"$sha\"}/" > "$side" || [ ! -s "$side" ]; then
+  if ! (umask 077; debugfs -R "cat /etc/vesper-provenance.json" "$out" 2>/dev/null | sed "s/}}\$/},\"output_sha256\":\"$sha\"}/" > "$side") || [ ! -s "$side" ]; then
     echo "ERR provenance sidecar could not be written (debugfs missing?)"; rm -f "$side"; return 1
   fi
   echo "BUILT $out sha256=$sha bytes=$(stat -c %s "$out") cached=false"

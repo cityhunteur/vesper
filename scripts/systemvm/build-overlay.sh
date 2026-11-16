@@ -33,6 +33,10 @@ done < <(cargo run -q --bin systemvmctl -- archive-list --lock "${PACKAGES_LOCK}
 bash "${ROOT_DIR}/scripts/systemvm/build-shim.sh" >/dev/null
 APK_ARGS+=(--file "${ROOT_DIR}/build/shim/containerd-shim-vesper-v2:/usr/bin/containerd-shim-vesper-v2:0755")
 APK_ARGS+=(--file "${ROOT_DIR}/build/shim/vesper-console:/usr/bin/vesper-console:0755")
+# dockerd's authorisation plugin (ADR 0010); etc/init.d/vesper-authz runs it.
+APK_ARGS+=(--file "${ROOT_DIR}/build/shim/vesper-authz:/usr/bin/vesper-authz:0755")
+# dockerd's default runtime in a normal boot: runc, then the share-ownership refresh after create (TD-062).
+APK_ARGS+=(--file "${ROOT_DIR}/build/shim/vesper-runc:/usr/bin/vesper-runc:0755")
 # The baseline lock rides along so guest-built artifacts can embed the pinned revisions (GH #19 provenance).
 APK_ARGS+=(--file "${ROOT_DIR}/docs/specs/design-v0.baselines.lock.yaml:/var/lib/vesper/baselines.lock.yaml:0644")
 

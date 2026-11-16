@@ -61,6 +61,56 @@ Virtualization.framework (macOS, Apple silicon). `make systemvm-prepare` runs al
 then exposes the guest's Docker on `run/vesper/docker.sock` for the host Docker CLI
 (see [process/systemvm-bringup.md](process/systemvm-bringup.md)).
 
+### Disk space on the Mac
+
+The System VM's data disk `run/systemvm/data.img` is a sparse 64 GiB file. Files deleted in the System VM keep their
+space on the Mac until the disk is trimmed:
+
+```sh
+cargo run -q --bin systemvmctl -- control data trim   # TRIM discard=… trimmed=<bytes>
+du -sh run/systemvm/data.img
+```
+
+On 2026-11-16 this took the image from 61 GiB to 12 GiB with 11 GiB in use. Nothing in the System VM is deleted.
+
+### Containers are not root on the System VM (ADR 0010)
+
+`make docker-up` prints `containers mapped`. dockerd runs every container in a remapped user namespace, behind an
+authorisation plugin, so some `docker` commands that work on other hosts fail here:
+
+| Command | Result |
+|---|---|
+| `docker run --privileged`, `--pid=host`, `--network=host`, `--ipc=host`, `--userns=host` | refused |
+| `docker run --runtime <name>` other than `vesper-runc` (the default) or `runc`, volumes with driver options (`docker volume create -o …`, Compose `driver_opts`) | refused |
+| `docker build` with BuildKit | refused; use `DOCKER_BUILDKIT=0` |
+| `docker swarm`, `docker service`, `docker plugin` | refused |
+| a container create whose request is 1 MiB or more | refused |
+| `-v /var/run/docker.sock:…` | mounts, but the container cannot open the socket |
+| `-v /some/new/path:…` where the path does not exist and is not inside a shared macOS directory | refused; Docker would create it on the System VM |
+| `docker run --runtime runc` with a bind mount from a share | for its first second the bind can appear owned by `nobody`; `chmod` and `git` can fail (TD-062: the default runtime refreshes the owner, runc does not) |
+| `chmod` or `touch` of a share's root directory, bound as a whole | fails for every uid (TD-038); bind a directory inside the share |
+
+Images, volumes and containers made before this change are still on the data disk, unused; `make docker-up` says
+so. Pull or build images again. Volumes hold data, so they can be copied into the remapped store:
+
+```sh
+cargo run -q --bin systemvmctl -- control data legacy status               # VOLUME <name> kib=<n> imported|not-imported|has-options
+cargo run -q --bin systemvmctl -- control data legacy import-volume NAME   # IMPORTED <name> entries=N kib=N unmapped=N
+```
+
+`import-volume` copies one volume into a new volume of the same name; the old one stays as it was. Each owner is
+shifted into the container range, so a file owned by root or by uid 1000 in the old volume has the same owner in a
+container. An owner outside 0 to 65535 becomes `nobody` (counted as `unmapped`). Hard links, symbolic links,
+modes and set-id bits are kept; extended attributes, ACLs and file capabilities are not. It refuses a name that
+already exists in the remapped store, a volume with driver options (bind, tmpfs or NFS: create it again) and a
+copy that would not fit. Stop the containers that use the volume first. Nothing deletes the old store. The new
+volume carries the label `vesper.import` (a one-time token), so the import never uses or removes a volume of the
+same name that another client created while it was copying.
+
+The upstream Firecracker suite (`make systemvm-upstream-suite`) is the one exception: it restarts the System VM
+with unmapped containers on a data disk of its own (`run/systemvm/upstream-data.img`) and puts the normal
+configuration back afterwards. Do not run other workloads during it.
+
 ## Build and run
 
 ```sh

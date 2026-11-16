@@ -100,8 +100,25 @@ touch_one() {
 
 size_of() { stat -c %s "$1" 2>/dev/null || stat -f %z "$1" 2>/dev/null; }
 
+# TD-062: a share reports every file as owned by whoever asks, and the System VM caches the answer for about a
+# second for every uid. A replay as root would leave uid 0 in that cache, and a remapped container would see the
+# file owned by "nobody" and fail to chmod or touch it. So in a boot with remapped containers the replay runs as
+# container root (uid and gid from dockremap) with CAP_FOWNER alone, which it needs to set times on any file: every
+# lookup and set it makes leaves the owner a container expects. Runs once, before any lookup.
+as_container() {
+  [ "$(id -u)" = 0 ] || return 0
+  [ -z "${VESPER_SHARE_MOUNTS:-}" ] || return 0 # self-test against a fake mounts table
+  [ "$(cat /run/vesper/containers 2>/dev/null)" = mapped ] || return 0
+  cuid=$(awk -F: '$1=="dockremap" {print $2; exit}' /etc/subuid 2>/dev/null)
+  cgid=$(awk -F: '$1=="dockremap" {print $2; exit}' /etc/subgid 2>/dev/null)
+  case "$cuid:$cgid" in *[!0-9:]*|:*|*:) echo "ERR no dockremap ids for the replay"; exit 1 ;; esac
+  exec setpriv --reuid="$cuid" --regid="$cgid" --clear-groups --no-new-privs \
+    --inh-caps=-all,+fowner --ambient-caps=-all,+fowner --bounding-set=-all,+fowner -- "$0" "$@"
+}
+
 touch_() {
   [ $# -gt 0 ] || { echo "ERR usage: vesper-share touch PATH..."; return 2; }
+  as_container touch "$@"
   load_shares; rc=0
   for p in "$@"; do
     touch_one "$p"; echo "$RESULT $p${REASON:+ $REASON}"
@@ -111,6 +128,9 @@ touch_() {
 }
 
 notify() {
+  . "$(dirname "$0")/../lib/vesper/vsock-peer.sh"
+  vsock_host_only
+  as_container notify
   load_shares; touched=0; skipped=0; missing=0; rejected=0; errors=0
   echo "VESPER-SHARE-NOTIFY 1"
   while IFS= read -r p; do

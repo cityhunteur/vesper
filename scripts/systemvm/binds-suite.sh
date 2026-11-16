@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # GH #29 checklist: virtio-fs shares configured in the launch config are mounted in the guest at the same
-# absolute path, so Docker bind mounts of those host paths work from macOS; ownership mapping, chmod,
+# absolute path, so Docker bind mounts of those host paths work from macOS; ownership at once (TD-062), chmod,
 # read-only enforcement (share-level and `:ro`), promptness of host edits, inotify behaviour and the path
 # policy are recorded. Needs `make systemvm-up-shares` (three shares: run/WOR-39/share, watched;
 # run/WOR-39/share-ro:ro; run/WOR-39/share-nowatch:nowatch), `make docker-up`, and the alpine:3.22 image.
@@ -29,11 +29,25 @@ if echo "${out}" | grep -q "SHARE share0 ${SHARE} mode=rw" && echo "${out}" | gr
 out="$(run -v "${SHARE}:/data" "${IMAGE}" cat /data/hello.txt 2>&1)"
 [ "${out}" = "from-host" ] && record host_file_readable_in_container true "cat /data/hello.txt -> ${out}" || record host_file_readable_in_container false "${out}"
 
-host_owner="$(stat -f '%u:%g' "${SHARE}/hello.txt")"; guest_owner="$(run -v "${SHARE}:/data" "${IMAGE}" stat -c '%u:%g' /data/hello.txt 2>&1)"
+# The share reports every file as owned by whoever asks, and the System VM caches that answer for about a second
+# for all uids. dockerd and runc look up each bind source as root while they create a container, so without the
+# refresh in vesper-runc (TD-062) a remapped container sees its bind owned by "nobody" in its first second and
+# cannot chmod it. These checks look at once, with no wait; plain runc, which has no refresh, shows the fault. They
+# bind a directory inside the share: no uid can set attributes on a share's root directory (see TD-038).
+mkdir -p "${SHARE}/own"
+first_look='stat -c %u:%g /data; chmod "$(stat -c %a /data)" /data && echo chmod-ok'
+bad=""; for i in 1 2 3 4 5; do out="$(run -v "${SHARE}/own:/data" "${IMAGE}" sh -c "${first_look}" 2>&1 | tr '\n' ' ')"; [ "${out}" = "0:0 chmod-ok " ] || bad="${bad}run ${i}: ${out}; "; done
+[ -z "${bad}" ] && record bind_owned_by_container_root_at_start true "5 of 5 containers saw the bind owned by 0:0 and could chmod it in their first command" || record bind_owned_by_container_root_at_start false "${bad}"
+out="$(run -u 1000:1000 -v "${SHARE}/own:/data" "${IMAGE}" sh -c "${first_look}" 2>&1 | tr '\n' ' ')"
+[ "${out}" = "1000:1000 chmod-ok " ] && record bind_owned_by_container_user_at_start true "a container running as 1000:1000 saw the bind owned by 1000:1000 and could chmod it at once" || record bind_owned_by_container_user_at_start false "${out}"
+out="$(run --runtime runc -v "${SHARE}/own:/data" "${IMAGE}" sh -c "${first_look}" 2>&1 | tr '\n' ' ')"
+case "${out}" in 65534:65534*) record plain_runc_shows_the_fault true "with --runtime runc (no refresh) the first look saw ${out}: the checks above can fail" ;; *) record plain_runc_shows_the_fault false "plain runc did not show the fault, so the checks above prove nothing: ${out}" ;; esac
+rmdir "${SHARE}/own"
+host_owner="$(stat -f '%u:%g' "${SHARE}/hello.txt")"; guest_owner="$(run -v "${SHARE}:/data" "${IMAGE}" sh -c 'stat -c %u:%g /data/hello.txt' 2>&1)"
 [ "${guest_owner}" = "0:0" ] && record ownership_mapped_to_root_in_guest true "host ${host_owner} appears as ${guest_owner} in the container (the sharing user owns the share; containers see root)" || record ownership_mapped_to_root_in_guest false "host ${host_owner}, guest ${guest_owner}"
 
 run -v "${SHARE}:/data" "${IMAGE}" sh -c 'echo from-container > /data/c.txt && chmod 640 /data/c.txt && chown 1000:1000 /data/c.txt' >/dev/null 2>&1
-h="$(stat -f '%u:%g %Lp' "${SHARE}/c.txt" 2>&1)"; c="$(cat "${SHARE}/c.txt" 2>&1)"; g="$(run -v "${SHARE}:/data" "${IMAGE}" stat -c '%u:%g %a' /data/c.txt 2>&1)"
+h="$(stat -f '%u:%g %Lp' "${SHARE}/c.txt" 2>&1)"; c="$(cat "${SHARE}/c.txt" 2>&1)"; g="$(run -v "${SHARE}:/data" "${IMAGE}" sh -c 'stat -c "%u:%g %a" /data/c.txt' 2>&1)"
 if [ "${c}" = "from-container" ] && [ "${h}" = "${host_owner} 640" ] && [ "${g}" = "0:0 640" ]; then record container_write_owned_by_host_user true "container wrote c.txt, chmod 640 kept, chown 1000:1000 ignored; host sees ${h}, guest sees ${g}"; else record container_write_owned_by_host_user false "host ${h} content ${c}; guest ${g}"; fi
 
 out="$(run -v "${SHARE_RO}:/ro" "${IMAGE}" sh -c 'cat /ro/ro.txt && echo x > /ro/y.txt' 2>&1 | tr '\n' ' ')"
@@ -52,6 +66,15 @@ events() { "${DOCKER}" exec binds-inot cat /tmp/ev.log 2>&1 | tr '\t' ' ' | tr '
 wait_event() { local t0; t0="$(now_ms)"; for _ in $(seq 1 20); do case "$(events)" in *" $1;"*) echo $(( $(now_ms) - t0 )); return 0 ;; esac; sleep 0.1; done; return 1; }
 "${DOCKER}" run -d --name binds-inot -v "${SHARE}:/data" -v "${SHARE_RO}:/ro" -v "${SHARE_NW}:/nw" "${IMAGE}" sh -c 'inotifyd - /data:cwnd /data/sub:cwnd /ro:cwnd /nw:cwnd > /tmp/ev.log 2>&1 & sleep 120' >/dev/null 2>&1; sleep 1
 "${DOCKER}" exec binds-inot sh -c 'echo b > /data/from-guest.txt' >/dev/null 2>&1; sleep 1
+# A container that acts on each host edit at once: the replay runs as container root (TD-062), so the owner it leaves
+# in the cache is the container's, and a chmod in the event handler works.
+"${DOCKER}" rm -f binds-own >/dev/null 2>&1
+"${DOCKER}" run -d --name binds-own -v "${SHARE}:/data" "${IMAGE}" sh -c 'printf "%s\n" "#!/bin/sh" "[ \"\$3\" = owned.txt ] || exit 0" "echo \"\$(stat -c %u /data/owned.txt) \$(chmod 644 /data/owned.txt 2>&1 && echo chmod-ok)\" >> /tmp/own.log" > /own.sh; chmod +x /own.sh; inotifyd /own.sh /data:c & sleep 120' >/dev/null 2>&1; sleep 1
+for i in 1 2 3 4 5; do echo "edit ${i}" >> "${SHARE}/owned.txt"; sleep 0.6; done; sleep 1
+own="$("${DOCKER}" exec binds-own cat /tmp/own.log 2>&1 | tr '\n' ';')"
+n_ok="$(printf '%s' "${own}" | tr ';' '\n' | grep -c '^0 chmod-ok$')"; n_all="$(printf '%s' "${own}" | tr ';' '\n' | grep -c .)"
+[ "${n_all}" -ge 4 ] && [ "${n_ok}" = "${n_all}" ] && record replayed_file_owned_by_container_root true "${n_all} replayed host edits: each event handler saw owner 0 and could chmod at once (${own})" || record replayed_file_owned_by_container_root false "handler lines: ${own}"
+"${DOCKER}" rm -f binds-own >/dev/null 2>&1; rm -f "${SHARE}/owned.txt"
 ev="$(events)"
 case "${ev}" in *from-guest.txt*) record inotify_guest_writes_seen true "events: ${ev}" ;; *) record inotify_guest_writes_seen false "events: ${ev}" ;; esac
 hint="no event within 2 s; is the share watched (launch config \"watch\": true, launcher status share-watch) and is vesper-share-notify started?"
@@ -106,8 +129,10 @@ lines="$(wc -l < "${SHARE}/sub/rapid.txt" | tr -d ' ')"
 "${DOCKER}" rm -f binds-inot >/dev/null 2>&1
 rm -f "${SHARE}"/sub/*; rmdir "${SHARE}/sub" 2>/dev/null
 
-out="$(run -v /tmp/vesper-not-shared:/x "${IMAGE}" sh -c 'ls -A /x | wc -l' 2>&1)"
-[ "${out}" = "0" ] && [ ! -e /tmp/vesper-not-shared ] && record unshared_path_is_guest_local true "-v /tmp/vesper-not-shared is a guest-local empty directory; only configured shares map host paths (path policy)" || record unshared_path_is_guest_local false "${out}; host dir exists: $([ -e /tmp/vesper-not-shared ] && echo yes || echo no)"
+# A path that is not shared and does not exist in the System VM: Docker would create it there for the container.
+# Since ADR 0010 the authorisation plugin refuses that, so nothing is created on either side.
+out="$(run -v /tmp/vesper-not-shared:/x "${IMAGE}" sh -c 'ls -A /x | wc -l' 2>&1)"; rc=$?
+[ "${rc}" = 125 ] && case "${out}" in *"does not exist"*"shared macOS directory"*) true ;; *) false ;; esac && [ ! -e /tmp/vesper-not-shared ] && record unshared_path_is_refused true "-v /tmp/vesper-not-shared is refused; only configured shares map host paths, and no directory is made in the System VM (path policy)" || record unshared_path_is_refused false "rc ${rc}: ${out}; host dir exists: $([ -e /tmp/vesper-not-shared ] && echo yes || echo no)"
 
 rm -f "${SHARE}"/c.txt "${SHARE}"/p.txt "${SHARE}"/from-guest.txt "${SHARE}"/from-host.txt
 passed=true; for s in "${steps[@]}"; do case "$s" in *'"ok":false'*) passed=false;; esac; done

@@ -21,6 +21,10 @@
 #        vesper-ctr inflight-result NAME [T]      wait for it; RC <code> then OUT lines
 #        vesper-ctr metrics NAME                  METRICS NAME memory_bytes=<n> cpu_usec=<n> pids=<n> from `ctr task metrics`
 set -u
+# Scratch files in a directory that is root's own (vesper-containers makes it at boot), not in /tmp, where a
+# container bound to it could plant a link for root to write through (ADR 0010).
+TMPD=/run/vesper/ctr
+mkdir -p "$TMPD" && [ ! -L "$TMPD" ] && [ "$(stat -c %u "$TMPD")" = 0 ] && chmod 0700 "$TMPD" || { echo "ERR $TMPD is not a root-owned directory"; exit 1; }
 NS=vesper
 RT=io.containerd.vesper.v2
 IMAGE_TAG=vesper/trivial:guest
@@ -34,8 +38,8 @@ import_layered() {
   docker image inspect "$IMAGE_TAG" >/dev/null 2>&1 || /usr/local/bin/vesper-rootfs import-trivial >/dev/null 2>&1
   if ! docker image inspect "$LAYERED_TAG" >/dev/null 2>&1; then
     cid=$(docker create "$IMAGE_TAG" /bin/true) || { echo "ERR docker create failed"; return 1; }
-    printf 'layer-two\n' > /tmp/layer2-marker
-    docker cp /tmp/layer2-marker "$cid:/etc/layer2-marker" >/dev/null || { echo "ERR docker cp failed"; return 1; }
+    printf 'layer-two\n' > $TMPD/layer2-marker
+    docker cp $TMPD/layer2-marker "$cid:/etc/layer2-marker" >/dev/null || { echo "ERR docker cp failed"; return 1; }
     docker commit "$cid" "$LAYERED_TAG" >/dev/null || { echo "ERR docker commit failed"; return 1; }
     docker rm -f "$cid" >/dev/null 2>&1
   fi
@@ -83,17 +87,17 @@ state_file() {
 inflight_start() {
   name=${1:?}; shift
   r=$(ref) || true; [ -n "$r" ] || { echo "ERR import first"; return 1; }
-  rm -f "/tmp/inflight-$name.out" "/tmp/inflight-$name.rc"
-  ( ctr_ run --rm --runtime "$RT" "$r" "$name" sh -c "$*" > "/tmp/inflight-$name.out" 2>&1; echo $? > "/tmp/inflight-$name.rc" ) </dev/null >/dev/null 2>&1 &
+  rm -f "$TMPD/inflight-$name.out" "$TMPD/inflight-$name.rc"
+  ( ctr_ run --rm --runtime "$RT" "$r" "$name" sh -c "$*" > "$TMPD/inflight-$name.out" 2>&1; echo $? > "$TMPD/inflight-$name.rc" ) </dev/null >/dev/null 2>&1 &
   for _ in $(seq 1 80); do ctr_ task ls 2>/dev/null | awk -v n="$name" '$1==n' | grep -q . && break; sleep 0.25; done
   echo "INFLIGHT $name"
 }
 
 inflight_result() {
   name=${1:?}; t=${2:-60}; i=0
-  while [ "$i" -lt "$((t * 4))" ]; do [ -f "/tmp/inflight-$name.rc" ] && break; sleep 0.25; i=$((i + 1)); done
-  [ -f "/tmp/inflight-$name.rc" ] || { echo "ERR ctr run $name still running after ${t}s"; return 1; }
-  emit "$(cat "/tmp/inflight-$name.rc")" "$(cat "/tmp/inflight-$name.out")"
+  while [ "$i" -lt "$((t * 4))" ]; do [ -f "$TMPD/inflight-$name.rc" ] && break; sleep 0.25; i=$((i + 1)); done
+  [ -f "$TMPD/inflight-$name.rc" ] || { echo "ERR ctr run $name still running after ${t}s"; return 1; }
+  emit "$(cat "$TMPD/inflight-$name.rc")" "$(cat "$TMPD/inflight-$name.out")"
 }
 
 metrics() {
@@ -196,7 +200,7 @@ leftovers() {
 
 run_stdio() {
   name=${1:?}; r=$(ref)
-  out=/tmp/exec-$name.out; err=/tmp/exec-$name.err
+  out=$TMPD/exec-$name.out; err=$TMPD/exec-$name.err
   printf 'stdin-roundtrip\n' | ctr_ run --rm --runtime "$RT" "$r" "$name" /bin/sh -c 'cat; echo stderr-only >&2; exit 7' > "$out" 2> "$err"
   rc=$?
   echo "RC $rc"
@@ -223,8 +227,8 @@ signal_test() {
   done
   [ "$ready" = 1 ] || { echo 'ERR task did not start'; return 1; }
   if [ "$trap_mode" = trap ]; then
-    for _ in $(seq 1 100); do grep -q signal-ready "/tmp/inflight-$name.out" && break; sleep 0.1; done
-    grep -q signal-ready "/tmp/inflight-$name.out" || { echo 'ERR trap not ready'; return 1; }
+    for _ in $(seq 1 100); do grep -q signal-ready "$TMPD/inflight-$name.out" && break; sleep 0.1; done
+    grep -q signal-ready "$TMPD/inflight-$name.out" || { echo 'ERR trap not ready'; return 1; }
   fi
   ctr_ task kill -s "$signal" "$name" || return 1
   inflight_result "$name" 30
@@ -261,25 +265,25 @@ run_orphan() {
 exit_with_exec() {
   name=${1:?}
   inflight_start "$name" 'echo init-ready; sleep 3; exit 7' >/dev/null
-  for _ in $(seq 1 100); do grep -q init-ready "/tmp/inflight-$name.out" && break; sleep 0.1; done
+  for _ in $(seq 1 100); do grep -q init-ready "$TMPD/inflight-$name.out" && break; sleep 0.1; done
   ctr_ task exec --detach --exec-id orphan-exec "$name" /bin/busybox sleep 300 || return 1
   inflight_result "$name" 20
 }
 
 exec_signal() {
   name=${1:?}
-  rm -f /tmp/vesper-exec-signal.rc
-  (ctr_ task exec --exec-id signal-exec "$name" /bin/busybox sh -c 'echo exec-signal-ready; exec /bin/busybox sleep 300' >/tmp/vesper-exec-signal.out 2>&1; echo $? >/tmp/vesper-exec-signal.rc) </dev/null >/dev/null 2>&1 &
+  rm -f $TMPD/vesper-exec-signal.rc
+  (ctr_ task exec --exec-id signal-exec "$name" /bin/busybox sh -c 'echo exec-signal-ready; exec /bin/busybox sleep 300' >$TMPD/vesper-exec-signal.out 2>&1; echo $? >$TMPD/vesper-exec-signal.rc) </dev/null >/dev/null 2>&1 &
   ready=0
   for _ in $(seq 1 100); do
-    if grep -q exec-signal-ready /tmp/vesper-exec-signal.out; then ready=1; break; fi
+    if grep -q exec-signal-ready $TMPD/vesper-exec-signal.out; then ready=1; break; fi
     sleep 0.1
   done
   [ "$ready" = 1 ] || { echo 'ERR exec not running'; return 1; }
   ctr_ task kill --exec-id signal-exec -s KILL "$name" || return 1
-  for _ in $(seq 1 100); do [ -f /tmp/vesper-exec-signal.rc ] && break; sleep 0.1; done
-  [ -f /tmp/vesper-exec-signal.rc ] || { echo 'ERR exec did not exit'; return 1; }
-  emit "$(cat /tmp/vesper-exec-signal.rc)" "$(cat /tmp/vesper-exec-signal.out)"
+  for _ in $(seq 1 100); do [ -f $TMPD/vesper-exec-signal.rc ] && break; sleep 0.1; done
+  [ -f $TMPD/vesper-exec-signal.rc ] || { echo 'ERR exec did not exit'; return 1; }
+  emit "$(cat $TMPD/vesper-exec-signal.rc)" "$(cat $TMPD/vesper-exec-signal.out)"
 }
 
 cmd=${1:-}; shift 2>/dev/null

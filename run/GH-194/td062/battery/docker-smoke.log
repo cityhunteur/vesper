@@ -1,0 +1,9 @@
+bash scripts/systemvm/docker-smoke.sh
+ok   socket_exists_owner_only: /Volumes/Workspace/github.com/cityhunteur/vesper/run/vesper/docker.sock mode 600
+ok   docker_version: server 28.3.3 linux/arm64
+ok   docker_info: 28.3.3 containerd=fcd43222d6b07379a4be9786bda52438f0dd16a1 driver=overlay2 cgroup=2
+ok   docker_import: sha256:e442ce7ea7f030ff1df82b2114a83e2b65bdd381998be8ffafa2b5dba23c8072 (1679360 bytes through the proxy)
+ok   trivial_container_runs: vesper-container-ok
+ok   no_raw_host_sockets: host sockets under run/: run/vesperd.sock run/systemvm/vsock/3.sock run/vesper/docker.sock run/docker.sock 
+ok   raw_guest_port_denied: guest port 2376 (no listener) refused: agent closed the connection
+docker smoke: passed=true (report: /Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/docker-smoke-report.json)

@@ -1,0 +1,17 @@
+GH #194 M2-M5 regression, after the council review's fixes (2026-11-14). Every log here is from the last run of its suite.
+
+Final overlay (after the mke2fs umask fix): confine 14/14, sharenet, microvm, shim, workload, bundle, exec, restart, rootfs,
+vesperd, ctr-conformance, binds: all rc=0.
+
+One overlay earlier (differs only in how vesper-rootfs and the shim set the umask around mke2fs): launchapi, egress, bounds,
+snapshot, docker-smoke, docker-conformance, ports-suite, dns-suite, workflow-suite, crossarch-suite, data-disk: all rc=0.
+
+Failures on the way, and what each was:
+- rootfs: reproducible_rebuild failed when the image file was created before mke2fs; fixed by setting umask 077 around mke2fs instead.
+- binds: unshared_path_is_guest_local expected Docker to create /tmp/vesper-not-shared in the System VM; the plugin now refuses
+  that by design, and the step is unshared_path_is_refused. Earlier, two ownership checks saw nobody:nobody within a second of
+  dockerd's bind (TD-062); they now look after 1.5 s.
+- vesperd: firecracker_connection_limit_passes_through failed once ("connection 11 got ''") and passed on the rerun with no
+  change to anything it uses; treated as a flake, not explained.
+- workflow: BuildKit is refused by the plugin; the suite builds with DOCKER_BUILDKIT=0.
+- docker-smoke, docker-conformance: no_raw_host_sockets tripped on a socket file the egress suite's last step leaves behind.

@@ -8,6 +8,20 @@
 # usage: vesper-data mount     DATA mounted|formatted <dev> | DATA absent | DATA refused <dev> <reason> | ERR ...
 #        vesper-data status    DATA <state> [<dev>] used=<KiB> avail=<KiB>   (state from the last mount)
 #        vesper-data stop      sync and unmount; DATA stopped
+#        vesper-data binds     BINDS <n> of <total>: how many state directories are ext4 mounts from the disk
+#        vesper-data label     LABEL <dev> <type> <label> | LABEL <dev> none | LABEL absent
+#        vesper-data test-relabel LABEL   suite hook: give the disk another label, so the next boot refuses it;
+#                                         RELABELLED <dev> <label>
+#        vesper-data trim      tell the disk image which blocks ext4 no longer uses, so macOS can free them;
+#                              TRIM discard=<bytes> trimmed=<bytes> | TRIM unsupported | ERR ...
+#        vesper-data legacy status       the Docker store from boots before ADR 0010: LEGACY absent, or
+#                                         LEGACY present volumes=N containers=M, then one line per volume:
+#                                         VOLUME <name> kib=<n> imported|not-imported|has-options
+#        vesper-data legacy import-volume NAME   copy one old volume into the remapped store, each owner shifted
+#                                         into the container range; IMPORTED <name> entries=N kib=N unmapped=N
+#        vesper-data test-import plant|import|check|clean   suite hook: an old-style volume with known owners, imported
+#                                         from a scratch store; IMPORT-TEST ...
+# binds, label and test-relabel exist so the data-disk suite needs no root shell in a container (ADR 0010).
 set -u
 LABEL=vesper-data
 MNT=/var/lib/vesper-data
@@ -53,6 +67,10 @@ mount_() {
     mkdir -p "$sub" "$d"
     mount --bind "$sub" "$d" || { record refused "$dev" "bind-failed:$d"; return 1; }
   done
+  # ADR 0010: the Vesper stores are owner-only; the state directory lets the vesperd jail uid pass through to its
+  # jails. Docker's and containerd's directories keep the modes those daemons give them.
+  chmod 0700 /var/lib/vesper/rootfs /var/lib/vesper/rootfs-cache /var/lib/vesper/workloads
+  chmod 0711 /var/lib/vesper/state
   # Boot sweep (ADR 0007 section 4): vesperd jails on the disk never outlive a boot; only the store does.
   /usr/local/bin/vesper-vesperd sweep > /dev/null 2>&1
   record "$how" "$dev"
@@ -75,9 +93,203 @@ stop() {
   echo "DATA stopped"
 }
 
+# The image is sparse on macOS, but ext4 frees blocks only inside it: without a discard, a file deleted in the
+# System VM keeps its space on the Mac. fstrim sends one discard for each free range.
+trim() {
+  grep -q " $MNT " /proc/mounts || { echo "ERR the data disk is not mounted"; return 1; }
+  dev=$(device); max=$(cat "/sys/block/${dev#/dev/}/queue/discard_max_bytes" 2>/dev/null || echo 0)
+  [ "${max:-0}" -gt 0 ] || { echo "TRIM unsupported"; return 1; }
+  out=$(fstrim -v "$MNT" 2>&1) || { echo "ERR fstrim: $out"; return 1; }
+  n=$(printf '%s' "$out" | sed -n 's/.*(\([0-9]*\) bytes).*/\1/p')
+  [ -n "$n" ] || n=$(printf '%s' "$out" | sed -n 's/.*: *\([0-9]*\) bytes.*/\1/p')
+  echo "TRIM discard=$max trimmed=${n:-unknown} ($out)"
+}
+
+binds() {
+  n=0; t=0
+  for d in $DIRS; do t=$((t + 1)); grep -q " $d ext4 " /proc/mounts && n=$((n + 1)); done
+  echo "BINDS $n of $t"
+}
+
+label() {
+  dev=$(device)
+  [ -n "$dev" ] && [ -b "$dev" ] || { echo "LABEL absent"; return 0; }
+  echo "LABEL $dev $(probe "$dev")"
+}
+
+test_relabel() {
+  case "${1:-}" in ''|*[!A-Za-z0-9-]*) echo "ERR label: letters, digits and - only"; return 2 ;; esac
+  [ "${#1}" -le 16 ] || { echo "ERR label: at most 16 characters"; return 2; }
+  dev=$(device)
+  [ -n "$dev" ] && [ -b "$dev" ] || { echo "ERR no data disk"; return 1; }
+  e2label "$dev" "$1" || { echo "ERR e2label failed"; return 1; }
+  echo "RELABELLED $dev $1"
+}
+
+# --- The Docker store from before ADR 0010 -------------------------------------------------------------------------
+# dockerd keeps one store per user namespace mapping. Boots before ADR 0010 used /var/lib/docker itself; a remapped
+# dockerd uses /var/lib/docker/<base>.<base> and cannot see the old one. The old store is only read here: nothing
+# in it is changed or removed (deleting it needs the owner's approval, ADR 0010 point 8).
+OLD=/var/lib/docker
+BASE=100000
+COUNT=65536
+NEW="$OLD/$BASE.$BASE"
+LOCK=/run/vesper/legacy-import.lock
+# Where an import is copied and shifted: a root-only (0700) directory on the store's filesystem. Container root
+# (uid BASE) cannot enter it, so no container can swap a path in the copy while root changes owners in it.
+STAGE="$NEW/.vesper-import"
+TEST_STORE=/run/vesper/legacy-test
+
+# A Docker volume name: [a-zA-Z0-9][a-zA-Z0-9_.-]* (moby's volume name rule), at most 255 bytes.
+valid_name() {
+  [ "${#1}" -le 255 ] || return 1
+  case "$1" in ''|[!A-Za-z0-9]*|*[!A-Za-z0-9_.-]*) return 1 ;; esac
+}
+
+legacy_status() {
+  store="${1:-$OLD}"
+  [ -d "$store/image" ] || { echo "LEGACY absent"; return 0; }
+  v=$(find "$store/volumes" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)
+  c=$(find "$store/containers" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)
+  echo "LEGACY present volumes=$((v)) containers=$((c))"
+  for d in "$store"/volumes/*/; do
+    [ -d "$d" ] || continue
+    n=$(basename "$d")
+    kib=$(du -sk "$d" 2>/dev/null | awk '{print $1}')
+    if [ -e "$d/opts.json" ]; then st=has-options
+    elif [ -d "$NEW/volumes/$n" ]; then st=imported
+    else st=not-imported; fi
+    echo "VOLUME $n kib=${kib:-0} $st"
+  done
+}
+
+# Shifts the owner and group of every path in "$@" into the container range: id N becomes BASE+N; an id outside
+# 0..COUNT-1 has no name in a container, so it becomes the container's nobody (BASE+65534), and a U is printed for
+# it. chown clears set-id bits, so they are put back. A file with several names is shifted once (marked in $SEEN).
+# Prints E for a path it could not change, and for a marker it could not make.
+SHIFT_SCRIPT='
+for p in "$@"; do
+  s=$(stat -c "%u %g %a %h %i" "$p") || { echo E; continue; }
+  set -- $s; u=$1; g=$2; m=$3
+  # A file with several names is one inode: shift it once, by the first name that claims it.
+  if [ "$4" -gt 1 ] && [ ! -d "$p" ]; then
+    [ -d "$SEEN/$5" ] && continue
+    mkdir "$SEEN/$5" || { echo E; continue; }
+  fi
+  if [ "$u" -lt "$COUNT" ]; then u=$((BASE + u)); else u=$((BASE + 65534)); echo U; fi
+  if [ "$g" -lt "$COUNT" ]; then g=$((BASE + g)); else g=$((BASE + 65534)); echo U; fi
+  chown -h "$u:$g" "$p" || { echo E; continue; }
+  [ -L "$p" ] || [ "${#m}" -le 3 ] || chmod "$m" "$p" || echo E
+done'
+
+# Copies volume $1 of store $2 (default the old store) into the remapped store as a new volume of the same name.
+import_volume() {
+  name="${1:-}"; store="${2:-$OLD}"
+  valid_name "$name" || { echo "ERR volume name: [A-Za-z0-9][A-Za-z0-9_.-]*, at most 255 characters"; return 2; }
+  [ "$(cat /run/vesper/containers 2>/dev/null)" = mapped ] || { echo "ERR containers are not remapped in this boot"; return 1; }
+  [ -d "$store/image" ] || { echo "ERR no Docker store from before container remapping"; return 1; }
+  src="$store/volumes/$name"
+  [ -d "$src/_data" ] && [ ! -L "$src" ] && [ ! -L "$src/_data" ] || { echo "ERR no volume $name in the old store"; return 1; }
+  # A local volume with options is a bind, tmpfs or NFS mount, not data in the store; it is created again instead.
+  [ -e "$src/opts.json" ] && { echo "ERR volume $name has driver options; create it again in the remapped store"; return 1; }
+  [ -d "$NEW/volumes" ] || { echo "ERR the remapped store has no volumes directory; is dockerd running?"; return 1; }
+  docker volume inspect "$name" > /dev/null 2>&1 && { echo "ERR volume $name exists in the remapped store"; return 1; }
+  # flock is released when this process ends, however it ends; the traps also remove an unfinished copy.
+  exec 9>"$LOCK" && flock -n 9 || { echo "ERR another import is running"; return 1; }
+  trap 'rm -rf "${STAGE:?}"' EXIT
+  trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
+  need=$(du -sk "$src/_data" | awk '{print $1}')
+  avail=$(df -k "$NEW/volumes" | awk 'NR==2 {print $4}')
+  [ "$((need + need / 10 + 1024))" -le "${avail:-0}" ] || { echo "ERR not enough space: need ${need} KiB, ${avail:-0} KiB free"; return 1; }
+  # Under the lock, anything left in STAGE is from an import that died; it is never a volume.
+  rm -rf "${STAGE:?}"
+  (umask 077 && mkdir "$STAGE") && chown 0:0 "$STAGE" && chmod 0700 "$STAGE" || { echo "ERR cannot make $STAGE"; return 1; }
+  tmp="$STAGE/data"; seen="$STAGE/inodes"
+  mkdir "$seen" || { echo "ERR cannot make $seen"; return 1; }
+  cp -a "$src/_data" "$tmp" || { echo "ERR copy failed"; return 1; }
+  out=$(find "$tmp" -exec env BASE="$BASE" COUNT="$COUNT" SEEN="$seen" sh -c "$SHIFT_SCRIPT" sh {} + || echo E)
+  errs=$(printf '%s\n' "$out" | grep -c '^E$')
+  unmapped=$(printf '%s\n' "$out" | grep -c '^U$')
+  [ "$errs" -eq 0 ] || { echo "ERR could not shift the owner of $errs entries"; return 1; }
+  entries=$(find "$tmp" | wc -l)
+  # docker volume create returns an existing volume of the same name without error, so the volume is made with a
+  # label only this import knows, and is used (or removed on failure) only if it carries that label.
+  token="$$.$(date +%s).$(od -An -N4 -tx4 /dev/urandom | tr -d ' ')"
+  docker volume create --label "vesper.import=$token" "$name" > /dev/null 2>&1 || { echo "ERR docker volume create $name failed"; return 1; }
+  [ "$(docker volume inspect -f '{{index .Labels "vesper.import"}}' "$name" 2>/dev/null)" = "$token" ] ||
+    { echo "ERR volume $name was created by someone else during the import; it is left as it is"; return 1; }
+  dst="$NEW/volumes/$name/_data"
+  # rmdir fails unless _data is the empty directory docker just made; mv then renames onto a free name.
+  if ! { rmdir "$dst" && [ ! -e "$dst" ] && mv "$tmp" "$dst"; }; then
+    docker volume rm "$name" > /dev/null 2>&1
+    echo "ERR could not put the copy in place"; return 1
+  fi
+  echo "IMPORTED $name entries=$((entries)) kib=$need unmapped=$((unmapped))"
+}
+
+legacy() {
+  case "${1:-}" in
+    status) legacy_status ;;
+    import-volume) import_volume "${2:-}" ;;
+    *) echo "ERR usage: vesper-data legacy status|import-volume NAME"; return 2 ;;
+  esac
+}
+
+# Suite hook: a scratch store shaped like an old one, with entries whose owners and modes are known, imported as
+# volume vesper-legacy-test. check prints what the remapped store holds; the suite reads it from a container too.
+test_import() {
+  v=vesper-legacy-test; d="$TEST_STORE/volumes/$v/_data"
+  case "${1:-}" in
+    plant)
+      rm -rf "${TEST_STORE:?}"
+      mkdir -p "$TEST_STORE/image" "$d/sub" || { echo "ERR plant"; return 1; }
+      echo root > "$d/root.txt" && chown 0:0 "$d/root.txt" && chmod 0644 "$d/root.txt" &&
+      echo user > "$d/sub/user.txt" && chown 1000:1000 "$d/sub/user.txt" && chmod 0600 "$d/sub/user.txt" &&
+      echo far > "$d/far.txt" && chown 70000:70000 "$d/far.txt" &&
+      echo prog > "$d/setgid" && chown 0:50 "$d/setgid" && chmod 2755 "$d/setgid" &&
+      ln -s root.txt "$d/link" && chown -h 1000:1000 "$d/link" &&
+      ln "$d/root.txt" "$d/hard" &&
+      echo edge > "$d/-dash" && chown 65535:65536 "$d/-dash" && chmod 0640 "$d/-dash" &&
+      echo prog > "$d/setuid" && chown 0:0 "$d/setuid" && chmod 4755 "$d/setuid" &&
+      ln -s /etc/shadow "$d/out" && chown -h 0:0 "$d/out" &&
+      ln -s missing "$d/dangling" && chown -h 0:0 "$d/dangling" &&
+      stat -c '%u:%g:%a' /etc/shadow > "$TEST_STORE/shadow" &&
+      chown 0:0 "$d" && chmod 0755 "$d" || { echo "ERR plant"; return 1; }
+      # What an import that died leaves behind; the next import must clear it.
+      mkdir -p "$STAGE/data/left-over" || { echo "ERR plant"; return 1; }
+      echo "IMPORT-TEST planted" ;;
+    import) import_volume "$v" "$TEST_STORE" ;;
+    check)
+      t="$NEW/volumes/$v/_data"
+      [ -d "$t" ] || { echo "ERR not imported"; return 1; }
+      for f in . root.txt sub/user.txt far.txt setgid link -dash setuid out dangling; do
+        echo "IMPORT-TEST $f $(stat -c '%u:%g:%a' "$t/$f" 2>/dev/null || echo missing)"
+      done
+      echo "IMPORT-TEST links $(stat -c '%h' "$t/root.txt" 2>/dev/null || echo missing)"
+      echo "IMPORT-TEST source $(stat -c '%u:%g' "$d/root.txt" 2>/dev/null || echo missing)"
+      echo "IMPORT-TEST out-target $(readlink "$t/out")"
+      if [ "$(stat -c '%u:%g:%a' /etc/shadow)" = "$(cat "$TEST_STORE/shadow" 2>/dev/null)" ]; then
+        echo "IMPORT-TEST shadow unchanged"; else echo "IMPORT-TEST shadow changed"; fi
+      if [ -e "$STAGE" ]; then echo "IMPORT-TEST stage left"; else echo "IMPORT-TEST stage gone"; fi
+      l=$(docker volume inspect -f '{{index .Labels "vesper.import"}}' "$v" 2>/dev/null)
+      if [ -n "$l" ]; then echo "IMPORT-TEST label set"; else echo "IMPORT-TEST label unset"; fi ;;
+    clean)
+      docker volume rm "$v" > /dev/null 2>&1
+      rm -rf "${TEST_STORE:?}"
+      echo "IMPORT-TEST clean" ;;
+    *) echo "ERR usage: vesper-data test-import plant|import|check|clean"; return 2 ;;
+  esac
+}
+
 case "${1:-}" in
+  legacy) legacy "${2:-}" "${3:-}" ;;
+  test-import) test_import "${2:-}" ;;
+  trim) trim ;;
+  binds) binds ;;
+  label) label ;;
+  test-relabel) test_relabel "${2:-}" ;;
   mount) mount_ ;;
   status) status ;;
   stop) stop ;;
-  *) echo "ERR usage: vesper-data mount|status|stop"; exit 2 ;;
+  *) echo "ERR usage: vesper-data mount|status|stop|trim|binds|label|test-relabel LABEL|legacy status|legacy import-volume NAME|test-import plant|import|check|clean"; exit 2 ;;
 esac

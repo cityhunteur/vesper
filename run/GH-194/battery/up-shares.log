@@ -1,0 +1,18 @@
+docker-down: stopped
+guest acknowledged shutdown
+systemvm-down: guest acknowledged shutdown
+systemvm-down: stopped
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.04s
+     Running `target/debug/systemvmctl launch-config --from-lock --dir /Volumes/Workspace/github.com/cityhunteur/vesper/build/systemvm --console-log /Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/console.log --out /Volumes/Workspace/github.com/cityhunteur/vesper/build/systemvm/launch-config.json --share /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share --share '/Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share-ro:ro' --share '/Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share-nowatch:nowatch' --data-disk /Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/data.img`
+wrote launch config: /Volumes/Workspace/github.com/cityhunteur/vesper/build/systemvm/launch-config.json (3 shared directories)
+systemvm-up: running (pid 59770); bridge run/systemvm/vsock/3.sock; log /Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/vmlauncher.log
+{"status":"bridge-listening","elapsed_ms":95,"ready_pattern":"login:","console_log":"/Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/console.log","bridge":"run/systemvm/vsock/3.sock"}
+{"status":"ready","elapsed_ms":2872,"ready_pattern":"login:","console_log":"/Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/console.log"}
+{"status":"probe-ok","elapsed_ms":6152,"ready_pattern":"login:","console_log":"/Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/console.log"}
+systemvm-up: MOUNTED share0 /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share mode=rw
+systemvm-up: MOUNTED share1 /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share-ro mode=ro
+systemvm-up: MOUNTED share2 /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share-nowatch mode=rw
+docker-up: containers mapped: no container is root on the System VM (ADR 0010)
+docker-up: the data disk also holds a Docker store from before container remapping (volumes=6 containers=0); it is not used and not deleted
+docker-up: vesper-proxy pid 60044; DOCKER_HOST=unix:///Volumes/Workspace/github.com/cityhunteur/vesper/run/vesper/docker.sock; published ports via the guest relay (status /Volumes/Workspace/github.com/cityhunteur/vesper/run/vesper/ports.json)
+srw-------@ 1 pravin  staff  0 14 Nov 19:52 /Volumes/Workspace/github.com/cityhunteur/vesper/run/vesper/docker.sock

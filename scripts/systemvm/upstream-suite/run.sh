@@ -14,7 +14,7 @@
 # and a wall-clock watchdog; collect {nodeid: outcome}; compare (baselinectl --mode upstream-compare, which also
 # fails on pytest's own errors); rerun alone the tests that matched no class, when there are 1 to
 # UPSTREAM_RERUN_MAX (8) of them, and compare again (decision D-031; unmatched.txt, alone.json.gz,
-# pytest-alone.log.gz, and the first verdict in *-under-load.*); wipe /srv; restore the previous launch config and
+# pytest-alone.log.gz, and the first verdict in *-under-load.*); wipe /srv and trim the disk; restore the previous launch config and
 # restart. Exit status is the comparator's. One run at a time: build/upstream-suite/runner.lock is a symlink to the runner's pid.
 #
 # Environment: UPSTREAM_WALL_S (default 14400) stops the run; UPSTREAM_MIN_FREE_GB (45) is the data-disk space it
@@ -30,7 +30,12 @@ B="$ROOT/build/upstream-suite"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 OUT="$ROOT/run/GH-172/$STAMP"
 CFG="$ROOT/build/systemvm/launch-config.json"
-SAVED="$B/launch-config.saved.json"
+# Not in $B, which this runner shares read-write into the suite's boot: the saved config is what the next normal
+# boot starts from (ADR 0010). A launch config that shares build/systemvm itself is outside what this protects.
+SAVED="$ROOT/build/systemvm/launch-config.upstream-saved.json"
+# The suite's containers need real root and /dev/kvm, so its boot runs unmapped containers, on a data disk of its
+# own: a disk records its container mode, and a normal disk refuses an unmapped boot (vesper-containers).
+DATA_DISK="${UPSTREAM_DATA_DISK:-$ROOT/run/systemvm/upstream-data.img}"
 SRC_VOL=vesper-upstream-src
 CARGO_VOL=vesper-upstream-cargo
 NAME=vesper-upstream-run
@@ -180,6 +185,8 @@ restore() {
   set +e
   docker rm -f "$NAME" >/dev/null 2>&1
   wipe_srv
+  # The suite's disk is a sparse image: give the blocks /srv held back to macOS before the System VM stops.
+  say "$(cargo run -q --bin systemvmctl -- control data trim 2>&1 | head -1)"
   if [ "${UPSTREAM_KEEP_SIZE:-0}" != 1 ] && [ -f "$SAVED" ]; then
     live="$(sha "$CFG")"
     if [ "$live" = "$(sha "$SAVED")" ]; then
@@ -220,10 +227,23 @@ if [ "${UPSTREAM_KEEP_SIZE:-0}" != 1 ]; then
   make -s systemvm-down >/dev/null 2>&1 || { say "systemvm-down failed; the run needs a resized System VM"; exit 2; }
   # Write the resized config beside the live one and record its hash before it replaces the live one, so restore
   # can always tell which config is live.
-  python3 -I - "$SAVED" "$CFG.new" "$B" "${UPSTREAM_CPUS:-4}" "${UPSTREAM_MEMORY_MIB:-8192}" <<'PY'
+  if [ ! -f "$DATA_DISK" ]; then
+    (umask 077; dd if=/dev/zero of="$DATA_DISK" bs=1 count=0 seek="${VESPER_DATA_DISK_GIB:-64}g" 2>/dev/null) \
+      || { say "cannot create the suite's data disk $DATA_DISK"; exit 2; }
+    say "created the suite's sparse data disk ${DATA_DISK#"$ROOT"/}"
+  fi
+  chmod 600 "$DATA_DISK"
+  python3 -I - "$SAVED" "$CFG.new" "$B" "${UPSTREAM_CPUS:-4}" "${UPSTREAM_MEMORY_MIB:-8192}" "$DATA_DISK" <<'PY'
 import json, sys
-src, dst, share, cpus, mem = sys.argv[1:6]
+src, dst, share, cpus, mem, disk = sys.argv[1:7]
 c = json.load(open(src))
+# One boot with unmapped containers, on the suite's own disk. The token lives only in this temporary config.
+# The data disk is the next virtio block device after the boot media and the rootfs (src/systemvm/data_disk.rs);
+# a base config made with VESPER_DATA_DISK=none has no vesper_data= token, so it is derived here (council finding 19).
+c["data_disk_path"] = disk
+dev = "/dev/vd" + chr(ord("a") + bool(c.get("boot_media_path")) + bool(c.get("rootfs_path")))
+words = [w for w in c.get("kernel_cmdline", "").split() if not w.startswith(("vesper.containers=", "vesper_data="))]
+c["kernel_cmdline"] = " ".join(words + ["vesper_data=" + dev, "vesper.containers=unmapped"])
 c["cpu_count"], c["memory_mib"] = int(cpus), int(mem)
 shares = [s for s in c.get("shared_directories", []) if s.get("host_path") != share]
 shares.append({"tag": f"share{len(shares)}", "host_path": share, "read_only": False, "watch": False})
@@ -234,9 +254,14 @@ json.dump(c, open(dst, "w"), indent=2)
 PY
   sha "$CFG.new" > "$SAVED.resized"
   mv "$CFG.new" "$CFG"
-  make -s systemvm-up && make -s docker-up
+  # Only this runner serves Docker from an unmapped boot (docker-up.sh refuses otherwise).
+  make -s systemvm-up && VESPER_ALLOW_UNMAPPED=1 make -s docker-up
 fi
 docker info >/dev/null || { say "the System VM's Docker is not reachable at $DOCKER_HOST"; exit 2; }
+if docker info --format '{{json .SecurityOptions}}' | grep -q 'name=userns'; then
+  say "this System VM runs remapped containers; the suite needs its own unmapped boot (do not set UPSTREAM_KEEP_SIZE)"
+  exit 2
+fi
 if [ "$CLEAN" = 1 ]; then docker volume rm -f "$SRC_VOL" "$CARGO_VOL" >/dev/null; fi
 with_timeout 600 docker pull -q "$HELPER_IMAGE" >/dev/null || { say "pull of $HELPER_IMAGE failed or took over 600 s"; exit 2; }
 FREE_GB="$(docker run --rm -v "$SRC_VOL":/v "$HELPER_IMAGE" df -Pk /v | awk 'NR==2 {print int($4 / 1048576)}')"

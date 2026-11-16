@@ -7,7 +7,9 @@
 #   VERSION               -> VERSION 1
 #   ECHO <n>              -> ECHO <n> then the next <n> bytes are read and written back unchanged
 #   HEALTH                -> HEALTH {"packages_ready":bool,"services_ready":bool,"services":{...},
-#                             "containerd_ok":bool,"docker_ok":bool,"docker_version":"...","kvm":bool}
+#                             "containerd_ok":bool,"docker_ok":bool,"docker_version":"...","kvm":bool,"tun":bool,
+#                             "ip":"...","containers":"mapped|unmapped|refused <reason>","authz":"<state>",
+#                             "legacy_store":"absent|present volumes=N containers=M"}  (ADR 0010)
 #   KILL <containerd|docker> -> KILL <name> <pid> after SIGKILL to the daemon (crash simulation)
 #   LOGS <messages|containerd|docker> <n> -> LOGS <count> then <count> log lines
 #   MICROVM <args...>     -> MICROVM <rc> <count> then <count> output lines of `vesper-microvm <args>`
@@ -18,6 +20,7 @@
 #   SHARE <args...>       -> SHARE <rc> <count> then <count> output lines of `vesper-share <args>`
 #   ARCH <args...>        -> ARCH <rc> <count> then <count> output lines of `vesper-arch <args>`
 #   DATA <args...>        -> DATA <rc> <count> then <count> output lines of `vesper-data <args>` (GH #164)
+#   CONTAINERS <args...>  -> CONTAINERS <rc> <count> then <count> output lines of `vesper-containers <args>` (ADR 0010)
 #   VESPERD <args...>     -> VESPERD <rc> <count> then <count> output lines of `vesper-vesperd <args>`, except
 #                            launch and connect (ADR 0007); includes stage, store-list and store-rm (slice 5)
 #   LAUNCHAPI <id> [ceiling] [stage=SRC:DEST|tap=NAME|tapaddr=NAME:ADDR/PREFIX|net=none|net=nat]...
@@ -32,6 +35,8 @@
 #   SHUTDOWN              -> BYE then poweroff
 #   QUIT                  -> BYE then the connection is closed
 #   anything else         -> ERR unknown command
+. "$(dirname "$0")/../lib/vesper/vsock-peer.sh"
+vsock_host_only
 printf 'VESPER-AGENT 1 %s\n' "$(hostname)"
 service_state() {
   if [ -x "/etc/init.d/$1" ]; then
@@ -58,11 +63,15 @@ while IFS= read -r line; do
       [ -f /run/vesper/packages-ready ] && ready=true
       [ -f /run/vesper/services-ready ] && sready=true
       ctr --connect-timeout 2s version >/dev/null 2>&1 && cok=true
-      dver="$(docker version --format '{{.Server.Version}}' 2>/dev/null || true)"
+      # Bounded: without its authorisation plugin dockerd holds a request for about 30 s before it refuses it.
+      dver="$(timeout 5 docker version --format '{{.Server.Version}}' 2>/dev/null || true)"
       [ -n "$dver" ] && dok=true
       ip=$(ip -4 -o addr show dev eth0 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -1)
-      printf 'HEALTH {"packages_ready":%s,"services_ready":%s,"services":{"containerd":"%s","docker":"%s","vesper-agent":"%s"},"containerd_ok":%s,"docker_ok":%s,"docker_version":"%s","kvm":%s,"tun":%s,"ip":"%s"}\n' \
-        "$ready" "$sready" "$(service_state containerd)" "$(service_state docker)" "$(service_state vesper-agent)" "$cok" "$dok" "$dver" "$kvm" "$tun" "$ip"
+      # ADR 0010: the container mode of this boot, the plugin's state and whether an old unmapped store is on the disk.
+      cst=$(/usr/local/bin/vesper-containers status 2>/dev/null | sed 's/^CONTAINERS //')
+      cmode=${cst%% authz=*}; rest=${cst#* authz=}; authz=${rest%% legacy=*}; legacy=${rest#* legacy=}
+      printf 'HEALTH {"packages_ready":%s,"services_ready":%s,"services":{"containerd":"%s","docker":"%s","vesper-agent":"%s"},"containerd_ok":%s,"docker_ok":%s,"docker_version":"%s","kvm":%s,"tun":%s,"ip":"%s","containers":"%s","authz":"%s","legacy_store":"%s"}\n' \
+        "$ready" "$sready" "$(service_state containerd)" "$(service_state docker)" "$(service_state vesper-agent)" "$cok" "$dok" "$dver" "$kvm" "$tun" "$ip" "${cmode:-unknown}" "${authz:-unknown}" "${legacy:-unknown}"
       ;;
     KILL)
       case "$2" in
@@ -96,9 +105,9 @@ while IFS= read -r line; do
       ;;
     LAUNCHAPI) shift; exec /usr/local/bin/vesper-vesperd launch "$@" ;;
     FCAPI) shift; exec /usr/local/bin/vesper-vesperd connect "$@" ;;
-    MICROVM|ROOTFS|WORKLOAD|FCPARITY|CTR|SHARE|ARCH|DATA|VESPERD)
+    MICROVM|ROOTFS|WORKLOAD|FCPARITY|CTR|SHARE|ARCH|DATA|VESPERD|CONTAINERS)
       tool=$1; shift
-      case "$tool" in MICROVM) bin=/usr/local/bin/vesper-microvm ;; ROOTFS) bin=/usr/local/bin/vesper-rootfs ;; WORKLOAD) bin=/usr/local/bin/vesper-workload ;; FCPARITY) bin=/usr/local/bin/vesper-fcparity ;; CTR) bin=/usr/local/bin/vesper-ctr ;; SHARE) bin=/usr/local/bin/vesper-share ;; DATA) bin=/usr/local/bin/vesper-data ;; VESPERD) bin=/usr/local/bin/vesper-vesperd ;; *) bin=/usr/local/bin/vesper-arch ;; esac
+      case "$tool" in CONTAINERS) bin=/usr/local/bin/vesper-containers ;; MICROVM) bin=/usr/local/bin/vesper-microvm ;; ROOTFS) bin=/usr/local/bin/vesper-rootfs ;; WORKLOAD) bin=/usr/local/bin/vesper-workload ;; FCPARITY) bin=/usr/local/bin/vesper-fcparity ;; CTR) bin=/usr/local/bin/vesper-ctr ;; SHARE) bin=/usr/local/bin/vesper-share ;; DATA) bin=/usr/local/bin/vesper-data ;; VESPERD) bin=/usr/local/bin/vesper-vesperd ;; *) bin=/usr/local/bin/vesper-arch ;; esac
       # launch and connect own the connection; they are reached only as LAUNCHAPI and FCAPI.
       if [ "$tool" = VESPERD ]; then case "${1:-}" in launch|connect) echo "$tool 2 1"; echo "ERR use LAUNCHAPI or FCAPI"; continue ;; esac; fi
       out="$("$bin" "$@" 2>&1)"; rc=$?

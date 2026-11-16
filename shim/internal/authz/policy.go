@@ -147,7 +147,10 @@ type createBody struct {
 		UsernsMode   string
 		Runtime      string
 		VolumeDriver string
+		Binds        []string
 		Mounts       []struct {
+			Type          string
+			Source        string
 			VolumeOptions *struct {
 				DriverConfig *driverConfig
 			}
@@ -172,13 +175,26 @@ func checkCreate(_ *url.URL, body []byte) Decision {
 	if h.UsernsMode != "" {
 		return deny("--userns=%s is refused: every container runs in the remapped user namespace", h.UsernsMode)
 	}
-	if h.Runtime != "" && h.Runtime != "runc" {
-		return deny("--runtime=%s is refused: only the default runtime is known to stay in the remapped user namespace", h.Runtime)
+	// vesper-runc is the default (TD-062); runc is the same runtime without the share-ownership refresh.
+	if h.Runtime != "" && h.Runtime != "vesper-runc" && h.Runtime != "runc" {
+		return deny("--runtime=%s is refused: only vesper-runc and runc are known to stay in the remapped user namespace", h.Runtime)
 	}
 	if h.VolumeDriver != "" && h.VolumeDriver != "local" {
 		return deny("volume driver %q is not allowed", h.VolumeDriver)
 	}
+	for _, b := range h.Binds {
+		// "source:target[:options]"; a source that is not a path names a volume.
+		src, _, _ := strings.Cut(b, ":")
+		if p := bindProblem(src); p != "" {
+			return deny("%s", p)
+		}
+	}
 	for _, m := range h.Mounts {
+		if strings.EqualFold(m.Type, "bind") {
+			if p := bindProblem(m.Source); p != "" {
+				return deny("%s", p)
+			}
+		}
 		if m.VolumeOptions == nil {
 			continue
 		}
@@ -187,6 +203,26 @@ func checkCreate(_ *url.URL, body []byte) Decision {
 		}
 	}
 	return allow
+}
+
+// MissingSourceOK reports whether dockerd may create a bind source that does not exist yet. dockerd creates a
+// missing source directory itself and gives it to container root. On the System VM's own filesystems that hands a
+// container a directory that a root tool may later adopt (a state directory made lazily with mkdir -p), so it is
+// allowed only on a shared macOS directory. The plugin's main sets it; the default refuses every missing source.
+var MissingSourceOK = func(path string) (exists, creatable bool) { return false, false }
+
+func bindProblem(src string) string {
+	if !strings.HasPrefix(src, "/") {
+		return "" // a named volume
+	}
+	if path.Clean(src) != src {
+		return fmt.Sprintf("bind source %q is not a canonical path", src)
+	}
+	exists, creatable := MissingSourceOK(src)
+	if exists || creatable {
+		return ""
+	}
+	return fmt.Sprintf("bind source %s does not exist, and Vesper creates missing sources only inside a shared macOS directory", src)
 }
 
 func checkVolumeCreate(_ *url.URL, body []byte) Decision {

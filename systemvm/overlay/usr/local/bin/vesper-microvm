@@ -28,6 +28,10 @@
 #        vesper-microvm log ID [N]           last N lines of the serial console log (at most 1 MiB, plus the previous
 #                                             1 MiB file; vesper-boundlog, TD-055)
 set -u
+# ADR 0010: containers run as an unprivileged uid of the System VM, and dockerd can bind any single file into
+# one whatever its parent directory allows. So nothing this tool writes is readable by other uids unless a line
+# says why it must be.
+umask 077
 FC_DIR=/var/lib/vesper/firecracker
 MVM=/var/lib/vesper/microvm
 JAIL=/srv/jailer
@@ -194,7 +198,11 @@ test_share_listen() { # ID PORT | ID stop: a TCP listener on the server address 
   setsid nsenter --net="$NETNS/$id" socat "TCP-LISTEN:$2,bind=$SHARE_SRV,fork,reuseaddr" SYSTEM:'echo vesper-share' < /dev/null > /dev/null 2>&1 &
   echo "$! $(cat "$pf" 2>/dev/null)" > "$pf"
   sleep 0.3
-  echo "LISTEN $id tcp=$SHARE_SRV:$2"
+  # Say whether the listener is still running: a suite that finds the address closed must not be looking at a
+  # listener that never started. (The namespace accepts connections from the tap only, so only the guest can show
+  # that the listener answers; the suites read the guest's own probe for that.)
+  if kill -0 "$!" 2>/dev/null; then r=yes; else r=no; fi
+  echo "LISTEN $id tcp=$SHARE_SRV:$2 alive=$r"
 }
 test_share_reach() { # PORT [OTHER_ID]: can anything outside a namespace reach the server address? REACH <from> open|closed
   digits "${1:-}" || { echo "ERR usage: test-share-reach PORT [OTHER_ID]"; return 2; }
@@ -206,12 +214,21 @@ test_share_reach() { # PORT [OTHER_ID]: can anything outside a namespace reach t
   fi
   img=$(/usr/local/bin/vesper-rootfs import-trivial 2>&1 | sed -n 's/^IMPORTED //p')
   [ -n "$img" ] || { echo "ERR trivial image import failed"; return 1; }
-  for mode in bridge host; do
-    # --privileged: a container with every capability still has no route into another network namespace.
-    out=$(docker run --rm --privileged --network "$mode" "$img" /bin/busybox nc -z -w 2 "$SHARE_SRV" "$1" 2>&1); drc=$?
-    case "$drc" in 0) r=open ;; 1) r=closed ;; *) echo "ERR container-$mode: docker rc $drc: $(printf '%s' "$out" | vnetns_oneline)"; return 1 ;; esac
-    echo "REACH container-$mode $r"
-  done
+  # Every capability Docker grants a remapped container (ADR 0010), and no seccomp filter: it still has no route
+  # into another network namespace.
+  out=$(docker run --rm --cap-add ALL --security-opt seccomp=unconfined --network bridge "$img" /bin/busybox nc -z -w 2 "$SHARE_SRV" "$1" 2>&1); drc=$?
+  case "$drc" in 0) r=open ;; 1) r=closed ;; *) echo "ERR container-bridge: docker rc $drc: $(printf '%s' "$out" | vnetns_oneline)"; return 1 ;; esac
+  echo "REACH container-bridge $r"
+  # The host network: dockerd refuses it for a remapped container, and that refusal is the row. In an unmapped
+  # boot (the upstream suite's) the container runs, and the row says what it reached.
+  out=$(docker run --rm --network host "$img" /bin/busybox nc -z -w 2 "$SHARE_SRV" "$1" 2>&1); drc=$?
+  case "$drc:$out" in
+    0:*) r=open ;;
+    1:*) r=closed ;;
+    125:*"host's network namespace when user namespaces are enabled"*) r=refused ;;
+    *) echo "ERR container-host: docker rc $drc: $(printf '%s' "$out" | vnetns_oneline)"; return 1 ;;
+  esac
+  echo "REACH container-host $r"
 }
 test_age() { # ID SECONDS: make ID's record that much older (the reaper's grace period)
   id=${1:-}; valid_id "$id" && digits "${2:-}" && [ -f "$REC/$id" ] || { echo "ERR usage: test-age ID SECONDS (with a record)"; return 2; }
@@ -252,6 +269,10 @@ reap_loop() { # INTERVAL: what the vesper-microvm-reaper service runs
 }
 
 prepare() {
+  # The kernel and initramfs every microVM boots come from $MVM. It must be root's own directory: dockerd would
+  # create a missing one for a container, which could then plant them (GH #194).
+  mkdir -p "$MVM" && [ ! -L "$MVM" ] && [ "$(stat -c %u "$MVM")" = 0 ] || { echo "ERR $MVM is not a root-owned directory"; return 1; }
+  umask 022 # the initramfs tree keeps ordinary modes: they become the guest's (runs in a subshell or as the last act)
   mkdir -p "$MVM"
   if [ ! -f "$MVM/Image" ]; then
     # The ISO kernel is an EFI zboot PE: gzip payload at the offset/size stored at bytes 8..16.

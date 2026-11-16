@@ -1,7 +1,7 @@
 ---
 status: draft
 owner: cityhunteur
-last_reviewed: 2026-11-14
+last_reviewed: 2026-11-16
 ---
 
 # Vesper: Firecracker‑compatible microVM runtime on macOS using Apple Virtualization
@@ -371,6 +371,17 @@ containerd runs workloads on the Vesper runtime without special handling, includ
 * DNS and network defaults match Docker Desktop for the cases in `make dns-suite`, and containers can resolve `host.docker.internal`. **Not met** (TD-039): `host.docker.internal` is not provided.
 * `linux/arm64` is the native default on Apple Silicon.
 * `linux/amd64` runs through emulation in the System VM, and the image and container metadata report the architecture. **Meets the requirement** on the Docker path (`make crossarch-suite`).
+* No container is root on the System VM ([ADR 0010](../design-docs/adr/0010-no-container-is-systemvm-root.md), GH #194). **Meets the requirement** on the Docker path (`make systemvm-confine-suite`, 15 steps). It costs these **accepted deviations** from Docker on other hosts (D-035), each listed with its effect in [DEVELOPMENT.md](../DEVELOPMENT.md#containers-are-not-root-on-the-system-vm-adr-0010):
+  * `--privileged`, `--pid=host`, `--network=host`, `--ipc=host` and `--userns=host` are refused.
+  * A runtime other than the default (`vesper-runc`) or `runc`, and a volume with driver options, are refused.
+  * BuildKit builds are refused; the legacy builder (`DOCKER_BUILDKIT=0`) works and its steps run remapped.
+  * `docker swarm`, `docker service` and `docker plugin` are refused, and so is any route outside the plugin's list.
+  * A container create of 1 MiB or more is refused, because dockerd does not pass such a body to the plugin.
+  * A bind of the Docker socket mounts, but the container cannot open it.
+  * A bind source that does not exist on the System VM is refused unless it is inside a shared macOS directory.
+  * Under `--runtime runc`, a bind from a share can look owned by `nobody` for a second (TD-062 is fixed for the default runtime only), and no uid can change the attributes of a share's root directory (TD-038).
+  * Images, containers and volumes from before remapping are not used. Volumes can be copied in with `vesper-data legacy import-volume`; images are pulled or built again.
+  * Isolation between containers is not guaranteed: they share one mapping and one kernel.
 
 #### Phase 4 verification
 
@@ -463,7 +474,7 @@ Integration, on one machine and automated:
 End to end, from macOS against a running Vesper:
 
 * `docker run hello-world`; `docker run -p 8080:80 nginx`; `docker run --platform linux/amd64 alpine uname -m`; `docker compose up` on a small stack; a bind mount edited on macOS and observed in the container; `docker logs -f`, `docker exec -it`, `docker stop` (SIGTERM, then SIGKILL).
-* `docker build` with BuildKit in the System VM. **Meets the requirement** on the Docker path (`make workflow-suite`).
+* `docker build` in the System VM. **Meets the requirement** on the Docker path with the legacy builder (`make workflow-suite`, `DOCKER_BUILDKIT=0`). BuildKit is refused under ADR 0010 until a test shows its builds stay remapped.
 
 [TESTING.md](../TESTING.md) lists the suites that exist, their Make targets and what each needs. Every suite writes a JSON report.
 
@@ -549,7 +560,7 @@ The components on macOS must treat every byte from the System VM as untrusted (D
 | Actor | Boundary crossed | Asset | Mitigation today | Required mechanism | Pointer |
 | --- | --- | --- | --- | --- | --- |
 | A process of the same user on macOS | The vsock bridge, the Docker socket and the `vesperd` socket | The four System VM vsock ports in the bridge allow-list: the agent (which can run and stop microVMs and power off the System VM), the Docker API, the port relay and the share notification sink | None against the same user. The sockets under `run/` are owner-only, which stops other users; the `vesperd` default socket is owner-only (TD-050, resolved) | A restriction on what the vsock bridge reaches (a port allow-list or a check of the peer); an owner-only `vesperd` socket | TD-027, TD-050 |
-| A hostile container on the Docker path | Container → System VM kernel, which every container shares; read-write shares → macOS files | Other containers, the System VM, and macOS files in the shares, written as the sharing user | Whatever isolation dockerd and runc apply by default; Vesper adds none and no Vesper test checks it. Only directories named at launch are shared, and a read-only share is enforced at the virtio-fs level. dockerd grants `--privileged`, the host pid namespace and host bind mounts as asked, so a container can be root on the System VM (TD-061) | A microVM per container. Before that, no container is root on the System VM, whatever flags started it (D-034, [ADR 0010](../design-docs/adr/0010-no-container-is-systemvm-root.md), accepted, not built yet) | GH #53, GH #194 |
+| A hostile container on the Docker path | Container → System VM kernel, which every container shares; read-write shares → macOS files | Other containers, the System VM, and macOS files in the shares, written as the sharing user | Whatever isolation dockerd and runc apply by default; Vesper adds none and no Vesper test checks it. Only directories named at launch are shared, and a read-only share is enforced at the virtio-fs level. No container is root on the System VM, whatever flags started it: dockerd remaps every container and a default-deny authorisation plugin refuses requests outside the mapping (D-034, [ADR 0010](../design-docs/adr/0010-no-container-is-systemvm-root.md), `make systemvm-confine-suite`). Containers still share one kernel and one mapping | A microVM per container | GH #53, GH #194 |
 | A hostile workload in a microVM | microVM → shim, over its private vsock session; microVM → Firecracker and the jailer | The shim, other tasks and the System VM | The microVM boundary and the jailer (dedicated uid, pivot-root jail, cgroup limits, seccomp); the shim bounds control replies; microVMs have no network device. Inside the microVM the workload has full capabilities, and every microVM shares one jailer uid | The workload’s requested posture honoured, or the full-capability model confirmed by the security review; a jailer uid per owner | CE-0004, GH #156 |
 | A compromised System VM | System VM → `vesper-proxy`, the launcher and, after step 1, `vesperd` | macOS listeners, files in the shares, and later the state of `vesperd` | `vesper-proxy` opens loopback TCP listeners only, from what dockerd reports. The launcher sends path names only, never file contents. Nothing limits or validates control replies | Schema validation and bounded replies in every macOS component that reads from the System VM | TD-026 |
 

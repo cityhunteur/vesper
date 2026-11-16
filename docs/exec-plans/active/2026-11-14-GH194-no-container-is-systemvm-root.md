@@ -20,17 +20,50 @@ volumes that must be pulled or imported once.
   only): route allow-list, the create-body rules, refusal log without queries or bodies; unit tests for path
   cleaning, version prefixes, missing bodies, key case, folded letters, duplicate keys, merged objects and
   unreadable plugin messages; the route inventory below. Built by `build-shim.sh`, not installed yet
-- [ ] M2 Overlay: `dockremap` and subordinate ranges, dockerd configuration, the plugin's OpenRC service ordered
-  before dockerd with an activation wait, the data disk's mode record, `HEALTH` fields (`containers`, plugin
-  state, legacy store)
-- [ ] M3 Private state: an inventory of what Vesper writes under `/run/vesper`, `/var/lib/vesper` and `/var/log`,
-  owner-only creation including rotation, and the vsock peer check (CID 2 only) with `vsock_loopback` blocked
-- [ ] M4 Callers and the unmapped boot: `test-share-reach`, `data-disk-suite.sh` on new `vesper-data` verbs, the
-  `vesper.containers=unmapped` token with its own data disk, the upstream runner's saved config moved out of the
-  shared directory, the launcher printing the mode
-- [ ] M5 `make systemvm-confine-suite`, and the ADR 0009 step in the share-network suite
-- [ ] M6 `vesper-data legacy status` and `legacy import-volume`; every Docker suite rerun; deviations recorded;
-  `design-v0.md`, `docs/SECURITY.md`, the conformance notes and TD-061 updated; council review of the code
+- [x] M2 (2026-11-14) Overlay: `vesper-containers` (mode from the kernel command line, the disk's record,
+  `dockremap`, dockerd configuration), the `vesper-authz` service started before dockerd with a socket wait,
+  `HEALTH` fields `containers`, `authz`, `legacy_store`, the `CONTAINERS` agent verb
+- [x] M3 (2026-11-14) Private state from a full inventory: `umask 077` in the root tools with two reasoned
+  exceptions, explicit modes for the stores, snapshot store files `root:vesperd-jail` 0440, shim files 0600, the
+  daemons' logs 0600; the vsock peer check in the agent, port relay and share notifier; `vsock_loopback` blacklisted
+- [x] M4 (2026-11-14) Callers and the unmapped boot: `test-share-reach`, `data-disk-suite.sh` on `vesper-data
+  binds|label|test-relabel`, the upstream runner's token, own data disk and saved config outside the share,
+  `docker-up.sh` comparing the launch config's mode with the System VM's
+- [x] M5 (2026-11-14) `make systemvm-confine-suite`: 14 of 14 from a rebuilt overlay, after the council review's fixes
+  (`run/GH-194/m5-confine-report.json`). The same overlay passes 23 other suites
+  (`run/GH-194/battery/summary.txt`): sharenet, microvm, shim, workload, launchapi, vesperd, egress, bounds, exec,
+  bundle, restart, rootfs, snapshot, docker-smoke, docker-conformance, ports, dns, workflow, crossarch,
+  ctr-conformance, data-disk, binds. Not rerun: the upstream Firecracker suite in its new unmapped boot
+- [x] M5b (2026-11-15) TD-062 fixed before merge (D-036): dockerd's default runtime is `vesper-runc`, which asks
+  each bind source on a share for its owner again as the container's uid after `runc create`; the host-edit
+  replay runs as container root with `CAP_FOWNER` only. `make binds-suite` 25 of 25 with no waits; plain runc and a
+  root replay fail the same checks (`run/GH-194/td062/control.txt`). Confine 14 of 14 and 23 other suites pass on
+  that overlay (`run/GH-194/td062/battery/summary.txt`; the snapshot suite on a rerun in its own boot config)
+- [ ] M6 `legacy import-volume`; a short upstream-suite run in its unmapped boot on its own disk; deviations
+  recorded in the conformance notes; council review of the code
+  - [x] (2026-11-16) `vesper-data legacy status|import-volume NAME`; the confinement suite's 15th step imports a
+    planted volume and checks the owners in the store and in a container (`run/GH-194/m6/`). The real old store
+    lists 6 volumes; none was imported (that is the owner's choice per volume)
+  - [x] (2026-11-16) TD-061's council findings: the Docker relay runs `vesper-docker-relay-conn`, which turns
+    away a peer that is not the macOS host, and the Docker and port relays hold at most 256 connections (finding
+    20); the upstream runner derives `vesper_data=` for its own disk (finding 19). Confine 15 of 15 (the vsock step
+    now tries the port relay too, 9 refused connects), docker-smoke, docker-conformance and ports pass
+  - [x] (2026-11-16) Docker deviations recorded in `design-v0.md` Phase 4 as accepted deviations (D-035); its
+    BuildKit line, which still said BuildKit builds pass, now says the legacy builder passes and BuildKit is refused
+  - [x] (2026-11-16) A short upstream-suite run in its unmapped boot on its own disk
+    (`integration_tests/functional/test_api.py`, twice): 67 tests, 59 passed, 6 upstream platform skips and 2
+    `vmm-memory-overhead` errors, every result explained; the next normal boot was mapped. The runner now trims the
+    suite's disk before it restores (20 GiB to 7.1 GiB on the Mac). Evidence: `run/GH-194/m6/upstream-short-*`
+  - [x] (2026-11-16) Council review of the M6 code (`2ec6281..cd7063a`; the rewritten static council: five
+    reviewer roles, a Claude Opus judge, no code run). Four confirmed defects, all in `import-volume`, fixed: the
+    copy is shifted in a root-only staging directory, not in the container-reachable volumes directory (a
+    container could swap a path mid-shift, high); a hard-link marker that cannot be made fails the import; the
+    volume is created with a one-time label and is used or removed only when it carries it; `flock` and signal
+    traps replace the `mkdir` lock. The suite fixture gained the boundary ids, set-uid, outward and dangling links,
+    a leading-dash name and a dead import's leftovers. Remaining coverage gaps are TD-064
+  - [x] (2026-11-16) Acceptance check against GH #194: `docker exec --privileged` was the one listed flag no step
+    ran. Step 3 now runs its 21 probes again through `docker exec --privileged` into the broadest container; all 21
+    are refused (`run/GH-194/m6/exec-privileged-confine-report.json`, run without the two restarts)
 
 ## Surprises & Discoveries
 
@@ -45,8 +78,33 @@ volumes that must be pulled or imported once.
 - 2026-11-14: the System VM has no `buildx`; its `docker build` is the legacy builder, which runs remapped.
   BuildKit from a macOS client is untested.
 
+- 2026-11-14 (M5): **ownership on shares flickers under remapping (TD-062).** Apple's virtio-fs reports the asking
+  uid as each file's owner, and the System VM caches the answer for about a second for all uids. While container
+  root was the System VM's root the two always agreed. Now a look by root (dockerd resolving a bind at container
+  start, the host-edit replay) leaves uid 0 in the cache, and for that second a container sees `nobody` and gets
+  `EPERM` from `chmod` and `touch`. A same-mode `chmod` by the container uid cannot refresh the cache, because the
+  kernel checks the cached owner first. Measured in a one-off unmapped boot on a scratch disk.
+- 2026-11-14 (M5): a container without a seccomp filter can make a vsock socket without `/dev/vsock`. Its connects
+  to CIDs 1 and 2 are reset by the macOS host; to the System VM's own CID they fail with "no such device".
+- 2026-11-14 (M5): `make systemvm-up` fails on a refused boot, because the launcher's probe needs dockerd. The
+  console line `vesper: CONTAINERS refused …` is the evidence; `HEALTH` is not reachable from a failed `up`.
+- 2026-11-14 (M5): the buildx client falls back to a privileged BuildKit container with `--userns=host` when
+  `/session` is refused, so the plugin's refusal names `--userns=host`. `DOCKER_BUILDKIT=0 docker build` works.
+- 2026-11-14 (M5): the egress suite's last step kills a `vesperd` holder and leaves its socket file under
+  `run/egress-suite/`; `docker-smoke` then fails `no_raw_host_sockets`. An ordering artefact, older than this work.
+- 2026-11-16 (M6): BusyBox `cp -a` keeps hard links, so shifting owners by path shifted a file with two names
+  twice and left it owned by `nobody`. The suite's planted hard link caught it; each inode is now shifted once.
+- 2026-11-16 (M6): the first import staged its copy in `/var/lib/docker/100000.100000/volumes`, which container
+  root can traverse. Each directory became container-owned as soon as it was shifted, before root had finished
+  below it, so a running container could have swapped a subdirectory for a symbolic link and had root re-own a
+  System VM file. Our own suite could not see it; the council's red-team role did.
+
 ## Decision Log
 
+- 2026-11-16: `import-volume` gives an owner outside 0 to 65535 the container's `nobody` (System VM uid 165534)
+  rather than refusing the volume or keeping the raw id. A raw id would be a System VM uid outside the mapping;
+  refusing would block a volume over one stray file. The count is printed as `unmapped=N`. It copies (BusyBox
+  `cp -a`) rather than moving, so the old store stays readable by a downgrade, as ADR 0010 point 8 requires.
 - 2026-11-14: the plugin is default-deny over routes, and refuses a create whose body it cannot read. dockerd
   hands a plugin the body only under 1 MiB, so "refuse a visible `host`" can be bypassed with padding (council
   finding 1).
@@ -89,6 +147,41 @@ Refused until a test shows each stays inside the mapping:
 
 Still to check against the running daemon in M5: that dockerd passes `RequestUri` exactly as this table parses
 it, and that a chunked create reaches the plugin without a body.
+
+- 2026-11-14 (M3): the files are closed, not only their directories, because dockerd binds a single file as root
+  whatever the parent allows. `umask 077` is set per tool, and each tool sets its own, so a caller's umask never
+  leaks into a tree whose modes become a guest's (`vesper-microvm prepare`, `vesper-rootfs`).
+- 2026-11-14 (M3): snapshot store files change from 0444 to `root:vesperd-jail` 0440. The jail still reads them
+  through its hard link and cannot change them; other uids no longer read guest memory.
+
+- 2026-11-14 (council review of M2 to M5, `run/GH-194/council-m2-m5.md`: 2 High, 8 Medium, 10 Low). Fixed before
+  merge:
+  - **High 1, a container could own a directory a root tool adopts.** dockerd creates a missing bind source for
+    container root, and `/var/lib/vesper/microvm` (the kernel and initramfs every microVM boots), `/srv/jailer` and
+    `/run/vesper/mem` were made lazily. Now `vesper-containers prepare` makes every state directory before
+    dockerd, the tools refuse one root does not own, and the plugin refuses to create a source outside a share.
+  - **High 2, old files kept their modes after an upgrade.** `prepare` sets them on every boot, and refuses the
+    boot if it cannot.
+  - Medium and Low: `docker-up` serves an unmapped boot only to the upstream runner; the vsock step requires six
+    recognised denials and the peer check has a hermetic test and fails closed under socat; images are owner-only
+    while `mke2fs` writes them; the suite disk is created 0600; the guest's own probe is the positive control for
+    the share server; probes that fail for another reason than a refusal fail the step; raw requests must get the
+    plugin's own 403; `up.sh` says why a refused boot failed; a refused boot cannot serve; `vesper-boundlog`
+    counts from the file's size; `vesper-ctr` leaves `/tmp`; jail parents are 0711; `HEALTH` no longer walks the
+    old store.
+  - Not fixed here: the share-ownership flicker (finding 7, TD-062; fixed in M5b after the owner chose to fix
+    it first); a peer check and a child cap
+    on the Docker relay (finding 20); a suite config without a data disk (finding 19). Both are in TD-061.
+
+- 2026-11-15 (M5b): the share-ownership fault happened on every container start, not now and then: a probe saw
+  `nobody` and `EPERM` from `chmod` in 4 of 4 starts, for container root and for `-u 1000`. One
+  `statx(AT_STATX_FORCE_SYNC)` with the container's ids ends it. A share's root directory refuses `chmod` from
+  uid 100000 even with the right owner cached, as it did from root in GH #150, so the suite binds a directory
+  inside the share.
+- 2026-11-14: creating the image file before `mke2fs` (to make it owner-only at once) changed the bytes `mke2fs`
+  wrote, and the rootfs suite's reproducible rebuild failed. The umask is set around `mke2fs` instead.
+- 2026-11-14: the vesperd suite's `firecracker_connection_limit_passes_through` failed once in the second battery
+  ("connection 11 got ''") and passed on a rerun with nothing it uses changed. Not explained.
 
 ## Outcomes & Retrospective
 

@@ -1,0 +1,2 @@
+before: 61G run/systemvm/data.img, host 16Gi free; guest used=11740692 KiB
+TRIM discard=68719476736 trimmed=55027200000; after: 12G data.img, host 65Gi free; data-disk suite passed

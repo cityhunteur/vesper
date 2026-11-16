@@ -1,0 +1,19 @@
+cargo run --bin systemvmctl -- control bundle-suite
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.17s
+     Running `target/debug/systemvmctl control bundle-suite`
+ok   handshake: protocol 1 host vesper (2 ms)
+ok   import_base_image: IMPORTED docker.io/vesper/trivial:guest (12 ms)
+ok   import_layered_image: IMPORTED docker.io/vesper/layered:guest layers=2 (25 ms)
+ok   layered_rootfs_boots: second layer's file read from the block-first root drive (2778 ms)
+ok   start_la: STARTED la pid=11756 (2201 ms)
+ok   meta_la_recorded: strategy block-first, overlay, 2 lower layers, cached=true, build_ms=19 (2 ms)
+ok   start_lb_same_chain: STARTED lb pid=11903 (2181 ms)
+ok   meta_lb_cache_hit: cached=true, same key and sha256 as la, build_ms=17 (2 ms)
+ok   cache_one_drive_per_chain: 2 cached drive(s): 153183014b083f885fa6717928d0a2edaccb6c27e805e757588e2482b45ab6f2 bytes=16777216 sha256=e5389c0b50382381; 1ca8dac6b4200a598b9d6d2d6956817c012d549fe949180513f1a2ebe1583563 bytes=16777216 sha256=d86f184de (3 ms)
+ok   layer_dedup_shared_base: base layer snapshot /var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/1/fs shared by both images (content store dedup) (2910 ms)
+ok   kill_la: KILLED la (21 ms)
+ok   delete_la: DELETED la (569 ms)
+ok   kill_lb: KILLED lb (25 ms)
+ok   delete_lb: DELETED lb (582 ms)
+ok   no_leftovers: CLEAN (14 ms)
+bundle suite passed (report: run/systemvm/bundle-report.json)
