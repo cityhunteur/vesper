@@ -1,0 +1,32 @@
+bash scripts/systemvm/binds-suite.sh
+rm: /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share/m3: is a directory
+rm: /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share/m3b-68f6d3fe: is a directory
+rm: /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share/m3b-a550d757: is a directory
+rm: /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share/m4: is a directory
+rm: /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share/m6: is a directory
+rm: /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share/m7: is a directory
+ok   shares_mounted_at_host_paths: SHARE share0 /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share mode=rw SHARE share1 /Volumes/Workspace/github.com/cityhunteur/vesper/r
+ok   host_file_readable_in_container: cat /data/hello.txt -> from-host
+ok   bind_owned_by_container_root_at_start: 5 of 5 containers saw the bind owned by 0:0 and could chmod it in their first command
+ok   bind_owned_by_container_user_at_start: a container running as 1000:1000 saw the bind owned by 1000:1000 and could chmod it at once
+ok   plain_runc_shows_the_fault: with --runtime runc (no refresh) the first look saw 65534:65534 chmod: /data: Operation not permitted : the checks above can fail
+ok   ownership_mapped_to_root_in_guest: host 501:20 appears as 0:0 in the container (the sharing user owns the share; containers see root)
+ok   container_write_owned_by_host_user: container wrote c.txt, chmod 640 kept, chown 1000:1000 ignored; host sees 501:20 640, guest sees 0:0 640
+ok   readonly_share_enforced: read-only content sh: can't create /ro/y.txt: Read-only file system 
+ok   docker_ro_flag_enforced: sh: can't create /data/z.txt: Read-only file system
+ok   host_edit_visible_promptly: host wrote p.txt and the next container read saw it
+ok   replayed_file_owned_by_container_root: 5 replayed host edits: each event handler saw owner 0 and could chmod at once (0 chmod-ok;0 chmod-ok;0 chmod-ok;0 chmod-ok;0 chmod-ok;)
+ok   inotify_guest_writes_seen: events: n /data from-guest.txt;c /data from-guest.txt;w /data from-guest.txt;c /data from-guest.txt;c /data owned.txt;c /data owned.txt;c /data owned.
+ok   inotify_host_edit_propagated: host append to hello.txt reached the container as an inotify event after 76 ms (polled)
+ok   inotify_host_create_propagated: host create of from-host.txt reached the container as an inotify event (IN_MODIFY, not IN_CREATE) after 66 ms (polled)
+ok   inotify_host_mtime_preserved: the replay left hello.txt's contents and mtime (1794873199.115123869) unchanged; only the host ctime moves
+ok   inotify_no_echo_storm: one host edit produced 1 event(s) for hello.txt in 5 s; the replay's own FSEvents echo is dropped
+ok   inotify_ro_share_host_edits_not_propagated: host edits on a read-only share produce no inotify events (the guest cannot touch files there; documented residual, TD-038)
+ok   inotify_host_delete_seen_on_parent: host delete of sub/d.txt reached the container as a change of the directory sub (IN_MODIFY on the parent, not IN_DELETE)
+ok   inotify_host_rename_seen: host rename sub/e.txt -> sub/f.txt reached the container as a change of sub and an event for f.txt (no IN_MOVED_FROM/TO)
+ok   inotify_share_root_delete_not_propagated: a host delete directly in the share's root directory produces no event (the guest cannot touch a share root; documented residual, TD-038)
+ok   inotify_burst_delivered: 500 files created on the host in one burst: events for all 500 within 1260 ms (polled); System VM healthy
+ok   inotify_nowatch_share_silent: host edits on the read-write share mounted with :nowatch produce no inotify events (opt-out honoured)
+ok   inotify_host_rapid_edits_mtime_preserved: 200 host appends to one file, 25 ms apart, while a container stat-ed it in a loop: after each of 5 rounds the host mtime (ns) equalled the last host w
+ok   unshared_path_is_refused: -v /tmp/vesper-not-shared is refused; only configured shares map host paths, and no directory is made in the System VM (path policy)
+binds suite: passed=true (report: /Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/binds-report.json)

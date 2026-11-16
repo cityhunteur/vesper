@@ -1,0 +1,103 @@
+{
+  "bridge_path": "run/systemvm/vsock/3.sock",
+  "port": 1024,
+  "steps": [
+    {
+      "name": "handshake",
+      "ok": true,
+      "detail": "protocol 1 host vesper",
+      "elapsed_ms": 4
+    },
+    {
+      "name": "import_trivial_image",
+      "ok": true,
+      "detail": "IMPORTED c8ab1ad05088f0133679da58975aa067a115c3371066736d9e3b478c1d5e4d55",
+      "elapsed_ms": 174
+    },
+    {
+      "name": "run_wa",
+      "ok": true,
+      "detail": "STARTED wa microvm=wl-wa pid=1387 image=c8ab1ad05088f0133679da58975aa067a115c3371066736d9e3b478c1d5e4d55",
+      "elapsed_ms": 2203
+    },
+    {
+      "name": "run_wb_concurrent",
+      "ok": true,
+      "detail": "STARTED wb microvm=wl-wb pid=1563 image=c8ab1ad05088f0133679da58975aa067a115c3371066736d9e3b478c1d5e4d55",
+      "elapsed_ms": 1965
+    },
+    {
+      "name": "run_wc_concurrent",
+      "ok": true,
+      "detail": "STARTED wc microvm=wl-wc pid=1727 image=c8ab1ad05088f0133679da58975aa067a115c3371066736d9e3b478c1d5e4d55",
+      "elapsed_ms": 1971
+    },
+    {
+      "name": "three_microvms_running",
+      "ok": true,
+      "detail": "3 running, pids {\"1387\", \"1563\", \"1727\"}",
+      "elapsed_ms": 26
+    },
+    {
+      "name": "isolation_between_microvms",
+      "ok": true,
+      "detail": "3 distinct cgroups {\"/firecracker/wl-wa\", \"/firecracker/wl-wc\", \"/firecracker/wl-wb\"}; wb cannot see wa's /tmp/x (private rootfs copies)",
+      "elapsed_ms": 20
+    },
+    {
+      "name": "stop_wa_tears_down_its_microvm",
+      "ok": true,
+      "detail": "STOPPED wa teardown=CLEAN",
+      "elapsed_ms": 288
+    },
+    {
+      "name": "others_unaffected_by_stop",
+      "ok": true,
+      "detail": "wa STOPPED, wb and wc still RUNNING, wl-wa CLEAN",
+      "elapsed_ms": 36
+    },
+    {
+      "name": "run_wd_short",
+      "ok": true,
+      "detail": "STARTED wd microvm=wl-wd pid=? image=c8ab1ad05088f0133679da58975aa067a115c3371066736d9e3b478c1d5e4d55",
+      "elapsed_ms": 1946
+    },
+    {
+      "name": "wait_maps_exit_code_and_output",
+      "ok": true,
+      "detail": "EXITED wd code=3; output hello-from-microvm; microVM torn down",
+      "elapsed_ms": 28
+    },
+    {
+      "name": "rm_wa",
+      "ok": true,
+      "detail": "REMOVED wa",
+      "elapsed_ms": 15
+    },
+    {
+      "name": "rm_wb",
+      "ok": true,
+      "detail": "REMOVED wb",
+      "elapsed_ms": 299
+    },
+    {
+      "name": "rm_wc",
+      "ok": true,
+      "detail": "REMOVED wc",
+      "elapsed_ms": 816
+    },
+    {
+      "name": "rm_wd",
+      "ok": true,
+      "detail": "REMOVED wd",
+      "elapsed_ms": 19
+    },
+    {
+      "name": "nothing_left",
+      "ok": true,
+      "detail": "no workloads, no microVMs",
+      "elapsed_ms": 1
+    }
+  ],
+  "passed": true
+}

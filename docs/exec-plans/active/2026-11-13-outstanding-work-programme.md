@@ -29,7 +29,7 @@ it is why the run comes last.
   frozen, `run/GH-172/20261113T172619Z`; D-031)
 - [x] W4 Runtime bounds: console logs (TD-055), memory budget (TD-056), snapshot store quota (TD-053) (PR #191;
   runtime evidence `run/W4/20261113T170614Z`: 7 suites, 121 of 121 steps, and a microVM that outlives its console bounder)
-- [ ] W5 #160: host shares into microVMs over NFS from `unfs3` (own ExecPlan; dependency approved in D-021)
+- [x] W5 #160: host shares into microVMs over NFS from `unfs3` (2026-11-16, PRs #199 to #202; deviations in D-038)
 - [ ] W6 ctr-conformance hang: reproduce, then fix or record it
 - [x] W7 Repository settings: the owner applies them (D-029); nothing for the agent to do
 - [ ] W8 CE-0003 Linux reference run (gated: quote and quota approval)

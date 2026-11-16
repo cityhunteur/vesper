@@ -362,10 +362,13 @@ prepare() {
 }
 
 # ---- share server (ADR 0009, GH #160 M3) ----
-unfs_mount_ok() { # DIR: an absolute virtio-fs mount point, named without white space
+unfs_mount_ok() { # DIR: an absolute virtio-fs mount point (spaces and shell characters allowed; no newline)
   case "$1" in /*) ;; *) echo "not absolute"; return 1 ;; esac
-  case "$1" in *[[:space:]]*|*\\*) echo "white space or a backslash in the path"; return 1 ;; esac
-  awk -v d="$1" '$2 == d && $3 == "virtiofs" {f=1} END {exit !f}' /proc/mounts || { echo "$1 is not a virtio-fs mount"; return 1; }
+  case "$1" in *"$NL"*) echo "a newline in the path"; return 1 ;; esac
+  # /proc/mounts writes a space, tab, newline and backslash as \040, \011, \012 and \134.
+  esc=$(printf '%s' "$1" | sed 's/\\/\\134/g; s/ /\\040/g; s/	/\\011/g')
+  # Through the environment: awk -v would decode the backslash escapes again.
+  D="$esc" awk '$2 == ENVIRON["D"] && $3 == "virtiofs" {f=1} END {exit !f}' /proc/mounts || { echo "$1 is not a virtio-fs mount"; return 1; }
 }
 unfs_pid() { p=$(cat "$UNFS/$1.pid" 2>/dev/null) && digits "$p" && [ -d "/proc/$p" ] && echo "$p"; }
 unfs_listening() { # ID: the server's NFS port is open on the server address inside the namespace
@@ -403,7 +406,16 @@ unfs_start() { # ID MOUNT SQUASH SOURCES(newline-separated) -> a reason on failu
     || { echo "supervise-daemon: $(head -n 2 "$UNFS/$us_id.err" | tr '\n' ' ')"; return 1; }
   rm -f "$UNFS/$us_id.err"
   for _ in $(seq 1 40); do
-    unfs_listening "$us_id" && return 0
+    if unfs_listening "$us_id"; then
+      # Test hook (test-unfs-stall-next): stop the next server once it listens, so the guest's mount stalls.
+      if [ -e "$UNFS/stall-next" ]; then
+        rm -f "$UNFS/stall-next"
+        for p in $(cat "$UNFS_CG/$us_id/cgroup.procs" 2>/dev/null); do
+          [ "$(cat "/proc/$p/comm" 2>/dev/null)" = unfsd ] && kill -STOP "$p"
+        done
+      fi
+      return 0
+    fi
     # A refused source or a sandbox step that failed will fail the same way on every respawn.
     grep -q "^vesper-unfs \(run\|init\):" "/var/log/vesper-unfs-$us_id.log" 2>/dev/null && break
     sleep 0.25
@@ -755,6 +767,7 @@ case "$cmd" in
   unfs-stop) valid_id "${1:-}" || { echo "ERR bad id"; exit 2; }; lock && unfs_stop "$1"; unlock; echo "UNFS $1 stopped" ;;
   test-unfs-selfcheck) test_unfs_selfcheck "$@" ;;
   test-unfs-kill) test_unfs_kill "$@" ;;
+  test-unfs-stall-next) mkdir -p "$UNFS" && : > "$UNFS/stall-next" && echo "STALL next" ;;
   test-unfs-probe) test_unfs_probe "$@" ;;
   reap) reap ;;
   reap-loop) reap_loop "$@" ;;
