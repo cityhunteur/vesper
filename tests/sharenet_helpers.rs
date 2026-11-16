@@ -13,7 +13,7 @@ fn overlay(rel: &str) -> PathBuf {
 /// command reaching the usage line shows the file was found.
 #[test]
 fn both_managers_source_the_shared_namespace_helpers() {
-    for (script, usage) in [("usr/local/bin/vesper-microvm", "sharenet|reap"), ("usr/local/bin/vesper-vesperd", "usage")] {
+    for (script, usage) in [("usr/local/bin/vesper-microvm", "sharenet|unfs|reap"), ("usr/local/bin/vesper-vesperd", "usage")] {
         let out = Command::new("sh").arg(overlay(script)).arg("no-such-command").output().unwrap();
         let text = String::from_utf8_lossy(&out.stdout).to_string() + &String::from_utf8_lossy(&out.stderr);
         assert_eq!(out.status.code(), Some(2), "{script}: {text}");

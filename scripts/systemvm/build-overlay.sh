@@ -37,6 +37,8 @@ APK_ARGS+=(--file "${ROOT_DIR}/build/shim/vesper-console:/usr/bin/vesper-console
 APK_ARGS+=(--file "${ROOT_DIR}/build/shim/vesper-authz:/usr/bin/vesper-authz:0755")
 # dockerd's default runtime in a normal boot: runc, then the share-ownership refresh after create (TD-062).
 APK_ARGS+=(--file "${ROOT_DIR}/build/shim/vesper-runc:/usr/bin/vesper-runc:0755")
+# The share server's sandbox and probe (ADR 0009, GH #160 M3); vesper-microvm launch --unfs-* runs it.
+APK_ARGS+=(--file "${ROOT_DIR}/build/shim/vesper-unfs:/usr/bin/vesper-unfs:0755")
 # The baseline lock rides along so guest-built artifacts can embed the pinned revisions (GH #19 provenance).
 APK_ARGS+=(--file "${ROOT_DIR}/docs/specs/design-v0.baselines.lock.yaml:/var/lib/vesper/baselines.lock.yaml:0644")
 

@@ -30,7 +30,7 @@ microVM, can reach the file server or another microVM's export.
   children), an error trap in `launch`, and the `vesper-microvm reap` pass (which runs `cleanup`) in a new
   `vesper-microvm-reaper` service; `docs/SECURITY.md` and `design-v0.md` updated here, when shim microVMs first get a
   network device
-- [ ] M3 One `unfsd` per microVM in that namespace, sandboxed (new mount, pid, ipc and uts namespaces, `pivot_root`
+- [x] M3 (2026-11-16, D-037; exit gate moved to M4) One `unfsd` per microVM in that namespace, sandboxed (new mount, pid, ipc and uts namespaces, `pivot_root`
   to a tmpfs, sources at `/s/N` with `nosuid,nodev` and kernel `ro`, `no_new_privs`, a reduced capability bounding
   set), in a capped cgroup admitted by `vesper-memadmit` with the microVM, under `supervise-daemon`, logging through
   `vesper-boundlog`; sources opened under the share mount's descriptor and bound from it; every `ro` source bound
@@ -40,12 +40,18 @@ microVM, can reach the file server or another microVM's export.
   the exports, a handle cannot cross between exports, a nested-chroot escape fails, a write to a `ro` export fails,
   a `ro` source nested in a `rw` one cannot be written through the outer export, a source swapped for a symlink
   after validation exports nothing outside the share, `ESTALE` after a restart measured. Exit gate: the GH #159
-  `>` then `>>` lost write is reproduced and explained, or shown not to recur in 1,000 tries
+  `>` then `>>` lost write is reproduced and explained, or shown not to recur in 1,000 tries.
+  Done: `vesper-unfs` (`shim/cmd/vesper-unfs`, `internal/unfs`, `internal/nfsprobe`) and `vesper-microvm launch
+  --unfs-*`; `make systemvm-unfs-suite` 12 of 12 (`run/GH-160/m3/unfs-report.json`). Root server by default, with a
+  seccomp filter against user namespaces added to the ADR's sandbox (D-037); memory peak 8 MB, cap 32 MiB; old
+  handles work after a restart (no `ESTALE`). The exit gate needs the guest's kernel client, so it moved to M4
 - [ ] M4 Guest: NFS client modules and their `modules.dep` closure, and `virtio_net`, in the initramfs;
   `vesper_share_net=` brings up `eth0` with no default route; the share list arrives as JSON in the session's `RUN`
   request; a `vesper-console` subcommand decodes it and calls `mount(2)` for each share, shallowest destination
   first, after a 3 s probe of the server, with
   `addr=169.254.77.1,vers=3,proto=tcp,port=2049,mountport=2050,mountproto=tcp,nolock,hard,actimeo=1,lookupcache=positive`
+  Exit gate (moved from M3): the GH #159 `>` then `>>` lost write is reproduced and explained, or shown not to recur
+  in 1,000 tries through the guest's mount
   (+ `ro`); the guest unmounts its shares before it reports `EXIT`
 - [ ] M5 Shim: OCI bind mounts whose resolved source is under a share mount become NFS mounts; file sources are
   refused with a clear error; other bind mounts keep today's behaviour; `Kill` forwards the signal as today, and a
@@ -95,7 +101,32 @@ microVM, can reach the file server or another microVM's export.
 - 2026-11-14 (M1): after boot with the new overlay no `unfsd` or `rpcbind` runs, no OpenRC service names them, and
   nothing listens on 111, 2049 or 2050. `shim-suite` (22 of 22) and `workload-suite` (16 of 16) pass.
 
+- 2026-11-16 (M3): `open_tree(OPEN_TREE_CLONE)` refuses a mount of another mount namespace, so the sandbox could not
+  bind from the parent's `O_PATH` descriptors. The parent clones each source into a detached tree (attributes set)
+  before the sandbox starts, one more per nest, and the sandbox attaches them with `move_mount`.
+- 2026-11-16 (M3): `supervise-daemon` run by hand needs `RC_SVCNAME` equal to its first argument. `unfsd` binds an
+  IPv6 socket to `::ffff:169.254.77.1`; the traffic is IPv4, so the namespace's `iptables` rule still applies.
+- 2026-11-16 (M3): unfs3 0.10.0 aborts on an assertion (`fh_decode`, `fh.c:505`) when sent some shortened handles.
+  The probe sends its forged handles of the same length first; the server restarts within about a second (TD-065).
+- 2026-11-16 (M3): unfs3 answers `..` at an export's root with the sandbox's `/s` and its attributes. Every
+  operation on that handle is refused, and the sandbox holds nothing else there.
+- 2026-11-16 (M3): `unshare(CLONE_NEWUSER)` fails with `EINVAL` in any Go process (it has threads), so the first
+  escape check proved nothing; a child started in a new user namespace was created, without capabilities only
+  because `exec` drops them without a uid map. Native code needs no exec, hence the seccomp filter (D-037). The
+  sandbox also sets its own umask: the System VM's tools run with 077, which left the root's directories closed to
+  a squashing server.
+
 ## Decision Log
+
+- 2026-11-16 (M3, D-037): the server runs as root with the six capabilities, not as 65534 with `all_squash`. Both
+  read `0600` files and `0700` directories (virtio-fs in the System VM does not check the caller), but the squashing
+  server makes every file look owned by 65534 to every guest uid, so a non-root guest user could not `chmod` its own
+  files, while the root server, acting as the caller, shows the caller's uid as the owner, as TD-062 gives
+  containers. `--unfs-squash` stays for M7's binds suite to compare. The sandbox also loads a seccomp filter that
+  refuses user namespaces, `setns` and `clone3`: without it an exploited server could make a user namespace and hold
+  every capability over a copy of its mount namespace.
+- 2026-11-16 (M3): the lost-write exit gate moved to M4. It is a property of the guest kernel's NFS client over a
+  real mount; the probe client in M3 sends single calls and cannot show it.
 
 - 2026-11-14: a container given the System VM's root is in scope (D-034, owner). The defence is not in this plan:
   ADR 0010 (proposed, GH #194) remaps every container. M3 to M7 continue; #160's closing test gains a step that

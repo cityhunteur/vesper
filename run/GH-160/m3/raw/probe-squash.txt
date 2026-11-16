@@ -1,0 +1,81 @@
+PROBE mnt /s/0 ok status=OK err=<nil>
+PROBE mnt /s/1 ok status=OK err=<nil>
+PROBE mnt /s/2 ok status=OK err=<nil>
+PROBE mnt-refused / ok status=ACCES err=<nil>
+PROBE mnt-refused /s ok status=ACCES err=<nil>
+PROBE mnt-refused /s/3 ok status=NOENT err=<nil>
+PROBE mnt-refused /usr ok status=ACCES err=<nil>
+PROBE mnt-refused /etc ok status=ACCES err=<nil>
+PROBE mnt-refused /s/0/.. ok status=ACCES err=<nil>
+PROBE mnt /s/0/../1 is /s/1 ok handle 2200000024000000000000002400000000000000020324, /s/1 2200000024000000000000002400000000000000020324
+PROBE getattr /s/0 ok type=2 mode=40755 uid=65534 gid=65534 size=256 fsid=34 fileid=28 status=OK err=<nil>
+PROBE read file ok read file.txt: "proj\n" status=OK err=<nil>
+PROBE read nested 0700 dir ok read dir700/inner.txt: "inner\n" status=OK err=<nil>
+PROBE read ro export ok read r.txt: "ro\n" status=OK err=<nil>
+PROBE read nested ro through outer ok read conf/app.conf: "conf\n" status=OK err=<nil>
+PROBE read 0600 file ok read status=OK err=<nil> data="s"
+INFO read-0600 type=1 mode=100600 uid=65534 gid=65534 size=2 fsid=34 fileid=30
+PROBE create in rw ok status=OK err=<nil>
+PROBE write in rw ok status=OK err=<nil>
+PROBE remove in rw ok status=OK err=<nil>
+PROBE create in ro export ok status=ROFS err=<nil>
+PROBE write in ro export ok status=ROFS err=<nil>
+PROBE chmod in ro export ok status=ROFS err=<nil>
+PROBE create in ro conf export ok status=ROFS err=<nil>
+PROBE create in nested ro through outer ok status=ROFS err=<nil>
+PROBE mkdir in nested ro through outer ok status=ROFS err=<nil>
+PROBE write nested ro through outer ok status=ROFS err=<nil>
+PROBE remove nested ro through outer ok status=ROFS err=<nil>
+INFO exported-objects 11
+INFO dotdot /s/0 x1 outside the share: type=2 mode=40755 uid=0 gid=0 size=100 fsid=38 fileid=3
+PROBE dotdot /s/0 x1 getattr ok status=ACCES err=<nil>
+PROBE dotdot /s/0 x1 readdir ok status=ACCES err=<nil> names=[]
+PROBE dotdot /s/0 x1 lookup 0 ok status=ACCES err=<nil> type=0 mode=0 uid=0 gid=0 size=0 fsid=0 fileid=0
+PROBE dotdot /s/0 x1 lookup 1 ok status=ACCES err=<nil> type=0 mode=0 uid=0 gid=0 size=0 fsid=0 fileid=0
+PROBE dotdot /s/0 x1 lookup 2 ok status=ACCES err=<nil> type=0 mode=0 uid=0 gid=0 size=0 fsid=0 fileid=0
+PROBE dotdot /s/0 x1 lookup usr ok status=ACCES err=<nil> type=0 mode=0 uid=0 gid=0 size=0 fsid=0 fileid=0
+PROBE dotdot /s/0 x1 lookup etc ok status=ACCES err=<nil> type=0 mode=0 uid=0 gid=0 size=0 fsid=0 fileid=0
+PROBE dotdot /s/0 x1 lookup lib ok status=ACCES err=<nil> type=0 mode=0 uid=0 gid=0 size=0 fsid=0 fileid=0
+PROBE dotdot /s/0 x1 lookup dev ok status=ACCES err=<nil> type=0 mode=0 uid=0 gid=0 size=0 fsid=0 fileid=0
+PROBE dotdot /s/0 x1 lookup .. ok status=ACCES err=<nil> type=0 mode=0 uid=0 gid=0 size=0 fsid=0 fileid=0
+PROBE dotdot /s/0 x1 create ok status=ACCES err=<nil>
+PROBE dotdot /s/1 x1 ok type=2 mode=40755 uid=65534 gid=65534 size=256 fsid=34 fileid=28
+INFO dotdot-list /s/1 x1 [. .. file.txt secret600 dir700 link-out link-up conf]
+INFO dotdot /s/1 x2 outside the share: type=2 mode=40755 uid=0 gid=0 size=100 fsid=38 fileid=3
+PROBE dotdot /s/1 x2 getattr ok status=ACCES err=<nil>
+PROBE dotdot /s/1 x2 readdir ok status=ACCES err=<nil> names=[]
+PROBE dotdot /s/1 x2 lookup 0 ok status=ACCES err=<nil> type=0 mode=0 uid=0 gid=0 size=0 fsid=0 fileid=0
+PROBE dotdot /s/1 x2 lookup 1 ok status=ACCES err=<nil> type=0 mode=0 uid=0 gid=0 size=0 fsid=0 fileid=0
+PROBE dotdot /s/1 x2 lookup 2 ok status=ACCES err=<nil> type=0 mode=0 uid=0 gid=0 size=0 fsid=0 fileid=0
+PROBE dotdot /s/1 x2 lookup usr ok status=ACCES err=<nil> type=0 mode=0 uid=0 gid=0 size=0 fsid=0 fileid=0
+PROBE dotdot /s/1 x2 lookup etc ok status=ACCES err=<nil> type=0 mode=0 uid=0 gid=0 size=0 fsid=0 fileid=0
+PROBE dotdot /s/1 x2 lookup lib ok status=ACCES err=<nil> type=0 mode=0 uid=0 gid=0 size=0 fsid=0 fileid=0
+PROBE dotdot /s/1 x2 lookup dev ok status=ACCES err=<nil> type=0 mode=0 uid=0 gid=0 size=0 fsid=0 fileid=0
+PROBE dotdot /s/1 x2 lookup .. ok status=ACCES err=<nil> type=0 mode=0 uid=0 gid=0 size=0 fsid=0 fileid=0
+PROBE dotdot /s/1 x2 create ok status=ACCES err=<nil>
+INFO dotdot /s/2 x1 outside the share: type=2 mode=40755 uid=0 gid=0 size=100 fsid=38 fileid=3
+PROBE dotdot /s/2 x1 getattr ok status=ACCES err=<nil>
+PROBE dotdot /s/2 x1 readdir ok status=ACCES err=<nil> names=[]
+PROBE dotdot /s/2 x1 lookup 0 ok status=ACCES err=<nil> type=0 mode=0 uid=0 gid=0 size=0 fsid=0 fileid=0
+PROBE dotdot /s/2 x1 lookup 1 ok status=ACCES err=<nil> type=0 mode=0 uid=0 gid=0 size=0 fsid=0 fileid=0
+PROBE dotdot /s/2 x1 lookup 2 ok status=ACCES err=<nil> type=0 mode=0 uid=0 gid=0 size=0 fsid=0 fileid=0
+PROBE dotdot /s/2 x1 lookup usr ok status=ACCES err=<nil> type=0 mode=0 uid=0 gid=0 size=0 fsid=0 fileid=0
+PROBE dotdot /s/2 x1 lookup etc ok status=ACCES err=<nil> type=0 mode=0 uid=0 gid=0 size=0 fsid=0 fileid=0
+PROBE dotdot /s/2 x1 lookup lib ok status=ACCES err=<nil> type=0 mode=0 uid=0 gid=0 size=0 fsid=0 fileid=0
+PROBE dotdot /s/2 x1 lookup dev ok status=ACCES err=<nil> type=0 mode=0 uid=0 gid=0 size=0 fsid=0 fileid=0
+PROBE dotdot /s/2 x1 lookup .. ok status=ACCES err=<nil> type=0 mode=0 uid=0 gid=0 size=0 fsid=0 fileid=0
+PROBE dotdot /s/2 x1 create ok status=ACCES err=<nil>
+PROBE through symlink link-out/passwd ok status=NOENT err=<nil> type=0 mode=0 uid=0 gid=0 size=0 fsid=0 fileid=0
+PROBE through symlink link-up/secret.txt ok status=NOENT err=<nil> type=0 mode=0 uid=0 gid=0 size=0 fsid=0 fileid=0
+PROBE readlink link-out ok "/etc" status=OK err=<nil>
+INFO forged-dropped /s/0 the server dropped the connection at handle 220000001c000000000000001c00000000000000fd031c: EOF
+INFO forged-dropped /s/0 the server dropped the connection at handle 220000001c000000000000001c0000000000000002031c0000000000000000: EOF
+INFO forged-dropped /s/0 the server dropped the connection at handle 0000000000000000000000000000000000000000000000: EOF
+INFO forged-dropped /s/0 the server dropped the connection at handle 220000001c000000000000001c000000000000000203: EOF
+PROBE forged /s/0 ok 25 of 25 full-length variants sent (22 answered), 1 of 23 shortened sent, 5 accepted, 0 outside the exports, 4 dropped connections
+INFO forged-dropped /s/0/file.txt the server dropped the connection at handle 220000001d000000000000001d00000000000000fc031c1d: EOF
+INFO forged-dropped /s/0/file.txt the server dropped the connection at handle 220000001d000000000000001d0000000000000003031c1d0000000000000000: EOF
+INFO forged-dropped /s/0/file.txt the server dropped the connection at handle 000000000000000000000000000000000000000000000000: EOF
+INFO forged-dropped /s/0/file.txt the server dropped the connection at handle 220000001d000000000000001d0000000000000003031c: EOF
+PROBE forged /s/0/file.txt ok 26 of 26 full-length variants sent (23 answered), 1 of 24 shortened sent, 5 accepted, 0 outside the exports, 4 dropped connections
+PROBE-SUMMARY passed=66 failed=0

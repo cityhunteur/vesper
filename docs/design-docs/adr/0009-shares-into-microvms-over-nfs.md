@@ -224,7 +224,9 @@ The milestones are in `docs/exec-plans/active/2026-11-13-GH160-shares-into-micro
    closure (for example `libtirpc`), each licence, and the tool that drops the server's uid. Anything in that
    closure beyond `unfs3` is a new runtime dependency and goes to the owner in M1's PR.
 2. The shared namespace helpers and a per-microVM namespace in `vesper-microvm`, with record, lock and reaper.
-3. Exports, the sandbox and supervision, with the isolation and escape tests.
+3. Exports, the sandbox and supervision, with the isolation and escape tests. Built 2026-11-16 (`vesper-unfs`,
+   `make systemvm-unfs-suite`). The server is root with the capability set above (the squashing server showed every
+   file as owned by 65534), and the sandbox also has a seccomp filter against user namespaces (D-037).
 4. The guest client.
 5. The shim mapping and the kill path.
 6. The event hop.
