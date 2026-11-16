@@ -30,6 +30,14 @@ The Go module pins containerd 2.1.5 and builds static Linux arm64 binaries with 
   for container and volume create; a request that is not listed, or a create whose body dockerd did not pass, is
   refused. `go test ./internal/authz` covers path handling, key case, duplicate keys and missing bodies. Built by
   `build-shim.sh` and installed as `/usr/bin/vesper-authz`.
+- `cmd/vesper-unfs`, `internal/unfs` and `internal/nfsprobe`: the per-microVM share server's sandbox (ADR 0009,
+  GH #160 M3) and a test NFSv3 client. `vesper-unfs run` opens each source with `openat2` beneath the share mount,
+  clones it into a detached mount tree, and starts `init` in new mount, pid, ipc and uts namespaces, which attaches
+  the trees in a tmpfs root, binds read-only sources again inside read-write ones, pivots, drops privileges, loads a
+  seccomp filter against user namespaces and execs `unfsd`. `vesper-unfs probe` runs the escape battery against a
+  server, and `run --selfcheck` runs the escape checks inside the sandbox in place of `unfsd`. `go test
+  ./internal/unfs ./internal/nfsprobe` covers parsing, nesting, exports, RPC encoding and the filter program.
+  Installed as `/usr/bin/vesper-unfs`.
 - `cmd/vesper-runc` and `internal/runcwrap`: dockerd's default runtime in a normal boot (TD-062, D-036). Every
   runc command but `create` replaces itself with `/usr/bin/runc`. For `create` it runs runc, and then asks each
   bind source on a macOS share for its attributes with `statx(AT_STATX_FORCE_SYNC)`, as the container process's

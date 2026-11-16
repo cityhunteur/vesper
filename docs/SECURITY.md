@@ -252,7 +252,8 @@ is the normative policy and this section the summary. No new port, socket, share
 
 ## Share network for the shim's microVMs (ADR 0009, GH #160)
 
-Built so far (M2): the network only. No share server runs yet, and the shim does not ask for the network yet.
+Built so far: the network (M2) and the server (M3). The shim does not ask for either yet (M5), and the guest does
+not mount anything yet (M4).
 
 - `vesper-microvm launch ID --share-net` gives that microVM a network namespace of its own, bound at
   `/run/vesper/microvm/netns/<id>` (root-only, tmpfs) and joined by the jailer (`--netns`). It holds `lo` and one tap,
@@ -287,6 +288,35 @@ Built so far (M2): the network only. No share server runs yet, and the shim does
   `test-share-reach`, `test-age`, `test-abort-launch`, `test-drop-record` and `test-impostor`. They need root in the System VM, like every `vesper-microvm`
   command.
 - **Evidence:** `make systemvm-sharenet-suite` (12 steps, `run/GH-160/m2-sharenet-suite.json`).
+
+### The share server (GH #160 M3)
+
+- `vesper-microvm launch ID --share-net --unfs-mount DIR --unfs-src REL:ro|rw ...` starts one `unfsd` for that
+  microVM, in its namespace, before the jailer. `DIR` must be a virtio-fs mount named without white space or a
+  backslash. The server exports each source as `/s/0`, `/s/1`, ... to `169.254.77.2` only, so no source path reaches
+  its exports file. It listens on `169.254.77.1` (TCP 2049 and 2050, through an IPv4-mapped IPv6 socket).
+- **Sources** are opened by `vesper-unfs run` with `openat2` beneath the share mount, with no symbolic link on the way
+  and no crossing to another mount, then cloned into detached mount trees (`open_tree`) with their final attributes
+  (`nosuid,nodev,noexec`, plus `ro` for a read-only source). Nothing opens a source path again. A symbolic link, a
+  `..` component or a mount that is not virtio-fs is refused, and the launch fails.
+- **Sandbox:** new mount, pid, ipc and uts namespaces; `pivot_root` into a 1 MiB tmpfs that is then read-only, with the
+  old root detached. It holds only the exports, a read-only `/usr` and `/lib` (for `unfsd` and its libraries),
+  `/dev/null`, and `/etc` with the exports file and libtirpc's tables. No `/proc`, `/sys`, `/run` or device. Each
+  read-only source is bound again, read-only, inside each read-write source that holds it, at a place found beneath
+  that export with no symbolic link on the way. The server runs as root with the bounding, permitted and effective
+  sets cut to `CAP_CHOWN`, `CAP_DAC_OVERRIDE`, `CAP_FOWNER`, `CAP_FSETID`, `CAP_SETGID` and `CAP_SETUID` (`0xdb`),
+  no ambient capabilities, `no_new_privs`, and a seccomp filter that refuses user namespaces (`unshare` and `clone`
+  with `CLONE_NEWUSER`), `setns`, and `clone3` (D-037). `--unfs-squash` runs it as 65534 with no capabilities instead.
+- **Supervision:** `supervise-daemon` (service `vesper-unfs-ID`, respawn after 1 s, at most 5 in 60 s), in
+  `/sys/fs/cgroup/vesper-unfs/ID` with `memory.max` 32 MiB and `pids.max` 32. The memory is admitted with the
+  microVM's ceiling as one entry. The log is `/var/log/vesper-unfs-ID.log` (bounded, 256 KiB). `cleanup` stops the
+  supervisor, kills what is left in the cgroup and removes it; `DIRTY` names `unfs` or `unfs-cgroup` otherwise.
+- **Inspection:** `vesper-microvm unfs ID` (state, listening, memory), `unfs-isolation ID` (ids, capabilities,
+  `no_new_privs`, seccomp, namespaces and every mount in the server's root), `unfs-log ID`.
+- **What remains:** a malformed file handle makes `unfsd` 0.10.0 abort on an assertion; the guest is the only client,
+  so it can stop only its own shares, and after five aborts in 60 s they stay down (TD-065). `..` at an export's
+  root returns a handle of the sandbox's `/s` with its attributes; every operation on it is refused.
+- **Evidence:** `make systemvm-unfs-suite` (11 steps, `run/GH-160/m3/unfs-report.json`).
 
 ## Container confinement (ADR 0010, GH #194)
 

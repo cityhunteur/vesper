@@ -13,6 +13,13 @@
 #                                             its own network namespace (jailer --netns) holding lo and one tap,
 #                                             share0 at 169.254.77.1/30, with the guest at 169.254.77.2 and no route
 #                                             out (ADR 0009): the network a share server will listen on
+#                                             --unfs-mount DIR --unfs-src REL:ro|rw [...] [--unfs-squash] (needs
+#                                             --share-net; GH #160 M3): one sandboxed unfsd (vesper-unfs run) in that
+#                                             namespace, exporting each source as /s/0, /s/1, ... to the guest only,
+#                                             under supervise-daemon in its own memory-capped cgroup, admitted with
+#                                             the microVM; started before the jailer
+#        vesper-microvm unfs ID              UNFS ID state=running|stopped pid=N listen=yes|no mem_max= mem_peak=
+#                                             oom_kills=, or UNFS ID absent
 #        vesper-microvm sharenet ID          SHARENET ID links=... addr=... owner=... routes=N input=... forward=...
 #                                             rules=N fc_in_ns=yes|no, or ABSENT ID
 #        vesper-microvm reap                 remove what is left of any --share-net microVM whose launch, shim and
@@ -74,6 +81,16 @@ SHARE_GUEST=169.254.77.2
 SHARE_PREFIX=30
 SHARE_PORTS="2049 2050"            # unfsd's NFS and mount ports (TCP)
 REAP_GRACE=30                      # seconds a record is left alone, whatever runs
+# ---- share server (ADR 0009, GH #160 M3) ----------------------------------------------------------------------
+UNFS=$STATE/unfs                   # unfs/<id>.pid: supervise-daemon's pid file for the server of <id>
+UNFS_CG=/sys/fs/cgroup/vesper-unfs # one memory-capped cgroup per server, beside the microVM's
+# Its memory.max, admitted with the microVM's ceiling. M3 measured an 8 MB peak through the probe battery and a
+# restart (run/GH-160/m3/unfs-report.json); page cache charged to the cgroup is reclaimed at the cap.
+UNFS_MEM=33554432
+UNFS_PIDS=32
+UNFS_ROOT=/run/vesper/unfs-root    # where each server mounts its own tmpfs root, in its own mount namespace
+NL='
+'
 LIBDIR=$(dirname "$0")/../lib/vesper; [ -r "$LIBDIR/netns.sh" ] || LIBDIR=/usr/local/lib/vesper
 # shellcheck source=/dev/null
 . "$LIBDIR/netns.sh"
@@ -326,9 +343,140 @@ prepare() {
   echo "PREPARED kernel=$(stat -c %s "$MVM/Image") initrd=$(stat -c %s "$MVM/initrd.gz") firecracker=$("$FC_DIR/firecracker" --version 2>/dev/null | head -1)"
 }
 
+# ---- share server (ADR 0009, GH #160 M3) ----
+unfs_mount_ok() { # DIR: an absolute virtio-fs mount point, named without white space
+  case "$1" in /*) ;; *) echo "not absolute"; return 1 ;; esac
+  case "$1" in *[[:space:]]*|*\\*) echo "white space or a backslash in the path"; return 1 ;; esac
+  awk -v d="$1" '$2 == d && $3 == "virtiofs" {f=1} END {exit !f}' /proc/mounts || { echo "$1 is not a virtio-fs mount"; return 1; }
+}
+unfs_pid() { p=$(cat "$UNFS/$1.pid" 2>/dev/null) && digits "$p" && [ -d "/proc/$p" ] && echo "$p"; }
+unfs_listening() { # ID: the server's NFS port is open on the server address inside the namespace
+  # unfsd binds an IPv6 socket to the IPv4-mapped address (::ffff:169.254.77.1); the traffic is IPv4 all the same.
+  nsenter --net="$NETNS/$1" netstat -ltn 2>/dev/null | grep -Eq "[ :]$SHARE_SRV:2049 "
+}
+unfs_state() { if [ -n "$(unfs_pid "$1")" ]; then echo running; else echo stopped; fi; }
+unfs_start() { # ID MOUNT SQUASH SOURCES(newline-separated) -> a reason on failure (lock held, namespace up)
+  us_id=$1; us_mount=$2; us_sq=$3; us_srcs=$4
+  mkdir -p "$UNFS" "$UNFS_ROOT" && chmod 0700 "$UNFS" "$UNFS_ROOT" || { echo "state directories"; return 1; }
+  grep -qw memory /sys/fs/cgroup/cgroup.subtree_control || echo +memory > /sys/fs/cgroup/cgroup.subtree_control
+  grep -qw pids /sys/fs/cgroup/cgroup.subtree_control || echo +pids > /sys/fs/cgroup/cgroup.subtree_control
+  mkdir -p "$UNFS_CG" && echo "+memory +pids" > "$UNFS_CG/cgroup.subtree_control" || { echo "cgroup parent"; return 1; }
+  mkdir -p "$UNFS_CG/$us_id" && echo "$UNFS_MEM" > "$UNFS_CG/$us_id/memory.max" && echo "$UNFS_PIDS" > "$UNFS_CG/$us_id/pids.max" \
+    || { echo "cgroup"; return 1; }
+  set --
+  us_ifs=$IFS; IFS=$NL
+  for us_s in $us_srcs; do set -- "$@" --src "$us_s"; done
+  IFS=$us_ifs
+  [ "$us_sq" = 1 ] && set -- "$@" --squash
+  rm -f "$UNFS/$us_id.pid" "$UNFS/$us_id.err"
+  # What the server was started with, for the selfcheck hook and for diagnosis.
+  { echo "$us_mount"; echo "$us_sq"; printf '%s\n' "$us_srcs"; } > "$UNFS/$us_id.args"
+  # Not on our stdout or stderr: the agent reads them to end of file, and supervise-daemon outlives this script.
+  # supervise-daemon insists that RC_SVCNAME names the service it is given.
+  RC_SVCNAME="vesper-unfs-$us_id" supervise-daemon "vesper-unfs-$us_id" --start --pidfile "$UNFS/$us_id.pid" \
+    --respawn-delay 1 --respawn-max 5 --respawn-period 60 --stdout /dev/null \
+    --stderr-logger "/usr/local/bin/vesper-boundlog /var/log/vesper-unfs-$us_id.log 262144" \
+    "$(command -v nsenter)" -- "--net=$NETNS/$us_id" /usr/bin/vesper-unfs run --mount "$us_mount" \
+    --root "$UNFS_ROOT" --cgroup "$UNFS_CG/$us_id" "$@" < /dev/null > /dev/null 2> "$UNFS/$us_id.err" \
+    || { echo "supervise-daemon: $(head -n 2 "$UNFS/$us_id.err" | tr '\n' ' ')"; return 1; }
+  rm -f "$UNFS/$us_id.err"
+  for _ in $(seq 1 40); do
+    unfs_listening "$us_id" && return 0
+    # A refused source or a sandbox step that failed will fail the same way on every respawn.
+    grep -q "^vesper-unfs \(run\|init\):" "/var/log/vesper-unfs-$us_id.log" 2>/dev/null && break
+    sleep 0.25
+  done
+  echo "server not listening: log: $(tail -n 3 "/var/log/vesper-unfs-$us_id.log" 2>/dev/null | tr '\n' ' ') netstat: $(nsenter --net="$NETNS/$us_id" netstat -ltn 2>&1 | tr '\n' ';') pidfile: $(cat "$UNFS/$us_id.pid" 2>/dev/null) cgroup: $(cat "$UNFS_CG/$us_id/cgroup.procs" 2>/dev/null | tr '\n' ' ') ps: $(ps -o pid,ppid,args 2>/dev/null | grep -e "vesper-unfs" -e unfsd -e nsenter | grep -v grep | tr '\n' ';')"
+  return 1
+}
+unfs_stop() { # ID: stop the supervisor and the server, then remove the cgroup; idempotent
+  if [ -e "$UNFS/$1.pid" ]; then
+    RC_SVCNAME="vesper-unfs-$1" supervise-daemon "vesper-unfs-$1" --stop --pidfile "$UNFS/$1.pid" > /dev/null 2>&1
+    rm -f "$UNFS/$1.pid"
+  fi
+  rm -f "$UNFS/$1.err" "$UNFS/$1.args" "$UNFS/$1.handles"
+  if [ -d "$UNFS_CG/$1" ]; then
+    [ -e "$UNFS_CG/$1/cgroup.kill" ] && echo 1 > "$UNFS_CG/$1/cgroup.kill" 2>/dev/null
+    for _ in $(seq 1 20); do [ -s "$UNFS_CG/$1/cgroup.procs" ] || break; sleep 0.1; done
+    rmdir "$UNFS_CG/$1" 2>/dev/null
+  fi
+}
+unfs() { # ID: the server's state, for the suites and for diagnosis
+  id=${1:-}; valid_id "$id" || { echo "ERR bad id"; return 2; }
+  [ -e "$UNFS/$id.pid" ] || [ -d "$UNFS_CG/$id" ] || { echo "UNFS $id absent"; return 1; }
+  l=no; unfs_listening "$id" && l=yes
+  cg="$UNFS_CG/$id"
+  echo "UNFS $id state=$(unfs_state "$id") pid=$(unfs_pid "$id") listen=$l mem_max=$(cat "$cg/memory.max" 2>/dev/null) mem_peak=$(cat "$cg/memory.peak" 2>/dev/null) oom_kills=$(awk '$1=="oom_kill"{print $2}' "$cg/memory.events" 2>/dev/null)"
+}
+unfs_log() { # ID [N]: the server's log and its supervisor's syslog lines, for diagnosis
+  id=${1:-}; valid_id "$id" || { echo "ERR bad id"; return 2; }
+  n=${2:-40}; digits "$n" || n=40
+  cat "/var/log/vesper-unfs-$id.log.1" "/var/log/vesper-unfs-$id.log" 2>/dev/null | tail -n "$n"
+  grep -a "vesper-unfs-$id" /var/log/messages 2>/dev/null | tail -n "$n"
+}
+# The server process as the kernel sees it: its ids, capabilities, no_new_privs, and namespaces against the share
+# namespace and the System VM's; and every mount point in its root.
+unfs_isolation() { # ID
+  id=${1:-}; valid_id "$id" || { echo "ERR bad id"; return 2; }
+  up=""
+  for p in $(cat "$UNFS_CG/$id/cgroup.procs" 2>/dev/null); do
+    [ "$(cat "/proc/$p/comm" 2>/dev/null)" = unfsd ] && up=$p
+  done
+  [ -n "$up" ] || { echo "UNFSISO $id absent"; return 1; }
+  st=/proc/$up/status
+  f() { awk -v k="$1:" '$1==k {print $2; exit}' "$st"; }
+  ns() { [ "$(readlink "/proc/$up/ns/$1")" = "$(readlink "/proc/$$/ns/$1")" ] && echo same || echo own; }
+  netns=other; [ "$(stat -L -c %i "/proc/$up/ns/net")" = "$(stat -L -c %i "$NETNS/$id" 2>/dev/null)" ] && netns=share
+  mounts=$(awk '{print $5}' "/proc/$up/mountinfo" | sort | tr '\n' ',')
+  echo "UNFSISO $id pid=$up uid=$(f Uid | cut -f1) gid=$(f Gid | cut -f1) capbnd=$(f CapBnd) capeff=$(f CapEff) capamb=$(f CapAmb) nonewprivs=$(f NoNewPrivs) seccomp=$(f Seccomp) mnt=$(ns mnt) pid_ns=$(ns pid) ipc=$(ns ipc) uts=$(ns uts) net=$netns mounts=$mounts"
+  awk '{print "UNFSMOUNT", $5, $4, $6, $9, $10}' "/proc/$up/mountinfo"
+}
+# Test hooks (make systemvm-unfs-suite). test-unfs-selfcheck builds ID's sandbox again, from the arguments its
+# server was started with, and runs the escape checks in it in place of unfsd. test-unfs-kill kills ID's unfsd, so
+# supervise-daemon starts it again.
+test_unfs_selfcheck() { # ID
+  id=${1:-}; valid_id "$id" || { echo "ERR bad id"; return 2; }
+  [ -r "$UNFS/$id.args" ] || { echo "ERR $id has no server"; return 1; }
+  set --
+  n=0
+  while IFS= read -r line; do
+    n=$((n + 1))
+    case $n in 1) m=$line ;; 2) [ "$line" = 1 ] && set -- "$@" --squash ;; *) [ -n "$line" ] && set -- "$@" --src "$line" ;; esac
+  done < "$UNFS/$id.args"
+  mkdir -p /run/vesper/unfs-check-root && chmod 0700 /run/vesper/unfs-check-root
+  nsenter --net="$NETNS/$id" /usr/bin/vesper-unfs run --selfcheck --mount "$m" --root /run/vesper/unfs-check-root "$@" 2>&1
+}
+test_unfs_kill() { # ID
+  id=${1:-}; valid_id "$id" || { echo "ERR bad id"; return 2; }
+  for p in $(cat "$UNFS_CG/$id/cgroup.procs" 2>/dev/null); do
+    [ "$(cat "/proc/$p/comm" 2>/dev/null)" = unfsd ] && { kill -KILL "$p"; echo "KILLED unfsd $p"; return 0; }
+  done
+  echo "ERR no unfsd for $id"; return 1
+}
+# Test hook (make systemvm-unfs-suite): run vesper-unfs probe against ID's server from inside its namespace. The
+# probe calls from the guest's address, so for its duration the namespace holds 169.254.77.2 on lo and accepts lo
+# traffic; the guest's own connection to the server cannot work meanwhile. Both are removed afterwards.
+test_unfs_probe() { # ID [probe flags]
+  id=${1:-}; valid_id "$id" || { echo "ERR bad id"; return 2; }; shift
+  vnetns_mounted "$NETNS" "$id" || { echo "ERR $id has no share namespace"; return 1; }
+  f="$NETNS/$id"
+  nsenter --net="$f" ip addr add "$SHARE_GUEST/32" dev lo 2>/dev/null
+  nsenter --net="$f" iptables -w -I INPUT 1 -i lo -j ACCEPT
+  # --save and --replay keep the handles in the server's state directory (ESTALE after a restart).
+  case "${1:-}" in
+    --save) set -- --handles-out "$UNFS/$id.handles" ;;
+    --replay) set -- --handles-in "$UNFS/$id.handles" ;;
+  esac
+  nsenter --net="$f" /usr/bin/vesper-unfs probe --local "$SHARE_GUEST:0" "$@"; rc=$?
+  nsenter --net="$f" iptables -w -D INPUT -i lo -j ACCEPT
+  nsenter --net="$f" ip addr del "$SHARE_GUEST/32" dev lo 2>/dev/null
+  return $rc
+}
+
 launch() {
   id=$1; shift
   mode=""; rootfs=""; cmd64=""; vsock=0; runc_smoke=0; guestexec=0; sharenet=0; probe=""
+  unfs_mount=""; unfs_srcs=""; unfs_squash=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --exit) mode=--exit ;;
@@ -337,6 +485,11 @@ launch() {
       --runc-smoke) runc_smoke=1 ;;
       --share-net) sharenet=1 ;;
       --share-probe) probe=$2; shift ;; # test hook: DELAY:PROBES, vesper_probe= for the guest after DELAY seconds
+      --unfs-mount) unfs_mount=${2:-}; shift ;;
+      --unfs-src)
+        case "${2:-}" in *"$NL"*|'') echo "ERR bad --unfs-src"; return 2 ;; esac
+        unfs_srcs="$unfs_srcs${unfs_srcs:+$NL}$2"; shift ;;
+      --unfs-squash) unfs_squash=1 ;;
       --rootfs) rootfs=$2; shift ;;
       --cmd) cmd64=$2; shift ;;
       *) echo "ERR unknown launch option $1"; return 2 ;;
@@ -356,6 +509,10 @@ launch() {
   if [ "$sharenet" = 1 ]; then
     valid_id "$id" || { echo "ERR --share-net needs an id of letters, digits and hyphens"; return 2; }
   fi
+  if [ -n "$unfs_mount$unfs_srcs" ]; then
+    [ "$sharenet" = 1 ] && [ -n "$unfs_mount" ] && [ -n "$unfs_srcs" ] || { echo "ERR --unfs-mount and --unfs-src need each other and --share-net"; return 2; }
+    why=$(unfs_mount_ok "$unfs_mount") || { echo "ERR --unfs-mount: $why"; return 2; }
+  fi
   if [ -n "$probe" ]; then
     [ "$sharenet" = 1 ] || { echo "ERR --share-probe needs --share-net"; return 2; }
     case "$probe" in *[!A-Za-z0-9.:,_-]*|[!0-9]*) echo "ERR bad --share-probe (DELAY:PROBES)"; return 2 ;; esac
@@ -373,7 +530,8 @@ launch() {
   if [ -e "$REC/$id" ] || [ -e "$NETNS/$id" ]; then
     old=$(cleanup "$id") || { unlock; echo "ERR $id: leftovers of an earlier run: $old"; return 1; }
   fi
-  adm=$(/usr/local/bin/vesper-memadmit acquire shim "$id" $((CEILING + copies))) || { unlock; echo "$adm" | head -1; return 1; }
+  book=$((CEILING + copies)); [ -n "$unfs_srcs" ] && book=$((book + UNFS_MEM))
+  adm=$(/usr/local/bin/vesper-memadmit acquire shim "$id" "$book") || { unlock; echo "$adm" | head -1; return 1; }
   LAUNCHING=$id
   nsarg=""; netcfg=""
   if [ "$sharenet" = 1 ]; then
@@ -383,6 +541,8 @@ launch() {
     [ -z "$why" ] && { mkdir -p "$REC" || why="record directory"; }
     [ -z "$why" ] && { echo "pid=$$ start=$(proc_stat $$ | cut -d' ' -f2) t=$(date +%s)" > "$REC/$id" && [ -s "$REC/$id" ] || why="record not written"; }
     [ -z "$why" ] && { why=$(sharenet_up "$id") && why=""; }
+    # The server starts in the namespace before the jailer, so the guest finds it listening (ADR 0009, Lifecycle).
+    [ -z "$why" ] && [ -n "$unfs_srcs" ] && { why=$(unfs_start "$id" "$unfs_mount" "$unfs_squash" "$unfs_srcs") && why="" || why="unfs: ${why:-start failed}"; }
     if [ -n "$why" ]; then
       cleanup "$id" > /dev/null; unlock; LAUNCHING=""
       echo "ERR share network: $why"; return 1
@@ -463,6 +623,7 @@ status() {
   if [ -n "$pid" ]; then
     vs="absent"; [ -S "$JAIL/firecracker/$id/root/v.sock" ] && vs="present"
     sn=""; vnetns_mounted "$NETNS" "$id" && sn=" sharenet=present"
+    [ -e "$UNFS/$id.pid" ] && sn="$sn unfs=$(unfs_state "$id")"
     echo "RUNNING $id pid=$pid vsock=$vs$sn"
   elif [ -f "$(logfile "$id")" ]; then echo "EXITED $id"
   else echo "ABSENT $id"; fi
@@ -516,6 +677,7 @@ cleanup() { # ID [--logs]: under the lifecycle lock, taken here unless the calle
 cleanup_locked() {
   id=$1; pid=$(fcpid "$id")
   [ -n "$pid" ] && { kill -KILL "$pid" 2>/dev/null; sleep 0.5; }
+  unfs_stop "$id"
   rm -rf "$JAIL/firecracker/$id"
   rm -f "/var/log/.vesper-microvm-$id.pipe"
   [ "${2:-}" = --logs ] && rm -f "$(logfile "$id")" "$(logfile "$id").1"
@@ -531,6 +693,8 @@ cleanup_locked() {
   [ -n "$(fcpid "$id")" ] && dirty="$dirty process"
   [ -e "$JAIL/firecracker/$id" ] && dirty="$dirty chroot"
   [ -d "/sys/fs/cgroup/firecracker/$id" ] && dirty="$dirty cgroup"
+  [ -d "$UNFS_CG/$id" ] && dirty="$dirty unfs-cgroup"
+  [ -e "$UNFS/$id.pid" ] && dirty="$dirty unfs"
   grep -q "/firecracker/$id/" /proc/mounts 2>/dev/null && dirty="$dirty mount"
   # A socket named after the id, as a whole word (ids are letters, digits and hyphens): a bare substring also matched other tasks' sockets (containerd
   # names shim sockets by a hex digest, which often contains a short id such as "ca"), and the false DIRTY kept the
@@ -555,6 +719,12 @@ case "$cmd" in
   cleanup) cleanup "$@" ;;
   log) mlog "$@" ;;
   sharenet) sharenet "$@" ;;
+  unfs) unfs "$@" ;;
+  unfs-isolation) unfs_isolation "$@" ;;
+  unfs-log) unfs_log "$@" ;;
+  test-unfs-selfcheck) test_unfs_selfcheck "$@" ;;
+  test-unfs-kill) test_unfs_kill "$@" ;;
+  test-unfs-probe) test_unfs_probe "$@" ;;
   reap) reap ;;
   reap-loop) reap_loop "$@" ;;
   setup-user) setup_user ;;
@@ -564,5 +734,5 @@ case "$cmd" in
   test-abort-launch) test_abort_launch "$@" ;;
   test-drop-record) test_drop_record "$@" ;;
   test-impostor) test_impostor "$@" ;;
-  *) echo "ERR usage: vesper-microvm prepare|launch|status|isolation|stop|crash|cleanup|log|sharenet|reap|setup-user"; exit 2 ;;
+  *) echo "ERR usage: vesper-microvm prepare|launch|status|isolation|stop|crash|cleanup|log|sharenet|unfs|reap|setup-user"; exit 2 ;;
 esac
