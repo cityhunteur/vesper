@@ -45,8 +45,8 @@ func CheckDest(dest string) error {
 		return fmt.Errorf("share destination %q is not absolute", dest)
 	case dest == "/":
 		return errors.New("a share cannot be mounted on the task's root")
-	case strings.ContainsRune(dest, 0):
-		return errors.New("share destination holds a NUL byte")
+	case strings.ContainsAny(dest, "\x00\n"):
+		return errors.New("share destination holds a NUL or newline")
 	case path.Clean(dest) != dest:
 		return fmt.Errorf("share destination %q is not clean", dest)
 	case len(dest) > 4096:

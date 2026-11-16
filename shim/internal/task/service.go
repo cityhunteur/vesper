@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/cityhunteur/vesper/shim/internal/backend"
@@ -258,6 +259,15 @@ func (s *Service) watch(ctx context.Context, containerID string, t *Task) {
 	if t.MarkExited(status, at) {
 		if containerID == t.ID {
 			s.persist(ctx, t)
+			// The guest unmounted its shares before EXIT, so the server has nothing left to serve (ADR 0009,
+			// Lifecycle): stop it now rather than at Delete, which may come much later.
+			if len(t.LaunchArgs) > 0 {
+				go func() {
+					if err := s.backend.StopShares(context.Background(), containerID); err != nil {
+						log.L.WithError(err).WithField("task", containerID).Warn("stop share server")
+					}
+				}()
+			}
 		}
 		s.publish(ctx, runtime.TaskExitEventTopic, &eventstypes.TaskExit{ContainerID: containerID, ID: t.ID, Pid: uint32(t.Pid()), ExitStatus: status, ExitedAt: protobuf.ToTimestamp(at)})
 	}
@@ -304,9 +314,31 @@ func (s *Service) Kill(ctx context.Context, r *taskAPI.KillRequest) (*emptypb.Em
 		if err := s.backend.Signal(ctx, r.ID, t.Port, r.Signal, r.All); err != nil {
 			return nil, errgrpc.ToGRPCf(errdefs.ErrUnknown, "%v", err)
 		}
+		// A SIGKILL to the init process starts a bounded wait for its EXIT, outside the operation lock. The guest
+		// unmounts its shares before it reports EXIT, so a process stuck in a hard NFS call to a dead server could
+		// hold the task forever; when the wait runs out the VMM is stopped (ADR 0009, Lifecycle; GH #160 M5).
+		if r.ExecID == "" && r.Signal == uint32(syscall.SIGKILL) {
+			go s.killFallback(r.ID, t)
+		}
 		return &emptypb.Empty{}, nil
 	default:
 		return nil, errgrpc.ToGRPCf(errdefs.ErrNotFound, "task %s already exited", t.ID)
+	}
+}
+
+// KillGrace bounds the wait for a SIGKILLed init process to report EXIT before the VMM is stopped. It covers the
+// guest's unmount, which flushes the writes it still buffers to the share server.
+var KillGrace = 10 * time.Second
+
+func (s *Service) killFallback(id string, t *Task) {
+	select {
+	case <-t.Exited():
+		return
+	case <-time.After(KillGrace):
+	}
+	log.L.WithField("task", id).Warn("no EXIT after SIGKILL; stopping the microVM")
+	if err := s.backend.Stop(context.Background(), id); err != nil {
+		log.L.WithError(err).WithField("task", id).Warn("stop microVM after SIGKILL")
 	}
 }
 

@@ -43,6 +43,8 @@ type Backend interface {
 	Abort(ctx context.Context, id string, port uint32) error
 	Resize(ctx context.Context, id string, port, rows, cols uint32) error
 	Signal(ctx context.Context, id string, port, signal uint32, all bool) error
+	// StopShares stops the microVM's share server once its task has stopped (GH #160 M5); Cleanup does it again.
+	StopShares(ctx context.Context, id string) error
 	// Stop terminates the microVM (SIGTERM, then SIGKILL after a grace period).
 	Stop(ctx context.Context, id string) error
 	// Cleanup removes the jail, the cgroup and any process and releases the microVM's share of the memory budget;
@@ -235,6 +237,14 @@ func (m *MicroVM) Launch(ctx context.Context, id, image string, extra []string) 
 	}
 	pid, _ := strconv.Atoi(match[1])
 	return pid, nil
+}
+
+func (m *MicroVM) StopShares(ctx context.Context, id string) error {
+	out, err := exec.CommandContext(ctx, microvmBin, "unfs-stop", id).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("vesper-microvm unfs-stop %s: %v: %s", id, err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 func (m *MicroVM) Stop(ctx context.Context, id string) error {

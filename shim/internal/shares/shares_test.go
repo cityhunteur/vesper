@@ -75,6 +75,48 @@ func TestMakePlanRefusals(t *testing.T) {
 	}
 }
 
+// Boundaries the plan must keep: a sibling whose name only starts with a share's, a share mounted inside another
+// (in either mount-table order), a link that resolves out of the share, and one directory bound both ways.
+func TestMakePlanBoundaries(t *testing.T) {
+	r := Resolver{
+		Resolve: func(p string) (string, error) {
+			if p == "/Users/me/out-link" {
+				return "/etc", nil
+			}
+			return p, nil
+		},
+		IsDir: func(string) (bool, error) { return true, nil },
+	}
+	p, err := MakePlan([]specs.Mount{{Destination: "/x", Type: "bind", Source: "/Users/mex/a"}}, []string{"/Users/me"}, r)
+	if err != nil || len(p.Sources) != 0 {
+		t.Errorf("a sibling with a longer name is not in the share: %+v %v", p, err)
+	}
+	p, err = MakePlan([]specs.Mount{{Destination: "/x", Type: "bind", Source: "/Users/me/out-link"}}, []string{"/Users/me"}, r)
+	if err != nil || len(p.Sources) != 0 {
+		t.Errorf("a link out of the share is not a share: %+v %v", p, err)
+	}
+	for _, order := range [][]string{{"/Users/me", "/Users/me/inner"}, {"/Users/me/inner", "/Users/me"}} {
+		p, err = MakePlan([]specs.Mount{{Destination: "/x", Type: "bind", Source: "/Users/me/inner/a"}}, order, r)
+		if err != nil || p.Mount != "/Users/me/inner" || p.Sources[0].Rel != "a" {
+			t.Errorf("nested shares %v: %+v %v", order, p, err)
+		}
+	}
+	p, err = MakePlan([]specs.Mount{
+		{Destination: "/rw", Type: "bind", Source: "/Users/me/d", Options: []string{"rw"}},
+		{Destination: "/ro", Type: "bind", Source: "/Users/me/d", Options: []string{"ro"}},
+	}, []string{"/Users/me"}, r)
+	want := []Share{{Dest: "/rw", Export: "/s/0"}, {Dest: "/ro", Export: "/s/1", ReadOnly: true}}
+	if err != nil || len(p.Sources) != 2 || !reflect.DeepEqual(p.Shares, want) {
+		t.Errorf("one directory bound both ways must be two exports: %+v %v", p, err)
+	}
+	if err := CheckDest("/a\nb"); err == nil {
+		t.Error("a newline in a destination was accepted")
+	}
+	if err := CheckDest("/my data"); err != nil {
+		t.Errorf("a space in a destination is valid: %v", err)
+	}
+}
+
 func TestAnnotationRoundTrip(t *testing.T) {
 	list := []Share{{Dest: "/a/b", Export: "/s/1", ReadOnly: true}, {Dest: "/a", Export: "/s/0"}}
 	v, err := Encode(list)

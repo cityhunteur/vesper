@@ -156,7 +156,13 @@ func UnmountAll(sessionDir, root string) error {
 		return err
 	}
 	defer unix.Close(rfd)
-	err = unmountList(rfd, strings.Fields(string(raw)))
+	var dests []string
+	for _, d := range strings.Split(string(raw), "\n") { // one per line; a destination may hold spaces
+		if d != "" {
+			dests = append(dests, d)
+		}
+	}
+	err = unmountList(rfd, dests)
 	if err == nil {
 		os.Remove(filepath.Join(sessionDir, mountedFile))
 	}
@@ -175,9 +181,15 @@ func unmountList(rfd int, dests []string) error {
 			continue
 		}
 		target := fmt.Sprintf("/proc/self/fd/%d", fd)
-		err = unix.Unmount(target, 0) // flushes the client's dirty pages to the server
+		// Write back the client's dirty pages first, so a busy mount's lazy detach below loses nothing written
+		// before it; the workload has exited, so nothing writes after.
+		serr := unix.Syncfs(fd)
+		err = unix.Unmount(target, 0)
 		if errors.Is(err, unix.EBUSY) {
 			err = unix.Unmount(target, unix.MNT_DETACH)
+		}
+		if err == nil && serr != nil {
+			err = fmt.Errorf("sync before unmount: %w", serr)
 		}
 		unix.Close(fd)
 		if err != nil && first == nil {

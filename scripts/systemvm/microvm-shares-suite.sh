@@ -63,11 +63,30 @@ out="$(runb "${B[@]}" --user=1000:1000 shares-f 'id -u; echo by-1000 > /data/by-
 case "${out}" in "RC 0"*"OUT 1000"*" 1000 "*"OUT hello"*) [ "$(cat "${F}/proj/by-1000.txt" 2>/dev/null)" = by-1000 ] && record non_root_guest_user_writes true "${out}" || record non_root_guest_user_writes false "${out}; macOS: $(cat "${F}/proj/by-1000.txt" 2>&1)" ;;
   *) record non_root_guest_user_writes false "${out}" ;; esac
 
+# --- 5b. The server stops when the task stops, before Delete (GH #160 M5) -----------------------------------------
+st="$(runb "${B[@]}" --detach shares-g 'echo quick > /data/quick.txt')"
+for _ in $(seq 1 60); do case "$(ctl ctr -- state shares-g)" in *STOPPED*) break ;; esac; sleep 0.5; done
+sleep 2; srvg="$(ctl microvm unfs shares-g | head -1)"; ctl ctr -- delete shares-g >/dev/null
+case "${st}:${srvg}" in "STARTED shares-g:UNFS shares-g absent") record server_stops_with_the_task true "${st}; after the task stopped, before delete: ${srvg}" ;;
+  *) record server_stops_with_the_task false "${st}; ${srvg}" ;; esac
+
+# --- 5c. SIGKILL ends a task stuck on a dead server: the shim stops the microVM after its grace -----------------
+st="$(runb "${B[@]}" --detach shares-k 'while true; do echo x >> /data/k.txt; sleep 0.2; done')"
+sleep 4
+down="$(ctl microvm unfs-stop shares-k)"   # the guest's next write, and its unmount, now wait on a dead server
+sleep 2
+t0=$(date +%s); killed="$(ctl ctr -- kill shares-k 60)"; t1=$(date +%s)
+ctl ctr -- delete shares-k >/dev/null
+case "${st}|${down}|${killed}" in "STARTED shares-k|UNFS shares-k stopped|KILLED shares-k") record sigkill_bounded_on_dead_server true "${down}; ${killed} after $((t1 - t0)) s (shim grace 10 s)" ;;
+  *) record sigkill_bounded_on_dead_server false "${st}; ${down}; ${killed} after $((t1 - t0)) s" ;; esac
+
 # --- 6. Nothing is left -------------------------------------------------------------------------------------------
-left="$(ctl ctr -- leftovers)"; srv=""
-for n in shares-a shares-b shares-c shares-d shares-e shares-f; do srv="${srv} $(ctl microvm unfs "${n}" | head -1)"; done
-case "${left}" in *CLEAN*) case "${srv}" in *state=*) record nothing_left false "${left}; ${srv}" ;; *) record nothing_left true "${left};${srv}" ;; esac ;;
-  *) record nothing_left false "${left}; ${srv}" ;; esac
+left="$(ctl ctr -- leftovers)"; srv=""; gone=true
+for n in shares-a shares-b shares-c shares-d shares-e shares-f shares-g shares-k; do
+  u="$(ctl microvm unfs "${n}" | head -1)"; srv="${srv} ${u};"
+  [ "${u}" = "UNFS ${n} absent" ] || gone=false   # only the documented answer counts, not an error or nothing
+done
+case "${left}" in *CLEAN*) record nothing_left "${gone}" "${left};${srv}" ;; *) record nothing_left false "${left};${srv}" ;; esac
 
 passed=true; for s in "${steps[@]}"; do case "$s" in *'"ok":false'*) passed=false ;; esac; done
 printf '{"steps":[%s],"passed":%s}\n' "$(IFS=,; echo "${steps[*]}")" "${passed}" > "${REPORT}"

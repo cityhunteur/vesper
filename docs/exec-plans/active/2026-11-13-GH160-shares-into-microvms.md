@@ -58,10 +58,17 @@ microVM, can reach the file server or another microVM's export.
   also unmounts on abort. `prepare` copies each module with its `modules.dep` closure. `make
   systemvm-microvm-shares-suite` 6 of 6; the lost write did not recur in 1,000 tries, judged in the guest and on
   macOS (`run/GH-160/m4/microvm-shares-report.json`)
-- [ ] M5 (mapping done 2026-11-16; kill path, stop at `PhaseStopped` and sensors remain) Shim: OCI bind mounts whose resolved source is under a share mount become NFS mounts; file sources are
+- [x] M5 (2026-11-16) Shim: OCI bind mounts whose resolved source is under a share mount become NFS mounts; file sources are
   refused with a clear error; other bind mounts keep today's behaviour; `Kill` forwards the signal as today, and a
   `SIGKILL` whose `EXIT` does not arrive within a bounded wait (outside the task's operation lock) stops the VMM;
-  no `SIGTERM` timer; the server stops at `PhaseStopped`; the leak sensors cover servers and namespaces
+  no `SIGTERM` timer; the server stops at `PhaseStopped`; the leak sensors cover servers and namespaces.
+  Done: `shim/internal/shares.MakePlan` and the task service; `Kill` with `SIGKILL` to init starts a 10 s wait
+  (`KillGrace`, a goroutine outside the operation lock) and then `vesper-microvm stop`; the init's exit runs
+  `vesper-microvm unfs-stop`; `vesper-ctr leftovers` counts server pid files and cgroups. `make
+  systemvm-microvm-shares-suite` 8 of 8: a task stuck on a stopped server ended 10 s after `SIGKILL`, and a stopped
+  task's server was gone before `Delete`. Council review of M4/M5: 7 confirmed findings fixed (the kill path among
+  them); a mount that stalls after the TCP probe succeeds is not bounded (Unknown: the kernel's mount-time RPC
+  timeouts were not measured)
 - [ ] M6 Event hop: the GH #150 host-edit replay reaches the microVM, so a macOS edit gives `IN_MODIFY` inside it,
   through a bounded, coalescing queue per microVM, with no echo back to macOS
 - [ ] M7 `binds-suite` variant against the microVM path, with the failure tests below; deviations recorded as
