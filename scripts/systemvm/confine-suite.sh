@@ -120,15 +120,15 @@ fi
 # --- 4. The vsock listeners serve the macOS host only -----------------------------------------------------------
 cid="$(python3 -c 'import json,os,sys; print(os.path.basename(json.load(open(sys.argv[1])).get("vsock_bridge_path", "3.sock")).split(".")[0])' "${CFG}")"
 out="$("${DOCKER}" run --rm "${BROAD[@]}" "${IMAGE}" sh -c '
-  for c in 1 2 '"${cid}"'; do for port in 1024 2375; do
+  for c in 1 2 '"${cid}"'; do for port in 1024 2375 2400; do
     r=$(printf "PING\nGET /_ping HTTP/1.0\r\n\r\n" | chroot /host timeout 4 socat -T3 - VSOCK-CONNECT:$c:$port 2>&1 | grep -v "W open" | sed "s/^[0-9/: ]*socat\[[0-9]*\] //" | head -c 160 | tr "\n" " ")
     echo "cid $c port $port: $r"
   done; done' 2>&1)"
 vrc=$?
-# Six connects, each ended by the transport: reset by the macOS host (no listener there), or no device for the
+# Nine connects (agent, Docker relay, port relay), each ended by the transport: reset by the macOS host (no listener there), or no device for the
 # System VM's own CID. A container that failed to start, or any answer from a listener, fails the step.
 den="$(printf '%s\n' "${out}" | grep -c '^cid [0-9]* port [0-9]*: E connect.*\(Connection reset by peer\|No such device\|Connection refused\|Permission denied\)')"
-if [ "${vrc}" = 0 ] && [ "${den}" = 6 ] && ! printf '%s' "${out}" | grep -q 'VESPER-AGENT\|PONG\|HTTP/1'; then record vsock_listeners_serve_the_host_only true "${out}"; else record vsock_listeners_serve_the_host_only false "rc ${vrc}, ${den} of 6 denied: ${out}"; fi
+if [ "${vrc}" = 0 ] && [ "${den}" = 9 ] && ! printf '%s' "${out}" | grep -q 'VESPER-AGENT\|PONG\|HTTP/1'; then record vsock_listeners_serve_the_host_only true "${out}"; else record vsock_listeners_serve_the_host_only false "rc ${vrc}, ${den} of 9 denied: ${out}"; fi
 
 # --- 5. The plugin refuses what it cannot read and what it does not list ----------------------------------------
 out="$(python3 -I "${ROOT_DIR}/scripts/systemvm/confine-requests.py" "${SOCKET}" "${IMAGE}" 2>&1)"; rc=$?

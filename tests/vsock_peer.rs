@@ -44,3 +44,20 @@ fn the_host_and_a_handler_run_by_hand_get_past_the_check() {
         assert!(!out.contains("ERR this endpoint"), "{env:?}: {out}");
     }
 }
+
+/// The Docker relay's handler (`vesper-docker-relay-conn`, council finding 20) turns a peer that is not the host
+/// away before it connects to dockerd's socket.
+#[test]
+fn the_docker_relay_turns_away_a_peer_that_is_not_the_host() {
+    let script = concat!(env!("CARGO_MANIFEST_DIR"), "/systemvm/overlay/usr/local/bin/vesper-docker-relay-conn");
+    for env in [vec![("SOCAT_PID", "7"), ("SOCAT_PEERADDR", "3")], vec![("SOCAT_PID", "7")]] {
+        let mut cmd = Command::new("sh");
+        cmd.arg(script).env_remove("SOCAT_PEERADDR").env_remove("SOCAT_PID");
+        for (k, v) in &env {
+            cmd.env(k, v);
+        }
+        let out = cmd.stdin(Stdio::null()).stderr(Stdio::null()).output().expect("sh");
+        assert_eq!(out.status.code(), Some(1), "{env:?}");
+        assert!(String::from_utf8_lossy(&out.stdout).contains("ERR this endpoint serves the macOS host only"), "{env:?}");
+    }
+}

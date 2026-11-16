@@ -236,9 +236,12 @@ import json, sys
 src, dst, share, cpus, mem, disk = sys.argv[1:7]
 c = json.load(open(src))
 # One boot with unmapped containers, on the suite's own disk. The token lives only in this temporary config.
+# The data disk is the next virtio block device after the boot media and the rootfs (src/systemvm/data_disk.rs);
+# a base config made with VESPER_DATA_DISK=none has no vesper_data= token, so it is derived here (council finding 19).
 c["data_disk_path"] = disk
-words = [w for w in c.get("kernel_cmdline", "").split() if not w.startswith("vesper.containers=")]
-c["kernel_cmdline"] = " ".join(words + ["vesper.containers=unmapped"])
+dev = "/dev/vd" + chr(ord("a") + bool(c.get("boot_media_path")) + bool(c.get("rootfs_path")))
+words = [w for w in c.get("kernel_cmdline", "").split() if not w.startswith(("vesper.containers=", "vesper_data="))]
+c["kernel_cmdline"] = " ".join(words + ["vesper_data=" + dev, "vesper.containers=unmapped"])
 c["cpu_count"], c["memory_mib"] = int(cpus), int(mem)
 shares = [s for s in c.get("shared_directories", []) if s.get("host_path") != share]
 shares.append({"tag": f"share{len(shares)}", "host_path": share, "read_only": False, "watch": False})

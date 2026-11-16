@@ -8,7 +8,10 @@ relay_port="${VESPER_DOCKER_PORT:-2375}"
 command=/usr/bin/socat
 # -t: after one side half-closes (an attach with no stdin, an HTTP client that shuts its write side), keep
 # relaying the other direction until it closes too; socat's default ends the connection 0.5 s later (GH #167).
-command_args="-t 86400 VSOCK-LISTEN:${relay_port},reuseaddr,fork UNIX-CONNECT:/var/run/docker.sock"
+# Each connection runs vesper-docker-relay-conn, which serves the macOS host only. max-children bounds the
+# connections held at once (a streamed attach, logs -f or events holds one for its lifetime); past it socat stops
+# accepting until one ends, so a flood waits rather than exhausting the System VM (ADR 0010, council finding 20).
+command_args="-t 86400 VSOCK-LISTEN:${relay_port},reuseaddr,fork,max-children=256 EXEC:/usr/local/bin/vesper-docker-relay-conn"
 respawn_delay=1
 respawn_max=0
 

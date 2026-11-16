@@ -324,11 +324,12 @@ share namespace (ADR 0009, D-034) and away from Vesper's own state.
   before this change left on the data disk get their modes (images and records 0600, snapshots
   `root:vesperd-jail` 0440). `vesper-microvm prepare`, `vesper-memadmit` and `vesper-ctr` also refuse a state
   directory that root does not own.
-- **vsock:** the agent, the port relay and the share notifier refuse a peer that is not the macOS host (CID 2), or a
-  socat handler with no peer address (`tests/vsock_peer.rs`), and
+- **vsock:** the agent, the Docker relay, the port relay and the share notifier refuse a peer that is not the macOS
+  host (CID 2), or a socat handler with no peer address (`tests/vsock_peer.rs`), and
   `vsock_loopback` is blacklisted. A container without a seccomp filter can still make a vsock socket. Its connects
   to CIDs 1 and 2 go to the macOS host, which has no listener and resets them; a connect to the System VM's own CID
-  fails with "no such device". The Docker relay has no peer check of its own and rests on that.
+  fails with "no such device". The Docker and port relays each hold at most 256 connections (`max-children`);
+  past that socat waits for one to end (council finding 20).
 - **Data disk:** a disk records the container mode of the first dockerd that used it
   (`/var/lib/vesper/state/containers-mode`). A boot in the other mode does not start dockerd.
 - **The one unmapped boot.** `vesper.containers=unmapped` on the kernel command line starts dockerd without

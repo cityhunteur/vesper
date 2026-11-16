@@ -44,6 +44,10 @@ volumes that must be pulled or imported once.
   - [x] (2026-11-16) `vesper-data legacy status|import-volume NAME`; the confinement suite's 15th step imports a
     planted volume and checks the owners in the store and in a container (`run/GH-194/m6/`). The real old store
     lists 6 volumes; none was imported (that is the owner's choice per volume)
+  - [x] (2026-11-16) TD-061's council findings: the Docker relay runs `vesper-docker-relay-conn`, which turns
+    away a peer that is not the macOS host, and the Docker and port relays hold at most 256 connections (finding
+    20); the upstream runner derives `vesper_data=` for its own disk (finding 19). Confine 15 of 15 (the vsock step
+    now tries the port relay too, 9 refused connects), docker-smoke, docker-conformance and ports pass
 
 ## Surprises & Discoveries
 
