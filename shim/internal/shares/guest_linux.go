@@ -4,12 +4,14 @@ package shares
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -26,6 +28,10 @@ const mountedFile = "shares.mounted"
 // ProbeTimeout bounds the wait for the server before the first hard mount, so a stalled server cannot hang session
 // start until its deadline (ADR 0009, Guest).
 var ProbeTimeout = 3 * time.Second
+
+// MountTimeout bounds each mount: a server that accepts the connection but does not answer (stopped, overloaded)
+// would hold mount(2) for minutes. Each mount runs in a child (MountOne), killed when this runs out.
+var MountTimeout = 5 * time.Second
 
 // readList reads the share list from the session's OCI config.
 func readList(sessionDir string) ([]Share, error) {
@@ -130,17 +136,39 @@ func mountOne(rfd int, s Share) error {
 	if err != nil {
 		return err
 	}
-	defer unix.Close(fd)
-	var flags uintptr
+	f := os.NewFile(uintptr(fd), s.Dest)
+	defer f.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), MountTimeout)
+	defer cancel()
+	ro := "rw"
 	if s.ReadOnly {
+		ro = "ro"
+	}
+	// The child mounts on descriptor 3, the directory resolved here; SIGKILL ends it if the server stalls (an NFS
+	// mount's RPC waits are killable).
+	cmd := exec.CommandContext(ctx, "/proc/self/exe", "shares", "mount1", s.Export, ro)
+	cmd.ExtraFiles = []*os.File{f}
+	out, err := cmd.CombinedOutput()
+	if ctx.Err() != nil {
+		return fmt.Errorf("the share server did not answer the mount of %s within %s", s.Export, MountTimeout)
+	}
+	if err != nil {
+		return fmt.Errorf("mount %s: %s", s.Export, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// MountOne is the child of mountOne: it mounts export on descriptor 3.
+func MountOne(export, mode string) error {
+	if err := checkExport(export, unfs.MaxSources); err != nil {
+		return err
+	}
+	var flags uintptr
+	if mode == "ro" {
 		flags |= unix.MS_RDONLY
 	}
 	// The kernel resolves the descriptor's magic link to the directory itself, not to a path that could change.
-	target := fmt.Sprintf("/proc/self/fd/%d", fd)
-	if err := unix.Mount(unfs.ServerAddr+":"+s.Export, target, "nfs", flags, MountOptions()); err != nil {
-		return fmt.Errorf("mount %s: %w", s.Export, err)
-	}
-	return nil
+	return unix.Mount(unfs.ServerAddr+":"+export, "/proc/self/fd/3", "nfs", flags, MountOptions())
 }
 
 // UnmountAll unmounts what MountAll recorded, deepest first, so the server receives the writes still buffered

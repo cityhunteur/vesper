@@ -41,6 +41,14 @@ func main() {
 		}
 		return
 	}
+	// shares mount1 EXPORT ro|rw: one mount on descriptor 3, the child of `shares mount` (bounded by MountTimeout).
+	if len(os.Args) == 5 && os.Args[1] == "shares" && os.Args[2] == "mount1" {
+		if err := shares.MountOne(os.Args[3], os.Args[4]); err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		return
+	}
 	// shares replay: share events from the System VM on stdin (vsock port 1026, GH #160 M6).
 	if len(os.Args) == 3 && os.Args[1] == "shares" && os.Args[2] == "replay" {
 		t, m, r := shares.Replay(os.Stdin, "/run/sessions/p1028", "/newroot")

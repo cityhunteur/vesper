@@ -142,33 +142,35 @@ run() { run_image "$(ref)" "$@"; }
 # macOS share becomes an NFS mount in the microVM). SRC and DST must not hold ':' or ','.
 run_binds() {
   r=$(ref); [ -n "$r" ] || { echo "ERR import first"; return 1; }
-  set -f; mounts=""; detach=""
+  # Each mount option is one argument, so a path may hold spaces; --bind64 takes the source base64-encoded, so it may
+  # hold shell characters too (not ':' or ',', which ctr's --mount syntax uses, nor a newline).
+  opts=$TMPD/run-binds.$$; : > "$opts"; detach=""
   while [ $# -gt 0 ]; do
     case "$1" in
-      --bind=*)
-        b=${1#--bind=}; src=${b%%:*}; rest=${b#*:}; dst=${rest%%:*}; mode=${rest#*:}
-        case "$src$dst" in *,*|*[[:space:]]*|'') echo "ERR bad --bind $1 (no comma or white space)"; return 2 ;; esac
-        case "$mode" in ro|rw) ;; *) echo "ERR bad --bind mode $mode"; return 2 ;; esac
-        mounts="$mounts --mount type=bind,src=$src,dst=$dst,options=rbind:$mode" ;;
+      --bind=*|--bind64=*)
+        b=${1#--bind=}; b=${b#--bind64=}; src=${b%%:*}; rest=${b#*:}; dst=${rest%%:*}; mode=${rest#*:}
+        case "$1" in --bind64=*) src=$(printf '%s' "$src" | base64 -d 2>/dev/null) || { echo "ERR bad base64"; rm -f "$opts"; return 2; } ;; esac
+        case "$src$dst" in *,*|*:*|'') echo "ERR bad bind $1 (no comma or colon)"; rm -f "$opts"; return 2 ;; esac
+        case "$mode" in ro|rw) ;; *) echo "ERR bad bind mode $mode"; rm -f "$opts"; return 2 ;; esac
+        printf '%s\n' --mount "type=bind,src=$src,dst=$dst,options=rbind:$mode" >> "$opts" ;;
       --detach) detach=1 ;;
       --user=*)
-        case "${1#--user=}" in *[!0-9:]*|'') echo "ERR bad --user"; return 2 ;; esac
-        mounts="$mounts --user ${1#--user=}" ;;
+        case "${1#--user=}" in *[!0-9:]*|'') echo "ERR bad --user"; rm -f "$opts"; return 2 ;; esac
+        printf '%s\n' --user "${1#--user=}" >> "$opts" ;;
       *) break ;;
     esac
     shift
   done
-  name=${1:?}; shift
+  name=${1:?}; shift; words="$*"
+  set --
+  while IFS= read -r line; do set -- "$@" "$line"; done < "$opts"
+  rm -f "$opts"
   if [ -n "$detach" ]; then
-    # shellcheck disable=SC2086
-    out=$(ctr_ run -d --runtime "$RT" $mounts "$r" "$name" sh -c "$*" 2>&1); rc=$?
-    set +f
+    out=$(ctr_ run -d --runtime "$RT" "$@" "$r" "$name" sh -c "$words" 2>&1); rc=$?
     [ "$rc" = 0 ] && { echo "STARTED $name"; return 0; }
     emit "$rc" "$out"; return
   fi
-  # shellcheck disable=SC2086
-  out=$(ctr_ run --rm --runtime "$RT" $mounts "$r" "$name" sh -c "$*" 2>&1); rc=$?
-  set +f
+  out=$(ctr_ run --rm --runtime "$RT" "$@" "$r" "$name" sh -c "$words" 2>&1); rc=$?
   emit "$rc" "$out"
 }
 start() { start_image "$(ref)" "$@"; }

@@ -273,6 +273,9 @@ from its own microVM's server. Docker containers do not use the shim and still g
 - **Replay identity:** the sink waits for the boot's container mode before choosing its uid, and refuses without it;
   it used to decide at connection time, and a launcher that connected early made the whole session replay as root
   (TD-062's fault). It logs `replay uid=` to syslog.
+- **Bounds at session start:** a 3 s probe of the server, then each mount in a child process killed after 5 s, so a
+  server that accepts the connection but does not answer fails the `RUN` with an error naming the export.
+- **Accepted deviations (D-038):** TD-065, TD-066, TD-067, and no host-edit events on read-only binds.
 - **Kill and stop:** a `SIGKILL` to the init process gets 10 s to report `EXIT` (the guest's unmount flushes its
   writes); after that the shim stops the VMM, so a dead server cannot hold a task. The server stops when the task
   stops; `Delete` cleans up again.

@@ -80,8 +80,16 @@ microVM, can reach the file server or another microVM's export.
   `IN_MODIFY`, 1,000 appends gave 3 or 4, the fanout's queued count stayed still for 10 s after the edits stopped,
   and the files' size and whole-second mtime on macOS were unchanged. Council review of M6: 6 confirmed, 5 fixed
   (the replay's size-change guard, serialised stats, tests) and the read-only one recorded as a limit
-- [ ] M7 `binds-suite` variant against the microVM path, with the failure tests below; deviations recorded as
-  accepted or fixed; `design-v0.md`, `docs/SECURITY.md`, TD-032, TD-049 and the decision log updated; #160 closed
+- [x] M7 (2026-11-16, D-038) `binds-suite` variant against the microVM path, with the failure tests below; deviations recorded as
+  accepted or fixed; `design-v0.md`, `docs/SECURITY.md`, TD-032, TD-049 and the decision log updated; #160 closed.
+  Done: `make systemvm-microvm-binds-suite` 7 of 7 (`run/GH-160/m7/`): 32 MiB then `SIGKILL` keeps every byte; a
+  stalled server fails the `RUN` with `the share server did not answer the mount of /s/0 within 5s` (each mount now
+  runs in a child killed after 5 s); the server killed under load comes back and 200 of 200 writes land; `0600`
+  and `0700` entries read and write; 39 directories deep read and the rename case is recorded (TD-067); a source
+  path with spaces and shell characters mounts; after the shim is killed the reaper clears every server, namespace
+  and record. The other failure tests are covered by earlier suites: the kill with a dead server, the 1,000-edit
+  burst and the forged handle (`systemvm-microvm-shares-suite`, `systemvm-unfs-suite`), the aborted launch and the
+  launch racing the reaper (`systemvm-sharenet-suite`), the nested-chroot escape (`systemvm-unfs-suite`)
 
 ## Surprises & Discoveries
 
@@ -142,6 +150,13 @@ microVM, can reach the file server or another microVM's export.
   as root and containers saw replayed files owned by `nobody` (TD-062's fault, back). M6's sink change made the
   launcher win that race on every boot; `main` passed only by timing. The sink now waits up to 60 s for the mode
   and refuses without it, the service starts after `vesper-services`, and it logs the uid it replays as.
+
+- 2026-11-16 (M7): a file 40 directories below an export fails with `ENAMETOOLONG`: unfs3 keeps the directory path
+  in its 64-byte handle. The same handles let an append through a descriptor opened before a rename land at the
+  start of the file. Both are TD-067, accepted in D-038.
+- 2026-11-16 (M7): macOS `stat` and `wc` reported 12 MB for a 32 MiB file whose sha256 matched; the guest's
+  `dd if=/dev/urandom bs=1M` had made short reads and its `/tmp` (the image's root drive) had filled. The test now
+  writes straight to the share.
 
 ## Decision Log
 
@@ -209,7 +224,18 @@ microVM, can reach the file server or another microVM's export.
 
 ## Outcomes & Retrospective
 
-Not yet written.
+Done 2026-11-16 (W5 of D-029). A containerd task on the Vesper shim whose bind mount comes from a macOS share gets
+it as an NFSv3 mount from one `unfs3` per microVM, sandboxed (own namespaces, `pivot_root`, six capabilities,
+`no_new_privs`, a seccomp filter against user namespaces) inside that microVM's own network namespace; macOS edits
+reach it as `IN_MODIFY` through a bounded, coalescing queue; `SIGKILL` and a dead server are bounded. Six suites
+carry it: `systemvm-sharenet-suite`, `systemvm-unfs-suite`, `systemvm-microvm-shares-suite`,
+`systemvm-microvm-binds-suite`, and the regression set. Deviations are accepted in D-038 (TD-065, TD-066, TD-067).
+
+What went well: four council reviews, each of which found a real defect our own suites had passed (a container
+able to swap a path mid-shift in M3's sibling work, a nested read-only source writable after a rename race, the
+missing kill path, the replay's mtime race). What did not: three regressions surfaced only in other suites (the
+usage-line test, the replay-uid race, a probe flake), so the regression set is now run before every push. Open:
+Docker containers still use runc with virtio-fs binds (GH #53), and TD-066 and TD-067 need a server change.
 
 ## Context and Orientation
 
