@@ -9,10 +9,12 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/cityhunteur/vesper/shim/internal/backend"
 	"github.com/cityhunteur/vesper/shim/internal/bundle"
+	"github.com/cityhunteur/vesper/shim/internal/shares"
 	eventstypes "github.com/containerd/containerd/api/events"
 	taskAPI "github.com/containerd/containerd/api/runtime/task/v3"
 	"github.com/containerd/containerd/api/types"
@@ -106,7 +108,22 @@ func (s *Service) Create(ctx context.Context, r *taskAPI.CreateTaskRequest) (_ *
 		return nil, errgrpc.ToGRPCf(errdefs.ErrInvalidArgument, "%v", err)
 	}
 	spec.Process.Terminal = r.Terminal
-	config, err := bundle.GuestConfig(spec.Process)
+	// Bind mounts from macOS shares become NFS mounts from the microVM's own server (ADR 0009, GH #160 M5); other
+	// bind mounts keep today's behaviour.
+	procMounts, _ := os.ReadFile("/proc/mounts")
+	plan, err := shares.MakePlan(spec.Mounts, shares.ShareMounts(string(procMounts)), shares.HostResolver)
+	if err != nil {
+		return nil, errgrpc.ToGRPCf(errdefs.ErrInvalidArgument, "%v", err)
+	}
+	var annotations map[string]string
+	if len(plan.Shares) > 0 {
+		v, err := shares.Encode(plan.Shares)
+		if err != nil {
+			return nil, errgrpc.ToGRPCf(errdefs.ErrInvalidArgument, "%v", err)
+		}
+		annotations = map[string]string{shares.Annotation: v}
+	}
+	config, err := bundle.GuestConfig(spec.Process, annotations)
 	if err != nil {
 		return nil, errgrpc.ToGRPCf(errdefs.ErrInvalidArgument, "%v", err)
 	}
@@ -132,6 +149,7 @@ func (s *Service) Create(ctx context.Context, r *taskAPI.CreateTaskRequest) (_ *
 	log.G(ctx).WithFields(log.Fields{"task": r.ID, "strategy": meta.Strategy, "cached": meta.Cached, "layers": len(meta.Layers.Lower), "build_ms": meta.BuildMS}).Info("root drive ready")
 	t := newTask(r.ID, r.Bundle)
 	t.Image, t.Config, t.Port = image, config, 1028
+	t.LaunchArgs = plan.LaunchArgs()
 	t.Stdin, t.Stdout, t.Stderr, t.Terminal = r.Stdin, r.Stdout, r.Stderr, r.Terminal
 	s.task = t
 	s.persist(ctx, t)
@@ -158,7 +176,7 @@ func (s *Service) Start(ctx context.Context, r *taskAPI.StartRequest) (*taskAPI.
 	}
 	pid := 0
 	if r.ExecID == "" {
-		pid, err = s.backend.Launch(ctx, t.ID, t.Image)
+		pid, err = s.backend.Launch(ctx, t.ID, t.Image, t.LaunchArgs)
 		if err != nil {
 			_ = s.backend.Cleanup(context.Background(), r.ID, false)
 			return nil, errgrpc.ToGRPCf(errdefs.ErrFailedPrecondition, "launch microVM: %v", err)
@@ -241,6 +259,15 @@ func (s *Service) watch(ctx context.Context, containerID string, t *Task) {
 	if t.MarkExited(status, at) {
 		if containerID == t.ID {
 			s.persist(ctx, t)
+			// The guest unmounted its shares before EXIT, so the server has nothing left to serve (ADR 0009,
+			// Lifecycle): stop it now rather than at Delete, which may come much later.
+			if len(t.LaunchArgs) > 0 {
+				go func() {
+					if err := s.backend.StopShares(context.Background(), containerID); err != nil {
+						log.L.WithError(err).WithField("task", containerID).Warn("stop share server")
+					}
+				}()
+			}
 		}
 		s.publish(ctx, runtime.TaskExitEventTopic, &eventstypes.TaskExit{ContainerID: containerID, ID: t.ID, Pid: uint32(t.Pid()), ExitStatus: status, ExitedAt: protobuf.ToTimestamp(at)})
 	}
@@ -287,9 +314,31 @@ func (s *Service) Kill(ctx context.Context, r *taskAPI.KillRequest) (*emptypb.Em
 		if err := s.backend.Signal(ctx, r.ID, t.Port, r.Signal, r.All); err != nil {
 			return nil, errgrpc.ToGRPCf(errdefs.ErrUnknown, "%v", err)
 		}
+		// A SIGKILL to the init process starts a bounded wait for its EXIT, outside the operation lock. The guest
+		// unmounts its shares before it reports EXIT, so a process stuck in a hard NFS call to a dead server could
+		// hold the task forever; when the wait runs out the VMM is stopped (ADR 0009, Lifecycle; GH #160 M5).
+		if r.ExecID == "" && r.Signal == uint32(syscall.SIGKILL) {
+			go s.killFallback(r.ID, t)
+		}
 		return &emptypb.Empty{}, nil
 	default:
 		return nil, errgrpc.ToGRPCf(errdefs.ErrNotFound, "task %s already exited", t.ID)
+	}
+}
+
+// KillGrace bounds the wait for a SIGKILLed init process to report EXIT before the VMM is stopped. It covers the
+// guest's unmount, which flushes the writes it still buffers to the share server.
+var KillGrace = 10 * time.Second
+
+func (s *Service) killFallback(id string, t *Task) {
+	select {
+	case <-t.Exited():
+		return
+	case <-time.After(KillGrace):
+	}
+	log.L.WithField("task", id).Warn("no EXIT after SIGKILL; stopping the microVM")
+	if err := s.backend.Stop(context.Background(), id); err != nil {
+		log.L.WithError(err).WithField("task", id).Warn("stop microVM after SIGKILL")
 	}
 }
 

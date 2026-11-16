@@ -116,3 +116,54 @@ func TestDeleteLeavesShutdownToContainerd(t *testing.T) {
 		t.Fatal("containerd Shutdown did not stop the shim")
 	}
 }
+
+type killBackend struct {
+	backend.Backend
+	stopped chan string
+}
+
+func (killBackend) Signal(context.Context, string, uint32, uint32, bool) error { return nil }
+func (b killBackend) Stop(_ context.Context, id string) error                  { b.stopped <- id; return nil }
+
+// A SIGKILLed init process that never reports EXIT gets its microVM stopped after KillGrace (GH #160 M5); one
+// that does exit in time is left alone.
+func TestKillFallbackStopsTheMicroVM(t *testing.T) {
+	ctx := context.Background()
+	old := KillGrace
+	KillGrace = 50 * time.Millisecond
+	defer func() { KillGrace = old }()
+	b := killBackend{stopped: make(chan string, 2)}
+	s, err := NewService(ctx, nil, &shutdownProbe{}, b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.task = newTask("init", t.TempDir())
+	if err := s.task.MarkRunning(42); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Kill(ctx, &taskAPI.KillRequest{ID: "init", Signal: 9}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case id := <-b.stopped:
+		if id != "init" {
+			t.Fatalf("stopped %q", id)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the microVM was not stopped after the grace")
+	}
+
+	s.task = newTask("init", t.TempDir())
+	if err := s.task.MarkRunning(43); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Kill(ctx, &taskAPI.KillRequest{ID: "init", Signal: 9}); err != nil {
+		t.Fatal(err)
+	}
+	s.task.MarkExited(137, time.Now())
+	select {
+	case <-b.stopped:
+		t.Fatal("a task that exited in time had its microVM stopped")
+	case <-time.After(200 * time.Millisecond):
+	}
+}

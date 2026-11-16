@@ -15,6 +15,8 @@ import (
 	"github.com/containerd/console"
 	runc "github.com/containerd/go-runc"
 	"golang.org/x/sys/unix"
+
+	"github.com/cityhunteur/vesper/shim/internal/shares"
 )
 
 func main() {
@@ -25,6 +27,19 @@ func main() {
 			os.Exit(255)
 		}
 		os.Exit(code)
+	}
+	// shares mount|unmount SESSION-DIR: the session's host shares over NFS under /newroot (ADR 0009, GH #160 M4).
+	// A failure prints one line on stdout, which vesper-guest-session passes on in its ERROR reply.
+	if len(os.Args) == 4 && os.Args[1] == "shares" && (os.Args[2] == "mount" || os.Args[2] == "unmount") {
+		f := shares.MountAll
+		if os.Args[2] == "unmount" {
+			f = shares.UnmountAll
+		}
+		if err := f(os.Args[3], "/newroot"); err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		return
 	}
 	if len(os.Args) == 5 && os.Args[1] == "resize" {
 		if err := resize(os.Args[2], os.Args[3], os.Args[4]); err != nil {

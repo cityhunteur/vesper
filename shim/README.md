@@ -30,6 +30,11 @@ The Go module pins containerd 2.1.5 and builds static Linux arm64 binaries with 
   for container and volume create; a request that is not listed, or a create whose body dockerd did not pass, is
   refused. `go test ./internal/authz` covers path handling, key case, duplicate keys and missing bodies. Built by
   `build-shim.sh` and installed as `/usr/bin/vesper-authz`.
+- `internal/shares`: maps a task's bind mounts from macOS shares onto its microVM's NFS exports (GH #160 M4, M5).
+  `MakePlan` turns each bind whose resolved source lies under a virtio-fs mount into an export and a guest share,
+  refusing file sources and binds from two shares; the task service passes the plan's `--share-net --unfs-*`
+  arguments to `vesper-microvm launch` and the list to the guest as the annotation `io.vesper.shares`.
+  `vesper-console shares mount|unmount` (`guest_linux.go`) mounts them under `/newroot` in the guest.
 - `cmd/vesper-unfs`, `internal/unfs` and `internal/nfsprobe`: the per-microVM share server's sandbox (ADR 0009,
   GH #160 M3) and a test NFSv3 client. `vesper-unfs run` opens each source with `openat2` beneath the share mount,
   clones it into a detached mount tree, and starts `init` in new mount, pid, ipc and uts namespaces, which attaches

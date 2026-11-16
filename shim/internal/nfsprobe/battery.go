@@ -204,7 +204,15 @@ func (b *Battery) Run() bool {
 		b.check("readlink link-out", err == nil && st == 0 && t == "/etc", "%q status=%v err=%v", t, st, err)
 	}
 	b.forged("/s/0", &n, r0)
-	if fh, _, st, err := n.Walk(r0, "file.txt"); err == nil && st == 0 {
+	fh, _, st, err = n.Walk(r0, "file.txt")
+	if err != nil { // the forged handles above may have ended this connection as the server restarted (TD-065)
+		if nn, rerr := b.reconnect(); rerr == nil {
+			n.Close()
+			n = nn
+			fh, _, st, err = n.Walk(r0, "file.txt")
+		}
+	}
+	if err == nil && st == 0 {
 		b.forged("/s/0/file.txt", &n, fh)
 	} else {
 		b.check("forged /s/0/file.txt", false, "lookup file.txt: status=%v err=%v", st, err)

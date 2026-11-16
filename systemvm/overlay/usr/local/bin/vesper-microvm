@@ -18,6 +18,7 @@
 #                                             namespace, exporting each source as /s/0, /s/1, ... to the guest only,
 #                                             under supervise-daemon in its own memory-capped cgroup, admitted with
 #                                             the microVM; started before the jailer
+#        vesper-microvm unfs-stop ID         stop ID's share server (the shim, when the task stops); UNFS ID stopped
 #        vesper-microvm unfs ID              UNFS ID state=running|stopped pid=N listen=yes|no mem_max= mem_peak=
 #                                             oom_kills=, or UNFS ID absent
 #        vesper-microvm sharenet ID          SHARENET ID links=... addr=... owner=... routes=N input=... forward=...
@@ -322,11 +323,28 @@ prepare() {
     kver=$(uname -r)
     mdir="$MVM/initroot/lib/modules/$kver"
     mkdir -p "$mdir"
-    for rel in kernel/drivers/virtio/virtio_mmio kernel/drivers/block/virtio_blk kernel/crypto/crc32c_generic kernel/lib/libcrc32c kernel/fs/ext4/ext4 kernel/fs/jbd2/jbd2 kernel/fs/mbcache kernel/lib/crc16 kernel/net/vmw_vsock/vsock kernel/net/vmw_vsock/vmw_vsock_virtio_transport_common kernel/net/vmw_vsock/vmw_vsock_virtio_transport kernel/drivers/virtio/virtio_balloon kernel/drivers/virtio/virtio_mem kernel/net/core/failover kernel/drivers/net/net_failover kernel/drivers/net/virtio_net; do
+    # The NFSv3 client for host shares (ADR 0009, GH #160 M4) is named by its top module only: every module is
+    # copied with its whole modules.dep closure, so a dependency the kernel adds cannot go missing at boot.
+    want="kernel/drivers/virtio/virtio_mmio kernel/drivers/block/virtio_blk kernel/crypto/crc32c_generic kernel/lib/libcrc32c kernel/fs/ext4/ext4 kernel/fs/jbd2/jbd2 kernel/fs/mbcache kernel/lib/crc16 kernel/net/vmw_vsock/vsock kernel/net/vmw_vsock/vmw_vsock_virtio_transport_common kernel/net/vmw_vsock/vmw_vsock_virtio_transport kernel/drivers/virtio/virtio_balloon kernel/drivers/virtio/virtio_mem kernel/net/core/failover kernel/drivers/net/net_failover kernel/drivers/net/virtio_net kernel/fs/nfs/nfsv3"
+    files=""
+    for rel in $want; do
       src=$(ls "/lib/modules/$kver/$rel".ko* 2>/dev/null | head -1)
       [ -n "$src" ] || { echo "ERR module $rel missing from /lib/modules/$kver"; return 1; }
-      mkdir -p "$mdir/$(dirname "$rel")"
-      cp "$src" "$mdir/$(dirname "$rel")/"
+      files="$files ${src#/lib/modules/$kver/}"
+    done
+    # modules.dep: "kernel/a.ko.gz: kernel/b.ko.gz kernel/c.ko.gz"; add dependencies until nothing new appears.
+    [ -r "/lib/modules/$kver/modules.dep" ] || { echo "ERR /lib/modules/$kver/modules.dep missing"; return 1; }
+    files=$(awk -v start="$files" '
+      { sub(":", "", $1); dep[$1] = ""; for (i = 2; i <= NF; i++) dep[$1] = dep[$1] " " $i }
+      END {
+        n = split(start, q, " "); for (i = 1; i <= n; i++) seen[q[i]] = 1
+        for (i = 1; i <= n; i++) { m = split(dep[q[i]], d, " "); for (j = 1; j <= m; j++) if (!(d[j] in seen)) { seen[d[j]] = 1; q[++n] = d[j] } }
+        for (f in seen) print f
+      }' "/lib/modules/$kver/modules.dep") || { echo "ERR reading modules.dep"; return 1; }
+    for f in $files; do
+      [ -f "/lib/modules/$kver/$f" ] || { echo "ERR module $f missing from /lib/modules/$kver"; return 1; }
+      mkdir -p "$mdir/$(dirname "$f")"
+      cp "/lib/modules/$kver/$f" "$mdir/$(dirname "$f")/"
     done
     for f in modules.dep modules.alias modules.builtin modules.order; do
       [ -f "/lib/modules/$kver/$f" ] && cp "/lib/modules/$kver/$f" "$mdir/$f"
@@ -733,6 +751,7 @@ case "$cmd" in
   unfs) unfs "$@" ;;
   unfs-isolation) unfs_isolation "$@" ;;
   unfs-log) unfs_log "$@" ;;
+  unfs-stop) valid_id "${1:-}" || { echo "ERR bad id"; exit 2; }; lock && unfs_stop "$1"; unlock; echo "UNFS $1 stopped" ;;
   test-unfs-selfcheck) test_unfs_selfcheck "$@" ;;
   test-unfs-kill) test_unfs_kill "$@" ;;
   test-unfs-probe) test_unfs_probe "$@" ;;

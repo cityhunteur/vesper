@@ -36,12 +36,15 @@ type Backend interface {
 	// chain was built before, else by building it from the mounted bundle rootfs. The record describes
 	// what happened.
 	Prepare(ctx context.Context, task, bundleDir string, mounts []mount.Mount) (image string, meta bundle.Meta, err error)
-	// Launch boots the microVM and its private guest control listener; returns the VMM pid.
-	Launch(ctx context.Context, id, image string) (pid int, err error)
+	// Launch boots the microVM and its private guest control listener; returns the VMM pid. extra are further
+	// vesper-microvm launch arguments: the share network and server of a task with host shares (GH #160 M5).
+	Launch(ctx context.Context, id, image string, extra []string) (pid int, err error)
 	OpenSession(ctx context.Context, id string, port uint32, config []byte, isExec bool, paths IO) (*Session, error)
 	Abort(ctx context.Context, id string, port uint32) error
 	Resize(ctx context.Context, id string, port, rows, cols uint32) error
 	Signal(ctx context.Context, id string, port, signal uint32, all bool) error
+	// StopShares stops the microVM's share server once its task has stopped (GH #160 M5); Cleanup does it again.
+	StopShares(ctx context.Context, id string) error
 	// Stop terminates the microVM (SIGTERM, then SIGKILL after a grace period).
 	Stop(ctx context.Context, id string) error
 	// Cleanup removes the jail, the cgroup and any process and releases the microVM's share of the memory budget;
@@ -219,8 +222,9 @@ func copyFile(src, dst string) error {
 	return os.Rename(tmp, dst)
 }
 
-func (m *MicroVM) Launch(ctx context.Context, id, image string) (int, error) {
-	out, err := exec.CommandContext(ctx, microvmBin, "launch", id, "--rootfs", image, "--guest-exec").CombinedOutput()
+func (m *MicroVM) Launch(ctx context.Context, id, image string, extra []string) (int, error) {
+	args := append([]string{"launch", id, "--rootfs", image, "--guest-exec"}, extra...)
+	out, err := exec.CommandContext(ctx, microvmBin, args...).CombinedOutput()
 	first := strings.SplitN(strings.TrimSpace(string(out)), "\n", 2)[0]
 	if err != nil || !strings.HasPrefix(first, "LAUNCHED ") {
 		return 0, fmt.Errorf("vesper-microvm launch %s: %v: %s", id, err, first)
@@ -233,6 +237,14 @@ func (m *MicroVM) Launch(ctx context.Context, id, image string) (int, error) {
 	}
 	pid, _ := strconv.Atoi(match[1])
 	return pid, nil
+}
+
+func (m *MicroVM) StopShares(ctx context.Context, id string) error {
+	out, err := exec.CommandContext(ctx, microvmBin, "unfs-stop", id).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("vesper-microvm unfs-stop %s: %v: %s", id, err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 func (m *MicroVM) Stop(ctx context.Context, id string) error {

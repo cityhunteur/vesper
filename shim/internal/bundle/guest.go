@@ -52,11 +52,16 @@ func GuestProcess(p *specs.Process) (*specs.Process, error) {
 	return &out, nil
 }
 
-// GuestConfig is transported separately from the cached rootfs; the guest writes these bytes verbatim.
-func GuestConfig(p *specs.Process) ([]byte, error) {
+// GuestConfig is transported separately from the cached rootfs; the guest writes these bytes verbatim. A non-empty
+// annotations (the encoded host shares, GH #160 M4) ride in the config for vesper-console to mount.
+func GuestConfig(p *specs.Process, annotations map[string]string) ([]byte, error) {
 	process, err := GuestProcess(p)
 	if err != nil {
 		return nil, err
 	}
-	return json.Marshal(&specs.Spec{Version: specs.Version, Process: process, Root: &specs.Root{Path: "/newroot"}, Linux: &specs.Linux{Namespaces: []specs.LinuxNamespace{{Type: specs.NetworkNamespace, Path: "/proc/1/ns/net"}}}})
+	spec := &specs.Spec{Version: specs.Version, Process: process, Root: &specs.Root{Path: "/newroot"}, Linux: &specs.Linux{Namespaces: []specs.LinuxNamespace{{Type: specs.NetworkNamespace, Path: "/proc/1/ns/net"}}}}
+	if len(annotations) > 0 {
+		spec.Annotations = annotations
+	}
+	return json.Marshal(spec)
 }

@@ -1,0 +1,97 @@
+{
+  "bridge_path": "run/systemvm/vsock/3.sock",
+  "port": 1024,
+  "steps": [
+    {
+      "name": "handshake",
+      "ok": true,
+      "detail": "protocol 1 host vesper",
+      "elapsed_ms": 2
+    },
+    {
+      "name": "import_base_image",
+      "ok": true,
+      "detail": "IMPORTED docker.io/vesper/trivial:guest",
+      "elapsed_ms": 12
+    },
+    {
+      "name": "import_layered_image",
+      "ok": true,
+      "detail": "IMPORTED docker.io/vesper/layered:guest layers=2",
+      "elapsed_ms": 24
+    },
+    {
+      "name": "layered_rootfs_boots",
+      "ok": true,
+      "detail": "second layer's file read from the block-first root drive",
+      "elapsed_ms": 2784
+    },
+    {
+      "name": "start_la",
+      "ok": true,
+      "detail": "STARTED la pid=1030",
+      "elapsed_ms": 2281
+    },
+    {
+      "name": "meta_la_recorded",
+      "ok": true,
+      "detail": "strategy block-first, overlay, 2 lower layers, cached=true, build_ms=17",
+      "elapsed_ms": 2
+    },
+    {
+      "name": "start_lb_same_chain",
+      "ok": true,
+      "detail": "STARTED lb pid=1176",
+      "elapsed_ms": 2215
+    },
+    {
+      "name": "meta_lb_cache_hit",
+      "ok": true,
+      "detail": "cached=true, same key and sha256 as la, build_ms=17",
+      "elapsed_ms": 2
+    },
+    {
+      "name": "cache_one_drive_per_chain",
+      "ok": true,
+      "detail": "2 cached drive(s): 153183014b083f885fa6717928d0a2edaccb6c27e805e757588e2482b45ab6f2 bytes=16777216 sha256=e5389c0b50382381; 1ca8dac6b4200a598b9d6d2d6956817c012d549fe949180513f1a2ebe1583563 bytes=16777216 sha256=d86f184de9294aac",
+      "elapsed_ms": 3
+    },
+    {
+      "name": "layer_dedup_shared_base",
+      "ok": true,
+      "detail": "base layer snapshot /var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/1/fs shared by both images (content store dedup)",
+      "elapsed_ms": 2983
+    },
+    {
+      "name": "kill_la",
+      "ok": true,
+      "detail": "KILLED la",
+      "elapsed_ms": 139
+    },
+    {
+      "name": "delete_la",
+      "ok": true,
+      "detail": "DELETED la",
+      "elapsed_ms": 598
+    },
+    {
+      "name": "kill_lb",
+      "ok": true,
+      "detail": "KILLED lb",
+      "elapsed_ms": 129
+    },
+    {
+      "name": "delete_lb",
+      "ok": true,
+      "detail": "DELETED lb",
+      "elapsed_ms": 602
+    },
+    {
+      "name": "no_leftovers",
+      "ok": true,
+      "detail": "CLEAN",
+      "elapsed_ms": 17
+    }
+  ],
+  "passed": true
+}

@@ -252,8 +252,20 @@ is the normative policy and this section the summary. No new port, socket, share
 
 ## Share network for the shim's microVMs (ADR 0009, GH #160)
 
-Built so far: the network (M2) and the server (M3). The shim does not ask for either yet (M5), and the guest does
-not mount anything yet (M4).
+Built so far: the network (M2), the server (M3), the guest's mounts (M4) and the shim's mapping and kill path (M5). A containerd task on the Vesper shim whose bind mount comes from a macOS share gets it as an NFS mount
+from its own microVM's server. Docker containers do not use the shim and still get virtio-fs binds through runc.
+
+- **Mapping (shim):** a bind mount whose source, with symbolic links followed in the System VM, lies under a
+  virtio-fs share mount becomes one export (`--unfs-src`), and the guest mounts it at the bind's destination; a
+  source that is a file, or binds from two different shares, are refused with an error naming the mount; other bind
+  mounts keep today's behaviour (ignored by the microVM path).
+- **Guest:** `vesper-console shares mount` probes the server for 3 s, then mounts each share under the task's root,
+  resolving the destination with `openat2(RESOLVE_IN_ROOT)`, so a symbolic link in the image cannot place a mount
+  outside it, and mounting on the descriptor; a link whose target is missing fails the mount. Shares are synced and
+  unmounted, deepest first, before the session reports `EXIT`.
+- **Kill and stop:** a `SIGKILL` to the init process gets 10 s to report `EXIT` (the guest's unmount flushes its
+  writes); after that the shim stops the VMM, so a dead server cannot hold a task. The server stops when the task
+  stops; `Delete` cleans up again.
 
 - `vesper-microvm launch ID --share-net` gives that microVM a network namespace of its own, bound at
   `/run/vesper/microvm/netns/<id>` (root-only, tmpfs) and joined by the jailer (`--netns`). It holds `lo` and one tap,

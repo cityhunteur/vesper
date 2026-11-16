@@ -1,0 +1,15 @@
+bash scripts/systemvm/unfs-suite.sh
+ok   server_starts_with_the_microvm
+ok   sandbox_holds_only_the_exports
+ok   probe_as_root_finds_nothing_outside
+FAIL probe_as_uid_1000_sees_its_own_files: PROBE-SUMMARY passed=65 failed=1; INFO read-0600 type=1 mode=100600 uid=1000 gid=1000 size=2 fsid=34 fileid=1018; PROBE forged /s/0/file.txt FAIL lookup file.txt: status=OK err=read tcp 169.254.77.2:1021->169.254.77.1:2049: read: connection reset by peer;
+ok   escape_checks_fail_as_root
+ok   nested_source_swap_refused
+ok   server_closed_to_containers_and_other_microvms
+ok   server_restarts_and_old_handles_measured
+ok   server_memory_within_its_cap
+ok   bad_sources_refused
+ok   squash_server_confined_and_serving
+ok   cleanup_removes_the_server
+unfs suite: passed=false (report: /Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/unfs-report.json)
+make: *** [systemvm-unfs-suite] Error 1
