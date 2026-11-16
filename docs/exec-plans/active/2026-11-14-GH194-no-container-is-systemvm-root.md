@@ -48,6 +48,8 @@ volumes that must be pulled or imported once.
     away a peer that is not the macOS host, and the Docker and port relays hold at most 256 connections (finding
     20); the upstream runner derives `vesper_data=` for its own disk (finding 19). Confine 15 of 15 (the vsock step
     now tries the port relay too, 9 refused connects), docker-smoke, docker-conformance and ports pass
+  - [x] (2026-11-16) Docker deviations recorded in `design-v0.md` Phase 4 as accepted deviations (D-035); its
+    BuildKit line, which still said BuildKit builds pass, now says the legacy builder passes and BuildKit is refused
 
 ## Surprises & Discoveries
 

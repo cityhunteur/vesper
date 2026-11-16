@@ -1,7 +1,7 @@
 ---
 status: draft
 owner: cityhunteur
-last_reviewed: 2026-11-14
+last_reviewed: 2026-11-16
 ---
 
 # Vesper: Firecracker‑compatible microVM runtime on macOS using Apple Virtualization
@@ -371,6 +371,17 @@ containerd runs workloads on the Vesper runtime without special handling, includ
 * DNS and network defaults match Docker Desktop for the cases in `make dns-suite`, and containers can resolve `host.docker.internal`. **Not met** (TD-039): `host.docker.internal` is not provided.
 * `linux/arm64` is the native default on Apple Silicon.
 * `linux/amd64` runs through emulation in the System VM, and the image and container metadata report the architecture. **Meets the requirement** on the Docker path (`make crossarch-suite`).
+* No container is root on the System VM ([ADR 0010](../design-docs/adr/0010-no-container-is-systemvm-root.md), GH #194). **Meets the requirement** on the Docker path (`make systemvm-confine-suite`, 15 steps). It costs these **accepted deviations** from Docker on other hosts (D-035), each listed with its effect in [DEVELOPMENT.md](../DEVELOPMENT.md#containers-are-not-root-on-the-system-vm-adr-0010):
+  * `--privileged`, `--pid=host`, `--network=host`, `--ipc=host` and `--userns=host` are refused.
+  * A runtime other than the default (`vesper-runc`) or `runc`, and a volume with driver options, are refused.
+  * BuildKit builds are refused; the legacy builder (`DOCKER_BUILDKIT=0`) works and its steps run remapped.
+  * `docker swarm`, `docker service` and `docker plugin` are refused, and so is any route outside the plugin's list.
+  * A container create of 1 MiB or more is refused, because dockerd does not pass such a body to the plugin.
+  * A bind of the Docker socket mounts, but the container cannot open it.
+  * A bind source that does not exist on the System VM is refused unless it is inside a shared macOS directory.
+  * Under `--runtime runc`, a bind from a share can look owned by `nobody` for a second (TD-062 is fixed for the default runtime only), and no uid can change the attributes of a share's root directory (TD-038).
+  * Images, containers and volumes from before remapping are not used. Volumes can be copied in with `vesper-data legacy import-volume`; images are pulled or built again.
+  * Isolation between containers is not guaranteed: they share one mapping and one kernel.
 
 #### Phase 4 verification
 
@@ -463,7 +474,7 @@ Integration, on one machine and automated:
 End to end, from macOS against a running Vesper:
 
 * `docker run hello-world`; `docker run -p 8080:80 nginx`; `docker run --platform linux/amd64 alpine uname -m`; `docker compose up` on a small stack; a bind mount edited on macOS and observed in the container; `docker logs -f`, `docker exec -it`, `docker stop` (SIGTERM, then SIGKILL).
-* `docker build` with BuildKit in the System VM. **Meets the requirement** on the Docker path (`make workflow-suite`).
+* `docker build` in the System VM. **Meets the requirement** on the Docker path with the legacy builder (`make workflow-suite`, `DOCKER_BUILDKIT=0`). BuildKit is refused under ADR 0010 until a test shows its builds stay remapped.
 
 [TESTING.md](../TESTING.md) lists the suites that exist, their Make targets and what each needs. Every suite writes a JSON report.
 
