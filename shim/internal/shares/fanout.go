@@ -64,8 +64,9 @@ func ParseEvent(line string) (Event, error) {
 	return Event{Export: n, Rest: rest}, nil
 }
 
-// Map returns the events a host path gives on this server: one per source that holds it. The root of a source is
-// not replayed (GH #150 never replays a share root either).
+// Map returns the events a host path gives on this server: one per read-write source that holds it. The root of a
+// source is not replayed (GH #150 never replays a share root either), nor is a read-only source: the guest can set
+// no times on a read-only mount, so its watchers get no event (a recorded limit, ADR 0009).
 func (s Server) Map(p string) []Event {
 	if p != s.Mount && !strings.HasPrefix(p, s.Mount+"/") {
 		return nil
@@ -73,6 +74,9 @@ func (s Server) Map(p string) []Event {
 	rel := strings.TrimPrefix(strings.TrimPrefix(p, s.Mount), "/")
 	var out []Event
 	for i, src := range s.Sources {
+		if src.ReadOnly {
+			continue
+		}
 		var rest string
 		switch {
 		case src.Rel == ".":
@@ -179,6 +183,9 @@ type Fanout struct {
 	StatPath string                            // where the counters are written (JSON), or ""
 	Batch    int
 	Refresh  time.Duration
+	Idle     time.Duration // how long an idle sender waits before it checks that its microVM still exists
+
+	statMu sync.Mutex // one writer of StatPath at a time
 
 	mu      sync.Mutex
 	servers []Server
@@ -197,6 +204,9 @@ func (f *Fanout) init() {
 	}
 	if f.Refresh == 0 {
 		f.Refresh = time.Second
+	}
+	if f.Idle == 0 {
+		f.Idle = 5 * time.Second
 	}
 }
 
@@ -260,7 +270,7 @@ func (f *Fanout) send(id string) {
 		if n == 0 {
 			select {
 			case <-wake:
-			case <-time.After(5 * time.Second):
+			case <-time.After(f.Idle):
 				if !f.alive(id) {
 					f.forget(id)
 					return
@@ -335,6 +345,8 @@ func (f *Fanout) writeStats() {
 	if f.StatPath == "" {
 		return
 	}
+	f.statMu.Lock()
+	defer f.statMu.Unlock()
 	b, _ := json.Marshal(f.Snapshot())
 	tmp := f.StatPath + ".tmp"
 	if os.WriteFile(tmp, append(b, '\n'), 0o600) == nil {

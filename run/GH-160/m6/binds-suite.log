@@ -16,15 +16,15 @@ ok   docker_ro_flag_enforced: sh: can't create /data/z.txt: Read-only file syste
 ok   host_edit_visible_promptly: host wrote p.txt and the next container read saw it
 ok   replayed_file_owned_by_container_root: 5 replayed host edits: each event handler saw owner 0 and could chmod at once (0 chmod-ok;0 chmod-ok;0 chmod-ok;0 chmod-ok;0 chmod-ok;)
 ok   inotify_guest_writes_seen: events: n /data from-guest.txt;c /data from-guest.txt;w /data from-guest.txt;c /data from-guest.txt;c /data owned.txt;c /data owned.txt;c /data owned.
-ok   inotify_host_edit_propagated: host append to hello.txt reached the container as an inotify event after 68 ms (polled)
-ok   inotify_host_create_propagated: host create of from-host.txt reached the container as an inotify event (IN_MODIFY, not IN_CREATE) after 69 ms (polled)
-ok   inotify_host_mtime_preserved: the replay left hello.txt's contents and mtime (1794870027.580935165) unchanged; only the host ctime moves
+ok   inotify_host_edit_propagated: host append to hello.txt reached the container as an inotify event after 65 ms (polled)
+ok   inotify_host_create_propagated: host create of from-host.txt reached the container as an inotify event (IN_MODIFY, not IN_CREATE) after 75 ms (polled)
+ok   inotify_host_mtime_preserved: the replay left hello.txt's contents and mtime (1794870540.986277214) unchanged; only the host ctime moves
 ok   inotify_no_echo_storm: one host edit produced 1 event(s) for hello.txt in 5 s; the replay's own FSEvents echo is dropped
 ok   inotify_ro_share_host_edits_not_propagated: host edits on a read-only share produce no inotify events (the guest cannot touch files there; documented residual, TD-038)
 ok   inotify_host_delete_seen_on_parent: host delete of sub/d.txt reached the container as a change of the directory sub (IN_MODIFY on the parent, not IN_DELETE)
 ok   inotify_host_rename_seen: host rename sub/e.txt -> sub/f.txt reached the container as a change of sub and an event for f.txt (no IN_MOVED_FROM/TO)
 ok   inotify_share_root_delete_not_propagated: a host delete directly in the share's root directory produces no event (the guest cannot touch a share root; documented residual, TD-038)
-ok   inotify_burst_delivered: 500 files created on the host in one burst: events for all 500 within 1532 ms (polled); System VM healthy
+ok   inotify_burst_delivered: 500 files created on the host in one burst: events for all 500 within 1148 ms (polled); System VM healthy
 ok   inotify_nowatch_share_silent: host edits on the read-write share mounted with :nowatch produce no inotify events (opt-out honoured)
 ok   inotify_host_rapid_edits_mtime_preserved: 200 host appends to one file, 25 ms apart, while a container stat-ed it in a loop: after each of 5 rounds the host mtime (ns) equalled the last host w
 ok   unshared_path_is_refused: -v /tmp/vesper-not-shared is refused; only configured shares map host paths, and no directory is made in the System VM (path policy)

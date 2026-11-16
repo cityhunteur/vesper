@@ -204,8 +204,9 @@ func unmountList(rfd int, dests []string) error {
 // Replay applies share events from the System VM (Fanout) on the session's NFS mounts, one "N<TAB>rest" line at a
 // time: each path is opened (the NFS client fetches its attributes again on open) and its mtime is set to the value
 // it already has, which gives IN_MODIFY to watchers in the guest. The value is the server's, so the change that
-// reaches macOS leaves the file's mtime and size as they were, and the launcher's (mtime, size) filter drops it as
-// an echo. It returns the counts it prints at the end.
+// reaches macOS leaves the file's size and mtime as they were, except that unfs3 sets times to the whole second
+// (TD-066): a fractional mtime loses its fraction and comes back once, and the next replay changes nothing, so the
+// launcher's (mtime, size) filter ends the loop there. It returns the counts it prints at the end.
 func Replay(r io.Reader, sessionDir, root string) (touched, missing, rejected int) {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 64*1024), 64*1024)
@@ -268,6 +269,18 @@ func touchInRoot(rfd int, rel string) bool {
 	if unix.Fstat(fd, &st) != nil {
 		return false
 	}
+	p := fmt.Sprintf("/proc/self/fd/%d", fd)
 	ts := []unix.Timespec{{Sec: 0, Nsec: unix.UTIME_OMIT}, st.Mtim}
-	return unix.UtimesNanoAt(unix.AT_FDCWD, fmt.Sprintf("/proc/self/fd/%d", fd), ts, 0) == nil
+	if unix.UtimesNanoAt(unix.AT_FDCWD, p, ts, 0) != nil {
+		return false
+	}
+	// A host write that landed between the read and the set has had its mtime set back to the older value. The
+	// reply to the set carries the file's attributes, so a size change shows it; then set the mtime to now, which
+	// is never older than that write (the System VM's sink does the same, GH #150).
+	var after unix.Stat_t
+	if unix.Fstat(fd, &after) == nil && after.Size != st.Size {
+		now := []unix.Timespec{{Sec: 0, Nsec: unix.UTIME_OMIT}, {Sec: 0, Nsec: unix.UTIME_NOW}}
+		_ = unix.UtimesNanoAt(unix.AT_FDCWD, p, now, 0)
+	}
+	return true
 }

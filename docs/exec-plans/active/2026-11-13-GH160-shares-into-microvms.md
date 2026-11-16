@@ -75,9 +75,11 @@ microVM, can reach the file server or another microVM's export.
   replay drops to the container uid), which maps it to `N<TAB>rest` for each microVM whose server exports it, with
   a 10,000-path coalescing queue per microVM, and sends batches to guest vsock port 1026 through the jail's
   `v.sock`; the guest's `vesper-console shares replay` opens the path on its NFS mount and sets its mtime to its own
-  value (`IN_MODIFY`, and the launcher's (mtime, size) filter drops the echo). `make systemvm-microvm-shares-suite`
-  9 of 9: one macOS edit gave a guest watcher 2 `IN_MODIFY`, 1,000 appends gave 3, and the fanout's queued count
-  stayed still for 10 s after the edits stopped
+  value (`IN_MODIFY`; unfs3 keeps whole seconds, so the fraction is lost once and comes back once, TD-066; read-only
+  sources get no event). `make systemvm-microvm-shares-suite` 9 of 9: one macOS edit gave a guest watcher 2
+  `IN_MODIFY`, 1,000 appends gave 3 or 4, the fanout's queued count stayed still for 10 s after the edits stopped,
+  and the files' size and whole-second mtime on macOS were unchanged. Council review of M6: 6 confirmed, 5 fixed
+  (the replay's size-change guard, serialised stats, tests) and the read-only one recorded as a limit
 - [ ] M7 `binds-suite` variant against the microVM path, with the failure tests below; deviations recorded as
   accepted or fixed; `design-v0.md`, `docs/SECURITY.md`, TD-032, TD-049 and the decision log updated; #160 closed
 
