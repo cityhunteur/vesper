@@ -307,16 +307,19 @@ not mount anything yet (M4).
   sets cut to `CAP_CHOWN`, `CAP_DAC_OVERRIDE`, `CAP_FOWNER`, `CAP_FSETID`, `CAP_SETGID` and `CAP_SETUID` (`0xdb`),
   no ambient capabilities, `no_new_privs`, and a seccomp filter that refuses user namespaces (`unshare` and `clone`
   with `CLONE_NEWUSER`), `setns`, and `clone3` (D-037). `--unfs-squash` runs it as 65534 with no capabilities instead.
-- **Supervision:** `supervise-daemon` (service `vesper-unfs-ID`, respawn after 1 s, at most 5 in 60 s), in
+- **Supervision:** `supervise-daemon` (service `vesper-unfs-ID`, respawn after 1 s, at most 30 in 60 s), in
   `/sys/fs/cgroup/vesper-unfs/ID` with `memory.max` 32 MiB and `pids.max` 32. The memory is admitted with the
   microVM's ceiling as one entry. The log is `/var/log/vesper-unfs-ID.log` (bounded, 256 KiB). `cleanup` stops the
   supervisor, kills what is left in the cgroup and removes it; `DIRTY` names `unfs` or `unfs-cgroup` otherwise.
 - **Inspection:** `vesper-microvm unfs ID` (state, listening, memory), `unfs-isolation ID` (ids, capabilities,
   `no_new_privs`, seccomp, namespaces and every mount in the server's root), `unfs-log ID`.
-- **What remains:** a malformed file handle makes `unfsd` 0.10.0 abort on an assertion; the guest is the only client,
-  so it can stop only its own shares, and after five aborts in 60 s they stay down (TD-065). `..` at an export's
+- **What remains:** some malformed file handles, of the right length or shortened, make `unfsd` 0.10.0 abort on an
+  assertion; the guest is the only client, so it can stop only its own shares, and after 30 aborts in 60 s they stay
+  down (TD-065). `..` at an export's
   root returns a handle of the sandbox's `/s` with its attributes; every operation on it is refused.
-- **Evidence:** `make systemvm-unfs-suite` (11 steps, `run/GH-160/m3/unfs-report.json`).
+- **A nested read-only source** is bound only on the directory that was opened as that source (same device and
+  inode); a directory renamed and replaced on macOS before the bind is placed makes the server refuse to start.
+- **Evidence:** `make systemvm-unfs-suite` (12 steps, `run/GH-160/m3/unfs-report.json`).
 
 ## Container confinement (ADR 0010, GH #194)
 

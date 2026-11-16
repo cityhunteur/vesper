@@ -364,17 +364,21 @@ unfs_start() { # ID MOUNT SQUASH SOURCES(newline-separated) -> a reason on failu
   mkdir -p "$UNFS_CG/$us_id" && echo "$UNFS_MEM" > "$UNFS_CG/$us_id/memory.max" && echo "$UNFS_PIDS" > "$UNFS_CG/$us_id/pids.max" \
     || { echo "cgroup"; return 1; }
   set --
-  us_ifs=$IFS; IFS=$NL
+  # Split on newlines only, with pathname expansion off: a source may hold spaces, *, ? or [.
+  us_ifs=$IFS; IFS=$NL; set -f
   for us_s in $us_srcs; do set -- "$@" --src "$us_s"; done
-  IFS=$us_ifs
+  set +f; IFS=$us_ifs
   [ "$us_sq" = 1 ] && set -- "$@" --squash
-  rm -f "$UNFS/$us_id.pid" "$UNFS/$us_id.err"
+  rm -f "$UNFS/$us_id.pid" "$UNFS/$us_id.err" "/var/log/vesper-unfs-$us_id.log.1"
+  : > "/var/log/vesper-unfs-$us_id.log"   # a retried id must not read the last launch's error as its own
   # What the server was started with, for the selfcheck hook and for diagnosis.
   { echo "$us_mount"; echo "$us_sq"; printf '%s\n' "$us_srcs"; } > "$UNFS/$us_id.args"
+  # A guest can make unfsd abort with a malformed handle (TD-065), so restarts are bounded by rate, not by a small
+  # count: at most one a second and 30 a minute; a guest that crashes it faster loses only its own shares.
   # Not on our stdout or stderr: the agent reads them to end of file, and supervise-daemon outlives this script.
   # supervise-daemon insists that RC_SVCNAME names the service it is given.
   RC_SVCNAME="vesper-unfs-$us_id" supervise-daemon "vesper-unfs-$us_id" --start --pidfile "$UNFS/$us_id.pid" \
-    --respawn-delay 1 --respawn-max 5 --respawn-period 60 --stdout /dev/null \
+    --respawn-delay 1 --respawn-max 30 --respawn-period 60 --stdout /dev/null \
     --stderr-logger "/usr/local/bin/vesper-boundlog /var/log/vesper-unfs-$us_id.log 262144" \
     "$(command -v nsenter)" -- "--net=$NETNS/$us_id" /usr/bin/vesper-unfs run --mount "$us_mount" \
     --root "$UNFS_ROOT" --cgroup "$UNFS_CG/$us_id" "$@" < /dev/null > /dev/null 2> "$UNFS/$us_id.err" \
@@ -434,8 +438,9 @@ unfs_isolation() { # ID
 # Test hooks (make systemvm-unfs-suite). test-unfs-selfcheck builds ID's sandbox again, from the arguments its
 # server was started with, and runs the escape checks in it in place of unfsd. test-unfs-kill kills ID's unfsd, so
 # supervise-daemon starts it again.
-test_unfs_selfcheck() { # ID
+test_unfs_selfcheck() { # ID [PAUSE_MS]: PAUSE_MS holds the sandbox before it places the nests (the rename test)
   id=${1:-}; valid_id "$id" || { echo "ERR bad id"; return 2; }
+  pause=${2:-0}; digits "$pause" || { echo "ERR bad pause"; return 2; }
   [ -r "$UNFS/$id.args" ] || { echo "ERR $id has no server"; return 1; }
   set --
   n=0
@@ -444,7 +449,7 @@ test_unfs_selfcheck() { # ID
     case $n in 1) m=$line ;; 2) [ "$line" = 1 ] && set -- "$@" --squash ;; *) [ -n "$line" ] && set -- "$@" --src "$line" ;; esac
   done < "$UNFS/$id.args"
   mkdir -p /run/vesper/unfs-check-root && chmod 0700 /run/vesper/unfs-check-root
-  nsenter --net="$NETNS/$id" /usr/bin/vesper-unfs run --selfcheck --mount "$m" --root /run/vesper/unfs-check-root "$@" 2>&1
+  nsenter --net="$NETNS/$id" /usr/bin/vesper-unfs run --selfcheck --test-pause-nests "${pause}ms" --mount "$m" --root /run/vesper/unfs-check-root "$@" 2>&1
 }
 test_unfs_kill() { # ID
   id=${1:-}; valid_id "$id" || { echo "ERR bad id"; return 2; }
@@ -460,6 +465,12 @@ test_unfs_probe() { # ID [probe flags]
   id=${1:-}; valid_id "$id" || { echo "ERR bad id"; return 2; }; shift
   vnetns_mounted "$NETNS" "$id" || { echo "ERR $id has no share namespace"; return 1; }
   f="$NETNS/$id"
+  # Whatever ends the probe, the address and the rule go, or the guest's own connection stays broken.
+  tp_undo() {
+    nsenter --net="$f" iptables -w -D INPUT -i lo -j ACCEPT 2>/dev/null
+    nsenter --net="$f" ip addr del "$SHARE_GUEST/32" dev lo 2>/dev/null
+  }
+  trap 'tp_undo; exit 130' INT; trap 'tp_undo; exit 143' TERM; trap 'tp_undo; exit 129' HUP
   nsenter --net="$f" ip addr add "$SHARE_GUEST/32" dev lo 2>/dev/null
   nsenter --net="$f" iptables -w -I INPUT 1 -i lo -j ACCEPT
   # --save and --replay keep the handles in the server's state directory (ESTALE after a restart).
@@ -468,8 +479,8 @@ test_unfs_probe() { # ID [probe flags]
     --replay) set -- --handles-in "$UNFS/$id.handles" ;;
   esac
   nsenter --net="$f" /usr/bin/vesper-unfs probe --local "$SHARE_GUEST:0" "$@"; rc=$?
-  nsenter --net="$f" iptables -w -D INPUT -i lo -j ACCEPT
-  nsenter --net="$f" ip addr del "$SHARE_GUEST/32" dev lo 2>/dev/null
+  tp_undo
+  trap - INT TERM HUP
   return $rc
 }
 
@@ -680,7 +691,7 @@ cleanup_locked() {
   unfs_stop "$id"
   rm -rf "$JAIL/firecracker/$id"
   rm -f "/var/log/.vesper-microvm-$id.pipe"
-  [ "${2:-}" = --logs ] && rm -f "$(logfile "$id")" "$(logfile "$id").1"
+  [ "${2:-}" = --logs ] && rm -f "$(logfile "$id")" "$(logfile "$id").1" "/var/log/vesper-unfs-$id.log" "/var/log/vesper-unfs-$id.log.1"
   for cg in "/sys/fs/cgroup/firecracker/$id" "/sys/fs/cgroup/$id"; do
     [ -d "$cg" ] && rmdir "$cg" 2>/dev/null
   done

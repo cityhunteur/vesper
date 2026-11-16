@@ -23,6 +23,8 @@ const (
 	offNr   = 0
 	offArch = 4
 	offArg0 = 16
+	// x32SyscallBit marks an x32 system call on x86-64.
+	x32SyscallBit = 0x40000000
 )
 
 func auditArch() (uint32, error) {
@@ -50,11 +52,17 @@ func filter(arch uint32) []unix.SockFilter {
 	)
 	eperm := uint32(seccompRetErrno | uint32(unix.EPERM))
 	enosys := uint32(seccompRetErrno | uint32(unix.ENOSYS))
-	return []unix.SockFilter{
+	prog := []unix.SockFilter{
 		stmt(ld, offArch),
 		jump(jeq, arch, 1, 0),
 		stmt(ret, eperm), // another architecture's calling convention: refuse everything
 		stmt(ld, offNr),
+	}
+	if arch == auditArchX86_64 {
+		// x32 calls share the x86-64 audit architecture and carry __X32_SYSCALL_BIT in the number; refuse them all.
+		prog = append(prog, jump(jset, x32SyscallBit, 0, 1), stmt(ret, eperm))
+	}
+	return append(prog,
 		jump(jeq, uint32(unix.SYS_CLONE3), 0, 1),
 		stmt(ret, enosys),
 		jump(jeq, uint32(unix.SYS_SETNS), 0, 1),
@@ -65,7 +73,7 @@ func filter(arch uint32) []unix.SockFilter {
 		jump(jset, unix.CLONE_NEWUSER, 0, 1),
 		stmt(ret, eperm),
 		stmt(ret, seccompRetAllow),
-	}
+	)
 }
 
 // installFilter loads the filter for this thread (no_new_privs must already be set); exec keeps it.

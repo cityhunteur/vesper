@@ -44,6 +44,14 @@ func run(t *testing.T, prog []unix.SockFilter, arch, nr uint32, arg0 uint64) uin
 	return 0
 }
 
+type filterCase struct {
+	name string
+	arch uint32
+	nr   uint32
+	arg0 uint64
+	want uint32
+}
+
 func TestFilter(t *testing.T) {
 	arch, err := auditArch()
 	if err != nil {
@@ -52,13 +60,7 @@ func TestFilter(t *testing.T) {
 	prog := filter(arch)
 	eperm := uint32(seccompRetErrno | uint32(unix.EPERM))
 	enosys := uint32(seccompRetErrno | uint32(unix.ENOSYS))
-	cases := []struct {
-		name string
-		arch uint32
-		nr   uint32
-		arg0 uint64
-		want uint32
-	}{
+	cases := []filterCase{
 		{"unshare user", arch, unix.SYS_UNSHARE, unix.CLONE_NEWUSER, eperm},
 		{"unshare user and mount", arch, unix.SYS_UNSHARE, unix.CLONE_NEWUSER | unix.CLONE_NEWNS, eperm},
 		{"unshare mount", arch, unix.SYS_UNSHARE, unix.CLONE_NEWNS, seccompRetAllow},
@@ -68,6 +70,11 @@ func TestFilter(t *testing.T) {
 		{"setns", arch, unix.SYS_SETNS, 0, eperm},
 		{"read", arch, unix.SYS_READ, unix.CLONE_NEWUSER, seccompRetAllow},
 		{"other arch", 0x40000003, unix.SYS_READ, 0, eperm},
+	}
+	if arch == auditArchX86_64 {
+		cases = append(cases,
+			filterCase{"x32 unshare", arch, x32SyscallBit | uint32(unix.SYS_UNSHARE), unix.CLONE_NEWUSER, eperm},
+			filterCase{"x32 read", arch, x32SyscallBit | uint32(unix.SYS_READ), 0, eperm})
 	}
 	for _, c := range cases {
 		if got := run(t, prog, c.arch, uint32(c.nr), c.arg0); got != c.want {

@@ -4,6 +4,7 @@ ok   sandbox_holds_only_the_exports
 ok   probe_as_root_finds_nothing_outside
 ok   probe_as_uid_1000_sees_its_own_files
 ok   escape_checks_fail_as_root
+ok   nested_source_swap_refused
 ok   server_closed_to_containers_and_other_microvms
 ok   server_restarts_and_old_handles_measured
 ok   server_memory_within_its_cap

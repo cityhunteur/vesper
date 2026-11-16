@@ -86,6 +86,7 @@ func run(args []string) int {
 	fs.StringVar(&cfg.Unfsd, "unfsd", "/usr/sbin/unfsd", "the unfsd binary (under /usr)")
 	fs.BoolVar(&cfg.Selfcheck, "selfcheck", false, "run the escape checks in the sandbox in place of unfsd (tests)")
 	fs.StringVar(&cfg.SelfcheckBin, "selfcheck-bin", "/usr/bin/vesper-unfs", "this binary as the sandbox sees it")
+	fs.DurationVar(&cfg.TestPauseNests, "test-pause-nests", 0, "wait this long before placing nests (tests only)")
 	fs.SetOutput(io.Discard)
 	if err := fs.Parse(args); err != nil {
 		fmt.Fprintf(os.Stderr, "vesper-unfs run: %v\n", err) // one line, which vesper-microvm looks for

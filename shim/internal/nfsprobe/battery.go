@@ -28,7 +28,7 @@ type Battery struct {
 	pass     int
 	fail     int
 	shareFS  uint64
-	exported map[uint64]bool
+	exported map[[2]uint64]bool // (fsid, fileid) of every object reachable inside the exports
 }
 
 func (b *Battery) check(name string, ok bool, format string, a ...any) {
@@ -93,7 +93,7 @@ func (b *Battery) Run() bool {
 	a0, st, err := n.Getattr(r0)
 	b.check("getattr /s/0", err == nil && st == 0, "%v status=%v err=%v", a0, st, err)
 	b.shareFS = a0.FSID
-	b.exported = map[uint64]bool{}
+	b.exported = map[[2]uint64]bool{}
 
 	read := func(name string, dir []byte, path, want string) {
 		fh, _, st, err := n.Walk(dir, path)
@@ -108,12 +108,14 @@ func (b *Battery) Run() bool {
 	read("read nested 0700 dir", r0, "dir700/inner.txt", "inner")
 	read("read ro export", r2, "r.txt", "ro")
 	read("read nested ro through outer", r0, "conf/app.conf", "conf")
-	// A 0600 file: the question that decides the server's user (ADR 0009, Privilege model). Reported, not judged.
+	// A 0600 file: the question that decided the server's user (ADR 0009, Privilege model; D-037). The owner it
+	// reports is printed for the suite, which checks that a caller sees its own uid.
 	if fh, a, st, err := n.Walk(r0, "secret600"); err == nil && st == 0 {
 		data, st, err := n.Read(fh, 0, 64)
-		b.info("read-0600", "%v; read status=%v err=%v data=%q", a, st, err, bytes.TrimSpace(data))
+		b.check("read 0600 file", err == nil && st == 0 && string(bytes.TrimSpace(data)) == "s", "read status=%v err=%v data=%q", st, err, bytes.TrimSpace(data))
+		b.info("read-0600", "%v", a)
 	} else {
-		b.info("read-0600", "lookup status=%v err=%v", st, err)
+		b.check("read 0600 file", false, "lookup status=%v err=%v", st, err)
 	}
 
 	// Writes: allowed in the rw export, refused in a ro export and in a ro source nested in the rw one.
@@ -125,8 +127,9 @@ func (b *Battery) Run() bool {
 		st, err = n.Remove(r0, "probe-new.txt")
 		b.check("remove in rw", err == nil && st == 0, "status=%v err=%v", st, err)
 	}
+	// A refusal is an NFS status from the server; a dropped connection or an RPC error proves nothing.
 	refused := func(name string, st Status, err error) {
-		b.check(name, err != nil || st != 0, "status=%v err=%v", st, err)
+		b.check(name, err == nil && st != 0, "status=%v err=%v", st, err)
 	}
 	_, st, err = n.Create(r2, "x", 0o644)
 	refused("create in ro export", st, err)
@@ -135,6 +138,8 @@ func (b *Battery) Run() bool {
 		refused("write in ro export", st, err)
 		st, err = n.Chmod(fh, 0o777)
 		refused("chmod in ro export", st, err)
+	} else {
+		b.check("lookup r.txt in ro export", false, "status=%v", st0)
 	}
 	_, st, err = n.Create(r1, "x", 0o644)
 	refused("create in ro conf export", st, err)
@@ -149,21 +154,25 @@ func (b *Battery) Run() bool {
 			refused("write nested ro through outer", st, err)
 			st, err = n.Remove(conf, "app.conf")
 			refused("remove nested ro through outer", st, err)
+		} else {
+			b.check("lookup app.conf through outer", false, "status=%v", st1)
 		}
 	} else {
 		b.check("lookup conf through outer", false, "status=%v", st0)
 	}
 
-	// Nothing outside the exports: "..", symbolic links, and forged handles.
-	b.exported[a0.FileID] = true
+	// Nothing outside the exports: "..", symbolic links, and forged handles. First, every object the exports hold,
+	// which is the whole of what a handle may name.
+	for _, r := range [][]byte{r0, r1, r2} {
+		b.collect(n, r, 0)
+	}
+	b.info("exported-objects", "%d", len(b.exported))
 	for i, r := range [][]byte{r0, r1, r2} {
-		a, _, _ := n.Getattr(r)
-		b.exported[a.FileID] = true
 		up := r
 		for k := 1; k <= 3; k++ {
 			h, a, st, err := n.Lookup(up, "..")
 			if err != nil || st != 0 {
-				b.check(fmt.Sprintf("dotdot /s/%d x%d", i, k), true, "status=%v err=%v", st, err)
+				b.check(fmt.Sprintf("dotdot /s/%d x%d", i, k), err == nil, "status=%v err=%v", st, err)
 				break
 			}
 			name := fmt.Sprintf("dotdot /s/%d x%d", i, k)
@@ -194,61 +203,133 @@ func (b *Battery) Run() bool {
 		t, st, err := n.Readlink(fh)
 		b.check("readlink link-out", err == nil && st == 0 && t == "/etc", "%q status=%v err=%v", t, st, err)
 	}
-	b.forged("/s/0", n, r0)
-	if fh, _, st, _ := n.Walk(r0, "file.txt"); st == 0 {
-		b.forged("/s/0/file.txt", n, fh)
+	b.forged("/s/0", &n, r0)
+	if fh, _, st, err := n.Walk(r0, "file.txt"); err == nil && st == 0 {
+		b.forged("/s/0/file.txt", &n, fh)
+	} else {
+		b.check("forged /s/0/file.txt", false, "lookup file.txt: status=%v err=%v", st, err)
 	}
 	return b.summary()
 }
 
-// refusedHandle checks that a handle of something outside the exports reads, lists and finds nothing.
-func (b *Battery) refusedHandle(name string, n NFS, h []byte) {
-	_, st, err := n.Getattr(h)
-	b.check(name+" getattr", err != nil || st != 0, "status=%v err=%v", st, err)
-	names, st, err := n.Readdir(h)
-	b.check(name+" readdir", err != nil || st != 0, "status=%v err=%v names=%v", st, err, names)
-	for _, c := range []string{"0", "1", "2", "usr", "etc", "lib", "dev", ".."} {
-		_, a, st, err := n.Lookup(h, c)
-		b.check(name+" lookup "+c, err != nil || st != 0, "status=%v err=%v %v", st, err, a)
+// collect records every object below a directory handle (a few levels; the fixture is small).
+func (b *Battery) collect(n NFS, dir []byte, depth int) {
+	if a, st, err := n.Getattr(dir); err == nil && st == 0 {
+		b.exported[[2]uint64{a.FSID, a.FileID}] = true
 	}
-	_, st, err = n.Create(h, "x", 0o644)
-	b.check(name+" create", err != nil || st != 0, "status=%v err=%v", st, err)
+	if depth > 4 {
+		return
+	}
+	names, st, err := n.Readdir(dir)
+	if err != nil || st != 0 {
+		return
+	}
+	for _, nm := range names {
+		if nm == "." || nm == ".." {
+			continue
+		}
+		fh, a, st, err := n.Lookup(dir, nm)
+		if err != nil || st != 0 {
+			continue
+		}
+		b.exported[[2]uint64{a.FSID, a.FileID}] = true
+		if a.Type == 2 {
+			b.collect(n, fh, depth+1)
+		}
+	}
 }
 
-// forged sends variants of a real handle: each byte flipped, each shorter length, longer, all zeros. A variant the
-// server accepts must name something in the share (same fsid); the sandbox holds nothing else of the share than the
-// exports, so that is the whole check.
-func (b *Battery) forged(name string, n NFS, fh []byte) {
-	var variants [][]byte
+// reconnect waits for the server to listen again (supervise-daemon restarts it within about a second).
+func (b *Battery) reconnect() (NFS, error) {
+	var last error
+	for range 30 {
+		c, err := b.dial(2049, ProgNFS)
+		if err == nil {
+			return NFS{c}, nil
+		}
+		last = err
+		time.Sleep(500 * time.Millisecond)
+	}
+	return NFS{}, last
+}
+
+// refusedHandle checks that a handle of something outside the exports reads, lists and finds nothing: each call
+// must come back with an NFS error status.
+func (b *Battery) refusedHandle(name string, n NFS, h []byte) {
+	_, st, err := n.Getattr(h)
+	b.check(name+" getattr", err == nil && st != 0, "status=%v err=%v", st, err)
+	names, st, err := n.Readdir(h)
+	b.check(name+" readdir", err == nil && st != 0, "status=%v err=%v names=%v", st, err, names)
+	for _, c := range []string{"0", "1", "2", "usr", "etc", "lib", "dev", ".."} {
+		_, a, st, err := n.Lookup(h, c)
+		b.check(name+" lookup "+c, err == nil && st != 0, "status=%v err=%v %v", st, err, a)
+	}
+	_, st, err = n.Create(h, "x", 0o644)
+	b.check(name+" create", err == nil && st != 0, "status=%v err=%v", st, err)
+}
+
+// forged sends variants of a real handle: each byte flipped, eight bytes longer, all zeros (every one must be sent
+// and answered), then each shorter length. A variant the server accepts must name an object seen inside the exports.
+// unfs3 0.10.0 aborts on some shortened handles (TD-065): a dropped connection among the full-length variants is
+// reported, the probe waits for the restart and goes on; among the shortened ones it reports and stops there.
+func (b *Battery) forged(name string, n *NFS, fh []byte) {
+	var full, short [][]byte
 	for i := range fh {
 		v := append([]byte(nil), fh...)
 		v[i] ^= 0xff
-		variants = append(variants, v)
+		full = append(full, v)
 	}
-	variants = append(variants, append(append([]byte(nil), fh...), make([]byte, 8)...), make([]byte, len(fh)))
-	// Shortened handles last: unfs3 asserts on some of them and dies (TD-065), which ends the run.
+	full = append(full, append(append([]byte(nil), fh...), make([]byte, 8)...), make([]byte, len(fh)))
 	for l := len(fh) - 1; l >= 0; l-- {
-		variants = append(variants, append([]byte(nil), fh[:l]...))
+		short = append(short, append([]byte(nil), fh[:l]...))
 	}
-	accepted, outside, sent := 0, 0, 0
-	for _, v := range variants {
+	accepted, outside, answered, drops, shortSent, fullSent := 0, 0, 0, 0, 0, 0
+	lost := false
+	try := func(v []byte) bool {
 		a, st, err := n.Getattr(v)
-		sent++
 		if err != nil {
-			// unfs3 0.10.0 asserts on some malformed handles and the server dies (TD-065); supervise-daemon
-			// starts it again. That ends this connection, so the rest of the variants are not sent.
-			b.info("forged-dropped "+name, "the server dropped the connection at variant %d of %d (%x): %v", sent, len(variants), v, err)
-			break
+			drops++
+			b.info("forged-dropped "+name, "the server dropped the connection at handle %x: %v", v, err)
+			n.Close()
+			nn, rerr := b.reconnect()
+			if rerr != nil {
+				lost = true
+				b.check("forged "+name+" server back", false, "%v", rerr)
+				return false
+			}
+			*n = nn
+			return false
 		}
 		if st == 0 {
 			accepted++
-			if a.FSID != b.shareFS {
+			if a.FSID != b.shareFS || !b.exported[[2]uint64{a.FSID, a.FileID}] {
 				outside++
 				b.info("forged-outside "+name, "handle %x -> %v", v, a)
 			}
 		}
+		return true
 	}
-	b.check("forged "+name, outside == 0, "%d of %d variants sent, %d accepted, %d outside the share", sent, len(variants), accepted, outside)
+	for _, v := range full {
+		if lost {
+			break
+		}
+		fullSent++
+		if try(v) {
+			answered++
+		}
+	}
+	for _, v := range short {
+		if lost {
+			break
+		}
+		shortSent++
+		if !try(v) {
+			break
+		}
+	}
+	b.check("forged "+name, !lost && fullSent == len(full) && outside == 0,
+		"%d of %d full-length variants sent (%d answered), %d of %d shortened sent, %d accepted, %d outside the exports, %d dropped connections",
+		fullSent, len(full), answered, shortSent, len(short), accepted, outside, drops)
 }
 
 func (b *Battery) summary() bool {

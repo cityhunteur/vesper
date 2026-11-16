@@ -32,6 +32,9 @@ type Config struct {
 	// privileges, for the escape tests (GH #160 M3).
 	Selfcheck    bool
 	SelfcheckBin string
+	// TestPauseNests holds the sandbox for this long before it places the nests (tests only: the suite renames a
+	// nested source in the meantime and expects a refusal).
+	TestPauseNests time.Duration
 }
 
 // childConfig crosses into the sandbox in the environment; the sources cross as descriptors 3, 4, ...
@@ -43,6 +46,8 @@ type childConfig struct {
 	Unfsd   string   `json:"unfsd"`
 	// Check, when set, is run with argument "selfcheck" in place of unfsd.
 	Check string `json:"check,omitempty"`
+	// PauseNestsMs: Config.TestPauseNests.
+	PauseNestsMs int64 `json:"pause_nests_ms,omitempty"`
 }
 
 const (
@@ -160,7 +165,7 @@ func Run(cfg Config) (int, error) {
 	if cfg.Selfcheck {
 		check = cfg.SelfcheckBin
 	}
-	cc, _ := json.Marshal(childConfig{Sources: cfg.Sources, Nests: Nests(cfg.Sources), Squash: cfg.Squash, Root: cfg.Root, Unfsd: cfg.Unfsd, Check: check})
+	cc, _ := json.Marshal(childConfig{Sources: cfg.Sources, Nests: Nests(cfg.Sources), Squash: cfg.Squash, Root: cfg.Root, Unfsd: cfg.Unfsd, Check: check, PauseNestsMs: cfg.TestPauseNests.Milliseconds()})
 	cmd := exec.Command("/proc/self/exe", "init")
 	cmd.Env = []string{configEnv + "=" + string(cc)}
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = nil, os.Stdout, os.Stderr
@@ -286,6 +291,9 @@ func Init() error {
 	}
 	// Each read-only source again, read-only, inside each read-write source that holds it. The place is found
 	// beneath the outer export with no symbolic link on the way, so a swapped directory cannot move the bind.
+	if cc.PauseNestsMs > 0 {
+		time.Sleep(time.Duration(cc.PauseNestsMs) * time.Millisecond)
+	}
 	for k, n := range cc.Nests {
 		outer, err := unix.Open(filepath.Join(root, ExportPath(n.Outer)), unix.O_PATH|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 		if err != nil {
@@ -299,7 +307,25 @@ func Init() error {
 		if err != nil {
 			return fmt.Errorf("nest %d in %d at %q: %w", n.Inner, n.Outer, n.Sub, err)
 		}
-		err = moveTree(firstFd+len(cc.Sources)+k, at)
+		// The place must be the very directory the parent opened as the inner source. A host process could rename it
+		// and put another directory in its place in between; binding the read-only tree there would leave the
+		// original writable under its new name through the outer export. Once attached, the bind follows the
+		// directory wherever it is renamed.
+		tree := firstFd + len(cc.Sources) + k
+		var want, got unix.Stat_t
+		if err := unix.Fstat(tree, &want); err != nil {
+			unix.Close(at)
+			return fmt.Errorf("nest %d in %d: %w", n.Inner, n.Outer, err)
+		}
+		if err := unix.Fstat(at, &got); err != nil {
+			unix.Close(at)
+			return fmt.Errorf("nest %d in %d: %w", n.Inner, n.Outer, err)
+		}
+		if want.Dev != got.Dev || want.Ino != got.Ino {
+			unix.Close(at)
+			return fmt.Errorf("nest %d in %d at %q: the directory there is not the source that was opened (renamed or replaced)", n.Inner, n.Outer, n.Sub)
+		}
+		err = moveTree(tree, at)
 		unix.Close(at)
 		if err != nil {
 			return fmt.Errorf("nest %d in %d: %w", n.Inner, n.Outer, err)

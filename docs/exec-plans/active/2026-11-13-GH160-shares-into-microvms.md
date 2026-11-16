@@ -42,7 +42,7 @@ microVM, can reach the file server or another microVM's export.
   after validation exports nothing outside the share, `ESTALE` after a restart measured. Exit gate: the GH #159
   `>` then `>>` lost write is reproduced and explained, or shown not to recur in 1,000 tries.
   Done: `vesper-unfs` (`shim/cmd/vesper-unfs`, `internal/unfs`, `internal/nfsprobe`) and `vesper-microvm launch
-  --unfs-*`; `make systemvm-unfs-suite` 11 of 11 (`run/GH-160/m3/unfs-report.json`). Root server by default, with a
+  --unfs-*`; `make systemvm-unfs-suite` 12 of 12 (`run/GH-160/m3/unfs-report.json`). Root server by default, with a
   seccomp filter against user namespaces added to the ADR's sandbox (D-037); memory peak 8 MB, cap 32 MiB; old
   handles work after a restart (no `ESTALE`). The exit gate needs the guest's kernel client, so it moved to M4
 - [ ] M4 Guest: NFS client modules and their `modules.dep` closure, and `virtio_net`, in the initramfs;

@@ -1,0 +1,36 @@
+SELF identity ok uid=0 caps=0xdb no_new_privs=1
+SELF pid-1 ok pid=1
+SELF seccomp filter ok mode=2
+SELF unshare user namespace ok operation not permitted (EPERM is the filter; EINVAL would be the kernel's thread check)
+SELF unshare mount namespace ok operation not permitted
+SELF root-contents ok [dev etc lib s usr]
+SELF absent /proc ok lstat /proc: no such file or directory
+SELF absent /sys ok lstat /sys: no such file or directory
+SELF absent /old ok lstat /old: no such file or directory
+SELF absent /run ok lstat /run: no such file or directory
+SELF absent /var ok lstat /var: no such file or directory
+SELF absent /root ok lstat /root: no such file or directory
+SELF absent /etc/shadow ok lstat /etc/shadow: no such file or directory
+SELF absent /etc/passwd ok lstat /etc/passwd: no such file or directory
+SELF absent /dev/vda ok lstat /dev/vda: no such file or directory
+SELF absent /dev/kvm ok lstat /dev/kvm: no such file or directory
+SELF etc-contents ok [exports netconfig protocols services]
+SELF write /x ok open /x: read-only file system
+SELF write /etc/exports ok open /etc/exports: read-only file system
+SELF write /usr/x ok open /usr/x: read-only file system
+SELF write /lib/x ok open /lib/x: read-only file system
+SELF write /s/1/x ok open /s/1/x: read-only file system
+SELF write /s/2/x ok open /s/2/x: read-only file system
+SELF write /s/0/conf/x ok open /s/0/conf/x: read-only file system
+SELF write /s/0 (control) ok 
+SELF mount tmpfs ok operation not permitted
+SELF remount /s/1 rw ok operation not permitted
+SELF mount_setattr /s/1 rw ok operation not permitted
+SELF umount nested ro ok operation not permitted
+SELF open_tree clone ok operation not permitted
+SELF chroot ok operation not permitted
+SELF pivot_root ok operation not permitted
+SELF mknod ok operation not permitted
+SELF dotdot from an export is the root ok <nil>
+SELF userns child refused ok fork/exec /usr/bin/vesper-unfs: operation not permitted
+SELF-SUMMARY passed=35 failed=0

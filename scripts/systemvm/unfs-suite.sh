@@ -13,11 +13,12 @@ set -uo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SHARE="${UNFS_SHARE:-${ROOT_DIR}/run/WOR-39/share}"
 REPORT="${ROOT_DIR}/run/systemvm/unfs-report.json"
+RAW="${ROOT_DIR}/run/systemvm/unfs-raw"   # the full probe and selfcheck output of each step
 CTL=(cargo run -q --bin systemvmctl -- control)
 ID=unfs-a
 OTHER=unfs-b
 SQ=unfs-q
-cd "${ROOT_DIR}"; mkdir -p "$(dirname "${REPORT}")"
+cd "${ROOT_DIR}"; mkdir -p "$(dirname "${REPORT}")" "${RAW}"
 steps=()
 record() { local d; d="$(printf '%s' "$3" | tr '\n' ' ' | cut -c1-900 | sed 's/\\/\\\\/g; s/"/\\"/g')"; steps+=("{\"name\":\"$1\",\"ok\":$2,\"detail\":\"${d}\"}"); if [ "$2" = true ]; then echo "ok   $1"; else echo "FAIL $1: ${d}"; fi; }
 ctl() { "${CTL[@]}" "$@" 2>&1; }
@@ -60,23 +61,35 @@ record sandbox_holds_only_the_exports "${mounts_ok}" "${iso}"
 
 # --- 3. The probe: reads, read-only refusals, "..", symbolic links, forged handles --------------------------------
 p0="$(upid "${ID}")"
-out="$(mvm test-unfs-probe "${ID}")"
+out="$(mvm test-unfs-probe "${ID}")"; printf '%s\n' "${out}" > "${RAW}/probe-root.txt"
 wait_listen "${ID}"; p1="$(upid "${ID}")"
 restarted="no"; [ "${p0}" != "${p1}" ] && restarted="yes (unfsd ${p0} -> ${p1})"
 sum="$(printf '%s\n' "${out}" | grep '^PROBE-SUMMARY')"
 case "${sum}" in *"failed=0"*) record probe_as_root_finds_nothing_outside true "${sum}; server restarted during the probe: ${restarted}; $(printf '%s\n' "${out}" | grep -E '^INFO|forged' | tr '\n' ';')" ;;
   *) record probe_as_root_finds_nothing_outside false "$(printf '%s\n' "${out}" | grep -E 'FAIL|SUMMARY' | tr '\n' ';')" ;; esac
-out="$(mvm test-unfs-probe "${ID}" --uid 1000 --gid 1000)"
+out="$(mvm test-unfs-probe "${ID}" --uid 1000 --gid 1000)"; printf '%s\n' "${out}" > "${RAW}/probe-uid1000.txt"
 wait_listen "${ID}"
 sum="$(printf '%s\n' "${out}" | grep '^PROBE-SUMMARY')"; own="$(printf '%s\n' "${out}" | grep '^INFO read-0600')"
 case "${sum}:${own}" in *"failed=0"*":"*"uid=1000 gid=1000"*) record probe_as_uid_1000_sees_its_own_files true "${sum}; ${own}" ;;
   *) record probe_as_uid_1000_sees_its_own_files false "${sum}; ${own}; $(printf '%s\n' "${out}" | grep FAIL | tr '\n' ';')" ;; esac
 
 # --- 4. The escape checks, inside a copy of the sandbox --------------------------------------------------------
-out="$(mvm test-unfs-selfcheck "${ID}")"
+out="$(mvm test-unfs-selfcheck "${ID}")"; printf '%s\n' "${out}" > "${RAW}/selfcheck-root.txt"
 sum="$(printf '%s\n' "${out}" | grep '^SELF-SUMMARY')"
 case "${sum}" in *"failed=0"*) record escape_checks_fail_as_root true "${sum}; $(printf '%s\n' "${out}" | grep -E 'INFO|userns|chroot' | tr '\n' ';')" ;;
   *) record escape_checks_fail_as_root false "$(printf '%s\n' "${out}" | grep -E 'FAIL|SUMMARY|INFO|vesper-unfs' | tr '\n' ';')" ;; esac
+
+# --- 4b. A nested read-only source renamed and replaced before its bind is placed: the sandbox refuses to start --
+race_out="$(mktemp)"
+( mvm test-unfs-selfcheck "${ID}" 4000 > "${race_out}" 2>&1 ) &
+rp=$!
+sleep 1.5
+mv "${F}/proj/conf" "${F}/proj/conf-old" && mkdir "${F}/proj/conf" && echo decoy > "${F}/proj/conf/app.conf"
+wait "${rp}"
+race="$(tr '\n' ' ' < "${race_out}")"; rm -f "${race_out}"
+rm -rf "${F}/proj/conf"; mv "${F}/proj/conf-old" "${F}/proj/conf"
+case "${race}" in *"not the source that was opened"*) record nested_source_swap_refused true "${race}" ;;
+  *) record nested_source_swap_refused false "${race}" ;; esac
 
 # --- 5. Nothing outside the microVM reaches the server ---------------------------------------------------------
 other="$(mvm launch "${OTHER}" --share-net | tail -1)"
@@ -116,7 +129,7 @@ mvm cleanup "${ID}" --logs >/dev/null
 q="$(mvm launch "${SQ}" --share-net --unfs-squash "${SRCS[@]}" | tail -1)"
 qiso="$(mvm unfs-isolation "${SQ}" | head -1)"
 qp="$(mvm test-unfs-probe "${SQ}" --uid 1000 --gid 1000)"; wait_listen "${SQ}"
-qs="$(mvm test-unfs-selfcheck "${SQ}")"
+qs="$(mvm test-unfs-selfcheck "${SQ}")"; printf '%s\n' "${qp}" > "${RAW}/probe-squash.txt"; printf '%s\n' "${qs}" > "${RAW}/selfcheck-squash.txt"
 qsum="$(printf '%s\n' "${qp}" | grep '^PROBE-SUMMARY')"; qown="$(printf '%s\n' "${qp}" | grep '^INFO read-0600')"
 qself="$(printf '%s\n' "${qs}" | grep '^SELF-SUMMARY')"
 case "${q}:${qiso}:${qsum}:${qself}" in *"LAUNCHED ${SQ} "*":"*"uid=65534 gid=65534 capbnd=0000000000000000 capeff=0000000000000000"*"nonewprivs=1 seccomp=2"*":"*"failed=0"*":"*"failed=0"*)
