@@ -12,6 +12,8 @@
 #        vesper-data label     LABEL <dev> <type> <label> | LABEL <dev> none | LABEL absent
 #        vesper-data test-relabel LABEL   suite hook: give the disk another label, so the next boot refuses it;
 #                                         RELABELLED <dev> <label>
+#        vesper-data trim      tell the disk image which blocks ext4 no longer uses, so macOS can free them;
+#                              TRIM discard=<bytes> trimmed=<bytes> | TRIM unsupported | ERR ...
 #        vesper-data legacy status       the Docker store from boots before ADR 0010: LEGACY absent, or
 #                                         LEGACY present volumes=N containers=M, then one line per volume:
 #                                         VOLUME <name> kib=<n> imported|not-imported|has-options
@@ -89,6 +91,18 @@ stop() {
   for d in $DIRS; do grep -q " $d " /proc/mounts && umount "$d" 2>/dev/null; done
   grep -q " $MNT " /proc/mounts && umount "$MNT" 2>/dev/null
   echo "DATA stopped"
+}
+
+# The image is sparse on macOS, but ext4 frees blocks only inside it: without a discard, a file deleted in the
+# System VM keeps its space on the Mac. fstrim sends one discard for each free range.
+trim() {
+  grep -q " $MNT " /proc/mounts || { echo "ERR the data disk is not mounted"; return 1; }
+  dev=$(device); max=$(cat "/sys/block/${dev#/dev/}/queue/discard_max_bytes" 2>/dev/null || echo 0)
+  [ "${max:-0}" -gt 0 ] || { echo "TRIM unsupported"; return 1; }
+  out=$(fstrim -v "$MNT" 2>&1) || { echo "ERR fstrim: $out"; return 1; }
+  n=$(printf '%s' "$out" | sed -n 's/.*(\([0-9]*\) bytes).*/\1/p')
+  [ -n "$n" ] || n=$(printf '%s' "$out" | sed -n 's/.*: *\([0-9]*\) bytes.*/\1/p')
+  echo "TRIM discard=$max trimmed=${n:-unknown} ($out)"
 }
 
 binds() {
@@ -244,11 +258,12 @@ test_import() {
 case "${1:-}" in
   legacy) legacy "${2:-}" "${3:-}" ;;
   test-import) test_import "${2:-}" ;;
+  trim) trim ;;
   binds) binds ;;
   label) label ;;
   test-relabel) test_relabel "${2:-}" ;;
   mount) mount_ ;;
   status) status ;;
   stop) stop ;;
-  *) echo "ERR usage: vesper-data mount|status|stop|binds|label|test-relabel LABEL|legacy status|legacy import-volume NAME|test-import plant|import|check|clean"; exit 2 ;;
+  *) echo "ERR usage: vesper-data mount|status|stop|trim|binds|label|test-relabel LABEL|legacy status|legacy import-volume NAME|test-import plant|import|check|clean"; exit 2 ;;
 esac

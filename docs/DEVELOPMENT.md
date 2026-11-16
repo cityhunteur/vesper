@@ -61,6 +61,18 @@ Virtualization.framework (macOS, Apple silicon). `make systemvm-prepare` runs al
 then exposes the guest's Docker on `run/vesper/docker.sock` for the host Docker CLI
 (see [process/systemvm-bringup.md](process/systemvm-bringup.md)).
 
+### Disk space on the Mac
+
+The System VM's data disk `run/systemvm/data.img` is a sparse 64 GiB file. Files deleted in the System VM keep their
+space on the Mac until the disk is trimmed:
+
+```sh
+cargo run -q --bin systemvmctl -- control data trim   # TRIM discard=… trimmed=<bytes>
+du -sh run/systemvm/data.img
+```
+
+On 2026-11-16 this took the image from 61 GiB to 12 GiB with 11 GiB in use. Nothing in the System VM is deleted.
+
 ### Containers are not root on the System VM (ADR 0010)
 
 `make docker-up` prints `containers mapped`. dockerd runs every container in a remapped user namespace, behind an
