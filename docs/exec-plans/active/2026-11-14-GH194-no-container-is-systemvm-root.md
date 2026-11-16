@@ -50,6 +50,10 @@ volumes that must be pulled or imported once.
     now tries the port relay too, 9 refused connects), docker-smoke, docker-conformance and ports pass
   - [x] (2026-11-16) Docker deviations recorded in `design-v0.md` Phase 4 as accepted deviations (D-035); its
     BuildKit line, which still said BuildKit builds pass, now says the legacy builder passes and BuildKit is refused
+  - [x] (2026-11-16) A short upstream-suite run in its unmapped boot on its own disk
+    (`integration_tests/functional/test_api.py`, twice): 67 tests, 59 passed, 6 upstream platform skips and 2
+    `vmm-memory-overhead` errors, every result explained; the next normal boot was mapped. The runner now trims the
+    suite's disk before it restores (20 GiB to 7.1 GiB on the Mac). Evidence: `run/GH-194/m6/upstream-short-*`
 
 ## Surprises & Discoveries
 

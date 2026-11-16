@@ -14,7 +14,7 @@
 # and a wall-clock watchdog; collect {nodeid: outcome}; compare (baselinectl --mode upstream-compare, which also
 # fails on pytest's own errors); rerun alone the tests that matched no class, when there are 1 to
 # UPSTREAM_RERUN_MAX (8) of them, and compare again (decision D-031; unmatched.txt, alone.json.gz,
-# pytest-alone.log.gz, and the first verdict in *-under-load.*); wipe /srv; restore the previous launch config and
+# pytest-alone.log.gz, and the first verdict in *-under-load.*); wipe /srv and trim the disk; restore the previous launch config and
 # restart. Exit status is the comparator's. One run at a time: build/upstream-suite/runner.lock is a symlink to the runner's pid.
 #
 # Environment: UPSTREAM_WALL_S (default 14400) stops the run; UPSTREAM_MIN_FREE_GB (45) is the data-disk space it
@@ -185,6 +185,8 @@ restore() {
   set +e
   docker rm -f "$NAME" >/dev/null 2>&1
   wipe_srv
+  # The suite's disk is a sparse image: give the blocks /srv held back to macOS before the System VM stops.
+  say "$(cargo run -q --bin systemvmctl -- control data trim 2>&1 | head -1)"
   if [ "${UPSTREAM_KEEP_SIZE:-0}" != 1 ] && [ -f "$SAVED" ]; then
     live="$(sha "$CFG")"
     if [ "$live" = "$(sha "$SAVED")" ]; then
