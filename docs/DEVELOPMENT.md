@@ -103,7 +103,9 @@ shifted into the container range, so a file owned by root or by uid 1000 in the 
 container. An owner outside 0 to 65535 becomes `nobody` (counted as `unmapped`). Hard links, symbolic links,
 modes and set-id bits are kept; extended attributes, ACLs and file capabilities are not. It refuses a name that
 already exists in the remapped store, a volume with driver options (bind, tmpfs or NFS: create it again) and a
-copy that would not fit. Stop the containers that use the volume first. Nothing deletes the old store.
+copy that would not fit. Stop the containers that use the volume first. Nothing deletes the old store. The new
+volume carries the label `vesper.import` (a one-time token), so the import never uses or removes a volume of the
+same name that another client created while it was copying.
 
 The upstream Firecracker suite (`make systemvm-upstream-suite`) is the one exception: it restarts the System VM
 with unmapped containers on a data disk of its own (`run/systemvm/upstream-data.img`) and puts the normal

@@ -362,7 +362,14 @@ share namespace (ADR 0009, D-034) and away from Vesper's own state.
   store is `/var/lib/docker/100000.100000`. `HEALTH` and `make docker-up` report the old store; nothing deletes it.
   `vesper-data legacy import-volume NAME` (agent verb `DATA`, from macOS only) copies one old volume into a new
   volume, each owner shifted by 100000; an owner outside the 65536-id range becomes the container's `nobody`, so
-  no imported file is owned by a System VM uid outside the mapping. It only reads the old store.
+  no imported file is owned by a System VM uid outside the mapping. It only reads the old store. The copy is made
+  and shifted in `/var/lib/docker/100000.100000/.vesper-import`, a root-only (0700) directory that container root
+  cannot enter, so a container cannot swap a path in the copy while root changes owners in it; the finished copy
+  is then renamed into the volume. The volume is created with a one-time label `vesper.import`, and the import
+  uses (or, on failure, removes) only a volume that carries it, never one another client made meanwhile. A
+  hard-link marker it cannot make, or a `find` that fails, fails the import. What remains: an entry that was a
+  hard link, in the old volume, to a root-only file elsewhere on the data disk is copied and becomes the
+  container's (TD-064).
 - **Test hooks:** `vesper-containers test-authz stop|start`, `vesper-data test-relabel`, `vesper-data test-import`
   (imports from a scratch store under `/run/vesper/legacy-test`). All need the agent.
 - **Evidence:** `make systemvm-confine-suite` (15 steps, `run/GH-194/m5-confine-report.json`; the import step in

@@ -54,6 +54,13 @@ volumes that must be pulled or imported once.
     (`integration_tests/functional/test_api.py`, twice): 67 tests, 59 passed, 6 upstream platform skips and 2
     `vmm-memory-overhead` errors, every result explained; the next normal boot was mapped. The runner now trims the
     suite's disk before it restores (20 GiB to 7.1 GiB on the Mac). Evidence: `run/GH-194/m6/upstream-short-*`
+  - [x] (2026-11-16) Council review of the M6 code (`2ec6281..cd7063a`; the rewritten static council: five
+    reviewer roles, a Claude Opus judge, no code run). Four confirmed defects, all in `import-volume`, fixed: the
+    copy is shifted in a root-only staging directory, not in the container-reachable volumes directory (a
+    container could swap a path mid-shift, high); a hard-link marker that cannot be made fails the import; the
+    volume is created with a one-time label and is used or removed only when it carries it; `flock` and signal
+    traps replace the `mkdir` lock. The suite fixture gained the boundary ids, set-uid, outward and dangling links,
+    a leading-dash name and a dead import's leftovers. Remaining coverage gaps are TD-064
 
 ## Surprises & Discoveries
 
@@ -84,6 +91,10 @@ volumes that must be pulled or imported once.
   `run/egress-suite/`; `docker-smoke` then fails `no_raw_host_sockets`. An ordering artefact, older than this work.
 - 2026-11-16 (M6): BusyBox `cp -a` keeps hard links, so shifting owners by path shifted a file with two names
   twice and left it owned by `nobody`. The suite's planted hard link caught it; each inode is now shifted once.
+- 2026-11-16 (M6): the first import staged its copy in `/var/lib/docker/100000.100000/volumes`, which container
+  root can traverse. Each directory became container-owned as soon as it was shifted, before root had finished
+  below it, so a running container could have swapped a subdirectory for a symbolic link and had root re-own a
+  System VM file. Our own suite could not see it; the council's red-team role did.
 
 ## Decision Log
 

@@ -194,9 +194,9 @@ check="$(ctl data test-import check | tr '\n' ' ')"
 seen="$("${DOCKER}" run --rm -v vesper-legacy-test:/v "${IMAGE}" sh -c 'stat -c "%u:%g:%a %n" /v/root.txt /v/sub/user.txt /v/far.txt /v/setgid; echo more >> /v/root.txt && echo wrote' 2>&1 | tr '\n' ' ')"
 status="$(ctl data legacy status | head -1)"
 ctl data test-import clean >/dev/null
-want_check="IMPORT-TEST . 100000:100000:755 IMPORT-TEST root.txt 100000:100000:644 IMPORT-TEST sub/user.txt 101000:101000:600 IMPORT-TEST far.txt 165534:165534:644 IMPORT-TEST setgid 100000:100050:2755 IMPORT-TEST link 101000:101000:777 IMPORT-TEST links 2 IMPORT-TEST source 0:0"
+want_check="IMPORT-TEST . 100000:100000:755 IMPORT-TEST root.txt 100000:100000:644 IMPORT-TEST sub/user.txt 101000:101000:600 IMPORT-TEST far.txt 165534:165534:644 IMPORT-TEST setgid 100000:100050:2755 IMPORT-TEST link 101000:101000:777 IMPORT-TEST -dash 165535:165534:640 IMPORT-TEST setuid 100000:100000:4755 IMPORT-TEST out 100000:100000:777 IMPORT-TEST dangling 100000:100000:777 IMPORT-TEST links 2 IMPORT-TEST source 0:0 IMPORT-TEST out-target /etc/shadow IMPORT-TEST shadow unchanged IMPORT-TEST stage gone IMPORT-TEST label set "
 want_seen="0:0:644 /v/root.txt 1000:1000:600 /v/sub/user.txt 65534:65534:644 /v/far.txt 0:50:2755 /v/setgid wrote"
-if case "${planted}:${imported}" in *"IMPORT-TEST planted"*":"*"IMPORTED vesper-legacy-test entries=8 "*"unmapped=2"*) true ;; *) false ;; esac \
+if case "${planted}:${imported}" in *"IMPORT-TEST planted"*":"*"IMPORTED vesper-legacy-test entries=12 "*"unmapped=3"*) true ;; *) false ;; esac \
   && case "${again}" in *"exists in the remapped store"*) true ;; *) false ;; esac \
   && case "${badname}" in *"ERR volume name"*) true ;; *) false ;; esac \
   && case "${check}" in *"${want_check}"*) true ;; *) false ;; esac \
