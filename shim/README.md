@@ -35,6 +35,8 @@ The Go module pins containerd 2.1.5 and builds static Linux arm64 binaries with 
   refusing file sources and binds from two shares; the task service passes the plan's `--share-net --unfs-*`
   arguments to `vesper-microvm launch` and the list to the guest as the annotation `io.vesper.shares`.
   `vesper-console shares mount|unmount` (`guest_linux.go`) mounts them under `/newroot` in the guest.
+  `fanout.go` is the event hop (M6): `vesper-unfs fanout` maps replayed host paths to each microVM's exports and
+  sends them, from a bounded coalescing queue, to `vesper-console shares replay` on guest vsock port 1026.
 - `cmd/vesper-unfs`, `internal/unfs` and `internal/nfsprobe`: the per-microVM share server's sandbox (ADR 0009,
   GH #160 M3) and a test NFSv3 client. `vesper-unfs run` opens each source with `openat2` beneath the share mount,
   clones it into a detached mount tree, and starts `init` in new mount, pid, ipc and uts namespaces, which attaches

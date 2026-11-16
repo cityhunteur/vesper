@@ -751,6 +751,7 @@ case "$cmd" in
   unfs) unfs "$@" ;;
   unfs-isolation) unfs_isolation "$@" ;;
   unfs-log) unfs_log "$@" ;;
+  unfs-events) cat "$UNFS/fanout.stat" 2>/dev/null || echo "{}" ;;   # the event hop's counters per microVM (M6)
   unfs-stop) valid_id "${1:-}" || { echo "ERR bad id"; exit 2; }; lock && unfs_stop "$1"; unlock; echo "UNFS $1 stopped" ;;
   test-unfs-selfcheck) test_unfs_selfcheck "$@" ;;
   test-unfs-kill) test_unfs_kill "$@" ;;

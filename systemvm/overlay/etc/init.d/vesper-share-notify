@@ -15,4 +15,5 @@ respawn_max=0
 
 depend() {
   need localmount vesper-packages
+  after vesper-services   # vesper-containers records the boot's mode there; the replay's uid depends on it
 }

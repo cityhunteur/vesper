@@ -263,6 +263,14 @@ from its own microVM's server. Docker containers do not use the shim and still g
   resolving the destination with `openat2(RESOLVE_IN_ROOT)`, so a symbolic link in the image cannot place a mount
   outside it, and mounting on the descriptor; a link whose target is missing fails the mount. Shares are synced and
   unmounted, deepest first, before the session reports `EXIT`.
+- **Events (M6):** the share notification sink passes each path it replays to `vesper-unfs fanout`, a root process
+  that queues it (bounded, coalescing, 10,000 paths per microVM) for each microVM whose server exports it and sends
+  `N<TAB>rest` lines to the guest's vsock port 1026 through the jail's `v.sock`. The guest's replay resolves each
+  path beneath the task's root with no link leaving it and sets its mtime to its own value. Only the System VM can
+  reach that port; the guest is the task's own.
+- **Replay identity:** the sink waits for the boot's container mode before choosing its uid, and refuses without it;
+  it used to decide at connection time, and a launcher that connected early made the whole session replay as root
+  (TD-062's fault). It logs `replay uid=` to syslog.
 - **Kill and stop:** a `SIGKILL` to the init process gets 10 s to report `EXIT` (the guest's unmount flushes its
   writes); after that the shim stops the VMM, so a dead server cannot hold a task. The server stops when the task
   stops; `Delete` cleans up again.

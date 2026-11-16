@@ -108,6 +108,11 @@ size_of() { stat -c %s "$1" 2>/dev/null || stat -f %z "$1" 2>/dev/null; }
 as_container() {
   [ "$(id -u)" = 0 ] || return 0
   [ -z "${VESPER_SHARE_MOUNTS:-}" ] || return 0 # self-test against a fake mounts table
+  # The launcher connects as soon as this service listens, which can be before vesper-containers has recorded the
+  # boot's mode; deciding then replayed as root for the whole session. Wait for the mode, and refuse without it
+  # (the launcher connects again 2 s later).
+  for _ in $(seq 1 600); do [ -s /run/vesper/containers ] && break; sleep 0.1; done
+  [ -s /run/vesper/containers ] || { echo "ERR the container mode of this boot is not known yet"; exit 1; }
   [ "$(cat /run/vesper/containers 2>/dev/null)" = mapped ] || return 0
   cuid=$(awk -F: '$1=="dockremap" {print $2; exit}' /etc/subuid 2>/dev/null)
   cgid=$(awk -F: '$1=="dockremap" {print $2; exit}' /etc/subgid 2>/dev/null)
@@ -130,12 +135,26 @@ touch_() {
 notify() {
   . "$(dirname "$0")/../lib/vesper/vsock-peer.sh"
   vsock_host_only
+  # The event hop to shim microVMs (GH #160 M6): every path replayed here also goes to vesper-unfs fanout, which
+  # queues it for each microVM whose share server exports it. The fanout runs as root (it reads the server records
+  # and the jails' vsock sockets); the pipe to it is opened before the replay drops to the container uid, and the
+  # descriptor (3) survives that exec.
+  if [ "$(id -u)" = 0 ] && [ -z "${VESPER_SHARE_MOUNTS:-}" ] && [ -z "${VESPER_FANOUT:-}" ] && [ -x /usr/bin/vesper-unfs ]; then
+    fifo=$(mktemp -u /run/vesper/share-fanout.XXXXXX) && mkfifo -m 0600 "$fifo" && {
+      /usr/bin/vesper-unfs fanout < "$fifo" > /dev/null 2>&1 &
+      exec 3> "$fifo"; rm -f "$fifo"; export VESPER_FANOUT=3
+    }
+  fi
+  trap '' PIPE   # a fanout that has died must not end the replay
   as_container notify
+  # Who the replay runs as, for `probe` (TD-062: it must be container root in a mapped boot).
+  logger -t vesper-share-notify "replay uid=$(id -u) gid=$(id -g) caps=$(awk '$1=="CapEff:" {print $2}' /proc/self/status) fanout=${VESPER_FANOUT:-none}" 2>/dev/null
   load_shares; touched=0; skipped=0; missing=0; rejected=0; errors=0
   echo "VESPER-SHARE-NOTIFY 1"
   while IFS= read -r p; do
     [ -n "$p" ] || continue
     touch_one "$p"
+    [ "$RESULT" = TOUCHED ] && [ -n "${VESPER_FANOUT:-}" ] && { printf '%s\n' "$rp" >&3; } 2>/dev/null
     case "$RESULT" in
       TOUCHED) touched=$((touched+1)) ;; SKIPPED) skipped=$((skipped+1)) ;; MISSING) missing=$((missing+1)) ;;
       REJECTED) rejected=$((rejected+1)) ;; *) errors=$((errors+1)) ;;

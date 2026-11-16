@@ -3,9 +3,11 @@
 package shares
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -197,4 +199,75 @@ func unmountList(rfd int, dests []string) error {
 		}
 	}
 	return first
+}
+
+// Replay applies share events from the System VM (Fanout) on the session's NFS mounts, one "N<TAB>rest" line at a
+// time: each path is opened (the NFS client fetches its attributes again on open) and its mtime is set to the value
+// it already has, which gives IN_MODIFY to watchers in the guest. The value is the server's, so the change that
+// reaches macOS leaves the file's mtime and size as they were, and the launcher's (mtime, size) filter drops it as
+// an echo. It returns the counts it prints at the end.
+func Replay(r io.Reader, sessionDir, root string) (touched, missing, rejected int) {
+	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 64*1024), 64*1024)
+	var dests map[string][]string
+	load := func() {
+		list, err := readList(sessionDir)
+		if err != nil {
+			return
+		}
+		dests = map[string][]string{}
+		for _, s := range list {
+			dests[s.Export] = append(dests[s.Export], s.Dest)
+		}
+	}
+	rfd, err := unix.Open(root, unix.O_PATH|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return 0, 0, 0
+	}
+	defer unix.Close(rfd)
+	for sc.Scan() {
+		e, err := ParseEvent(sc.Text())
+		if err != nil {
+			rejected++
+			continue
+		}
+		if dests == nil {
+			load()
+		}
+		ds := dests[unfs.ExportPath(e.Export)]
+		if len(ds) == 0 {
+			load() // the session may have started since
+			ds = dests[unfs.ExportPath(e.Export)]
+		}
+		if len(ds) == 0 {
+			missing++
+			continue
+		}
+		for _, d := range ds {
+			if touchInRoot(rfd, strings.TrimPrefix(d, "/")+"/"+e.Rest) {
+				touched++
+			} else {
+				missing++
+			}
+		}
+	}
+	return touched, missing, rejected
+}
+
+// touchInRoot sets rel's mtime to its own value, found beneath root with no link leaving it.
+func touchInRoot(rfd int, rel string) bool {
+	fd, err := unix.Openat2(rfd, rel, &unix.OpenHow{
+		Flags:   unix.O_RDONLY | unix.O_NOFOLLOW | unix.O_NONBLOCK | unix.O_CLOEXEC,
+		Resolve: unix.RESOLVE_IN_ROOT | unix.RESOLVE_NO_MAGICLINKS,
+	})
+	if err != nil {
+		return false
+	}
+	defer unix.Close(fd)
+	var st unix.Stat_t
+	if unix.Fstat(fd, &st) != nil {
+		return false
+	}
+	ts := []unix.Timespec{{Sec: 0, Nsec: unix.UTIME_OMIT}, st.Mtim}
+	return unix.UtimesNanoAt(unix.AT_FDCWD, fmt.Sprintf("/proc/self/fd/%d", fd), ts, 0) == nil
 }
