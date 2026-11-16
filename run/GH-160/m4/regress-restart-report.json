@@ -1,0 +1,115 @@
+{
+  "bridge_path": "run/systemvm/vsock/3.sock",
+  "port": 1024,
+  "steps": [
+    {
+      "name": "handshake",
+      "ok": true,
+      "detail": "protocol 1 host vesper",
+      "elapsed_ms": 2
+    },
+    {
+      "name": "import_image",
+      "ok": true,
+      "detail": "IMPORTED docker.io/vesper/trivial:guest",
+      "elapsed_ms": 14
+    },
+    {
+      "name": "start_rs1",
+      "ok": true,
+      "detail": "STARTED rs1 pid=2091",
+      "elapsed_ms": 2231
+    },
+    {
+      "name": "state_file_running",
+      "ok": true,
+      "detail": "vesper-task.json: phase running, VMM pid recorded",
+      "elapsed_ms": 2
+    },
+    {
+      "name": "containerd_killed_and_respawned",
+      "ok": true,
+      "detail": "containerd pid 2943 SIGKILLed; containerd respawned and healthy",
+      "elapsed_ms": 601
+    },
+    {
+      "name": "task_survives_restart",
+      "ok": true,
+      "detail": "after restart: STATE rs1 RUNNING pid=2091 (same VMM pid)",
+      "elapsed_ms": 8
+    },
+    {
+      "name": "kill_after_restart",
+      "ok": true,
+      "detail": "KILLED rs1",
+      "elapsed_ms": 131
+    },
+    {
+      "name": "delete_after_restart",
+      "ok": true,
+      "detail": "DELETED rs1",
+      "elapsed_ms": 589
+    },
+    {
+      "name": "start_rs2",
+      "ok": true,
+      "detail": "STARTED rs2 pid=2668",
+      "elapsed_ms": 2234
+    },
+    {
+      "name": "kill_shim_rs2",
+      "ok": true,
+      "detail": "KILLED-SHIM rs2 2602",
+      "elapsed_ms": 3
+    },
+    {
+      "name": "task_gone_after_shim_crash",
+      "ok": true,
+      "detail": "GONE rs2",
+      "elapsed_ms": 8
+    },
+    {
+      "name": "no_orphaned_microvm",
+      "ok": true,
+      "detail": "microVM EXITED rs2; jail CLEAN rs2",
+      "elapsed_ms": 546
+    },
+    {
+      "name": "container_delete_after_crash",
+      "ok": true,
+      "detail": "container record removed",
+      "elapsed_ms": 30
+    },
+    {
+      "name": "inflight_start_rs3",
+      "ok": true,
+      "detail": "INFLIGHT rs3",
+      "elapsed_ms": 271
+    },
+    {
+      "name": "containerd_killed_during_inflight",
+      "ok": true,
+      "detail": "containerd pid 2267 SIGKILLed; containerd respawned and healthy",
+      "elapsed_ms": 1179
+    },
+    {
+      "name": "inflight_fails_gracefully",
+      "ok": true,
+      "detail": "ctr exited 1: ctr: error reading from server: EOF",
+      "elapsed_ms": 2
+    },
+    {
+      "name": "inflight_task_reconciled",
+      "ok": true,
+      "detail": "after restart the task was ABSENT; killed and deleted",
+      "elapsed_ms": 45
+    },
+    {
+      "name": "no_leftovers",
+      "ok": true,
+      "detail": "CLEAN",
+      "elapsed_ms": 13
+    }
+  ],
+  "passed": true
+}

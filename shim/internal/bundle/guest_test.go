@@ -11,7 +11,7 @@ import (
 func TestGuestConfig(t *testing.T) {
 	p := &specs.Process{Args: []string{"/app", "a b", "'$(touch /bad)'"}, Env: []string{"X=a\nb", "PATH=/bin"}, Cwd: "/work", ApparmorProfile: "host-profile", SelinuxLabel: "host-label", NoNewPrivileges: true}
 	original, _ := json.Marshal(p)
-	raw, err := GuestConfig(p)
+	raw, err := GuestConfig(p, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

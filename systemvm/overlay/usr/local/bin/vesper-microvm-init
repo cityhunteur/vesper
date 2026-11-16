@@ -38,6 +38,8 @@ if [ -n "$net" ] || [ -n "$sharenet" ]; then
 fi
 if [ -n "$sharenet" ] && [ -z "$net" ]; then
   ip link set dev eth0 up && ip addr add "$sharenet" dev eth0 && echo "VESPER-SHARE-NET-OK ${sharenet}" || echo "VESPER-SHARE-NET-FAILED"
+  # The NFS client for the task's shares (GH #160 M4); vesper-console mounts them when the session starts.
+  /bin/busybox modprobe -a nfsv3 >/dev/null 2>&1 && echo "VESPER-NFS-CLIENT-OK" || echo "VESPER-NFS-CLIENT-FAILED"
 fi
 if [ -n "$net" ]; then
   ip link set dev eth0 up && ip addr add "${net%,*}" dev eth0 && ip route add default via "${net#*,}" \

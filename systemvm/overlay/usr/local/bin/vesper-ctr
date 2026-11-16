@@ -2,6 +2,7 @@
 # Drive containerd (ctr) with the Vesper shim v2 runtime inside the System VM (GH #22).
 # usage: vesper-ctr import                        docker save the trivial image into containerd; IMPORTED <ref>
 #        vesper-ctr run NAME WORDS...             ctr run --rm … sh -c "WORDS"; prints RC <code> then OUT <line> per output line
+#        vesper-ctr run-binds [--bind=SRC:DST:ro|rw ...] [--user=UID:GID] NAME WORDS...   the same with bind mounts
 #        vesper-ctr start NAME WORDS...           ctr run -d … sh -c "WORDS"; STARTED NAME pid=N
 #        vesper-ctr state NAME                    STATE NAME <STATUS> pid=N
 #        vesper-ctr kill NAME                     SIGKILL and wait for STOPPED; KILLED NAME
@@ -135,6 +136,31 @@ emit() { # RC then OUT lines from a captured output
 }
 
 run() { run_image "$(ref)" "$@"; }
+# run-binds --bind=SRC:DST:ro|rw ... NAME WORDS...: ctr run --rm with those bind mounts (GH #160 M5: a bind from a
+# macOS share becomes an NFS mount in the microVM). SRC and DST must not hold ':' or ','.
+run_binds() {
+  r=$(ref); [ -n "$r" ] || { echo "ERR import first"; return 1; }
+  set -f; mounts=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --bind=*)
+        b=${1#--bind=}; src=${b%%:*}; rest=${b#*:}; dst=${rest%%:*}; mode=${rest#*:}
+        case "$src$dst" in *,*) echo "ERR bad --bind $1"; return 2 ;; esac
+        case "$mode" in ro|rw) ;; *) echo "ERR bad --bind mode $mode"; return 2 ;; esac
+        mounts="$mounts --mount type=bind,src=$src,dst=$dst,options=rbind:$mode" ;;
+      --user=*)
+        case "${1#--user=}" in *[!0-9:]*|'') echo "ERR bad --user"; return 2 ;; esac
+        mounts="$mounts --user ${1#--user=}" ;;
+      *) break ;;
+    esac
+    shift
+  done
+  name=${1:?}; shift
+  # shellcheck disable=SC2086
+  out=$(ctr_ run --rm --runtime "$RT" $mounts "$r" "$name" sh -c "$*" 2>&1); rc=$?
+  set +f
+  emit "$rc" "$out"
+}
 start() { start_image "$(ref)" "$@"; }
 
 run_image() {
@@ -299,6 +325,7 @@ case "$cmd" in
   exec) exec_ "$@" ;;
   signal-test) signal_test "$@" ;;
   run) run "$@" ;;
+  run-binds) run_binds "$@" ;;
   start) start "$@" ;;
   state) state "$@" ;;
   kill) kill_ "$@" ;;

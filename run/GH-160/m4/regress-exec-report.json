@@ -1,0 +1,121 @@
+{
+  "bridge_path": "run/systemvm/vsock/3.sock",
+  "port": 1024,
+  "steps": [
+    {
+      "name": "handshake",
+      "ok": true,
+      "detail": "connected",
+      "elapsed_ms": 2
+    },
+    {
+      "name": "import",
+      "ok": true,
+      "detail": "IMPORTED docker.io/vesper/trivial:guest",
+      "elapsed_ms": 12
+    },
+    {
+      "name": "stdin_stdout_stderr_exit7",
+      "ok": true,
+      "detail": "RC 7 | OUT stdin-roundtrip | ERR stderr-only",
+      "elapsed_ms": 2812
+    },
+    {
+      "name": "interactive_shell",
+      "ok": true,
+      "detail": "RC 7 | OUT echo interactive-ok; exit 7 | OUT echo interactive-ok; exit 7 | OUT ~ # echo interactive-ok; exit 7 | OUT interactive-ok",
+      "elapsed_ms": 2882
+    },
+    {
+      "name": "run_tty_resize_exit7",
+      "ok": true,
+      "detail": "RC 7 | OUT /dev/pts/0 | OUT BEFORE | OUT 24 80 | OUT AFTER | OUT 37 101",
+      "elapsed_ms": 4948
+    },
+    {
+      "name": "start_exec_host",
+      "ok": true,
+      "detail": "STARTED ex-host pid=30542",
+      "elapsed_ms": 2243
+    },
+    {
+      "name": "exec_no_shell_exit7",
+      "ok": true,
+      "detail": "RC 7 | OUT exec-output | OUT exec-stderr",
+      "elapsed_ms": 118
+    },
+    {
+      "name": "exec_tty_resize_exit7",
+      "ok": true,
+      "detail": "RC 7 | OUT /dev/pts/0 | OUT BEFORE | OUT 24 80 | OUT AFTER | OUT 37 101",
+      "elapsed_ms": 5124
+    },
+    {
+      "name": "exec_signal_kill137",
+      "ok": true,
+      "detail": "RC 137 | OUT exec-signal-ready",
+      "elapsed_ms": 328
+    },
+    {
+      "name": "exec_runtime_error_is_structured",
+      "ok": true,
+      "detail": "RC 1 | OUT exec failed: unable to start container process: exec: \"/no-such-vesper-program\": stat /no-such-vesper-program: no such file or directory | OUT ctr: guest session p1044: guest start p1044: ERROR {\"level\":\"error\",\"msg\":\"exec failed: unable to start container process: exec: \\\"/no-such-vesper-program\\\": stat /no-such-vesper-program: no such file or directory\",\"time\":\"2026-11-16T22:25:37Z\"} (console: /var/log/vesper-microvm-ex-host.log): failed precondition",
+      "elapsed_ms": 142
+    },
+    {
+      "name": "kill_exec_host",
+      "ok": true,
+      "detail": "KILLED ex-host",
+      "elapsed_ms": 132
+    },
+    {
+      "name": "delete_exec_host",
+      "ok": true,
+      "detail": "DELETED ex-host",
+      "elapsed_ms": 597
+    },
+    {
+      "name": "signal_TERM_plain_exit143",
+      "ok": true,
+      "detail": "RC 143",
+      "elapsed_ms": 3084
+    },
+    {
+      "name": "signal_TERM_trap_exit0",
+      "ok": true,
+      "detail": "RC 0 | OUT signal-ready | OUT TERM-caught",
+      "elapsed_ms": 3079
+    },
+    {
+      "name": "signal_KILL_plain_exit137",
+      "ok": true,
+      "detail": "RC 137",
+      "elapsed_ms": 3095
+    },
+    {
+      "name": "init_reaps_orphan",
+      "ok": true,
+      "detail": "RC 7 | OUT orphan-started",
+      "elapsed_ms": 2852
+    },
+    {
+      "name": "tty_init_reaps_orphan",
+      "ok": true,
+      "detail": "RC 7 | OUT orphan-started",
+      "elapsed_ms": 2965
+    },
+    {
+      "name": "init_exit_terminates_exec",
+      "ok": true,
+      "detail": "RC 7 | OUT init-ready",
+      "elapsed_ms": 6180
+    },
+    {
+      "name": "no_leftovers",
+      "ok": true,
+      "detail": "CLEAN",
+      "elapsed_ms": 14
+    }
+  ],
+  "passed": true
+}

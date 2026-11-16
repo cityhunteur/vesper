@@ -45,15 +45,20 @@ microVM, can reach the file server or another microVM's export.
   --unfs-*`; `make systemvm-unfs-suite` 12 of 12 (`run/GH-160/m3/unfs-report.json`). Root server by default, with a
   seccomp filter against user namespaces added to the ADR's sandbox (D-037); memory peak 8 MB, cap 32 MiB; old
   handles work after a restart (no `ESTALE`). The exit gate needs the guest's kernel client, so it moved to M4
-- [ ] M4 Guest: NFS client modules and their `modules.dep` closure, and `virtio_net`, in the initramfs;
+- [x] M4 (2026-11-16) Guest: NFS client modules and their `modules.dep` closure, and `virtio_net`, in the initramfs;
   `vesper_share_net=` brings up `eth0` with no default route; the share list arrives as JSON in the session's `RUN`
   request; a `vesper-console` subcommand decodes it and calls `mount(2)` for each share, shallowest destination
   first, after a 3 s probe of the server, with
   `addr=169.254.77.1,vers=3,proto=tcp,port=2049,mountport=2050,mountproto=tcp,nolock,hard,actimeo=1,lookupcache=positive`
-  Exit gate (moved from M3): the GH #159 `>` then `>>` lost write is reproduced and explained, or shown not to recur
-  in 1,000 tries through the guest's mount
-  (+ `ro`); the guest unmounts its shares before it reports `EXIT`
-- [ ] M5 Shim: OCI bind mounts whose resolved source is under a share mount become NFS mounts; file sources are
+  (+ `ro`); the guest unmounts its shares before it reports `EXIT`. Exit gate (moved from M3): the GH #159 `>` then
+  `>>` lost write is reproduced and explained, or shown not to recur in 1,000 tries through the guest's mount.
+  Done: the list rides as the annotation `io.vesper.shares` of the OCI config the `RUN` request already carries;
+  `vesper-console shares mount|unmount` (`shim/internal/shares`) resolves each destination with
+  `openat2(RESOLVE_IN_ROOT)` under `/newroot`, makes missing directories, and mounts on the descriptor; the session
+  also unmounts on abort. `prepare` copies each module with its `modules.dep` closure. `make
+  systemvm-microvm-shares-suite` 6 of 6; the lost write did not recur in 1,000 tries, judged in the guest and on
+  macOS (`run/GH-160/m4/microvm-shares-report.json`)
+- [ ] M5 (mapping done 2026-11-16; kill path, stop at `PhaseStopped` and sensors remain) Shim: OCI bind mounts whose resolved source is under a share mount become NFS mounts; file sources are
   refused with a clear error; other bind mounts keep today's behaviour; `Kill` forwards the signal as today, and a
   `SIGKILL` whose `EXIT` does not arrive within a bounded wait (outside the task's operation lock) stops the VMM;
   no `SIGTERM` timer; the server stops at `PhaseStopped`; the leak sensors cover servers and namespaces

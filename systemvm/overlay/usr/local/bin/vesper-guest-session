@@ -57,9 +57,14 @@ case "$size" in ''|*[!0-9]*) fail request invalid-size ;; esac
 case "$tty" in 0|1) ;; *) fail request invalid-terminal ;; esac
 mkdir "$dir" || fail start duplicate-session
 relays=''; runner=''
-trap '[ -f "$dir/status" ] || { touch "$dir/abort"; terminate; [ -n "$runner" ] || echo 137 > "$dir/status"; }; kill $relays 2>/dev/null || true' EXIT
+trap '[ -f "$dir/status" ] || { touch "$dir/abort"; terminate; [ -n "$runner" ] || echo 137 > "$dir/status"; }; kill $relays 2>/dev/null || true; [ "$op" != RUN ] || /usr/bin/vesper-console shares unmount "$dir" > /dev/ttyS0 2>&1 || true' EXIT
 head -c "$size" > "$dir/config.json"
 [ "$(wc -c < "$dir/config.json")" = "$size" ] || fail start truncated-config
+# The task's host shares (ADR 0009, GH #160 M4): NFS mounts under its root before it starts, from the share list in
+# its config. EXEC sessions run inside the task and see its mounts already.
+if [ "$op" = RUN ]; then
+  why=$(/usr/bin/vesper-console shares mount "$dir" 2>/dev/ttyS0) || fail shares "$(printf '%s' "$why" | tr -d '"\\' | tr '\n' ' ' | head -c 300)"
+fi
 mkfifo "$dir/in" "$dir/out" "$dir/err"
 socat -u VSOCK-LISTEN:$port,reuseaddr OPEN:$dir/in,wronly > /dev/null 2>/dev/ttyS0 & relays="$relays $!"
 socat -u OPEN:$dir/out,rdonly VSOCK-LISTEN:$((port+1)),reuseaddr > /dev/null 2>/dev/ttyS0 & relays="$relays $!"
@@ -101,4 +106,6 @@ wait "$runner"
 set -- $relays
 wait "$2" || true
 wait "$3" || true
+# Unmount before EXIT, so the writes the guest still buffers reach the server first (ADR 0009, Lifecycle).
+[ "$op" = RUN ] && { /usr/bin/vesper-console shares unmount "$dir" > /dev/ttyS0 2>&1 || true; }
 echo "EXIT $(cat "$dir/status")"
