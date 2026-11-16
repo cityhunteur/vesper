@@ -16,11 +16,13 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/cityhunteur/vesper/shim/internal/nfsprobe"
+	"github.com/cityhunteur/vesper/shim/internal/shares"
 	"github.com/cityhunteur/vesper/shim/internal/unfs"
 )
 
@@ -49,6 +51,19 @@ func main() {
 		os.Exit(1)
 	case "probe":
 		os.Exit(probe(os.Args[2:]))
+	case "fanout": // the share notification sink's paths, to each microVM that exports them (GH #160 M6)
+		f := &shares.Fanout{
+			Dir:      "/run/vesper/microvm/unfs",
+			StatPath: "/run/vesper/microvm/unfs/fanout.stat",
+			Dial: func(id string) (net.Conn, error) {
+				return shares.DialGuest(shares.JailSocket(id), shares.EventPort, 2*time.Second)
+			},
+		}
+		if err := f.Run(os.Stdin); err != nil {
+			fmt.Fprintf(os.Stderr, "vesper-unfs fanout: %v\n", err)
+			os.Exit(1)
+		}
+		time.Sleep(2 * time.Second) // let the senders drain what is queued
 	case "selfcheck": // inside the sandbox only (run --selfcheck)
 		mode, self := "root", ""
 		if len(os.Args) > 2 {

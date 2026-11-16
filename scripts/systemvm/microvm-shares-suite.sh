@@ -80,9 +80,34 @@ ctl ctr -- delete shares-k >/dev/null
 case "${st}|${down}|${killed}" in "STARTED shares-k|UNFS shares-k stopped|KILLED shares-k") record sigkill_bounded_on_dead_server true "${down}; ${killed} after $((t1 - t0)) s (shim grace 10 s)" ;;
   *) record sigkill_bounded_on_dead_server false "${st}; ${down}; ${killed} after $((t1 - t0)) s" ;; esac
 
+# --- 5d. A macOS edit reaches a watcher in the guest; a burst is coalesced; nothing echoes (GH #160 M6) ----------
+mkdir -p "${F}/ev"; echo w > "${F}/ev/watched.txt"; echo b > "${F}/ev/burst.txt"; rm -f "${F}"/ev/ev-*
+st="$(runb --bind="${F}/ev:/data:rw" --detach shares-n 'inotifyd - /data/watched.txt:c /data/burst.txt:c > /tmp/ev 2>&1 & sleep 30; kill $!; grep -c watched /tmp/ev > /data/ev-watched; grep -c burst /tmp/ev > /data/ev-burst')"
+sleep 8
+echo edit1 >> "${F}/ev/watched.txt"
+sleep 4
+for i in $(seq 1 1000); do echo "${i}" >> "${F}/ev/burst.txt"; done
+# unfs3 sets times with whole seconds (TD-066), so the guest's replay keeps the second and the size, not the fraction.
+meta0="$(stat -f '%m %z' "${F}/ev/burst.txt" "${F}/ev/watched.txt" | tr '\n' ' ')"   # what macOS wrote last
+sleep 4
+q1="$(ctl microvm unfs-events | sed -n 's/.*"shares-n":{"queued":\([0-9]*\).*/\1/p')"
+sleep 10   # an echo would come back as more queued paths
+q2="$(ctl microvm unfs-events | sed -n 's/.*"shares-n":{"queued":\([0-9]*\).*/\1/p')"
+stats="$(ctl microvm unfs-events)"
+meta1="$(stat -f '%m %z' "${F}/ev/burst.txt" "${F}/ev/watched.txt" | tr '\n' ' ')"   # after both replays: unchanged
+for _ in $(seq 1 40); do case "$(ctl ctr -- state shares-n)" in *STOPPED*) break ;; esac; sleep 1; done
+ctl ctr -- delete shares-n >/dev/null
+w="$(cat "${F}/ev/ev-watched" 2>/dev/null)"; b="$(cat "${F}/ev/ev-burst" 2>/dev/null)"
+if [ "${st}" = "STARTED shares-n" ] && [ -n "${w}" ] && [ "${w}" -ge 1 ] && [ "${w}" -le 2 ] && [ -n "${b}" ] && [ "${b}" -ge 1 ] && [ "${b}" -lt 100 ] \
+  && [ -n "${q1}" ] && [ "${q1}" = "${q2}" ] && [ "${meta0}" = "${meta1}" ]; then
+  record macos_edit_reaches_guest_watcher true "one edit: ${w} IN_MODIFY; 1,000 appends: ${b}; queued ${q1}, still ${q2} 10 s later (no echo); macOS mtime (to the second, TD-066) and size unchanged by the replays (${meta1}); ${stats}"
+else
+  record macos_edit_reaches_guest_watcher false "${st}; watched=${w:-none} burst=${b:-none}; queued ${q1:-?} then ${q2:-?}; macOS before ${meta0} after ${meta1}; ${stats}"
+fi
+
 # --- 6. Nothing is left -------------------------------------------------------------------------------------------
 left="$(ctl ctr -- leftovers)"; srv=""; gone=true
-for n in shares-a shares-b shares-c shares-d shares-e shares-f shares-g shares-k; do
+for n in shares-a shares-b shares-c shares-d shares-e shares-f shares-g shares-k shares-n; do
   u="$(ctl microvm unfs "${n}" | head -1)"; srv="${srv} ${u};"
   [ "${u}" = "UNFS ${n} absent" ] || gone=false   # only the documented answer counts, not an error or nothing
 done

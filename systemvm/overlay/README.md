@@ -68,7 +68,9 @@ session it first runs `vesper-console shares mount` (GH #160 M4): the shares lis
 `io.vesper.shares` are mounted over NFS under `/newroot` (failure: `ERROR {"stage":"shares",...}`), and they are
 unmounted before `EXIT` and on abort. With `vesper_share_net=` the init also loads `nfsv3`
 (`VESPER-NFS-CLIENT-OK|FAILED`); `prepare` copies every listed module with its `modules.dep` closure, and the list now
-includes `nfsv3`.
+includes `nfsv3`. With shares the init also listens on vsock port 1026 (`vesper-console shares replay`, GH #160
+M6) for host edits from the System VM's `vesper-unfs fanout`, which `vesper-share notify` starts; `vesper-microvm
+unfs-events` prints its counters per microVM (`/run/vesper/microvm/unfs/fanout.stat`).
 It supports start, exec, signal, abort and terminal resize control requests.
 `vesper-console` receives the terminal master through the existing containerd libraries.
 It uses a guest-local Unix socket for resize; no descriptor crosses the VM boundary.

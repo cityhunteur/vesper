@@ -1,0 +1,24 @@
+bash scripts/systemvm/share-notify-selftest.sh
+ok   file_in_rw_share_touched
+ok   mtime_unchanged
+ok   contents_unchanged
+ok   directory_touched
+ok   path_with_space_touched
+ok   symlink_inside_share_touched
+ok   share_root_skipped
+ok   read_only_share_skipped
+ok   missing_path_reported
+ok   missing_not_created
+ok   outside_shares_rejected
+ok   symlink_leaving_share_rejected
+ok   dotdot_rejected
+ok   relative_rejected
+ok   prefix_sibling_rejected
+ok   glob_share_name_literal
+ok   touch_rc_ok
+ok   touch_rc_rejected
+awk: can't open file /proc/self/status
+ source line number 1
+ok   notify_stream_counts
+ok   outside_file_untouched
+share-notify-selftest: passed

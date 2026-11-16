@@ -69,8 +69,17 @@ microVM, can reach the file server or another microVM's export.
   task's server was gone before `Delete`. Council review of M4/M5: 7 confirmed findings fixed (the kill path among
   them); a mount that stalls after the TCP probe succeeds is not bounded (Unknown: the kernel's mount-time RPC
   timeouts were not measured)
-- [ ] M6 Event hop: the GH #150 host-edit replay reaches the microVM, so a macOS edit gives `IN_MODIFY` inside it,
+- [x] M6 (2026-11-16) Event hop: the GH #150 host-edit replay reaches the microVM, so a macOS edit gives `IN_MODIFY` inside it,
   through a bounded, coalescing queue per microVM, with no echo back to macOS
+  Done: the share notification sink passes each replayed path to `vesper-unfs fanout` (root, started before the
+  replay drops to the container uid), which maps it to `N<TAB>rest` for each microVM whose server exports it, with
+  a 10,000-path coalescing queue per microVM, and sends batches to guest vsock port 1026 through the jail's
+  `v.sock`; the guest's `vesper-console shares replay` opens the path on its NFS mount and sets its mtime to its own
+  value (`IN_MODIFY`; unfs3 keeps whole seconds, so the fraction is lost once and comes back once, TD-066; read-only
+  sources get no event). `make systemvm-microvm-shares-suite` 9 of 9: one macOS edit gave a guest watcher 2
+  `IN_MODIFY`, 1,000 appends gave 3 or 4, the fanout's queued count stayed still for 10 s after the edits stopped,
+  and the files' size and whole-second mtime on macOS were unchanged. Council review of M6: 6 confirmed, 5 fixed
+  (the replay's size-change guard, serialised stats, tests) and the read-only one recorded as a limit
 - [ ] M7 `binds-suite` variant against the microVM path, with the failure tests below; deviations recorded as
   accepted or fixed; `design-v0.md`, `docs/SECURITY.md`, TD-032, TD-049 and the decision log updated; #160 closed
 
@@ -127,6 +136,12 @@ microVM, can reach the file server or another microVM's export.
   because `exec` drops them without a uid map. Native code needs no exec, hence the seccomp filter (D-037). The
   sandbox also sets its own umask: the System VM's tools run with 077, which left the root's directories closed to
   a squashing server.
+
+- 2026-11-16 (M6): the share notification sink decided once per connection whether to drop to container root, and
+  the launcher can connect before `vesper-containers` has recorded the boot's mode. Then the whole session replayed
+  as root and containers saw replayed files owned by `nobody` (TD-062's fault, back). M6's sink change made the
+  launcher win that race on every boot; `main` passed only by timing. The sink now waits up to 60 s for the mode
+  and refuses without it, the service starts after `vesper-services`, and it logs the uid it replays as.
 
 ## Decision Log
 

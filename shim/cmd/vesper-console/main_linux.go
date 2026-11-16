@@ -41,6 +41,12 @@ func main() {
 		}
 		return
 	}
+	// shares replay: share events from the System VM on stdin (vsock port 1026, GH #160 M6).
+	if len(os.Args) == 3 && os.Args[1] == "shares" && os.Args[2] == "replay" {
+		t, m, r := shares.Replay(os.Stdin, "/run/sessions/p1028", "/newroot")
+		fmt.Fprintf(os.Stderr, "VESPER-SHARE-REPLAY touched=%d missing=%d rejected=%d\n", t, m, r)
+		return
+	}
 	if len(os.Args) == 5 && os.Args[1] == "resize" {
 		if err := resize(os.Args[2], os.Args[3], os.Args[4]); err != nil {
 			fmt.Fprintln(os.Stderr, err)
