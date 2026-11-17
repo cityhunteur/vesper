@@ -39,6 +39,11 @@ APK_ARGS+=(--file "${ROOT_DIR}/build/shim/vesper-authz:/usr/bin/vesper-authz:075
 APK_ARGS+=(--file "${ROOT_DIR}/build/shim/vesper-runc:/usr/bin/vesper-runc:0755")
 # The share server's sandbox and probe (ADR 0009, GH #160 M3); vesper-microvm launch --unfs-* runs it.
 APK_ARGS+=(--file "${ROOT_DIR}/build/shim/vesper-unfs:/usr/bin/vesper-unfs:0755")
+# The patched unfsd it runs (D-044; built by scripts/systemvm/build-unfs3.sh, which CI repeats on arm64). Checked
+# against its pinned digest here, so the overlay never ships a binary that differs from the reviewed one.
+(cd "${ROOT_DIR}/third_party/unfs3" && shasum -a 256 -c unfsd-aarch64.sha256 >/dev/null) \
+  || { echo "build-overlay: third_party/unfs3/unfsd-aarch64 does not match its pinned digest" >&2; exit 1; }
+APK_ARGS+=(--file "${ROOT_DIR}/third_party/unfs3/unfsd-aarch64:/usr/libexec/vesper/unfsd:0755")
 # The baseline lock rides along so guest-built artifacts can embed the pinned revisions (GH #19 provenance).
 APK_ARGS+=(--file "${ROOT_DIR}/docs/specs/design-v0.baselines.lock.yaml:/var/lib/vesper/baselines.lock.yaml:0644")
 

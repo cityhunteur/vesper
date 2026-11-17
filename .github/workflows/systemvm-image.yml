@@ -13,6 +13,7 @@ on:
       - packaging/macos/vesper-vmlauncher.entitlements
       - src/systemvm.rs
       - src/bin/systemvmctl.rs
+      - third_party/unfs3/**
       - Makefile
       - .github/workflows/systemvm-image.yml
   push:
@@ -28,10 +29,21 @@ on:
       - packaging/macos/vesper-vmlauncher.entitlements
       - src/systemvm.rs
       - src/bin/systemvmctl.rs
+      - third_party/unfs3/**
       - Makefile
       - .github/workflows/systemvm-image.yml
 
 jobs:
+  unfs3-reproducible:
+    # The overlay ships a patched unfsd binary (third_party/unfs3, D-044). This rebuilds it from the pinned source,
+    # patches and container on a native arm64 runner and fails unless the result is byte for byte the shipped one.
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Rebuild unfsd and compare with the shipped binary
+        run: bash scripts/systemvm/build-unfs3.sh
+
   reproducible-image:
     runs-on: ubuntu-latest
     steps:

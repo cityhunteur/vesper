@@ -105,9 +105,10 @@ sleep 8
 echo edit1 >> "${F}/ev/watched.txt"
 sleep 4
 for i in $(seq 1 1000); do echo "${i}" >> "${F}/ev/burst.txt"; done
-# unfs3 keeps and reports whole seconds (TD-066). The fanout sends each event with the macOS mtime rounded up, and
-# the guest sets that, so the macOS mtime moves forward by less than a second, never back (council REL-3; setting
-# the value the guest sees used to floor it). Same size, mtime whole or untouched; anything else fails.
+# The patched unfs3 reports nanoseconds (D-044), so the guest's replay sets each file's own mtime and macOS sees no
+# change. Against a server that reports whole seconds the replay sets the macOS mtime rounded up, which the fanout
+# sends with each event (D-043): forward by less than a second, never back (council REL-3). Same size, and the mtime
+# untouched or whole and less than a second later; anything else fails.
 meta0="$(stat -f '%Fm %z' "${F}/ev/burst.txt" "${F}/ev/watched.txt" | tr '\n' ' ')"   # what macOS wrote last
 sleep 4
 q1="$(ctl microvm unfs-events | sed -n 's/.*"shares-n":{"queued":\([0-9]*\).*/\1/p')"
@@ -123,7 +124,7 @@ ctl ctr -- delete shares-n >/dev/null
 w="$(cat "${F}/ev/ev-watched" 2>/dev/null)"; b="$(cat "${F}/ev/ev-burst" 2>/dev/null)"
 if [ "${st}" = "STARTED shares-n" ] && [ -n "${w}" ] && [ "${w}" -ge 1 ] && [ "${w}" -le 2 ] && [ -n "${b}" ] && [ "${b}" -ge 1 ] && [ "${b}" -lt 100 ] \
   && [ -n "${q1}" ] && [ "${q1}" = "${q2}" ] && [ "${forward}" = yes ]; then
-  record macos_edit_reaches_guest_watcher true "one edit: ${w} IN_MODIFY; 1,000 appends: ${b}; queued ${q1}, still ${q2} 10 s later (no echo); macOS mtime and size before ${meta0}, after the replays ${meta1} (rounded up by the replay, never back: TD-066, REL-3); ${stats}"
+  record macos_edit_reaches_guest_watcher true "one edit: ${w} IN_MODIFY; 1,000 appends: ${b}; queued ${q1}, still ${q2} 10 s later (no echo); macOS mtime and size before ${meta0}, after the replays ${meta1} (untouched, or rounded up and never back: TD-066, REL-3); ${stats}"
 else
   record macos_edit_reaches_guest_watcher false "${st}; watched=${w:-none} burst=${b:-none}; queued ${q1:-?} then ${q2:-?}; macOS before ${meta0} after ${meta1}; ${stats}"
 fi

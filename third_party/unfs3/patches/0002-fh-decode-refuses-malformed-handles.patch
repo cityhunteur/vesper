@@ -1,0 +1,60 @@
+Vesper patch 2 of 3 (TD-065): a malformed file handle is refused, not asserted on.
+
+fh_decode asserted the handle's length bounds and that its length byte matched, so any client could stop the server
+with a forged handle; nfh_valid and PREP decode before they check. fh_decode now returns the invalid handle (zero
+device and inode) for a malformed one, and nfh_valid checks the lengths before decoding, so callers answer STALE.
+The checks still guard the memcpy into the 43-byte inos array.
+
+--- a/fh.c
++++ b/fh.c
+@@ -130,14 +130,18 @@
+  */
+ int nfh_valid(nfs_fh3 fh)
+ {
+-    unfs3_fh_t obj = fh_decode(&fh);
++    unfs3_fh_t obj;
+ 
+-    /* too small? */
+-    if (fh.data.data_len < FH_MINLEN)
++    /* too small, too large or absent? checked before decoding */
++    if (!fh.data.data_val || fh.data.data_len < FH_MINLEN ||
++	fh.data.data_len > FH_MINLEN + FH_MAXLEN)
+ 	return FALSE;
+ 
+-    /* encoded length different from real length? */
+-    if (fh.data.data_len != fh_length(&obj))
++    obj = fh_decode(&fh);
++
++    /* encoded length different from real length? (fh_decode returns an
++       invalid handle for that) */
++    if (!fh_valid(obj) || fh.data.data_len != fh_length(&obj))
+ 	return FALSE;
+ 
+     return TRUE;
+@@ -484,10 +488,12 @@
+     unfs3_fh_t obj;
+     const char *buf;
+ 
+-    assert(fh);
+-    assert(fh->data.data_len >= FH_MINLEN);
+-    assert(fh->data.data_len <= (FH_MINLEN + FH_MAXLEN));
+-    assert(fh->data.data_val);
++    /* A client sends any bytes it likes: refuse a malformed handle with an
++       invalid one (zero device and inode, see fh_valid) rather than an
++       assertion that stops the server. */
++    if (!fh || !fh->data.data_val || fh->data.data_len < FH_MINLEN ||
++	fh->data.data_len > (FH_MINLEN + FH_MAXLEN))
++	return invalid_fh;
+ 
+     buf = fh->data.data_val;
+ 
+@@ -502,7 +508,8 @@
+     memcpy(&obj.len, buf, sizeof(obj.len));
+     buf += sizeof(obj.len);
+ 
+-    assert(fh->data.data_len == (FH_MINLEN + obj.len));
++    if (fh->data.data_len != (FH_MINLEN + obj.len) || obj.len > FH_MAXLEN)
++	return invalid_fh;
+ 
+     if (obj.len)
+         memcpy(obj.inos, buf, obj.len);

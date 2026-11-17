@@ -67,6 +67,10 @@ restarted="no"; [ "${p0}" != "${p1}" ] && restarted="yes (unfsd ${p0} -> ${p1})"
 sum="$(printf '%s\n' "${out}" | grep '^PROBE-SUMMARY')"
 case "${sum}" in *"failed=0"*) record probe_as_root_finds_nothing_outside true "${sum}; server restarted during the probe: ${restarted}; $(printf '%s\n' "${out}" | grep -E '^INFO|forged' | tr '\n' ';')" ;;
   *) record probe_as_root_finds_nothing_outside false "$(printf '%s\n' "${out}" | grep -E 'FAIL|SUMMARY' | tr '\n' ';')" ;; esac
+# Apple's virtio-fs reports a file's owner as the caller, and the System VM caches that for about a second, so a
+# caller sees the last one's uid until then (TD-038). The root probe above used to end with the server's restart
+# (TD-065), which waited out the cache; the patched server does not restart (D-044), so the step waits.
+sleep 3
 out="$(mvm test-unfs-probe "${ID}" --uid 1000 --gid 1000)"; printf '%s\n' "${out}" > "${RAW}/probe-uid1000.txt"
 wait_listen "${ID}"
 sum="$(printf '%s\n' "${out}" | grep '^PROBE-SUMMARY')"; own="$(printf '%s\n' "${out}" | grep '^INFO read-0600')"

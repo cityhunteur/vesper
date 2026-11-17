@@ -104,7 +104,7 @@ obligations of each component's licence, including offering the corresponding so
 | readline | GPL-3.0 |
 | libmnl, libnftnl | LGPL-2.1 / GPL-2.0 |
 | tini | MIT |
-| unfs3, with rpcbind (installed, never started), libtirpc and libtirpc-conf (GH #160, D-021, D-033) | BSD-3-Clause |
+| unfs3, with rpcbind (installed, never started), libtirpc and libtirpc-conf (GH #160, D-021, D-033); the `unfsd` that runs is Vesper's patched build of 0.10.0 (`third_party/unfs3`, its licence and patches there; D-044) | BSD-3-Clause |
 | krb5-libs, krb5-conf, libverto (linked by libtirpc) | MIT |
 | keyutils-libs (linked by krb5-libs) | GPL-2.0-or-later / LGPL-2.0-or-later |
 | util-linux `setpriv`, libcap-ng (drop the share server's uid and capabilities) | GPL-2.0-or-later (libcap-ng library LGPL-2.1-or-later) |
