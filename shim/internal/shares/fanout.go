@@ -305,10 +305,15 @@ func (f *Fanout) send(id string) {
 			conn.Close()
 			conn = nil
 			f.mu.Lock()
+			q, st := f.queues[id], f.stats[id]
+			c, d := q.Coalesced, q.Dropped
 			for _, e := range batch { // put them back; the queue bound still holds
-				f.queues[id].Add(e)
+				q.Add(e)
 			}
-			f.stats[id].Failures++
+			st.Coalesced += q.Coalesced - c // a path offered again meanwhile, or one the bound drops, is counted
+			st.Dropped += q.Dropped - d
+			st.Waiting = q.Len()
+			st.Failures++
 			f.mu.Unlock()
 			time.Sleep(time.Second)
 			continue

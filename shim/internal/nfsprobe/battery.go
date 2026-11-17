@@ -199,6 +199,19 @@ func (b *Battery) Run() bool {
 		_, a, st, err := n.Walk(r0, p)
 		b.check("through symlink "+p, err != nil || st != 0, "status=%v err=%v %v", st, err, a)
 	}
+	// unfs3 follows a symbolic link in the middle of a path, so link-dev/null reaches the sandbox's /dev/null, which
+	// is the System VM's own inode. Its mode must not change (council SEC-1): the attempt sets the mode it already
+	// has, so a failure here changes nothing. What else such a link can read is a recorded residual (SEC-2).
+	if fh, a, st, err := n.Walk(r0, "link-dev/null"); err == nil && st == 0 {
+		b.info("through symlink link-dev/null", "%v", a)
+		cs, cerr := n.Chmod(fh, a.Mode&0o7777)
+		b.check("setattr /dev/null through a symlink", cerr == nil && cs != 0, "status=%v err=%v", cs, cerr)
+	} else {
+		b.check("setattr /dev/null through a symlink", true, "not reachable: status=%v err=%v", st, err)
+	}
+	if _, a, st, err := n.Walk(r0, "link-out/exports"); err == nil && st == 0 {
+		b.info("through symlink link-out/exports", "readable residual (SEC-2): %v", a)
+	}
 	if fh, _, st, _ := n.Lookup(r0, "link-out"); st == 0 {
 		t, st, err := n.Readlink(fh)
 		b.check("readlink link-out", err == nil && st == 0 && t == "/etc", "%q status=%v err=%v", t, st, err)

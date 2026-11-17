@@ -1,0 +1,12 @@
+bash scripts/systemvm/microvm-shares-suite.sh
+ok   binds_become_nfs_mounts
+ok   macos_write_seen_in_guest
+ok   lost_write_does_not_recur
+ok   file_refused_other_binds_unchanged
+ok   non_root_guest_user_writes
+ok   server_stops_with_the_task
+ok   sigkill_bounded_on_dead_server
+FAIL macos_edit_reaches_guest_watcher: STARTED shares-n; watched=2 burst=4; queued 5 then 5; macOS before 1794933863.369521199 3895 1794933859.000000000 8  after 1794933863.000000000 3895 1794933859.000000000 8 ; {\"shares-n\":{\"queued\":5,\"sent\":5,\"coalesced\":0,\"dropped\":0,\"waiting\":0,\"connect_failures\":0}}
+ok   nothing_left
+microvm-shares suite: passed=false (report: /Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/microvm-shares-report.json)
+make: *** [systemvm-microvm-shares-suite] Error 1

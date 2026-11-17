@@ -1,0 +1,41 @@
+bash scripts/systemvm/microvm-binds-suite.sh
+scripts/systemvm/microvm-binds-suite.sh: line 37: /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share/m7/w/big: No such file or directory
+scripts/systemvm/microvm-binds-suite.sh: line 37: /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share/m7/w/big: No such file or directory
+scripts/systemvm/microvm-binds-suite.sh: line 37: /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share/m7/w/big: No such file or directory
+scripts/systemvm/microvm-binds-suite.sh: line 37: /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share/m7/w/big: No such file or directory
+scripts/systemvm/microvm-binds-suite.sh: line 37: /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share/m7/w/big: No such file or directory
+scripts/systemvm/microvm-binds-suite.sh: line 37: /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share/m7/w/big: No such file or directory
+scripts/systemvm/microvm-binds-suite.sh: line 37: /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share/m7/w/big: No such file or directory
+scripts/systemvm/microvm-binds-suite.sh: line 37: /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share/m7/w/big: No such file or directory
+scripts/systemvm/microvm-binds-suite.sh: line 37: /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share/m7/w/big: No such file or directory
+scripts/systemvm/microvm-binds-suite.sh: line 37: /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share/m7/w/big: No such file or directory
+scripts/systemvm/microvm-binds-suite.sh: line 37: /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share/m7/w/big: No such file or directory
+scripts/systemvm/microvm-binds-suite.sh: line 37: /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share/m7/w/big: No such file or directory
+scripts/systemvm/microvm-binds-suite.sh: line 37: /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share/m7/w/big: No such file or directory
+scripts/systemvm/microvm-binds-suite.sh: line 37: /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share/m7/w/big: No such file or directory
+scripts/systemvm/microvm-binds-suite.sh: line 37: /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share/m7/w/big: No such file or directory
+scripts/systemvm/microvm-binds-suite.sh: line 37: /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share/m7/w/big: No such file or directory
+scripts/systemvm/microvm-binds-suite.sh: line 37: /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share/m7/w/big: No such file or directory
+scripts/systemvm/microvm-binds-suite.sh: line 37: /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share/m7/w/big: No such file or directory
+scripts/systemvm/microvm-binds-suite.sh: line 37: /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share/m7/w/big: No such file or directory
+scripts/systemvm/microvm-binds-suite.sh: line 37: /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share/m7/w/big: No such file or directory
+scripts/systemvm/microvm-binds-suite.sh: line 37: /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share/m7/w/big: No such file or directory
+scripts/systemvm/microvm-binds-suite.sh: line 37: /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share/m7/w/big: No such file or directory
+scripts/systemvm/microvm-binds-suite.sh: line 37: /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share/m7/w/big: No such file or directory
+scripts/systemvm/microvm-binds-suite.sh: line 37: /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share/m7/w/big: No such file or directory
+scripts/systemvm/microvm-binds-suite.sh: line 37: /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share/m7/w/big: No such file or directory
+scripts/systemvm/microvm-binds-suite.sh: line 37: /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share/m7/w/big: No such file or directory
+scripts/systemvm/microvm-binds-suite.sh: line 37: /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share/m7/w/big: No such file or directory
+scripts/systemvm/microvm-binds-suite.sh: line 37: /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share/m7/w/big: No such file or directory
+scripts/systemvm/microvm-binds-suite.sh: line 37: /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share/m7/w/big: No such file or directory
+scripts/systemvm/microvm-binds-suite.sh: line 37: /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share/m7/w/big: No such file or directory
+scripts/systemvm/microvm-binds-suite.sh: line 38: /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share/m7/w/big: No such file or directory
+FAIL write_then_kill_keeps_every_byte: STARTED binds-dd; KILLED binds-dd; size none; guest sum none; macOS sum none
+ok   stalled_server_fails_the_run
+ok   server_respawn_under_load
+ok   modes_0600_0700_read_and_write
+ok   deep_path_and_rename
+ok   odd_source_path
+ok   reaper_clears_after_shim_killed
+microvm-binds suite: passed=false (report: /Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/microvm-binds-report.json)
+make: *** [systemvm-microvm-binds-suite] Error 1

@@ -3,6 +3,7 @@ package task
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"github.com/cityhunteur/vesper/shim/internal/backend"
 	"os"
 	"path/filepath"
@@ -120,10 +121,11 @@ func TestDeleteLeavesShutdownToContainerd(t *testing.T) {
 type killBackend struct {
 	backend.Backend
 	stopped chan string
+	refuse  error
 }
 
-func (killBackend) Signal(context.Context, string, uint32, uint32, bool) error { return nil }
-func (b killBackend) Stop(_ context.Context, id string) error                  { b.stopped <- id; return nil }
+func (b killBackend) Signal(context.Context, string, uint32, uint32, bool) error { return b.refuse }
+func (b killBackend) Stop(_ context.Context, id string) error                    { b.stopped <- id; return nil }
 
 // A SIGKILLed init process that never reports EXIT gets its microVM stopped after KillGrace (GH #160 M5); one
 // that does exit in time is left alone.
@@ -165,5 +167,43 @@ func TestKillFallbackStopsTheMicroVM(t *testing.T) {
 	case <-b.stopped:
 		t.Fatal("a task that exited in time had its microVM stopped")
 	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+// A workload that exited by itself while its share server was dead leaves the guest stuck in the unmount before
+// EXIT, refusing signals; a SIGKILL still fails, but the microVM is stopped after the grace (council REL-1). A
+// refused signal other than SIGKILL starts nothing.
+func TestKillFallbackWhenTheGuestRefusesTheSignal(t *testing.T) {
+	ctx := context.Background()
+	old := KillGrace
+	KillGrace = 50 * time.Millisecond
+	defer func() { KillGrace = old }()
+	b := killBackend{stopped: make(chan string, 2), refuse: errors.New("signal p1028: ERR signal session-not-running")}
+	s, err := NewService(ctx, nil, &shutdownProbe{}, b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.task = newTask("init", t.TempDir())
+	if err := s.task.MarkRunning(44); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Kill(ctx, &taskAPI.KillRequest{ID: "init", Signal: 15}); err == nil {
+		t.Fatal("a refused SIGTERM reported success")
+	}
+	select {
+	case <-b.stopped:
+		t.Fatal("a refused SIGTERM stopped the microVM")
+	case <-time.After(200 * time.Millisecond):
+	}
+	if _, err := s.Kill(ctx, &taskAPI.KillRequest{ID: "init", Signal: 9}); err == nil {
+		t.Fatal("a refused SIGKILL reported success")
+	}
+	select {
+	case id := <-b.stopped:
+		if id != "init" {
+			t.Fatalf("stopped %q", id)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the microVM was not stopped after a refused SIGKILL")
 	}
 }

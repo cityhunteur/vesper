@@ -252,13 +252,16 @@ is the normative policy and this section the summary. No new port, socket, share
 
 ## Share network for the shim's microVMs (ADR 0009, GH #160)
 
-Built so far: the network (M2), the server (M3), the guest's mounts (M4) and the shim's mapping and kill path (M5). A containerd task on the Vesper shim whose bind mount comes from a macOS share gets it as an NFS mount
+Built: the network (M2), the server (M3), the guest's mounts (M4), the shim's mapping and kill path (M5), host-edit
+events (M6) and the failure suite (M7). A containerd task on the Vesper shim whose bind mount comes from a macOS share gets it as an NFS mount
 from its own microVM's server. Docker containers do not use the shim and still get virtio-fs binds through runc.
 
 - **Mapping (shim):** a bind mount whose source, with symbolic links followed in the System VM, lies under a
   virtio-fs share mount becomes one export (`--unfs-src`), and the guest mounts it at the bind's destination; a
   source that is a file, or binds from two different shares, are refused with an error naming the mount; other bind
-  mounts keep today's behaviour (ignored by the microVM path).
+  mounts keep today's behaviour (ignored by the microVM path). Both refusals are limits of Vesper's planner and
+  server launch (one share mount per server, directories only), not of unfs3 (council ARC-2, ARC-3); GH #207 and
+  GH #208 track lifting them.
 - **Guest:** `vesper-console shares mount` probes the server for 3 s, then mounts each share under the task's root,
   resolving the destination with `openat2(RESOLVE_IN_ROOT)`, so a symbolic link in the image cannot place a mount
   outside it, and mounting on the descriptor; a link whose target is missing fails the mount. Shares are synced and
@@ -267,18 +270,25 @@ from its own microVM's server. Docker containers do not use the shim and still g
   that queues it (bounded, coalescing, 10,000 paths per microVM) for each microVM whose server exports it and sends
   `N<TAB>rest` lines to the guest's vsock port 1026 through the jail's `v.sock`. The guest's replay resolves each
   path beneath the task's root with no link leaving it and sets its mtime to its own value (read-only sources get
-  no event: no times can be set on a read-only mount). unfs3 keeps whole seconds, so a macOS mtime's fraction is
-  lost once per edit and that change comes back once (TD-066). Only the System VM can reach that port; the guest is
+  no event: no times can be set on a read-only mount). unfs3 keeps and reports whole seconds, so each replay floors
+  the macOS file's mtime by up to a second, and that change comes back once (TD-066, P2: make or ninja on the Mac can
+  miss a rebuild). Only the System VM can reach that port; the guest is
   the task's own.
 - **Replay identity:** the sink waits for the boot's container mode before choosing its uid, and refuses without it;
   it used to decide at connection time, and a launcher that connected early made the whole session replay as root
   (TD-062's fault). It logs `replay uid=` to syslog.
 - **Bounds at session start:** a 3 s probe of the server, then each mount in a child process killed after 5 s, so a
   server that accepts the connection but does not answer fails the `RUN` with an error naming the export.
-- **Accepted deviations (D-038):** TD-065, TD-066, TD-067, and no host-edit events on read-only binds.
+- **Accepted deviations (D-038):** TD-065, TD-066, TD-067's depth limit, and no host-edit events on read-only binds.
+  Not accepted: a write through a descriptor opened before a rename (across directories, in one directory, or on
+  macOS) leaves only that write and loses the file's old content, with no error (TD-068, P0; the owner decides the
+  fix).
+  The host-edit events are best effort: a batch the guest's replay has not finished, and an event offered while
+  its microVM's sender stops, are lost (council REL-6).
 - **Kill and stop:** a `SIGKILL` to the init process gets 10 s to report `EXIT` (the guest's unmount flushes its
-  writes); after that the shim stops the VMM, so a dead server cannot hold a task. The server stops when the task
-  stops; `Delete` cleans up again.
+  writes); after that the shim stops the VMM, so a dead server cannot hold a task. The wait starts even when the
+  guest refuses the signal, as it does once the workload has exited and the session is stuck in that unmount
+  (council REL-1). The server stops when the task stops; `Delete` cleans up again.
 
 - `vesper-microvm launch ID --share-net` gives that microVM a network namespace of its own, bound at
   `/run/vesper/microvm/netns/<id>` (root-only, tmpfs) and joined by the jailer (`--netns`). It holds `lo` and one tap,
@@ -317,8 +327,8 @@ from its own microVM's server. Docker containers do not use the shim and still g
 ### The share server (GH #160 M3)
 
 - `vesper-microvm launch ID --share-net --unfs-mount DIR --unfs-src REL:ro|rw ...` starts one `unfsd` for that
-  microVM, in its namespace, before the jailer. `DIR` must be a virtio-fs mount named without white space or a
-  backslash. The server exports each source as `/s/0`, `/s/1`, ... to `169.254.77.2` only, so no source path reaches
+  microVM, in its namespace, before the jailer. `DIR` must be a virtio-fs mount whose name holds no newline (white
+  space and backslashes are matched in `/proc/mounts`'s escaped form). The server exports each source as `/s/0`, `/s/1`, ... to `169.254.77.2` only, so no source path reaches
   its exports file. It listens on `169.254.77.1` (TCP 2049 and 2050, through an IPv4-mapped IPv6 socket).
 - **Sources** are opened by `vesper-unfs run` with `openat2` beneath the share mount, with no symbolic link on the way
   and no crossing to another mount, then cloned into detached mount trees (`open_tree`) with their final attributes
@@ -326,7 +336,8 @@ from its own microVM's server. Docker containers do not use the shim and still g
   `..` component or a mount that is not virtio-fs is refused, and the launch fails.
 - **Sandbox:** new mount, pid, ipc and uts namespaces; `pivot_root` into a 1 MiB tmpfs that is then read-only, with the
   old root detached. It holds only the exports, a read-only `/usr` and `/lib` (for `unfsd` and its libraries),
-  `/dev/null`, and `/etc` with the exports file and libtirpc's tables. No `/proc`, `/sys`, `/run` or device. Each
+  `/dev/null` (read-only: it still opens for writing, but its mode and owner, the System VM's own, cannot change;
+  council SEC-1), and `/etc` with the exports file and libtirpc's tables. No `/proc`, `/sys`, `/run` or device. Each
   read-only source is bound again, read-only, inside each read-write source that holds it, at a place found beneath
   that export with no symbolic link on the way. The server runs as root with the bounding, permitted and effective
   sets cut to `CAP_CHOWN`, `CAP_DAC_OVERRIDE`, `CAP_FOWNER`, `CAP_FSETID`, `CAP_SETGID` and `CAP_SETUID` (`0xdb`),
@@ -338,7 +349,15 @@ from its own microVM's server. Docker containers do not use the shim and still g
   supervisor, kills what is left in the cgroup and removes it; `DIRTY` names `unfs` or `unfs-cgroup` otherwise.
 - **Inspection:** `vesper-microvm unfs ID` (state, listening, memory), `unfs-isolation ID` (ids, capabilities,
   `no_new_privs`, seccomp, namespaces and every mount in the server's root), `unfs-log ID`.
-- **What remains:** some malformed file handles, of the right length or shortened, make `unfsd` 0.10.0 abort on an
+- **What remains:** unfs3 follows a symbolic link in the middle of a path, so a guest that makes a link in a
+  read-write export can read what the sandbox's root holds: `/usr`, `/lib` and `/etc` (System VM binaries, the
+  exports file and libtirpc tables; no secret). The mount view, not unfs3's path checks, is what confines it; the
+  probe sets `/dev/null`'s mode through such a link and must be refused (SEC-2). The seccomp filter is a short
+  denylist: after an exploit of `unfsd`, `keyctl`, `io_uring`, `userfaultfd`, `perf_event_open`, `bpf` and `ptrace`
+  stay open to a root process (SEC-3, TD-069). The cgroup bounds memory and pids, not CPU or I/O, so a guest can make
+  its server a noisy neighbour (SEC-5, TD-069). With `no_root_squash`, `CAP_CHOWN` and `CAP_FSETID`, guest root can
+  make a setuid-root file on a share; whether Apple's virtio-fs keeps that owner and bit is Unknown, and the System
+  VM mounts shares without `nosuid,nodev` (SEC-4, TD-069). Some malformed file handles, of the right length or shortened, make `unfsd` 0.10.0 abort on an
   assertion; the guest is the only client, so it can stop only its own shares, and after 30 aborts in 60 s they stay
   down (TD-065). `..` at an export's
   root returns a handle of the sandbox's `/s` with its attributes; every operation on it is refused.

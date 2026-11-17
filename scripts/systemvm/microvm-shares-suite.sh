@@ -87,20 +87,25 @@ sleep 8
 echo edit1 >> "${F}/ev/watched.txt"
 sleep 4
 for i in $(seq 1 1000); do echo "${i}" >> "${F}/ev/burst.txt"; done
-# unfs3 sets times with whole seconds (TD-066), so the guest's replay keeps the second and the size, not the fraction.
-meta0="$(stat -f '%m %z' "${F}/ev/burst.txt" "${F}/ev/watched.txt" | tr '\n' ' ')"   # what macOS wrote last
+# unfs3 keeps and reports whole seconds (TD-066), so the guest's replay, which sets a file's mtime to the value it
+# sees, floors the macOS mtime by less than a second (council REL-3, confirmed here). The step pins that: same size,
+# mtime at most a second earlier and whole; anything worse fails.
+meta0="$(stat -f '%Fm %z' "${F}/ev/burst.txt" "${F}/ev/watched.txt" | tr '\n' ' ')"   # what macOS wrote last
 sleep 4
 q1="$(ctl microvm unfs-events | sed -n 's/.*"shares-n":{"queued":\([0-9]*\).*/\1/p')"
 sleep 10   # an echo would come back as more queued paths
 q2="$(ctl microvm unfs-events | sed -n 's/.*"shares-n":{"queued":\([0-9]*\).*/\1/p')"
 stats="$(ctl microvm unfs-events)"
-meta1="$(stat -f '%m %z' "${F}/ev/burst.txt" "${F}/ev/watched.txt" | tr '\n' ' ')"   # after both replays: unchanged
+meta1="$(stat -f '%Fm %z' "${F}/ev/burst.txt" "${F}/ev/watched.txt" | tr '\n' ' ')"   # after the replays
+# Per file: same size, mtime less than a second earlier, and whole or untouched.
+floored="$(printf '%s\n%s\n' "${meta0}" "${meta1}" | awk 'NR==1 {for (i = 1; i <= NF; i++) a[i] = $i} NR==2 {ok = NF == 4; for (i = 1; i <= NF; i += 2) {d = a[i] - $i; if ($(i+1) != a[i+1] || d < 0 || d >= 1 || ($i != a[i] && $i != int($i))) ok = 0}; print ok ? "yes" : "no"}')"
+
 for _ in $(seq 1 40); do case "$(ctl ctr -- state shares-n)" in *STOPPED*) break ;; esac; sleep 1; done
 ctl ctr -- delete shares-n >/dev/null
 w="$(cat "${F}/ev/ev-watched" 2>/dev/null)"; b="$(cat "${F}/ev/ev-burst" 2>/dev/null)"
 if [ "${st}" = "STARTED shares-n" ] && [ -n "${w}" ] && [ "${w}" -ge 1 ] && [ "${w}" -le 2 ] && [ -n "${b}" ] && [ "${b}" -ge 1 ] && [ "${b}" -lt 100 ] \
-  && [ -n "${q1}" ] && [ "${q1}" = "${q2}" ] && [ "${meta0}" = "${meta1}" ]; then
-  record macos_edit_reaches_guest_watcher true "one edit: ${w} IN_MODIFY; 1,000 appends: ${b}; queued ${q1}, still ${q2} 10 s later (no echo); macOS mtime (to the second, TD-066) and size unchanged by the replays (${meta1}); ${stats}"
+  && [ -n "${q1}" ] && [ "${q1}" = "${q2}" ] && [ "${floored}" = yes ]; then
+  record macos_edit_reaches_guest_watcher true "one edit: ${w} IN_MODIFY; 1,000 appends: ${b}; queued ${q1}, still ${q2} 10 s later (no echo); macOS mtime and size before ${meta0}, after the replays ${meta1} (the fraction floored by the replay: TD-066, REL-3); ${stats}"
 else
   record macos_edit_reaches_guest_watcher false "${st}; watched=${w:-none} burst=${b:-none}; queued ${q1:-?} then ${q2:-?}; macOS before ${meta0} after ${meta1}; ${stats}"
 fi
