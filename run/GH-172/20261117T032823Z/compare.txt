@@ -1,0 +1,4 @@
+reference=all-pass partial=true total=8 passed=4 to_explain={"failed": 4} not_passing_on_reference=0 missing_from_run=0
+class vsock-reset-after-snapshot: 4
+classes that explained nothing in this run: apple-cpu-features-unknown, apple-cpu-no-cache-topology, apple-cpu-ssb-vulnerable, balloon-stats-not-refreshed, guest-ssh-timeout-under-load, max-devices-worker-timeout, no-dmi, no-userfaultfd, rate-limiter-balloon-tolerance, upstream-platform-skip, vmclock-gen-counter-flag, vmm-exit-timeout-under-load, vmm-memory-overhead
+upstream-compare: class vsock-reset-after-snapshot explained 4 tests, more than its max of 3

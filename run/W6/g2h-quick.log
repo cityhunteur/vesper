@@ -1,0 +1,31 @@
+[upstream-suite 03:28:23] revision d83d72b710361a10294480131377b1b00b163af8 (v1.16.0), container public.ecr.aws/firecracker/fcuvm:v90@sha256:657863a847acff0b52888a237173f0f6740d7ace175a2d7423cf5f0307db9698, artefacts firecracker-ci/20260603-e656faf58d6c-0/aarch64, selection: integration_tests/functional/test_vsock.py::test_vsock_transport_reset_g2h
+[upstream-suite 03:28:24] artefacts: 15 objects
+[upstream-suite 03:28:24] release binaries: cpu-template-helper cpu-template-helper.debug firecracker firecracker.debug jailer jailer.debug rebase-snap rebase-snap.debug seccompiler-bin seccompiler-bin.debug snapshot-editor snapshot-editor.debug 
+[upstream-suite 03:28:24] restart the System VM with 4 vCPUs, 8192 MiB and /Volumes/Workspace/github.com/cityhunteur/vesper/build/upstream-suite shared
+systemvm-up: running (pid 23036); bridge run/systemvm/vsock/3.sock; log /Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/vmlauncher.log
+{"status":"bridge-listening","elapsed_ms":96,"ready_pattern":"login:","console_log":"/Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/console.log","bridge":"run/systemvm/vsock/3.sock"}
+{"status":"ready","elapsed_ms":3172,"ready_pattern":"login:","console_log":"/Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/console.log"}
+{"status":"probe-ok","elapsed_ms":5413,"ready_pattern":"login:","console_log":"/Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/console.log"}
+systemvm-up: MOUNTED share0 /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share mode=rw
+systemvm-up: MOUNTED share1 /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share-ro mode=ro
+systemvm-up: MOUNTED share2 /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share-nowatch mode=rw
+systemvm-up: MOUNTED share3 /Volumes/Workspace/github.com/cityhunteur/vesper/build/upstream-suite mode=rw
+docker-up: containers unmapped: this boot is for the upstream Firecracker suite only; a container can be root on the System VM (ADR 0010)
+docker-up: vesper-proxy pid 23192; DOCKER_HOST=unix:///Volumes/Workspace/github.com/cityhunteur/vesper/run/vesper/docker.sock; published ports via the guest relay (status /Volumes/Workspace/github.com/cityhunteur/vesper/run/vesper/ports.json)
+srw-------@ 1 pravin  staff  0 17 Nov 03:28 /Volumes/Workspace/github.com/cityhunteur/vesper/run/vesper/docker.sock
+[upstream-suite 03:28:38] tun loaded; data disk 50 GB free
+[upstream-suite 03:28:38] stage the tree into vesper-upstream-src
+[upstream-suite 03:28:59] build the examples and tools that tests expect in build/cargo_target/aarch64-unknown-linux-musl/release
+[upstream-suite 03:29:02] staged: build clippy-tracing clippy-tracing.d cpu-template-helper cpu-template-helper.debug deps examples firecracker firecracker.debug incremental jailer jailer.debug rebase-snap rebase-snap.debug seccompiler-bin seccompiler-bin.debug snapshot-editor snapshot-editor.debug 
+[upstream-suite 03:29:02] collect the selection
+[upstream-suite 03:29:08] run 8 tests with 3 workers, 600 s per test, 14400 s in all
+rc=1 wall_s=1565 collected=8 stopped=no selection=integration_tests/functional/test_vsock.py::test_vsock_transport_reset_g2h
+collect: 8 tests (8 collected): {'failed': 4, 'passed': 4}
+reference=all-pass partial=true total=8 passed=4 to_explain={"failed": 4} not_passing_on_reference=0 missing_from_run=0
+class vsock-reset-after-snapshot: 4
+classes that explained nothing in this run: apple-cpu-features-unknown, apple-cpu-no-cache-topology, apple-cpu-ssb-vulnerable, balloon-stats-not-refreshed, guest-ssh-timeout-under-load, max-devices-worker-timeout, no-dmi, no-userfaultfd, rate-limiter-balloon-tolerance, upstream-platform-skip, vmclock-gen-counter-flag, vmm-exit-timeout-under-load, vmm-memory-overhead
+upstream-compare: class vsock-reset-after-snapshot explained 4 tests, more than its max of 3
+[upstream-suite 03:55:15] wiped /srv and the test results in vesper-upstream-src
+[upstream-suite 03:55:15] evidence in run/GH-172/20261117T032823Z
+[upstream-suite 03:55:18] TRIM discard=68719476736 trimmed=59622445056 (/var/lib/vesper-data: 59622445056 bytes trimmed)
+[upstream-suite 03:55:18] restore the previous launch config and restart the System VM

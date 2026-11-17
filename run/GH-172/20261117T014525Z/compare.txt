@@ -1,0 +1,16 @@
+reference=all-pass partial=false total=980 passed=756 to_explain={"error": 34, "failed": 94, "skipped": 96} not_passing_on_reference=0 missing_from_run=0
+class apple-cpu-features-unknown: 8
+class apple-cpu-no-cache-topology: 24
+class apple-cpu-ssb-vulnerable: 10
+class guest-ssh-timeout-under-load: 5
+class max-devices-worker-timeout: 2
+class no-dmi: 1
+class no-userfaultfd: 8
+class rate-limiter-balloon-tolerance: 6
+class upstream-platform-skip: 96
+class vmm-memory-overhead: 60
+class vsock-reset-after-snapshot: 4
+classes that explained nothing in this run: balloon-stats-not-refreshed, vmclock-gen-counter-flag, vmm-exit-timeout-under-load
+PASSED-ALONE integration_tests/functional/test_drive_vhost_user.py::test_config_change[vmlinux-6.1.172-PCI_OFF] under load: failed subprocess.TimeoutExpired: Command '['ip', 'netns', 'exec', 'netns-gw0-22', 'ssh', '-o', 'ControlPath=/srv/jailer/firecracker/c9992558-24de-49b9-aac3-e79d8fe9d7d4/root/ssh-0.sock', 'root@192.168.0.2', 'mkfs.ext4 /dev/vdb && mkdir -p /tmp/tmp && mount /dev/vdb /tmp/tmp && umount /tmp/tmp']' timed out after 100 seconds
+PASSED-ALONE integration_tests/functional/test_net.py::test_tap_offload[uvm_restored-vmlinux-6.1.172-PCI_OFF] under load: failed ChildProcessError: [17923] Command: ['ip', 'netns', 'exec', 'netns-gw4-3', 'ssh', '-o', 'ControlPath=/srv/jailer/firecracker/9002adfe-9be5-43a0-aa11-9268a1c9c5c6/root/ssh-0.sock', 'root@192.168.0.2', 'sync; cat /tmp/out.txt'] [17923] stdout: [17923] stderr: cat: /tmp/out.txt: No such file or directory Returned error code: 1
+upstream-compare: class vsock-reset-after-snapshot explained 4 tests, more than its max of 3

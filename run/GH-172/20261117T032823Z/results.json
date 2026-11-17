@@ -1,0 +1,34 @@
+{
+ "integration_tests/functional/test_vsock.py::test_vsock_transport_reset_g2h[vmlinux-5.10.253-PCI_OFF-1vcpu]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_vsock.py::test_vsock_transport_reset_g2h[vmlinux-5.10.253-PCI_OFF-2vcpu]": {
+  "outcome": "failed",
+  "message": "worker 'gw1' crashed while running 'integration_tests/functional/test_vsock.py::test_vsock_transport_reset_g2h[vmlinux-5.10.253-PCI_OFF-2vcpu]'"
+ },
+ "integration_tests/functional/test_vsock.py::test_vsock_transport_reset_g2h[vmlinux-5.10.253-PCI_ON-1vcpu]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_vsock.py::test_vsock_transport_reset_g2h[vmlinux-5.10.253-PCI_ON-2vcpu]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_vsock.py::test_vsock_transport_reset_g2h[vmlinux-6.1.172-PCI_OFF-1vcpu]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_vsock.py::test_vsock_transport_reset_g2h[vmlinux-6.1.172-PCI_OFF-2vcpu]": {
+  "outcome": "failed",
+  "message": "worker 'gw2' crashed while running 'integration_tests/functional/test_vsock.py::test_vsock_transport_reset_g2h[vmlinux-6.1.172-PCI_OFF-2vcpu]'"
+ },
+ "integration_tests/functional/test_vsock.py::test_vsock_transport_reset_g2h[vmlinux-6.1.172-PCI_ON-1vcpu]": {
+  "outcome": "failed",
+  "message": "worker 'gw3' crashed while running 'integration_tests/functional/test_vsock.py::test_vsock_transport_reset_g2h[vmlinux-6.1.172-PCI_ON-1vcpu]'"
+ },
+ "integration_tests/functional/test_vsock.py::test_vsock_transport_reset_g2h[vmlinux-6.1.172-PCI_ON-2vcpu]": {
+  "outcome": "failed",
+  "message": "assert 0 == 1"
+ }
+}
