@@ -56,8 +56,7 @@ func TestMakePlan(t *testing.T) {
 
 func TestMakePlanRefusals(t *testing.T) {
 	cases := map[string][]specs.Mount{
-		"file":       {{Destination: "/f", Type: "bind", Source: "/Users/me/a.txt"}},
-		"root dest":  {{Destination: "/", Type: "bind", Source: "/Users/me/a"}},
+		"root dest": {{Destination: "/", Type: "bind", Source: "/Users/me/a"}},
 	}
 	for name, m := range cases {
 		if _, err := MakePlan(m, []string{"/Users/me", "/Volumes/other"}, fake); err == nil {
@@ -104,9 +103,16 @@ func TestMakePlanBoundaries(t *testing.T) {
 		{Destination: "/rw", Type: "bind", Source: "/Users/me/d", Options: []string{"rw"}},
 		{Destination: "/ro", Type: "bind", Source: "/Users/me/d", Options: []string{"ro"}},
 	}, []string{"/Users/me"}, r)
-	want := []Share{{Dest: "/rw", Export: "/s/0"}, {Dest: "/ro", Export: "/s/1", ReadOnly: true}}
-	if err != nil || len(p.Sources) != 2 || !reflect.DeepEqual(p.Shares, want) {
-		t.Errorf("one directory bound both ways must be two exports: %+v %v", p, err)
+	want := []Share{{Dest: "/rw", Export: "/s/0"}, {Dest: "/ro", Export: "/s/0", ReadOnly: true}}
+	if err != nil || !reflect.DeepEqual(p.Sources, []unfs.Source{{Rel: "d"}}) || !reflect.DeepEqual(p.Shares, want) {
+		t.Errorf("one directory bound both ways must be one read-write export, read-only in the guest at /ro: %+v %v", p, err)
+	}
+	p, err = MakePlan([]specs.Mount{
+		{Destination: "/ro", Type: "bind", Source: "/Users/me/d", Options: []string{"ro"}},
+		{Destination: "/rw", Type: "bind", Source: "/Users/me/d", Options: []string{"rw"}},
+	}, []string{"/Users/me"}, r)
+	if err != nil || !reflect.DeepEqual(p.Sources, []unfs.Source{{Rel: "d"}}) || !p.Shares[0].ReadOnly || p.Shares[1].ReadOnly {
+		t.Errorf("read-only first, then read-write: %+v %v", p, err)
 	}
 	if err := CheckDest("/a\nb"); err == nil {
 		t.Error("a newline in a destination was accepted")
@@ -158,6 +164,44 @@ func TestMakePlanTwoShares(t *testing.T) {
 	}
 	if p, err := MakePlan([]specs.Mount{{Destination: "/w", Type: "bind", Source: "/Users/me/x"}}, shares, fake); err != nil || len(p.Sources) != 1 {
 		t.Errorf("a source beside the inner share: %+v %v", p, err)
+	}
+}
+
+// GH #208: a file bind is a file source and a file share; a read-only file inside a read-write directory is nested.
+func TestMakePlanFiles(t *testing.T) {
+	p, err := MakePlan([]specs.Mount{
+		{Destination: "/app", Type: "bind", Source: "/Users/me/proj", Options: []string{"rw"}},
+		{Destination: "/app/conf.txt", Type: "bind", Source: "/Users/me/proj/conf.txt", Options: []string{"ro"}},
+		{Destination: "/etc/app.txt", Type: "bind", Source: "/Users/me/app.txt", Options: []string{"rw"}},
+	}, []string{"/Users/me"}, fake)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantSrc := []unfs.Source{{Rel: "proj"}, {Rel: "proj/conf.txt", ReadOnly: true, File: true}, {Rel: "app.txt", File: true}}
+	if !reflect.DeepEqual(p.Sources, wantSrc) {
+		t.Errorf("sources %+v", p.Sources)
+	}
+	wantShares := []Share{{Dest: "/app", Export: "/s/0"}, {Dest: "/app/conf.txt", Export: "/s/1", ReadOnly: true, File: true}, {Dest: "/etc/app.txt", Export: "/s/2", File: true}}
+	if !reflect.DeepEqual(p.Shares, wantShares) {
+		t.Errorf("shares %+v", p.Shares)
+	}
+	if got := strings.Join(p.LaunchArgs(), " "); got != "--share-net --unfs-mount /Users/me --unfs-src proj:rw --unfs-src proj/conf.txt:rof --unfs-src app.txt:rwf" {
+		t.Errorf("launch args %s", got)
+	}
+	if n := unfs.Nests(p.Sources); !reflect.DeepEqual(n, []unfs.Nest{{Outer: 0, Inner: 1, Sub: "conf.txt"}}) {
+		t.Errorf("nests %+v", n)
+	}
+	v, err := Encode(p.Shares)
+	if got, err2 := FromAnnotations(map[string]string{Annotation: v}); err != nil || err2 != nil || !reflect.DeepEqual(got, p.Shares) {
+		t.Errorf("annotation round trip %+v %v %v", got, err, err2)
+	}
+	// Events: a file source's own path gives its one entry; nothing below it.
+	srv := Server{Mounts: p.Mounts, Sources: p.Sources}
+	if got := srv.Map("/Users/me/app.txt"); !reflect.DeepEqual(got, []Event{{Export: 2, Rest: unfs.FileName}}) {
+		t.Errorf("file event %+v", got)
+	}
+	if got := srv.Map("/Users/me/app.txt/x"); got != nil {
+		t.Errorf("below a file %+v", got)
 	}
 }
 

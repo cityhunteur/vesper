@@ -25,11 +25,13 @@ import (
 // Annotation is the key of the share list in the guest's OCI config.
 const Annotation = "io.vesper.shares"
 
-// Share is one NFS mount in the guest: the export Export of the microVM's server at Dest under the task's root.
+// Share is one NFS mount in the guest: the export Export of the microVM's server at Dest under the task's root. A
+// File share is mounted at a hidden place in the guest, and its one file, unfs.FileName, is bound onto Dest (GH #208).
 type Share struct {
 	Dest     string `json:"dest"`
 	Export   string `json:"export"`
 	ReadOnly bool   `json:"ro"`
+	File     bool   `json:"file,omitempty"`
 }
 
 // MountOptions are the NFS options of every share (ADR 0009, Guest), without "ro".
@@ -180,7 +182,7 @@ var HostResolver = Resolver{
 }
 
 // MakePlan maps a spec's mounts. A bind mount whose resolved source lies under one of shareMounts (the virtio-fs
-// mount points) becomes a share; a file source is refused; other mounts are left as they were (ADR 0009, Shim). The
+// mount points) becomes a share, a directory or a single file (GH #208); other mounts are left as they were (ADR 0009, Shim). The
 // sources may come from several share mounts, one server serving them all (GH #207). A source that holds another
 // share mount is refused: it is cloned without its submounts, so the guest would see, and could write, the outer
 // share's view of that directory, even when the inner share is read-only (council JDG-1, ARC-9).
@@ -205,9 +207,7 @@ func MakePlan(mounts []specs.Mount, shareMounts []string, r Resolver) (Plan, err
 		if err != nil {
 			return Plan{}, fmt.Errorf("mount %s: %w", m.Destination, err)
 		}
-		if !dir {
-			return Plan{}, fmt.Errorf("mount %s: the source %s is a file; only directories from a share can be mounted in a microVM", m.Destination, m.Source)
-		}
+		// Anything that is not a directory is a file source; the server refuses one that is not a regular file.
 		for _, other := range shareMounts {
 			if other != sm && (other == src || strings.HasPrefix(other, src+"/")) {
 				return Plan{}, fmt.Errorf("mount %s: the source %s holds another share, %s; bind a directory inside one share", m.Destination, m.Source, other)
@@ -229,15 +229,27 @@ func MakePlan(mounts []specs.Mount, shareMounts []string, r Resolver) (Plan, err
 			mountIndex[sm] = mi
 			p.Mounts = append(p.Mounts, sm)
 		}
-		// The key holds the mount: the same relative path in two shares is two sources (council SEC-4).
-		s := unfs.Source{Mount: mi, Rel: rel, ReadOnly: readOnly(m)}
-		i, ok := index[s]
+		// The key holds the mount: the same relative path in two shares is two sources (council SEC-4). It does not
+		// hold the mode: a source bound both read-write and read-only is one read-write export, and its read-only
+		// destinations are read-only in the guest. Two exports of one directory give identical file handles (both
+		// export roots are the same inode), so unfs3 cannot tell them apart and a write could be checked against the
+		// read-only one; the task holds write access to the source anyway (GH #208 prototype).
+		ro := readOnly(m)
+		key := unfs.Source{Mount: mi, Rel: rel, File: !dir}
+		if key.File && rel == "." {
+			return Plan{}, fmt.Errorf("mount %s: the source %s is a share's root but not a directory", m.Destination, m.Source)
+		}
+		i, ok := index[key]
 		if !ok {
 			i = len(p.Sources)
-			index[s] = i
+			index[key] = i
+			s := key
+			s.ReadOnly = ro
 			p.Sources = append(p.Sources, s)
+		} else if !ro {
+			p.Sources[i].ReadOnly = false
 		}
-		p.Shares = append(p.Shares, Share{Dest: path.Clean(m.Destination), Export: unfs.ExportPath(i), ReadOnly: s.ReadOnly})
+		p.Shares = append(p.Shares, Share{Dest: path.Clean(m.Destination), Export: unfs.ExportPath(i), ReadOnly: ro, File: key.File})
 	}
 	if len(p.Sources) > unfs.MaxSources {
 		return Plan{}, fmt.Errorf("%d share sources; at most %d", len(p.Sources), unfs.MaxSources)

@@ -168,6 +168,10 @@ opened beneath its own share mount and keyed by it, read-only nests stay within 
 another share mount is refused, because a source is cloned without its submounts. The server record is versioned
 (`unfs.Args`) and parsed only in Go.
 
+Update 2026-11-17 (GH #208, D-050): a file source is supported. The server attaches it on a fixed name `f` in a
+read-only directory `/s/N`, and the guest mounts `/s/N` at a hidden place and binds `f` onto the destination. A
+file replaced on macOS by rename goes stale in the guest (`ESTALE`). The same work found TD-072 (D-049).
+
 Nothing in the root namespace listens for NFS, so no rule there has to hold for condition 3.
 
 ## Alternatives considered

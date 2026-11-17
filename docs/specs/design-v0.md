@@ -231,10 +231,11 @@ Backend A runs stock Firecracker on Linux, so its parity depends on the System V
   [ADR 0009](../design-docs/adr/0009-shares-into-microvms-over-nfs.md), D-038) for containerd tasks on the Vesper
   shim: a bind from a share is an NFSv3 mount from one sandboxed server per microVM (Vesper's patched `unfs3`,
   D-044), in that microVM's own network namespace (`make systemvm-unfs-suite`, `make
-  systemvm-microvm-shares-suite`, `make systemvm-microvm-binds-suite`). Deviations: file sources are refused (GH #208);
+  systemvm-microvm-shares-suite`, `make systemvm-microvm-binds-suite`). Deviations: a single-file bind goes stale (`ESTALE`)
+  when macOS replaces the file by rename, as editors' atomic saves do, until the task restarts (GH #208, D-050);
   binds from several shares share one server (GH #207, D-047); at most 40 directories below a bind and 1,024-byte
   paths (TD-067); a share's own I/O is bounded by a rate limit on its network (TD-069, D-045); read-only binds
-  get no host-edit events. The patched server fixed the data loss on appends (TD-068), whole-second times (TD-066)
+  get no host-edit events. The patched server fixed the data loss on appends (TD-068) and on writes to a file also reachable read-only (TD-072), whole-second times (TD-066)
   and the crash on malformed handles (TD-065). Docker containers still run on runc with virtio-fs binds (GH #53).
 * A microVM gets the vCPUs and memory its workload asks for. **Not met** (TD-048): every microVM has 1 vCPU and 256 MiB.
 * Stock Firecracker runs under the jailer in the System VM. **Meets the requirement** (`make systemvm-microvm-suite`).
