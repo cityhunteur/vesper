@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -319,10 +320,15 @@ func (s *Service) Kill(ctx context.Context, r *taskAPI.KillRequest) (*emptypb.Em
 		// task could then be neither killed nor deleted (council REL-1).
 		fallback := r.ExecID == "" && r.Signal == uint32(syscall.SIGKILL)
 		if err := s.backend.Signal(ctx, r.ID, t.Port, r.Signal, r.All); err != nil {
-			if fallback {
-				go s.killFallback(r.ID, t)
+			if !fallback {
+				return nil, errgrpc.ToGRPCf(errdefs.ErrUnknown, "%v", err)
 			}
-			return nil, errgrpc.ToGRPCf(errdefs.ErrUnknown, "%v", err)
+			go s.killFallback(r.ID, t)
+			// The guest says its workload is no longer running: the process the SIGKILL was for is gone, and the
+			// fallback ends the session it left behind, so the kill succeeds.
+			if !strings.Contains(err.Error(), "session-not-running") {
+				return nil, errgrpc.ToGRPCf(errdefs.ErrUnknown, "%v", err)
+			}
 		}
 		if fallback {
 			go s.killFallback(r.ID, t)

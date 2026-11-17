@@ -42,6 +42,20 @@ func jump(code uint16, k uint32, jt, jf uint8) unix.SockFilter {
 	return unix.SockFilter{Code: code, Jt: jt, Jf: jf, K: k}
 }
 
+// denied are calls an exploited unfsd, still root with six capabilities, could use against the System VM and that
+// unfsd never makes: the kernel keyrings (root's are shared across the System VM; request_key starts a helper),
+// io_uring, userfaultfd, perf events, BPF, tracing and other processes' memory, module and kexec loading, and the
+// mount API (council SEC-3, TD-069). Most also need a capability the server lacks; the filter refuses them anyway.
+var denied = []uintptr{
+	unix.SYS_KEYCTL, unix.SYS_ADD_KEY, unix.SYS_REQUEST_KEY,
+	unix.SYS_IO_URING_SETUP, unix.SYS_IO_URING_ENTER, unix.SYS_IO_URING_REGISTER,
+	unix.SYS_USERFAULTFD, unix.SYS_PERF_EVENT_OPEN, unix.SYS_BPF,
+	unix.SYS_PTRACE, unix.SYS_PROCESS_VM_READV, unix.SYS_PROCESS_VM_WRITEV,
+	unix.SYS_INIT_MODULE, unix.SYS_FINIT_MODULE, unix.SYS_DELETE_MODULE, unix.SYS_KEXEC_LOAD,
+	unix.SYS_MOUNT, unix.SYS_UMOUNT2, unix.SYS_PIVOT_ROOT, unix.SYS_OPEN_TREE, unix.SYS_MOVE_MOUNT,
+	unix.SYS_FSOPEN, unix.SYS_FSCONFIG, unix.SYS_FSMOUNT, unix.SYS_FSPICK, unix.SYS_MOUNT_SETATTR,
+}
+
 // filter builds the BPF program.
 func filter(arch uint32) []unix.SockFilter {
 	const (
@@ -61,6 +75,9 @@ func filter(arch uint32) []unix.SockFilter {
 	if arch == auditArchX86_64 {
 		// x32 calls share the x86-64 audit architecture and carry __X32_SYSCALL_BIT in the number; refuse them all.
 		prog = append(prog, jump(jset, x32SyscallBit, 0, 1), stmt(ret, eperm))
+	}
+	for _, nr := range denied {
+		prog = append(prog, jump(jeq, uint32(nr), 0, 1), stmt(ret, eperm))
 	}
 	return append(prog,
 		jump(jeq, uint32(unix.SYS_CLONE3), 0, 1),

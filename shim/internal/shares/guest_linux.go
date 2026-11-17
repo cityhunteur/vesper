@@ -273,7 +273,7 @@ func Replay(r io.Reader, sessionDir, root string) (touched, missing, rejected in
 			continue
 		}
 		for _, d := range ds {
-			if touchInRoot(rfd, strings.TrimPrefix(d, "/")+"/"+e.Rest) {
+			if touchInRoot(rfd, strings.TrimPrefix(d, "/")+"/"+e.Rest, e.Mtime) {
 				touched++
 			} else {
 				missing++
@@ -283,8 +283,9 @@ func Replay(r io.Reader, sessionDir, root string) (touched, missing, rejected in
 	return touched, missing, rejected
 }
 
-// touchInRoot sets rel's mtime to its own value, found beneath root with no link leaving it.
-func touchInRoot(rfd int, rel string) bool {
+// touchInRoot sets rel's mtime, found beneath root with no link leaving it: to mtime, the macOS mtime rounded up,
+// when the event carries one and it is not older than what the server now shows, or else to its own value.
+func touchInRoot(rfd int, rel string, mtime int64) bool {
 	fd, err := unix.Openat2(rfd, rel, &unix.OpenHow{
 		Flags:   unix.O_RDONLY | unix.O_NOFOLLOW | unix.O_NONBLOCK | unix.O_CLOEXEC,
 		Resolve: unix.RESOLVE_IN_ROOT | unix.RESOLVE_NO_MAGICLINKS,
@@ -298,7 +299,11 @@ func touchInRoot(rfd int, rel string) bool {
 		return false
 	}
 	p := fmt.Sprintf("/proc/self/fd/%d", fd)
-	ts := []unix.Timespec{{Sec: 0, Nsec: unix.UTIME_OMIT}, st.Mtim}
+	set := st.Mtim
+	if mtime >= st.Mtim.Sec && mtime > 0 {
+		set = unix.Timespec{Sec: mtime, Nsec: 0}
+	}
+	ts := []unix.Timespec{{Sec: 0, Nsec: unix.UTIME_OMIT}, set}
 	if unix.UtimesNanoAt(unix.AT_FDCWD, p, ts, 0) != nil {
 		return false
 	}

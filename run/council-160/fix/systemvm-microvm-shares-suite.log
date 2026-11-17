@@ -1,0 +1,12 @@
+bash scripts/systemvm/microvm-shares-suite.sh
+ok   binds_become_nfs_mounts
+ok   macos_write_seen_in_guest
+ok   lost_write_does_not_recur
+ok   file_refused_other_binds_unchanged
+ok   non_root_guest_user_writes
+ok   server_stops_with_the_task
+ok   sigkill_bounded_on_dead_server
+ok   exited_workload_on_dead_server_killed
+ok   macos_edit_reaches_guest_watcher
+ok   nothing_left
+microvm-shares suite: passed=true (report: /Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/microvm-shares-report.json)

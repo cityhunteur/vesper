@@ -89,6 +89,9 @@ UNFS_CG=/sys/fs/cgroup/vesper-unfs # one memory-capped cgroup per server, beside
 # restart (run/GH-160/m3/unfs-report.json); page cache charged to the cgroup is reclaimed at the cap.
 UNFS_MEM=33554432
 UNFS_PIDS=32
+# At most one CPU per server (council SEC-5, TD-069): a guest can keep its own server busy, but not starve the
+# System VM's other work. Set when the kernel offers the cpu controller; `unfs ID` shows it.
+UNFS_CPU="100000 100000"
 UNFS_ROOT=/run/vesper/unfs-root    # where each server mounts its own tmpfs root, in its own mount namespace
 NL='
 '
@@ -376,6 +379,16 @@ unfs_listening() { # ID: the server's NFS port is open on the server address ins
   nsenter --net="$NETNS/$1" netstat -ltn 2>/dev/null | grep -Eq "[ :]$SHARE_SRV:2049 "
 }
 unfs_state() { if [ -n "$(unfs_pid "$1")" ]; then echo running; else echo stopped; fi; }
+# The microVMs whose share server should run (its record is there) but whose supervisor has stopped: it gave up
+# after 30 restarts in 60 s (TD-065), or was killed. HEALTH reports them (TD-070); their guests hang on the hard
+# mounts until the task is stopped.
+unfs_down() {
+  for a in "$UNFS"/*.args; do
+    [ -f "$a" ] || continue
+    id=$(basename "$a" .args)
+    valid_id "$id" && [ "$(unfs_state "$id")" = stopped ] && echo "$id"
+  done
+}
 unfs_start() { # ID MOUNT SQUASH SOURCES(newline-separated) -> a reason on failure (lock held, namespace up)
   us_id=$1; us_mount=$2; us_sq=$3; us_srcs=$4
   mkdir -p "$UNFS" "$UNFS_ROOT" && chmod 0700 "$UNFS" "$UNFS_ROOT" || { echo "state directories"; return 1; }
@@ -384,6 +397,11 @@ unfs_start() { # ID MOUNT SQUASH SOURCES(newline-separated) -> a reason on failu
   mkdir -p "$UNFS_CG" && echo "+memory +pids" > "$UNFS_CG/cgroup.subtree_control" || { echo "cgroup parent"; return 1; }
   mkdir -p "$UNFS_CG/$us_id" && echo "$UNFS_MEM" > "$UNFS_CG/$us_id/memory.max" && echo "$UNFS_PIDS" > "$UNFS_CG/$us_id/pids.max" \
     || { echo "cgroup"; return 1; }
+  if grep -qw cpu /sys/fs/cgroup/cgroup.controllers; then
+    grep -qw cpu /sys/fs/cgroup/cgroup.subtree_control || echo +cpu > /sys/fs/cgroup/cgroup.subtree_control
+    grep -qw cpu "$UNFS_CG/cgroup.subtree_control" || echo +cpu > "$UNFS_CG/cgroup.subtree_control"
+    echo "$UNFS_CPU" > "$UNFS_CG/$us_id/cpu.max" || { echo "cgroup cpu.max"; return 1; }
+  fi
   set --
   # Split on newlines only, with pathname expansion off: a source may hold spaces, *, ? or [.
   us_ifs=$IFS; IFS=$NL; set -f
@@ -440,7 +458,7 @@ unfs() { # ID: the server's state, for the suites and for diagnosis
   [ -e "$UNFS/$id.pid" ] || [ -d "$UNFS_CG/$id" ] || { echo "UNFS $id absent"; return 1; }
   l=no; unfs_listening "$id" && l=yes
   cg="$UNFS_CG/$id"
-  echo "UNFS $id state=$(unfs_state "$id") pid=$(unfs_pid "$id") listen=$l mem_max=$(cat "$cg/memory.max" 2>/dev/null) mem_peak=$(cat "$cg/memory.peak" 2>/dev/null) oom_kills=$(awk '$1=="oom_kill"{print $2}' "$cg/memory.events" 2>/dev/null)"
+  echo "UNFS $id state=$(unfs_state "$id") pid=$(unfs_pid "$id") listen=$l mem_max=$(cat "$cg/memory.max" 2>/dev/null) mem_peak=$(cat "$cg/memory.peak" 2>/dev/null) cpu_max=$(cat "$cg/cpu.max" 2>/dev/null | tr ' ' /) oom_kills=$(awk '$1=="oom_kill"{print $2}' "$cg/memory.events" 2>/dev/null)"
 }
 unfs_log() { # ID [N]: the server's log and its supervisor's syslog lines, for diagnosis
   id=${1:-}; valid_id "$id" || { echo "ERR bad id"; return 2; }
@@ -487,6 +505,15 @@ test_unfs_kill() { # ID
     [ "$(cat "/proc/$p/comm" 2>/dev/null)" = unfsd ] && { kill -KILL "$p"; echo "KILLED unfsd $p"; return 0; }
   done
   echo "ERR no unfsd for $id"; return 1
+}
+# Test hook (make systemvm-microvm-shares-suite): what a supervisor that gave up leaves (TD-070): no supervisor and
+# no server, the record still there.
+test_unfs_giveup() { # ID
+  id=${1:-}; valid_id "$id" || { echo "ERR bad id"; return 2; }
+  sp=$(unfs_pid "$id") || { echo "ERR no supervisor for $id"; return 1; }
+  kill -KILL "$sp"
+  for p in $(cat "$UNFS_CG/$id/cgroup.procs" 2>/dev/null); do kill -KILL "$p"; done
+  echo "GAVEUP $id"
 }
 # Test hook (make systemvm-unfs-suite): run vesper-unfs probe against ID's server from inside its namespace. The
 # probe calls from the guest's address, so for its duration the namespace holds 169.254.77.2 on lo and accepts lo
@@ -762,11 +789,13 @@ case "$cmd" in
   sharenet) sharenet "$@" ;;
   unfs) unfs "$@" ;;
   unfs-isolation) unfs_isolation "$@" ;;
+  unfs-down) unfs_down ;;
   unfs-log) unfs_log "$@" ;;
   unfs-events) cat "$UNFS/fanout.stat" 2>/dev/null || echo "{}" ;;   # the event hop's counters per microVM (M6)
   unfs-stop) valid_id "${1:-}" || { echo "ERR bad id"; exit 2; }; lock && unfs_stop "$1"; unlock; echo "UNFS $1 stopped" ;;
   test-unfs-selfcheck) test_unfs_selfcheck "$@" ;;
   test-unfs-kill) test_unfs_kill "$@" ;;
+  test-unfs-giveup) test_unfs_giveup "$@" ;;
   test-unfs-stall-next) mkdir -p "$UNFS" && : > "$UNFS/stall-next" && echo "STALL next" ;;
   test-unfs-probe) test_unfs_probe "$@" ;;
   reap) reap ;;

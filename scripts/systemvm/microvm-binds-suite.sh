@@ -70,13 +70,15 @@ case "${out}" in "RC 0"*"OUT secret"*"OUT inner"*"OUT wrote"*"OUT appended"*) [ 
 # (TD-067, a recorded deviation; the GH #160 criterion asked for 60). The step measures the limit, counted from the
 # export (/data), and fails if it shrinks below 40. The same path-based handles mishandle a write through a
 # descriptor opened before a rename. Today's outcome across directories is pinned: the old content is lost and the
-# file holds only the late write (council REL-2, COR-4); anything worse fails the step, a fix passes it. Three more
-# cases are measured and reported, not judged: a rename in the same directory (logrotate), a write at an offset
-# (not an append), and a rename made on macOS while the guest holds the descriptor.
+# file holds only the late write (council REL-2, COR-4); anything worse fails the step, a fix passes it. More cases
+# are measured and reported, not judged: an append with no rename at all to a file the guest has not looked up, the
+# same after a read, a rename in the same directory (logrotate), a write at an offset, and a rename made on macOS
+# while the guest holds the descriptor. The loss is not about renames: an O_CREAT open of an existing file the
+# guest has not looked up truncates it (TD-068).
 deep="${F}/w/deep"; p="${deep}"; for i in $(seq 1 60); do p="${p}/d${i}"; done
 mkdir -p "${p}" "${F}/w/ra" "${F}/w/rb" "${F}/w/rc" "${F}/w/rd"
-echo start > "${F}/w/ra/f"; echo start > "${F}/w/ra/log"; printf 'xxxxxxxx' > "${F}/w/ra/w"; echo start > "${F}/w/rc/h"
-out="$(runb "${B[@]}" binds-deep 'p=/data/deep; d=1; while [ $d -le 61 ]; do q=$p; [ $d -gt 1 ] && q=$p/d$((d-1)); ls $q >/dev/null 2>&1 || break; p=$q; d=$((d+1)); done; echo depth $((d-1)); exec 3>> /data/ra/f; mv /data/ra/f /data/rb/f; echo late >&3 && echo late-ok; exec 3>&-; exec 4>> /data/ra/log; mv /data/ra/log /data/ra/log.1; echo late >&4 && echo log-ok; exec 4>&-; exec 5<> /data/ra/w; printf AB >&5; mv /data/ra/w /data/rb/w; printf CD >&5 && echo w-ok; exec 5>&-; sync')"
+echo start > "${F}/w/ra/f"; echo start > "${F}/w/ra/log"; echo start > "${F}/w/ra/plain"; echo start > "${F}/w/ra/seen"; printf 'xxxxxxxx' > "${F}/w/ra/w"; echo start > "${F}/w/rc/h"
+out="$(runb "${B[@]}" binds-deep 'p=/data/deep; d=1; while [ $d -le 61 ]; do q=$p; [ $d -gt 1 ] && q=$p/d$((d-1)); ls $q >/dev/null 2>&1 || break; p=$q; d=$((d+1)); done; echo depth $((d-1)); exec 6>> /data/ra/plain; echo late >&6; exec 6>&-; cat /data/ra/seen >/dev/null; exec 6>> /data/ra/seen; echo late >&6; exec 6>&-; exec 3>> /data/ra/f; mv /data/ra/f /data/rb/f; echo late >&3 && echo late-ok; exec 3>&-; exec 4>> /data/ra/log; mv /data/ra/log /data/ra/log.1; echo late >&4 && echo log-ok; exec 4>&-; exec 5<> /data/ra/w; printf AB >&5; mv /data/ra/w /data/rb/w; printf CD >&5 && echo w-ok; exec 5>&-; sync')"
 st="$(runb "${B[@]}" --detach binds-hostmv 'exec 3>> /data/rc/h; echo ready > /data/rc/ready; i=0; while [ ! -e /data/rc/go ] && [ $i -lt 300 ]; do sleep 0.1; i=$((i+1)); done; echo late >&3 && echo ok > /data/rc/wrote; exec 3>&-; sync; echo done > /data/rc/done; sleep 600')"
 for _ in $(seq 1 60); do [ -s "${F}/w/rc/ready" ] && break; sleep 0.5; done
 mv "${F}/w/rc/h" "${F}/w/rd/h"; touch "${F}/w/rc/go"
@@ -89,7 +91,7 @@ case "${cross}" in "start
 late") rename="a fix: the append landed after the old content" ;;
   late) rename="as recorded: the old content was lost, rb/f holds only the late write (TD-067)" ;;
   *) rename="" ;; esac
-facts="same-dir log.1: $(show "${F}/w/ra/log.1"), log: $(show "${F}/w/ra/log"); offset write rb/w: $(show "${F}/w/rb/w"); macOS rename rd/h: $(show "${F}/w/rd/h"), rc/h: $(show "${F}/w/rc/h"), guest wrote: $(cat "${F}/w/rc/wrote" 2>/dev/null || echo no)"
+facts="append, no rename, file not looked up first: $(show "${F}/w/ra/plain"); looked up first: $(show "${F}/w/ra/seen"); same-dir log.1: $(show "${F}/w/ra/log.1"), log: $(show "${F}/w/ra/log"); offset write rb/w: $(show "${F}/w/rb/w"); macOS rename rd/h: $(show "${F}/w/rd/h"), rc/h: $(show "${F}/w/rc/h"), guest wrote: $(cat "${F}/w/rc/wrote" 2>/dev/null || echo no)"
 case "${out}" in *"OUT late-ok"*) late=true ;; *) late=false ;; esac
 if [ -n "${depth}" ] && [ "${depth}" -ge 40 ] && [ -n "${rename}" ] && [ "${late}" = true ] && [ ! -e "${F}/w/ra/f" ]; then
   record deep_path_and_rename true "${depth} directories below the export read (TD-067); cross-directory rename: ${rename}; measured: ${facts}"

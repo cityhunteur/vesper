@@ -9,7 +9,8 @@
 #   HEALTH                -> HEALTH {"packages_ready":bool,"services_ready":bool,"services":{...},
 #                             "containerd_ok":bool,"docker_ok":bool,"docker_version":"...","kvm":bool,"tun":bool,
 #                             "ip":"...","containers":"mapped|unmapped|refused <reason>","authz":"<state>",
-#                             "legacy_store":"absent|present volumes=N containers=M"}  (ADR 0010)
+#                             "legacy_store":"absent|present volumes=N containers=M",  (ADR 0010)
+#                             "share_servers_down":"<id>,..."}  (TD-070: shim microVMs whose share server stopped)
 #   KILL <containerd|docker> -> KILL <name> <pid> after SIGKILL to the daemon (crash simulation)
 #   LOGS <messages|containerd|docker> <n> -> LOGS <count> then <count> log lines
 #   MICROVM <args...>     -> MICROVM <rc> <count> then <count> output lines of `vesper-microvm <args>`
@@ -70,8 +71,10 @@ while IFS= read -r line; do
       # ADR 0010: the container mode of this boot, the plugin's state and whether an old unmapped store is on the disk.
       cst=$(/usr/local/bin/vesper-containers status 2>/dev/null | sed 's/^CONTAINERS //')
       cmode=${cst%% authz=*}; rest=${cst#* authz=}; authz=${rest%% legacy=*}; legacy=${rest#* legacy=}
-      printf 'HEALTH {"packages_ready":%s,"services_ready":%s,"services":{"containerd":"%s","docker":"%s","vesper-agent":"%s"},"containerd_ok":%s,"docker_ok":%s,"docker_version":"%s","kvm":%s,"tun":%s,"ip":"%s","containers":"%s","authz":"%s","legacy_store":"%s"}\n' \
-        "$ready" "$sready" "$(service_state containerd)" "$(service_state docker)" "$(service_state vesper-agent)" "$cok" "$dok" "$dver" "$kvm" "$tun" "$ip" "${cmode:-unknown}" "${authz:-unknown}" "${legacy:-unknown}"
+      # TD-070: the shim microVMs whose share server has stopped for good (ids are [A-Za-z0-9_.-]).
+      sdown=$(/usr/local/bin/vesper-microvm unfs-down 2>/dev/null | tr -cd 'A-Za-z0-9_.\n-' | paste -sd, -)
+      printf 'HEALTH {"packages_ready":%s,"services_ready":%s,"services":{"containerd":"%s","docker":"%s","vesper-agent":"%s"},"containerd_ok":%s,"docker_ok":%s,"docker_version":"%s","kvm":%s,"tun":%s,"ip":"%s","containers":"%s","authz":"%s","legacy_store":"%s","share_servers_down":"%s"}\n' \
+        "$ready" "$sready" "$(service_state containerd)" "$(service_state docker)" "$(service_state vesper-agent)" "$cok" "$dok" "$dver" "$kvm" "$tun" "$ip" "${cmode:-unknown}" "${authz:-unknown}" "${legacy:-unknown}" "$sdown"
       ;;
     KILL)
       case "$2" in

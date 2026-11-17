@@ -80,6 +80,24 @@ ctl ctr -- delete shares-k >/dev/null
 case "${st}|${down}|${killed}" in "STARTED shares-k|UNFS shares-k stopped|KILLED shares-k") record sigkill_bounded_on_dead_server true "${down}; ${killed} after $((t1 - t0)) s (shim grace 10 s)" ;;
   *) record sigkill_bounded_on_dead_server false "${st}; ${down}; ${killed} after $((t1 - t0)) s" ;; esac
 
+# --- 5c2. A workload that exits by itself after its server gave up: HEALTH names the server, and a kill still ends
+# the task (council REL-1, TD-070). The guest's unmount waits on the dead server with the write still buffered, so it
+# never reports EXIT and refuses signals; the shim's SIGKILL fallback stops the microVM all the same.
+st="$(runb "${B[@]}" --detach shares-r 'echo buffered > /data/r.txt; sleep 6; exit 0')"
+sleep 3
+gaveup="$(ctl microvm test-unfs-giveup shares-r)"
+sleep 1; hdown="$(ctl health | sed -n 's/.*"share_servers_down":"\([^"]*\)".*/\1/p')"
+sleep 8   # the workload has exited; its session is stuck in the unmount
+before="$(ctl ctr -- state shares-r)"
+t0=$(date +%s); killed="$(ctl ctr -- kill shares-r 60)"; t1=$(date +%s)
+deleted="$(ctl ctr -- delete shares-r)"
+sleep 1; hafter="$(ctl health | sed -n 's/.*"share_servers_down":"\([^"]*\)".*/\1/p')"
+case "${st}|${gaveup}|${hdown}|${killed}|${deleted}" in
+  "STARTED shares-r|GAVEUP shares-r|"*shares-r*"|KILLED shares-r|DELETED shares-r")
+    if [ -z "${hafter}" ]; then record exited_workload_on_dead_server_killed true "HEALTH share_servers_down=${hdown}; then ${before}; ${killed} after $((t1 - t0)) s; ${deleted}; HEALTH after: '${hafter}'"
+    else record exited_workload_on_dead_server_killed false "HEALTH still names ${hafter} after delete"; fi ;;
+  *) record exited_workload_on_dead_server_killed false "${st}; ${gaveup}; HEALTH ${hdown:-none}; ${before}; ${killed} after $((t1 - t0)) s; ${deleted}" ;; esac
+
 # --- 5d. A macOS edit reaches a watcher in the guest; a burst is coalesced; nothing echoes (GH #160 M6) ----------
 mkdir -p "${F}/ev"; echo w > "${F}/ev/watched.txt"; echo b > "${F}/ev/burst.txt"; rm -f "${F}"/ev/ev-*
 st="$(runb --bind="${F}/ev:/data:rw" --detach shares-n 'inotifyd - /data/watched.txt:c /data/burst.txt:c > /tmp/ev 2>&1 & sleep 30; kill $!; grep -c watched /tmp/ev > /data/ev-watched; grep -c burst /tmp/ev > /data/ev-burst')"
@@ -87,9 +105,9 @@ sleep 8
 echo edit1 >> "${F}/ev/watched.txt"
 sleep 4
 for i in $(seq 1 1000); do echo "${i}" >> "${F}/ev/burst.txt"; done
-# unfs3 keeps and reports whole seconds (TD-066), so the guest's replay, which sets a file's mtime to the value it
-# sees, floors the macOS mtime by less than a second (council REL-3, confirmed here). The step pins that: same size,
-# mtime at most a second earlier and whole; anything worse fails.
+# unfs3 keeps and reports whole seconds (TD-066). The fanout sends each event with the macOS mtime rounded up, and
+# the guest sets that, so the macOS mtime moves forward by less than a second, never back (council REL-3; setting
+# the value the guest sees used to floor it). Same size, mtime whole or untouched; anything else fails.
 meta0="$(stat -f '%Fm %z' "${F}/ev/burst.txt" "${F}/ev/watched.txt" | tr '\n' ' ')"   # what macOS wrote last
 sleep 4
 q1="$(ctl microvm unfs-events | sed -n 's/.*"shares-n":{"queued":\([0-9]*\).*/\1/p')"
@@ -97,22 +115,22 @@ sleep 10   # an echo would come back as more queued paths
 q2="$(ctl microvm unfs-events | sed -n 's/.*"shares-n":{"queued":\([0-9]*\).*/\1/p')"
 stats="$(ctl microvm unfs-events)"
 meta1="$(stat -f '%Fm %z' "${F}/ev/burst.txt" "${F}/ev/watched.txt" | tr '\n' ' ')"   # after the replays
-# Per file: same size, mtime less than a second earlier, and whole or untouched.
-floored="$(printf '%s\n%s\n' "${meta0}" "${meta1}" | awk 'NR==1 {for (i = 1; i <= NF; i++) a[i] = $i} NR==2 {ok = NF == 4; for (i = 1; i <= NF; i += 2) {d = a[i] - $i; if ($(i+1) != a[i+1] || d < 0 || d >= 1 || ($i != a[i] && $i != int($i))) ok = 0}; print ok ? "yes" : "no"}')"
+# Per file: same size, mtime not earlier and less than a second later, and whole or untouched.
+forward="$(printf '%s\n%s\n' "${meta0}" "${meta1}" | awk 'NR==1 {for (i = 1; i <= NF; i++) a[i] = $i} NR==2 {ok = NF == 4; for (i = 1; i <= NF; i += 2) {d = $i - a[i]; if ($(i+1) != a[i+1] || d < 0 || d >= 1 || ($i != a[i] && $i != int($i))) ok = 0}; print ok ? "yes" : "no"}')"
 
 for _ in $(seq 1 40); do case "$(ctl ctr -- state shares-n)" in *STOPPED*) break ;; esac; sleep 1; done
 ctl ctr -- delete shares-n >/dev/null
 w="$(cat "${F}/ev/ev-watched" 2>/dev/null)"; b="$(cat "${F}/ev/ev-burst" 2>/dev/null)"
 if [ "${st}" = "STARTED shares-n" ] && [ -n "${w}" ] && [ "${w}" -ge 1 ] && [ "${w}" -le 2 ] && [ -n "${b}" ] && [ "${b}" -ge 1 ] && [ "${b}" -lt 100 ] \
-  && [ -n "${q1}" ] && [ "${q1}" = "${q2}" ] && [ "${floored}" = yes ]; then
-  record macos_edit_reaches_guest_watcher true "one edit: ${w} IN_MODIFY; 1,000 appends: ${b}; queued ${q1}, still ${q2} 10 s later (no echo); macOS mtime and size before ${meta0}, after the replays ${meta1} (the fraction floored by the replay: TD-066, REL-3); ${stats}"
+  && [ -n "${q1}" ] && [ "${q1}" = "${q2}" ] && [ "${forward}" = yes ]; then
+  record macos_edit_reaches_guest_watcher true "one edit: ${w} IN_MODIFY; 1,000 appends: ${b}; queued ${q1}, still ${q2} 10 s later (no echo); macOS mtime and size before ${meta0}, after the replays ${meta1} (rounded up by the replay, never back: TD-066, REL-3); ${stats}"
 else
   record macos_edit_reaches_guest_watcher false "${st}; watched=${w:-none} burst=${b:-none}; queued ${q1:-?} then ${q2:-?}; macOS before ${meta0} after ${meta1}; ${stats}"
 fi
 
 # --- 6. Nothing is left -------------------------------------------------------------------------------------------
 left="$(ctl ctr -- leftovers)"; srv=""; gone=true
-for n in shares-a shares-b shares-c shares-d shares-e shares-f shares-g shares-k shares-n; do
+for n in shares-a shares-b shares-c shares-d shares-e shares-f shares-g shares-k shares-r shares-n; do
   u="$(ctl microvm unfs "${n}" | head -1)"; srv="${srv} ${u};"
   [ "${u}" = "UNFS ${n} absent" ] || gone=false   # only the documented answer counts, not an error or nothing
 done
