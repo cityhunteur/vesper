@@ -1,0 +1,5 @@
+reference=all-pass partial=true total=8 passed=5 to_explain={"failed": 3} not_passing_on_reference=0 missing_from_run=0
+class vsock-reset-after-snapshot: 2
+classes that explained nothing in this run: apple-cpu-features-unknown, apple-cpu-no-cache-topology, apple-cpu-ssb-vulnerable, balloon-stats-not-refreshed, guest-ssh-timeout-under-load, max-devices-worker-timeout, no-dmi, no-userfaultfd, rate-limiter-balloon-tolerance, upstream-platform-skip, vmclock-gen-counter-flag, vmm-exit-timeout-under-load, vmm-memory-overhead
+UNMATCHED integration_tests/functional/test_vsock.py::test_vsock_transport_reset_g2h[vmlinux-6.1.172-PCI_OFF-1vcpu] failed [alone: failed] ChildProcessError: [1352] Command: ['ip', 'netns', 'exec', 'netns-gw2-3', 'ssh', '-i', '/srv/test_artifacts/amazonlinux-2023.id_rsa', '-o', 'StrictHostKeyChecking=no', '-o', 'ConnectTimeout=2', '-o',  … ab3a44de-9fea-4490-b6f3-26f5f686f140/root/ssh-0.sock', 'root@192.168.0.2', 'true'] [1352] stdout: [1352] stderr: ssh: connect to host 192.168.0.2 port 22: Connection timed out Returned error code: 255
+upstream-compare: 1 result(s) match no exception class

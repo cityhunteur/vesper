@@ -20,7 +20,7 @@ line after the last RERUN, a rerun test is an "error".
 `--alone` is the report of the runner's isolated rerun (decision D-031): the tests that matched no exception class
 in the full run, run again one at a time with nothing else loading the host. A test that passes there becomes
 {"outcome": "passed", "under_load": {outcome, message}}, which the comparator counts as passed and lists; one that
-does not keeps its full-run result and gains "alone": {outcome, message}. A test the full run did not report is
+does not keeps its full-run result and gains "alone": {outcome, message}, which the comparator classifies (D-039). A test the full run did not report is
 never taken from ALONE.json, and an isolated session that pytest did not end normally (an exit status other than 0
 or 1, or a collection error) is not used at all: the full run's results stand.
 

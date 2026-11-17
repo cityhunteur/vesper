@@ -1,0 +1,38 @@
+{
+ "integration_tests/functional/test_vsock.py::test_vsock_transport_reset_g2h[vmlinux-5.10.253-PCI_OFF-1vcpu]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_vsock.py::test_vsock_transport_reset_g2h[vmlinux-5.10.253-PCI_OFF-2vcpu]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_vsock.py::test_vsock_transport_reset_g2h[vmlinux-5.10.253-PCI_ON-1vcpu]": {
+  "outcome": "failed",
+  "message": "assert 0 == 1"
+ },
+ "integration_tests/functional/test_vsock.py::test_vsock_transport_reset_g2h[vmlinux-5.10.253-PCI_ON-2vcpu]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_vsock.py::test_vsock_transport_reset_g2h[vmlinux-6.1.172-PCI_OFF-1vcpu]": {
+  "outcome": "failed",
+  "message": "ChildProcessError: [1352] Command: ['ip', 'netns', 'exec', 'netns-gw2-3', 'ssh', '-i', '/srv/test_artifacts/amazonlinux-2023.id_rsa', '-o', 'StrictHostKeyChecking=no', '-o', 'ConnectTimeout=2', '-o', 'ControlMaster=auto', '-o', 'ControlPersist=yes', '-o', 'KexAlgorithms=ecdh-sha2-nistp521', '-o', 'HostKeyAlgorithms=rsa-sha2-512', '-o', 'PubkeyAcceptedAlgorithms=rsa-sha2-512', '-c', 'aes256-ctr', '-o', 'ControlPath=/srv/jailer/firecracker/ab3a44de-9fea-4490-b6f3-26f5f686f140/root/ssh-0.sock', 'root@192.168.0.2', 'true'] [1352] stdout: [1352] stderr: ssh: connect to host 192.168.0.2 port 22: Connection timed out Returned error code: 255",
+  "alone": {
+   "outcome": "failed",
+   "message": "host_tools.memory.MemoryUsageExceededError: ('Memory usage (6.75 MiB) exceeded maximum threshold (7.0 MiB)', psutil.Process(pid=269, status='terminated', started='04:14:54'))"
+  }
+ },
+ "integration_tests/functional/test_vsock.py::test_vsock_transport_reset_g2h[vmlinux-6.1.172-PCI_OFF-2vcpu]": {
+  "outcome": "failed",
+  "message": "worker 'gw1' crashed while running 'integration_tests/functional/test_vsock.py::test_vsock_transport_reset_g2h[vmlinux-6.1.172-PCI_OFF-2vcpu]'"
+ },
+ "integration_tests/functional/test_vsock.py::test_vsock_transport_reset_g2h[vmlinux-6.1.172-PCI_ON-1vcpu]": {
+  "outcome": "passed",
+  "message": ""
+ },
+ "integration_tests/functional/test_vsock.py::test_vsock_transport_reset_g2h[vmlinux-6.1.172-PCI_ON-2vcpu]": {
+  "outcome": "passed",
+  "message": ""
+ }
+}

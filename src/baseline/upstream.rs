@@ -322,6 +322,16 @@ pub struct Unmatched {
     pub alone: Option<Attempt>,
 }
 
+/// A test settled by its isolated rerun: `outcome` and `message` are its result under load, `class` explains the
+/// result alone.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct ExplainedAlone {
+    pub nodeid: String,
+    pub class: String,
+    pub outcome: String,
+    pub message: String,
+}
+
 /// What pytest itself reported about the run, beside the per-test results.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
 pub struct RunMeta {
@@ -354,7 +364,10 @@ pub struct Comparison {
     /// Tests that matched no class under load and passed when the runner reran them alone: counted as passed, and
     /// listed with what they did under load.
     pub passed_alone: Vec<Unmatched>,
-    /// The class file's cap on `passed_alone`.
+    /// Tests that matched no class under load, failed again when rerun alone, and whose isolated result a class
+    /// explains (D-039): counted under that class, and listed with what they did under load.
+    pub explained_alone: Vec<ExplainedAlone>,
+    /// The class file's cap on `passed_alone` and `explained_alone` together: the tests a rerun alone may settle.
     pub max_passed_alone: Option<usize>,
     /// Classes that explained more tests than their `max`.
     pub over_max: Vec<OverMax>,
@@ -382,8 +395,9 @@ impl Comparison {
         if !self.unmatched.is_empty() {
             f.push(format!("{} result(s) match no exception class", self.unmatched.len()));
         }
-        if let Some(max) = self.max_passed_alone.filter(|m| self.passed_alone.len() > *m) {
-            f.push(format!("{} tests passed only on the isolated rerun, more than the cap of {max}", self.passed_alone.len()));
+        let settled = self.passed_alone.len() + self.explained_alone.len();
+        if let Some(max) = self.max_passed_alone.filter(|m| settled > *m) {
+            f.push(format!("{settled} tests were settled only by the isolated rerun, more than the cap of {max}"));
         }
         for o in &self.over_max {
             f.push(format!("class {} explained {} tests, more than its max of {}", o.class, o.matched, o.max));
@@ -468,8 +482,29 @@ pub fn compare(
             }
         }
         *out.to_explain.entry(r.outcome.clone()).or_default() += 1;
-        match classes.classes.iter().find(|c| c.matches(nodeid, r)) {
-            Some(c) => *out.per_class.entry(c.id.clone()).or_default() += 1,
+        if let Some(c) = classes.classes.iter().find(|c| c.matches(nodeid, r)) {
+            *out.per_class.entry(c.id.clone()).or_default() += 1;
+            continue;
+        }
+        // Unmatched under load but failed again alone: the isolated result stands in for the one under load when a
+        // class explains it and the result under load is not a symptom a rerun never clears (D-039).
+        let alone_class = r.alone.as_ref().filter(|a| !is_pass(&a.outcome)).and_then(|a| {
+            if classes.never_pass_alone.iter().any(|m| r.message.contains(m.as_str())) {
+                return None;
+            }
+            let again = TestResult { outcome: a.outcome.clone(), message: a.message.clone(), under_load: None, alone: None };
+            classes.classes.iter().find(|c| c.matches(nodeid, &again))
+        });
+        match alone_class {
+            Some(c) => {
+                *out.per_class.entry(c.id.clone()).or_default() += 1;
+                out.explained_alone.push(ExplainedAlone {
+                    nodeid: nodeid.clone(),
+                    class: c.id.clone(),
+                    outcome: r.outcome.clone(),
+                    message: head_and_tail(&r.message, 200, 200),
+                });
+            }
             None => out.unmatched.push(Unmatched {
                 nodeid: nodeid.clone(),
                 outcome: r.outcome.clone(),
@@ -553,6 +588,34 @@ classes:
         let out = compare(&res, None, &strict, None, false);
         assert_eq!((out.passed, out.passed_alone.len(), out.unmatched.len()), (1, 1, 2));
         assert!(out.failures().iter().any(|f| f.contains("more than the cap of 0")), "{:?}", out.failures());
+        // A test unmatched under load that fails again alone with a classified symptom counts under that class and
+        // within the rerun cap; one whose result alone matches nothing, or whose result under load is a symptom a
+        // rerun never clears, stays unmatched (D-039).
+        let mut res = Results::new();
+        let mut settled = r("failed", "ssh: connect to host 192.168.0.2 port 22: Connection timed out");
+        settled.alone = Some(Attempt { outcome: "error".into(), message: "MemoryUsageExceededError: ('Memory usage (6.1 MiB)".into() });
+        res.insert("integration_tests/functional/e.py::t".into(), settled);
+        let mut unknown = r("failed", "ssh timeout");
+        unknown.alone = Some(Attempt { outcome: "failed".into(), message: "AssertionError".into() });
+        res.insert("integration_tests/functional/f.py::t".into(), unknown);
+        let mut stuck = r("error", "MemoryUsageExceededError: ('Memory usage (9.1 MiB)");
+        stuck.alone = Some(Attempt { outcome: "error".into(), message: "MemoryUsageExceededError: ('Memory usage (6.1 MiB)".into() });
+        res.insert("integration_tests/functional/g.py::t".into(), stuck);
+        let mut lenient = strict.clone();
+        lenient.max_passed_alone = Some(1);
+        let out = compare(&res, None, &lenient, None, false);
+        assert_eq!(out.per_class["overshoot"], 1);
+        assert_eq!(out.explained_alone, vec![ExplainedAlone {
+            nodeid: "integration_tests/functional/e.py::t".into(),
+            class: "overshoot".into(),
+            outcome: "failed".into(),
+            message: "ssh: connect to host 192.168.0.2 port 22: Connection timed out".into(),
+        }]);
+        let names: Vec<_> = out.unmatched.iter().map(|u| u.nodeid.as_str()).collect();
+        assert_eq!(names, ["integration_tests/functional/f.py::t", "integration_tests/functional/g.py::t"]);
+        lenient.max_passed_alone = Some(0);
+        let out = compare(&res, None, &lenient, None, false);
+        assert!(out.failures().iter().any(|f| f.contains("1 tests were settled only by the isolated rerun")), "{:?}", out.failures());
         // any_test with a message glob, a short message, a skip outcome, or a second any_test class is refused.
         for (key, value) in [("message_glob", r#"["assert * > *"]"#), ("message", r#"["e"]"#), ("outcomes", "[skipped]")] {
             let mut bad = v.clone();

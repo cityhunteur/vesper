@@ -36,6 +36,15 @@ it is why the run comes last.
   the regression check; a hang it catches leaves its state in `run/W6/`. Evidence: `run/W6/summary.txt`,
   `run/W6/cargo-loop.txt`)
 - [x] W7 Repository settings: the owner applies them (D-029); nothing for the agent to do
+- [ ] W3 regeneration after W4 and W5 (2026-11-17). Run `20261117T001613Z` on `main`
+  left one test unmatched, which D-039 (PR #204, pending review) settles. The fresh run with the files frozen
+  (`20261117T014525Z`, commit `8673d64`, hashes in `run/W6/frozen-regen.sha256`) explained every result but failed on
+  a cap: `vsock-reset-after-snapshot` matched 4 tests, over its `max: 3`. `test_vsock_transport_reset_g2h` fails in a
+  different subset of its 8 variants each time: 0, 3, 2, 1, 1 in W3's five full runs, then 1 and 4 tonight. Alone
+  on this branch it failed 4 of 8 (`20261117T032823Z`), and alone at `2453d4b`, before W5 and GH #194, it failed 3 of
+  8 (`20261117T035633Z`; one there was a guest SSH timeout, outside every class). So this is not a regression, and a
+  cap of 3 does not bound the symptom. The owner raised the cap to 8 (D-040) and approved D-039; a fresh full run
+  with the files frozen decides the regeneration.
 - [ ] W8 CE-0003 Linux reference run (gated: quote and quota approval)
 - [ ] Outcomes & Retrospective written; plan moved to completed
 
