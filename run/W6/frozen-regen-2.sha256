@@ -1,0 +1,6 @@
+# Frozen for the W3 regeneration run (2026-11-17, commit 1bde827, after D-039 and D-040).
+33959bb8a8ab1a040d3451b22fdd0aed356a2f8b0c7b783f336f9e3d846d4575  docs/specs/upstream-suite-classes.yaml
+36f50d5671abf6a30517b06c276a91e2062ace2a6c10a2d6ee32270c3b8cca70  src/baseline/upstream.rs
+9f68873ebe5529824cfeac1149858bfba5f3b41e71f334223ded34a77c497e66  src/bin/baselinectl.rs
+58eb8d4ea643f3a72a16a2e4f42c2da93c2f8aec38e003d365ff53f66d432748  scripts/systemvm/upstream-suite/collect.py
+10a488c05bbeb6e2adcb5b7784eb2632fe81ba7f29c876e1d446721cabaee325  scripts/systemvm/upstream-suite/run.sh

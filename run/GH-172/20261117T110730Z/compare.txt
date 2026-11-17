@@ -1,0 +1,16 @@
+reference=all-pass partial=false total=980 passed=761 to_explain={"error": 34, "failed": 89, "skipped": 96} not_passing_on_reference=0 missing_from_run=0
+class apple-cpu-features-unknown: 8
+class apple-cpu-no-cache-topology: 24
+class apple-cpu-ssb-vulnerable: 10
+class guest-ssh-timeout-under-load: 4
+class max-devices-worker-timeout: 2
+class no-dmi: 1
+class no-userfaultfd: 8
+class rate-limiter-balloon-tolerance: 7
+class upstream-platform-skip: 96
+class vmm-memory-overhead: 56
+class vsock-reset-after-snapshot: 3
+classes that explained nothing in this run: balloon-stats-not-refreshed, vmclock-gen-counter-flag, vmm-exit-timeout-under-load
+PASSED-ALONE integration_tests/functional/test_sysgenid.py::test_sysgenid_via_poll_and_nonblocking_read[vmlinux-5.10.253-PCI_OFF] under load: failed AssertionError: assert '' == 'SysGenID: 1' - SysGenID: 1
+PASSED-ALONE integration_tests/functional/test_vmclock.py::test_snapshot_update[SnapshotType.DIFF_MINCORE-vmlinux-5.10.253-PCI_ON-read()] under load: failed ChildProcessError: [8541] Command: ['ip', 'netns', 'exec', 'netns-gw2-2', 'ssh', '-i', '/srv/test_artifacts/ubuntu-24.04.id_rsa', '-o', 'StrictHostKeyChecking=no', '-o', 'ConnectTimeout=2', '-o', 'Con … ee3a5458-5dd1-4896-80f2-2ec89cbfa0f7/root/ssh-0.sock', 'root@192.168.0.2', 'true'] [8541] stdout: [8541] stderr: ssh: connect to host 192.168.0.2 port 22: Connection timed out Returned error code: 255
+upstream-compare: every result is explained

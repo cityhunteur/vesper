@@ -1,0 +1,62 @@
+bash scripts/systemvm/upstream-suite/run.sh 
+[upstream-suite 11:07:33] revision d83d72b710361a10294480131377b1b00b163af8 (v1.16.0), container public.ecr.aws/firecracker/fcuvm:v90@sha256:657863a847acff0b52888a237173f0f6740d7ace175a2d7423cf5f0307db9698, artefacts firecracker-ci/20260603-e656faf58d6c-0/aarch64, selection: integration_tests/functional integration_tests/security
+[upstream-suite 11:07:34] artefacts: 15 objects
+[upstream-suite 11:07:34] release binaries: cpu-template-helper cpu-template-helper.debug firecracker firecracker.debug jailer jailer.debug rebase-snap rebase-snap.debug seccompiler-bin seccompiler-bin.debug snapshot-editor snapshot-editor.debug 
+[upstream-suite 11:07:34] restart the System VM with 4 vCPUs, 8192 MiB and /Volumes/Workspace/github.com/cityhunteur/vesper/build/upstream-suite shared
+systemvm-up: running (pid 71219); bridge run/systemvm/vsock/3.sock; log /Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/vmlauncher.log
+{"status":"bridge-listening","elapsed_ms":137,"ready_pattern":"login:","console_log":"/Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/console.log","bridge":"run/systemvm/vsock/3.sock"}
+{"status":"ready","elapsed_ms":3203,"ready_pattern":"login:","console_log":"/Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/console.log"}
+{"status":"probe-ok","elapsed_ms":5480,"ready_pattern":"login:","console_log":"/Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/console.log"}
+systemvm-up: MOUNTED share0 /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share mode=rw
+systemvm-up: MOUNTED share1 /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share-ro mode=ro
+systemvm-up: MOUNTED share2 /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share-nowatch mode=rw
+systemvm-up: MOUNTED share3 /Volumes/Workspace/github.com/cityhunteur/vesper/build/upstream-suite mode=rw
+docker-up: containers unmapped: this boot is for the upstream Firecracker suite only; a container can be root on the System VM (ADR 0010)
+docker-up: vesper-proxy pid 71380; DOCKER_HOST=unix:///Volumes/Workspace/github.com/cityhunteur/vesper/run/vesper/docker.sock; published ports via the guest relay (status /Volumes/Workspace/github.com/cityhunteur/vesper/run/vesper/ports.json)
+srw-------@ 1 pravin  staff  0 17 Nov 11:07 /Volumes/Workspace/github.com/cityhunteur/vesper/run/vesper/docker.sock
+[upstream-suite 11:07:50] tun loaded; data disk 52 GB free
+[upstream-suite 11:07:50] stage the tree into vesper-upstream-src
+[upstream-suite 11:08:12] build the examples and tools that tests expect in build/cargo_target/aarch64-unknown-linux-musl/release
+[upstream-suite 11:08:16] staged: build clippy-tracing clippy-tracing.d cpu-template-helper cpu-template-helper.debug deps examples firecracker firecracker.debug incremental jailer jailer.debug rebase-snap rebase-snap.debug seccompiler-bin seccompiler-bin.debug snapshot-editor snapshot-editor.debug 
+[upstream-suite 11:08:16] collect the selection
+[upstream-suite 11:08:26] run 980 tests with 3 workers, 600 s per test, 14400 s in all
+rc=1 wall_s=5605 collected=980 stopped=no selection=integration_tests/functional integration_tests/security
+collect: 980 tests (980 collected): {'error': 34, 'failed': 91, 'passed': 759, 'skipped': 96}
+reference=all-pass partial=false total=980 passed=759 to_explain={"error": 34, "failed": 91, "skipped": 96} not_passing_on_reference=0 missing_from_run=0
+class apple-cpu-features-unknown: 8
+class apple-cpu-no-cache-topology: 24
+class apple-cpu-ssb-vulnerable: 10
+class guest-ssh-timeout-under-load: 4
+class max-devices-worker-timeout: 2
+class no-dmi: 1
+class no-userfaultfd: 8
+class rate-limiter-balloon-tolerance: 7
+class upstream-platform-skip: 96
+class vmm-memory-overhead: 56
+class vsock-reset-after-snapshot: 3
+classes that explained nothing in this run: balloon-stats-not-refreshed, vmclock-gen-counter-flag, vmm-exit-timeout-under-load
+UNMATCHED integration_tests/functional/test_sysgenid.py::test_sysgenid_via_poll_and_nonblocking_read[vmlinux-5.10.253-PCI_OFF] failed AssertionError: assert '' == 'SysGenID: 1' - SysGenID: 1
+UNMATCHED integration_tests/functional/test_vmclock.py::test_snapshot_update[SnapshotType.DIFF_MINCORE-vmlinux-5.10.253-PCI_ON-read()] failed ChildProcessError: [8541] Command: ['ip', 'netns', 'exec', 'netns-gw2-2', 'ssh', '-i', '/srv/test_artifacts/ubuntu-24.04.id_rsa', '-o', 'StrictHostKeyChecking=no', '-o', 'ConnectTimeout=2', '-o', 'Con … ee3a5458-5dd1-4896-80f2-2ec89cbfa0f7/root/ssh-0.sock', 'root@192.168.0.2', 'true'] [8541] stdout: [8541] stderr: ssh: connect to host 192.168.0.2 port 22: Connection timed out Returned error code: 255
+upstream-compare: 2 result(s) match no exception class
+[upstream-suite 12:42:11] rerun 2 unmatched test(s) alone, one at a time
+collect: 980 tests (980 collected): {'error': 34, 'failed': 89, 'passed': 761, 'skipped': 96}
+reference=all-pass partial=false total=980 passed=761 to_explain={"error": 34, "failed": 89, "skipped": 96} not_passing_on_reference=0 missing_from_run=0
+class apple-cpu-features-unknown: 8
+class apple-cpu-no-cache-topology: 24
+class apple-cpu-ssb-vulnerable: 10
+class guest-ssh-timeout-under-load: 4
+class max-devices-worker-timeout: 2
+class no-dmi: 1
+class no-userfaultfd: 8
+class rate-limiter-balloon-tolerance: 7
+class upstream-platform-skip: 96
+class vmm-memory-overhead: 56
+class vsock-reset-after-snapshot: 3
+classes that explained nothing in this run: balloon-stats-not-refreshed, vmclock-gen-counter-flag, vmm-exit-timeout-under-load
+PASSED-ALONE integration_tests/functional/test_sysgenid.py::test_sysgenid_via_poll_and_nonblocking_read[vmlinux-5.10.253-PCI_OFF] under load: failed AssertionError: assert '' == 'SysGenID: 1' - SysGenID: 1
+PASSED-ALONE integration_tests/functional/test_vmclock.py::test_snapshot_update[SnapshotType.DIFF_MINCORE-vmlinux-5.10.253-PCI_ON-read()] under load: failed ChildProcessError: [8541] Command: ['ip', 'netns', 'exec', 'netns-gw2-2', 'ssh', '-i', '/srv/test_artifacts/ubuntu-24.04.id_rsa', '-o', 'StrictHostKeyChecking=no', '-o', 'ConnectTimeout=2', '-o', 'Con … ee3a5458-5dd1-4896-80f2-2ec89cbfa0f7/root/ssh-0.sock', 'root@192.168.0.2', 'true'] [8541] stdout: [8541] stderr: ssh: connect to host 192.168.0.2 port 22: Connection timed out Returned error code: 255
+upstream-compare: every result is explained
+[upstream-suite 12:42:43] wiped /srv and the test results in vesper-upstream-src
+[upstream-suite 12:42:43] evidence in run/GH-172/20261117T110730Z
+[upstream-suite 12:42:50] TRIM discard=68719476736 trimmed=57595043840 (/var/lib/vesper-data: 57595043840 bytes trimmed)
+[upstream-suite 12:42:50] restore the previous launch config and restart the System VM
