@@ -258,11 +258,23 @@ from its own microVM's server. Docker containers do not use the shim and still g
 
 - **Mapping (shim):** a bind mount whose source, with symbolic links followed in the System VM, lies under a
   virtio-fs share mount becomes one export (`--unfs-src`), and the guest mounts it at the bind's destination; a
-  source that is a file, or a source that holds another share mount (JDG-1), is refused with an error naming the
-  mount; other bind mounts keep today's behaviour (ignored by the microVM path). Binds from several shares are one
-  server's sources, each opened beneath its own share mount and keyed by it, so the same relative path in two shares
-  is two exports, and read-only nests stay within one share (GH #207, D-047). The file refusal is a limit of Vesper's
-  design, not of unfs3 (council ARC-3); GH #208 tracks it, gated on a prototype (D-048).
+  source that holds another share mount (JDG-1) is refused with an error naming the mount; other bind mounts keep
+  today's behaviour (ignored by the microVM path). Binds from several shares are one server's sources, each opened
+  beneath its own share mount and keyed by it, so the same relative path in two shares is two exports, and read-only
+  nests stay within one share (GH #207, D-047). A source bound both read-write and read-only is one read-write
+  export, read-only in the guest at its read-only destinations: two exports of one directory give identical handles,
+  and the task holds write access to it anyway (D-049).
+- **Single-file binds** (GH #208, D-050): a file source is opened with `openat2` without `O_DIRECTORY`, no symbolic
+  link on the way, and must be a regular file (a FIFO or socket would hang the single-threaded server). It is
+  attached on an empty file `f`, a fixed name, in a directory `/s/N` of the read-only sandbox root, so the guest
+  cannot add entries next to it, rename or remove it, or change `/s/N` (`EROFS`); a hard link out of it fails
+  (`EXDEV`). A read-only file inside a read-write directory source is nested like a directory. The guest mounts `/s/N`
+  at a hidden directory of its session, outside the task's root, and binds `f` onto the destination (made as an
+  empty file when missing; a directory there is refused), read-only and `nosuid,nodev` as asked.
+- **One inode through two exports** (TD-072, D-049): unfs3 keys its handle cache on the handle's path hashes too
+  (patch 0004), so a handle from one export resolves only into that export; a handle whose object was renamed into
+  another directory still resolves within its own export. Before, a read through a read-only export made writes
+  through a read-write export of the same file fail with `ROFS`, silently for a shell redirection.
 - **The server record** (`/run/vesper/microvm/unfs/ID.args`, version 2: `squash`, then `mount` lines each followed
   by its `src` lines) is what `vesper-unfs run --args` starts from on every respawn, what the selfcheck starts from,
   and what the fanout maps host paths with, all through one Go parser (`unfs.ParseArgs`; council SEC-6). A record

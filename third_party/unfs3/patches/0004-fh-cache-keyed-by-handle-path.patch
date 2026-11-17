@@ -1,0 +1,257 @@
+Vesper: key the file handle cache on the handle's path hashes, not on device and
+inode alone, so a handle from one export never resolves to a path in another export of the same inode.
+A handle whose object was renamed into another directory still resolves within its own export.
+
+diff --git fh_cache.c fh_cache.c
+index 61c6ede..7a5e6b8 100644
+--- a/fh_cache.c
++++ b/fh_cache.c
+@@ -32,6 +32,8 @@
+ typedef struct {
+     uint32 dev;			/* device */
+     uint64 ino;			/* inode */
++    unsigned char len;		/* path hashes of the handle that */
++    unsigned char inos[FH_MAXLEN];	/* resolved to path (Vesper) */
+     char path[NFS_MAXPATHLEN];	/* pathname */
+     unsigned int use;		/* last use */
+ } unfs3_cache_t;
+@@ -114,19 +116,30 @@ static void fh_cache_inval(int idx)
+ {
+     fh_cache[idx].dev = 0;
+     fh_cache[idx].ino = 0;
++    fh_cache[idx].len = 0;
+     fh_cache[idx].use = 0;
+     fh_cache[idx].path[0] = 0;
+ }
+ 
+ /*
+- * find index given device and inode number
++ * find index given device, inode number and the handle's path hashes
++ *
++ * Vesper: one inode can be reachable through two exports (a directory
++ * exported read-only and a file or directory inside it exported
++ * read-write). Keyed on device and inode alone, the cache answered a
++ * handle from one export with the path last resolved through the
++ * other, so the export check and the write used the wrong export, and
++ * writes through the read-write export were refused (ROFS) after a
++ * read through the read-only one.
+  */
+-static int fh_cache_index(uint32 dev, uint64 ino)
++static int fh_cache_index(const unfs3_fh_t * fh)
+ {
+     int i, res = -1;
+ 
+     for (i = 0; i < fh_cache_max + 1; i++)
+-	if (fh_cache[i].dev == dev && fh_cache[i].ino == ino) {
++	if (fh_cache[i].dev == fh->dev && fh_cache[i].ino == fh->ino &&
++	    fh_cache[i].len == fh->len &&
++	    memcmp(fh_cache[i].inos, fh->inos, fh->len) == 0) {
+ 	    res = i;
+ 	    break;
+ 	}
+@@ -137,19 +150,21 @@ static int fh_cache_index(uint32 dev, uint64 ino)
+ /*
+  * add an entry to the filehandle cache
+  */
+-char *fh_cache_add(uint32 dev, uint64 ino, const char *path)
++char *fh_cache_add(const unfs3_fh_t * fh, const char *path)
+ {
+     int idx;
+ 
+     /* if we already have a matching entry, overwrite that */
+-    idx = fh_cache_index(dev, ino);
++    idx = fh_cache_index(fh);
+ 
+     /* otherwise overwrite least recently used entry */
+     if (idx == -1)
+ 	idx = fh_cache_lru();
+ 
+-    fh_cache[idx].dev = dev;
+-    fh_cache[idx].ino = ino;
++    fh_cache[idx].dev = fh->dev;
++    fh_cache[idx].ino = fh->ino;
++    fh_cache[idx].len = fh->len;
++    memcpy(fh_cache[idx].inos, fh->inos, fh->len);
+     fh_cache[idx].use = fh_cache_next();
+ 
+     strcpy(fh_cache[idx].path, path);
+@@ -160,12 +175,14 @@ char *fh_cache_add(uint32 dev, uint64 ino, const char *path)
+ /*
+  * lookup an entry in the cache given a device, inode, and generation number
+  */
+-static char *fh_cache_lookup(uint32 dev, uint64 ino)
++static char *fh_cache_lookup(const unfs3_fh_t * fh)
+ {
+     int i, res;
+     backend_statstruct buf;
++    uint32 dev = fh->dev;
++    uint64 ino = fh->ino;
+ 
+-    i = fh_cache_index(dev, ino);
++    i = fh_cache_index(fh);
+ 
+     if (i != -1) {
+ 	/* check whether path to <dev,ino> relation still holds */
+@@ -198,16 +215,71 @@ static char *fh_cache_lookup(uint32 dev, uint64 ino)
+     return NULL;
+ }
+ 
++/*
++ * Vesper: a handle whose path no longer leads to its object (it was
++ * renamed into another directory) misses the cache, whose entries are
++ * keyed on the path hashes, and fh_decomp_raw. Answer it with an entry
++ * for the same device and inode, but only one whose path lies in the
++ * export the handle came from: the handle's path hashes must begin with
++ * those of the export point that holds the entry's path. A descriptor
++ * kept open across a rename then still writes, and a handle from one
++ * export never resolves into another (bar an 8-bit hash collision of
++ * the two export roots).
++ */
++static char *fh_cache_lookup_moved(const unfs3_fh_t * fh)
++{
++    int i;
++    backend_statstruct buf;
++    char ep[NFS_MAXPATHLEN];
++    char *slash;
++    unfs3_fh_t efh;
++
++    for (i = 0; i < fh_cache_max + 1; i++) {
++	if (fh_cache[i].dev != fh->dev || fh_cache[i].ino != fh->ino ||
++	    fh_cache[i].path[0] == 0)
++	    continue;
++	if (backend_lstat(fh_cache[i].path, &buf) == -1 ||
++	    buf.st_dev != fh->dev || buf.st_ino != fh->ino)
++	    continue;
++	/* the export point that holds the entry's path */
++	strcpy(ep, fh_cache[i].path);
++	while (!export_point(ep)) {
++	    slash = strrchr(ep, '/');
++	    if (!slash || slash == ep) {
++		ep[0] = 0;
++		break;
++	    }
++	    *slash = 0;
++	}
++	if (!ep[0])
++	    continue;
++	efh = fh_comp_raw(ep, NULL, FH_ANY);
++	if (!fh_valid(efh) || efh.len > fh->len ||
++	    memcmp(efh.inos, fh->inos, efh.len) != 0)
++	    continue;
++	fh_cache[i].use = fh_cache_next();
++	fix_dir_times(fh_cache[i].path, &buf);
++	st_cache_valid = TRUE;
++	st_cache = buf;
++	fh_last_entry = i;
++	return fh_cache[i].path;
++    }
++    return NULL;
++}
++
+ /*
+  * update a fh inode cache for an operation like rename
+  */
+ void fh_cache_update(nfs_fh3 fh, char *path)
+ {
+-    unfs3_fh_t *obj = (void *) fh.data.data_val;
+     backend_statstruct buf;
++    unfs3_fh_t *obj;
+ 
+     if (backend_lstat(path, &buf) != -1) {
+-	fh_cache_add(obj->dev, buf.st_ino, path);
++	/* the moved object's handle: the target directory's, extended */
++	obj = fh_extend(fh, buf.st_dev, buf.st_ino, 0);
++	if (obj)
++	    fh_cache_add(obj, path);
+     }
+ }
+ /*
+@@ -268,20 +340,24 @@ char *fh_decomp(nfs_fh3 fh)
+     }
+ 
+     /* try lookup in cache, increase cache usage counter */
+-    result = fh_cache_lookup(obj.dev, obj.ino);
++    result = fh_cache_lookup(&obj);
+     fh_cache_use++;
+ 
+     if (!result) {
+ 	/* not found, resolve the hard way */
+ 	result = fh_decomp_raw(&obj);
+ 
++	/* moved within its export since the handle was made (Vesper) */
++	if (!result)
++	    result = fh_cache_lookup_moved(&obj);
++
+ 	/* if still not found, do full recursive search) */
+ 	if (!result)
+ 	    result = backend_locate_file(obj.dev, obj.ino);
+ 
+ 	if (result)
+ 	    /* add to cache for later use if resolution ok */
+-	    result = fh_cache_add(obj.dev, obj.ino, result);
++	    result = fh_cache_add(&obj, result);
+ 	else
+ 	    /* could not resolve in any way */
+ 	    st_cache_valid = FALSE;
+@@ -304,7 +380,7 @@ unfs3_fh_t fh_comp(const char *path, struct svc_req * rqstp, int need_dir)
+     res = fh_comp_raw(path, rqstp, need_dir);
+     if (fh_valid(res))
+ 	/* add to cache for later use */
+-	fh_cache_add(res.dev, res.ino, path);
++	fh_cache_add(&res, path);
+ 
+     res.pwhash = export_password_hash;
+     return res;
+diff --git fh_cache.h fh_cache.h
+index 7e2db78..4cfd9e6 100644
+--- a/fh_cache.h
++++ b/fh_cache.h
+@@ -18,7 +18,7 @@ char *fh_decomp(nfs_fh3 fh);
+ unfs3_fh_t fh_comp(const char *path, struct svc_req *rqstp, int need_dir);
+ unfs3_fh_t *fh_comp_ptr(const char *path, struct svc_req *rqstp, int need_dir);
+ 
+-char *fh_cache_add(uint32 dev, uint64 ino, const char *path);
++char *fh_cache_add(const unfs3_fh_t * fh, const char *path);
+ void fh_cache_update(nfs_fh3 fh, char *path);
+ 
+ #endif
+diff --git nfs.c nfs.c
+index 5296dd9..1d2f1cd 100644
+--- a/nfs.c
++++ b/nfs.c
+@@ -211,7 +211,8 @@ LOOKUP3res *nfsproc3_lookup_3_svc(LOOKUP3args * argp, struct svc_req * rqstp)
+ 	    } else {
+ 		gen = backend_get_gen(buf, FD_NONE, obj);
+ 		fh = fh_extend(argp->what.dir, buf.st_dev, buf.st_ino, gen);
+-		fh_cache_add(buf.st_dev, buf.st_ino, obj);
++		if (fh)
++		    fh_cache_add(fh, obj);
+ 	    }
+ 
+ 	    if (fh) {
+@@ -552,7 +553,11 @@ CREATE3res *nfsproc3_create_3_svc(CREATE3args * argp, struct svc_req * rqstp)
+ 	if (res != -1) {
+ 	    /* So far, so good */
+ 	    gen = backend_get_gen(buf, fd, obj);
+-	    fh_cache_add(buf.st_dev, buf.st_ino, obj);
++	    {
++		unfs3_fh_t *nfh = fh_extend(argp->where.dir, buf.st_dev, buf.st_ino, gen);
++		if (nfh)
++		    fh_cache_add(nfh, obj);
++	    }
+ 
+ 	    result.CREATE3res_u.resok.obj =
+ 		fh_extend_post(argp->where.dir, buf.st_dev, buf.st_ino, gen);
+@@ -579,7 +584,11 @@ CREATE3res *nfsproc3_create_3_svc(CREATE3args * argp, struct svc_req * rqstp)
+ 		    if (check_create_verifier(&buf, argp->how.createhow3_u.verf)) {
+ 			/* The verifier matched. Return success */
+ 			gen = backend_get_gen(buf, fd, obj);
+-			fh_cache_add(buf.st_dev, buf.st_ino, obj);
++			{
++			    unfs3_fh_t *nfh = fh_extend(argp->where.dir, buf.st_dev, buf.st_ino, gen);
++			    if (nfh)
++				fh_cache_add(nfh, obj);
++			}
+ 
+ 			result.CREATE3res_u.resok.obj =
+ 			    fh_extend_post(argp->where.dir, buf.st_dev,

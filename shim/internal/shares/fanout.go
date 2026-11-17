@@ -131,6 +131,12 @@ func (s Server) Map(p string) []Event {
 		}
 		var rest string
 		switch {
+		case src.File:
+			// A file source's one entry; the guest replays it on the bind's destination.
+			if rel != src.Rel {
+				continue
+			}
+			rest = unfs.FileName
 		case src.Rel == ".":
 			rest = rel
 		case rel == src.Rel:

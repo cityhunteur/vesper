@@ -173,10 +173,14 @@ func CheckMount(m string) error {
 	return nil
 }
 
-// Arg is a source's REL:ro or REL:rw form.
+// Arg is a source's REL:MODE form (ParseSource).
 func (s Source) Arg() string {
+	m := "rw"
 	if s.ReadOnly {
-		return s.Rel + ":ro"
+		m = "ro"
 	}
-	return s.Rel + ":rw"
+	if s.File {
+		m += "f"
+	}
+	return s.Rel + ":" + m
 }

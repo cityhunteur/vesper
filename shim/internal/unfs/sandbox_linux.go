@@ -90,7 +90,7 @@ func OpenSources(mounts []string, srcs []Source, anyFS bool) ([]*os.File, error)
 		}
 	}
 	for _, s := range srcs {
-		fd, err := openLive(mfds[s.Mount], s.Rel, time.Now().Add(StaleWait))
+		fd, err := openLive(mfds[s.Mount], s.Rel, s.File, time.Now().Add(StaleWait))
 		if err != nil {
 			return nil, fmt.Errorf("source %q: %w", s.Rel, err)
 		}
@@ -134,16 +134,35 @@ var StaleWait = 15 * time.Second
 // few seconds: virtio-fs keeps the name's old entry until its timeout. Reading the directory always asks macOS, and
 // the kernel refuses to read a dead one (ENOENT), so a dead directory is opened again until the entry expires or the
 // deadline passes; the server never serves a directory that is gone (TD-071).
-func openLive(mfd int, rel string, deadline time.Time) (int, error) {
+//
+// A file source (GH #208) is opened the same way without O_DIRECTORY, and must be a regular file: a FIFO or a socket
+// would hang the single-threaded server on a READ (council SEC-7).
+func openLive(mfd int, rel string, file bool, deadline time.Time) (int, error) {
+	flags := uint64(unix.O_PATH | unix.O_DIRECTORY | unix.O_CLOEXEC)
+	if file {
+		flags = unix.O_PATH | unix.O_CLOEXEC
+	}
 	for {
 		fd, err := unix.Openat2(mfd, rel, &unix.OpenHow{
-			Flags:   unix.O_PATH | unix.O_DIRECTORY | unix.O_CLOEXEC,
+			Flags:   flags,
 			Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_MAGICLINKS | unix.RESOLVE_NO_XDEV,
 		})
 		if err != nil {
 			return -1, err
 		}
-		err = dirAlive(fd)
+		if file {
+			var st unix.Stat_t
+			if err := unix.Fstat(fd, &st); err != nil || st.Mode&unix.S_IFMT != unix.S_IFREG {
+				unix.Close(fd)
+				if err == nil {
+					err = fmt.Errorf("not a regular file (mode %#o)", st.Mode&unix.S_IFMT)
+				}
+				return -1, err
+			}
+			err = nil
+		} else {
+			err = dirAlive(fd)
+		}
 		if err == nil {
 			err = refreshAttrs(fd)
 		}
@@ -350,12 +369,20 @@ func Init() error {
 		return err
 	}
 	// Each source: the detached tree the parent cloned from the descriptor it opened, attributes already set.
-	for i := range cc.Sources {
+	// A file source goes on an empty file FileName in /s/N, which the read-only root below then keeps from gaining
+	// siblings, being renamed or having its mode changed (GH #208, council SEC-7).
+	for i, s := range cc.Sources {
 		dst := filepath.Join(root, ExportPath(i))
 		if err := os.Mkdir(dst, 0o755); err != nil {
 			return err
 		}
-		if err := step(fmt.Sprintf("attach source %d", i), attachFd(firstFd+i, dst)); err != nil {
+		if s.File {
+			dst = filepath.Join(dst, FileName)
+			if err := os.WriteFile(dst, nil, 0o644); err != nil {
+				return err
+			}
+		}
+		if err := step(fmt.Sprintf("attach source %d", i), attachFd(firstFd+i, dst, s.File)); err != nil {
 			return err
 		}
 	}
@@ -369,8 +396,12 @@ func Init() error {
 		if err != nil {
 			return fmt.Errorf("nest %d in %d: %w", n.Inner, n.Outer, err)
 		}
+		nf := uint64(unix.O_PATH | unix.O_DIRECTORY | unix.O_CLOEXEC)
+		if cc.Sources[n.Inner].File {
+			nf = unix.O_PATH | unix.O_CLOEXEC // a read-only file inside a read-write directory (council ARC-15)
+		}
 		at, err := unix.Openat2(outer, n.Sub, &unix.OpenHow{
-			Flags:   unix.O_PATH | unix.O_DIRECTORY | unix.O_CLOEXEC,
+			Flags:   nf,
 			Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_MAGICLINKS,
 		})
 		unix.Close(outer)
@@ -464,8 +495,12 @@ func attachPath(src, dst string, set uint64) error {
 	return attachTree(unix.AT_FDCWD, src, 0, to, set)
 }
 
-func attachFd(tree int, dst string) error {
-	to, err := unix.Open(dst, unix.O_PATH|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+func attachFd(tree int, dst string, file bool) error {
+	flags := unix.O_PATH | unix.O_DIRECTORY | unix.O_NOFOLLOW | unix.O_CLOEXEC
+	if file {
+		flags = unix.O_PATH | unix.O_NOFOLLOW | unix.O_CLOEXEC
+	}
+	to, err := unix.Open(dst, flags, 0)
 	if err != nil {
 		return err
 	}

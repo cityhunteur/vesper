@@ -7,6 +7,7 @@
 # and write; at least 40 directories below an export read, a write through a descriptor opened before a rename
 # across directories keeps today's recorded outcome, and three more rename cases are measured; a share source whose
 # path holds spaces and shell characters mounts and reads; binds from two shares share one server and stay apart;
+# writes land when one inode is reachable read-only and read-write (TD-072); single-file binds (GH #208);
 # after the shim is killed the reaper leaves no server,
 # namespace or record. Needs `make systemvm-up-shares`.
 # Report: run/systemvm/microvm-binds-report.json.
@@ -109,12 +110,45 @@ case "${out}" in "RC 0"*"OUT odd"*"OUT wrote"*) [ "$(cat "${odd}/g" 2>/dev/null)
 SHARE2="${BINDS_SHARE2:-$(dirname "${SHARE}")/share-nowatch}"
 R="$(basename "${F}")/two"; A="${SHARE}/${R}"; Z="${SHARE2}/${R}"
 rm -rf "${SHARE2}"/m7-*; mkdir -p "${A}" "${Z}/sub"; echo first > "${A}/id"; echo second > "${Z}/id"
-out="$(runb --bind="${A}:/a:rw" --bind="${Z}:/b:rw" --bind="${Z}/sub:/b/sub:ro" binds-two 'cat /a/id /b/id; echo from-a > /a/w; echo from-b > /b/w; echo x > /b/sub/no 2>/dev/null && echo RO-WRITTEN || echo ro-refused; grep -c " nfs " /proc/mounts')"
+out="$(runb --bind="${A}:/a:rw" --bind="${Z}:/b:rw" --bind="${Z}/sub:/b/sub:ro" binds-two 'cat /a/id /b/id; echo from-a > /a/w; echo from-b > /b/w; { echo x > /b/sub/no; } 2>/dev/null && echo RO-WRITTEN || echo ro-refused; grep -c " nfs " /proc/mounts')"
 case "${out}" in "RC 0"*"OUT first"*"OUT second"*"OUT ro-refused"*"OUT 3"*)
   if [ "$(cat "${A}/w" 2>/dev/null)" = from-a ] && [ "$(cat "${Z}/w" 2>/dev/null)" = from-b ] && [ ! -e "${Z}/sub/no" ] && [ ! -e "${A}/sub" ]; then
     record binds_from_two_shares true "${out}; macOS: ${A}/w=from-a, ${Z}/w=from-b, sub/no absent"
   else record binds_from_two_shares false "${out}; a/w=$(cat "${A}/w" 2>&1) b/w=$(cat "${Z}/w" 2>&1)"; fi ;;
   *) record binds_from_two_shares false "${out}" ;; esac
+
+# --- 6c. One inode through a read-only and a read-write export: writes through the read-write one land (TD-072,
+# unfs3 patch 0004). Before the patch a read through the read-only export made later writes through the other fail
+# with ROFS, silently for a shell redirection ------------------------------------------------------------------------
+T="${F}/t72"; mkdir -p "${T}/proj/out"; echo w > "${T}/proj/out/w1"; echo p > "${T}/proj/p.txt"
+out="$(runb --bind="${T}/proj:/app:ro" --bind="${T}/proj/out:/else:rw" --bind="${T}/proj/p.txt:/x.txt:rw" binds-t72 'cat /app/out/w1 /app/p.txt >/dev/null; sleep 2; ls -l /app /app/out >/dev/null; cat /app/out/w1 /app/p.txt >/dev/null; echo b >> /else/w1; echo b >> /x.txt; sync; { echo z > /app/p.txt; } 2>/dev/null && echo RO-WRITTEN || echo ro-refused')"
+w1="$(tr '\n' ' ' < "${T}/proj/out/w1")"; pt="$(tr '\n' ' ' < "${T}/proj/p.txt")"
+case "${out}|${w1}|${pt}" in "RC 0"*"OUT ro-refused"*"|w b |p b ") record writes_land_through_either_export true "${out}; macOS: out/w1='${w1}' p.txt='${pt}'" ;;
+  *) record writes_land_through_either_export false "${out}; macOS: out/w1='${w1}' p.txt='${pt}' (want 'w b' and 'p b')" ;; esac
+
+# --- 6d. Single-file binds (GH #208, D-048): read and write; a read-only file bind and a read-only file nested in a
+# read-write directory refuse writes; one file bound both ways keeps its writes; the export's directory refuses new
+# entries, renames and removal from a hostile task; a file onto a directory is refused; a macOS edit reaches a
+# watcher; a rename-replace on macOS is recorded (the bind goes stale: ESTALE, not the old content) ----------------
+G="${F}/g208"; mkdir -p "${G}/dir"; echo one > "${G}/a.txt"; echo conf > "${G}/dir/conf.txt"; echo w > "${G}/w.txt"
+nfsopt='addr=169.254.77.1,vers=3,proto=tcp,port=2049,mountport=2050,mountproto=tcp,nolock'
+out="$(runb --bind="${G}/a.txt:/etc/a.txt:rw" --bind="${G}/dir:/app:rw" --bind="${G}/dir/conf.txt:/app/conf.txt:ro" --bind="${G}/a.txt:/ro/a.txt:ro" binds-file "cat /etc/a.txt; echo two >> /etc/a.txt; { echo x > /app/conf.txt; } 2>/dev/null && echo NEST-WRITTEN || echo nest-ro-refused; { echo y > /ro/a.txt; } 2>/dev/null && echo RO-WRITTEN || echo ro-refused; mv /etc/a.txt /etc/b.txt 2>/dev/null && echo MOVED || echo rename-busy; mkdir -p /mnt/x; mount -t nfs -o ${nfsopt} 169.254.77.1:/s/0 /mnt/x && echo export-entries \$(ls /mnt/x); touch /mnt/x/sib 2>/dev/null && echo SIBLING || echo sibling-refused; rm /mnt/x/f 2>/dev/null && echo REMOVED || echo remove-refused")"
+dirdest="$(runb --bind="${G}/w.txt:/etc:rw" binds-file-dir 'echo ran')"
+case "${out}|${dirdest}" in "RC 0"*"OUT one"*"OUT nest-ro-refused"*"OUT ro-refused"*"OUT rename-busy"*"OUT export-entries f"*"OUT sibling-refused"*"OUT remove-refused"*"|"*"is a directory; a file can only be bound onto a file"*)
+  if [ "$(tr '\n' ' ' < "${G}/a.txt")" = "one two " ] && [ "$(cat "${G}/dir/conf.txt")" = conf ]; then
+    record file_binds true "${out}; macOS a.txt='one two', conf.txt unchanged; onto a directory: ${dirdest}"
+  else record file_binds false "${out}; macOS a.txt='$(tr '\n' ' ' < "${G}/a.txt")'"; fi ;;
+  *) record file_binds false "${out}; onto a directory: ${dirdest}" ;; esac
+mkdir -p "${G}/log"; echo v1 > "${G}/e.txt"
+st="$(runb --bind="${G}/e.txt:/e.txt:rw" --bind="${G}/log:/log:rw" --detach binds-file-ev 'inotifyd - /e.txt:c > /log/ev 2>&1 & sleep 9; cat /e.txt > /log/before 2>&1; sleep 7; cat /e.txt > /log/after 2>&1; echo rc=$? >> /log/after; kill %1')"
+sleep 5; echo v2 >> "${G}/e.txt"; sleep 6
+printf 'v3\n' > "${G}/e.tmp" && mv "${G}/e.tmp" "${G}/e.txt"
+wait_stopped binds-file-ev 40; ctl ctr -- delete binds-file-ev >/dev/null
+ev="$(grep -c e.txt "${G}/log/ev" 2>/dev/null)"; before="$(tr '\n' ' ' < "${G}/log/before" 2>/dev/null)"; after="$(tr '\n' ' ' < "${G}/log/after" 2>/dev/null)"
+case "${st}|${before}|${after}" in "STARTED binds-file-ev|v1 v2 |"*)
+  if [ "${ev:-0}" -ge 1 ]; then record file_bind_events_and_rename_replace true "edit seen: '${before}', ${ev} IN_MODIFY; after a rename-replace on macOS the guest reads: '${after}' (recorded: a file bind pins the replaced file, D-048)"
+  else record file_bind_events_and_rename_replace false "no event; before '${before}' after '${after}'"; fi ;;
+  *) record file_bind_events_and_rename_replace false "${st}; before '${before}'; after '${after}'; events ${ev:-none}" ;; esac
 
 # --- 7. After the shim is killed, the reaper leaves no server, namespace or record ----------------------------------
 st="$(runb "${B[@]}" --detach binds-shim 'sleep 600')"

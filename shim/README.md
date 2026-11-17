@@ -32,7 +32,7 @@ The Go module pins containerd 2.1.5 and builds static Linux arm64 binaries with 
   `build-shim.sh` and installed as `/usr/bin/vesper-authz`.
 - `internal/shares`: maps a task's bind mounts from macOS shares onto its microVM's NFS exports (GH #160 M4, M5).
   `MakePlan` turns each bind whose resolved source lies under a virtio-fs mount into an export and a guest share,
-  refusing file sources and sources that hold another share; binds from several shares are one server's sources
+  directories and single files (GH #208), refusing sources that hold another share; binds from several shares are one server's sources
   (GH #207), grouped by share in the `unfs.Args` record (`internal/unfs/args.go`); the task service passes the plan's `--share-net --unfs-*`
   arguments to `vesper-microvm launch` and the list to the guest as the annotation `io.vesper.shares`.
   `vesper-console shares mount|unmount` (`guest_linux.go`) mounts them under `/newroot` in the guest.

@@ -5,7 +5,7 @@
 # Through `ctr run --runtime io.containerd.vesper.v2 --mount type=bind,...` (vesper-ctr run-binds): a read-write bind
 # and a read-only bind inside it are NFS mounts in the guest; the guest reads, writes reach macOS, the read-only one
 # refuses writes; a macOS write appears in the guest; the GH #159 lost write (`>` then `>>`) does not recur in 1,000
-# tries, judged in the guest and from macOS after the task; a file source is refused with a clear error; a bind from
+# tries, judged in the guest and from macOS after the task; a file source is bound read-only (GH #208); a bind from
 # outside every share keeps today's behaviour; a non-root guest user writes; nothing is left afterwards.
 # Needs `make systemvm-up-shares`. Report: run/systemvm/microvm-shares-report.json.
 set -uo pipefail
@@ -28,7 +28,7 @@ echo hello > "${F}/proj/file.txt"; echo conf > "${F}/proj/conf/app.conf"; echo s
 B=(--bind="${F}/proj:/data:rw" --bind="${F}/proj/conf:/data/conf:ro")
 
 # --- 1. Binds from a share are NFS mounts in the guest ------------------------------------------------------------
-out="$(runb "${B[@]}" shares-a 'cat /data/file.txt; echo from-guest > /data/new.txt; echo x > /data/conf/x 2>/dev/null && echo RO-WRITTEN || echo ro-refused; grep -c " nfs " /proc/mounts')"
+out="$(runb "${B[@]}" shares-a 'cat /data/file.txt; echo from-guest > /data/new.txt; { echo x > /data/conf/x; } 2>/dev/null && echo RO-WRITTEN || echo ro-refused; grep -c " nfs " /proc/mounts')"
 case "${out}" in "RC 0"*"OUT hello"*"OUT ro-refused"*"OUT 2"*) ;; *) out="BAD ${out}" ;; esac
 if [ "$(cat "${F}/proj/new.txt" 2>/dev/null)" = from-guest ] && [ ! -e "${F}/proj/conf/x" ] && case "${out}" in BAD*) false ;; *) true ;; esac; then
   record binds_become_nfs_mounts true "${out}; macOS sees new.txt=from-guest, conf/x absent"
@@ -51,11 +51,11 @@ case "${out}" in "RC 0"*"guest-bad 0"*) [ "${macbad}" = 0 ] && record lost_write
   *) record lost_write_does_not_recur false "${out}; macOS bad ${macbad}" ;; esac
 rm -f "${F}"/proj/lw-*
 
-# --- 4. A file source is refused; a bind outside every share keeps today's behaviour --------------------------------
-out1="$(runb --bind="${F}/proj/single.txt:/single.txt:ro" shares-d 'echo ran')"
+# --- 4. A file source is bound (GH #208); a bind outside every share keeps today's behaviour -----------------------
+out1="$(runb --bind="${F}/proj/single.txt:/single.txt:ro" shares-d 'cat /single.txt; { echo x > /single.txt; } 2>/dev/null && echo RO-WRITTEN || echo ro-refused')"
 out2="$(runb --bind=/etc:/hostetc:ro shares-e 'echo ran; grep -c " nfs " /proc/mounts || true')"
-case "${out1}|${out2}" in *"is a file"*"|RC 0"*"OUT ran"*"OUT 0"*) record file_refused_other_binds_unchanged true "file: ${out1}; outside a share: ${out2}" ;;
-  *) record file_refused_other_binds_unchanged false "file: ${out1}; outside a share: ${out2}" ;; esac
+case "${out1}|${out2}" in "RC 0"*"OUT single"*"OUT ro-refused"*"|RC 0"*"OUT ran"*"OUT 0"*) record file_bound_other_binds_unchanged true "file: ${out1}; outside a share: ${out2}" ;;
+  *) record file_bound_other_binds_unchanged false "file: ${out1}; outside a share: ${out2}" ;; esac
 
 # --- 5. A non-root guest user writes through the mount ------------------------------------------------------------
 chmod 0777 "${F}/proj"

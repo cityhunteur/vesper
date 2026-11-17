@@ -27,12 +27,17 @@ const (
 )
 
 // Source is one directory a server exports, as a path relative to one of its trusted share mounts (Mount is that
-// mount's index; GH #207).
+// mount's index; GH #207). A File source is one regular file, exported as the only entry, FileName, of a read-only
+// directory /s/N (GH #208).
 type Source struct {
 	Mount    int    `json:"mount,omitempty"`
 	Rel      string `json:"rel"`
 	ReadOnly bool   `json:"ro"`
+	File     bool   `json:"file,omitempty"`
 }
+
+// FileName is the fixed name of a file source inside its export: never the host file's own name (council SEC-7).
+const FileName = "f"
 
 // Nest says that read-only source Inner is bound again, read-only, at Sub inside read-write source Outer, so the
 // outer export cannot write what the task mounted read-only (ADR 0009, Sandbox).
@@ -42,25 +47,41 @@ type Nest struct {
 	Sub   string `json:"sub"`
 }
 
-// ParseSource reads REL:ro or REL:rw. REL is "." for the whole share, or a relative path of plain components.
+// ParseSource reads REL:MODE, MODE one of ro and rw for a directory, rof and rwf for a file (GH #208). REL is "."
+// for the whole share (a directory only), or a relative path of plain components.
 func ParseSource(arg string) (Source, error) {
 	i := strings.LastIndexByte(arg, ':')
 	if i < 0 {
-		return Source{}, fmt.Errorf("source %q: want REL:ro or REL:rw", arg)
+		return Source{}, fmt.Errorf("source %q: want REL:ro, REL:rw, REL:rof or REL:rwf", arg)
 	}
 	rel, mode := arg[:i], arg[i+1:]
-	var ro bool
+	var s Source
 	switch mode {
 	case "ro":
-		ro = true
+		s.ReadOnly = true
 	case "rw":
+	case "rof":
+		s.ReadOnly, s.File = true, true
+	case "rwf":
+		s.File = true
 	default:
-		return Source{}, fmt.Errorf("source %q: mode must be ro or rw", arg)
+		return Source{}, fmt.Errorf("source %q: mode must be ro, rw, rof or rwf", arg)
 	}
-	if err := CheckRel(rel); err != nil {
+	s.Rel = rel
+	if err := s.check(); err != nil {
 		return Source{}, err
 	}
-	return Source{Rel: rel, ReadOnly: ro}, nil
+	return s, nil
+}
+
+func (s Source) check() error {
+	if err := CheckRel(s.Rel); err != nil {
+		return err
+	}
+	if s.File && s.Rel == "." {
+		return errors.New("a file source cannot be the share itself")
+	}
+	return nil
 }
 
 // CheckRel accepts "." or a relative path whose components are neither empty, ".", nor "..".
@@ -106,7 +127,7 @@ func within(outer, inner string) (sub string, ok bool) {
 func Nests(srcs []Source) []Nest {
 	var out []Nest
 	for i, o := range srcs {
-		if o.ReadOnly {
+		if o.ReadOnly || o.File {
 			continue
 		}
 		for j, in := range srcs {
@@ -158,7 +179,7 @@ func Check(srcs []Source) error {
 		return fmt.Errorf("%d sources; at most %d", len(srcs), MaxSources)
 	}
 	for _, s := range srcs {
-		if err := CheckRel(s.Rel); err != nil {
+		if err := s.check(); err != nil {
 			return err
 		}
 	}

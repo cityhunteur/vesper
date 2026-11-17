@@ -19,7 +19,12 @@ func TestParseSource(t *testing.T) {
 			t.Errorf("ParseSource(%q) = %+v, %v; want %+v", in, got, err, want)
 		}
 	}
-	for _, in := range []string{"app", "app:", "app:rwx", ":ro", "/abs:rw", "../up:rw", "a/../b:ro", "a//b:rw", "a/./b:rw", "./a:rw", "a/:rw", "a\x00b:rw"} {
+	for in, want := range map[string]Source{"a.txt:rof": {Rel: "a.txt", ReadOnly: true, File: true}, "a.txt:rwf": {Rel: "a.txt", File: true}} {
+		if got, err := ParseSource(in); err != nil || got != want || got.Arg() != in {
+			t.Errorf("ParseSource(%q) = %+v, %v", in, got, err)
+		}
+	}
+	for _, in := range []string{".:rwf", ".:rof", "a:rf", "app", "app:", "app:rwx", ":ro", "/abs:rw", "../up:rw", "a/../b:ro", "a//b:rw", "a/./b:rw", "./a:rw", "a/:rw", "a\x00b:rw"} {
 		if _, err := ParseSource(in); err == nil {
 			t.Errorf("ParseSource(%q) accepted", in)
 		}
@@ -51,6 +56,9 @@ func TestNests(t *testing.T) {
 	}
 	if got := Nests(srcs); !reflect.DeepEqual(got, want) {
 		t.Errorf("Nests:\n got %+v\nwant %+v", got, want)
+	}
+	if got := Nests([]Source{{Rel: "a.txt", File: true}, {Rel: "a.txt", ReadOnly: true, File: true}}); len(got) != 0 {
+		t.Errorf("a file is never the outer of a nest, got %+v", got)
 	}
 	if got := Nests([]Source{{Rel: "a", ReadOnly: true}, {Rel: "a/b"}}); len(got) != 0 {
 		t.Errorf("a rw source inside a ro one needs no nest, got %+v", got)
