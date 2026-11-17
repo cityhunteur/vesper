@@ -19,8 +19,12 @@
 #                                         VOLUME <name> kib=<n> imported|not-imported|has-options
 #        vesper-data legacy import-volume NAME   copy one old volume into the remapped store, each owner shifted
 #                                         into the container range; IMPORTED <name> entries=N kib=N unmapped=N
+#        vesper-data legacy delete [--yes]   remove the old store (owner decision D-041): without --yes it only
+#                                         prints DELETE-PLAN <entry> lines; with it, DELETED entries=N kib=N. The
+#                                         remapped stores (<base>.<base>) inside /var/lib/docker are never touched
 #        vesper-data test-import plant|import|check|clean   suite hook: an old-style volume with known owners, imported
 #                                         from a scratch store; IMPORT-TEST ...
+#        vesper-data test-delete plant|delete|check|clean   suite hook: legacy delete on a scratch store; DELETE-TEST ...
 # binds, label and test-relabel exist so the data-disk suite needs no root shell in a container (ADR 0010).
 set -u
 LABEL=vesper-data
@@ -129,7 +133,7 @@ test_relabel() {
 # --- The Docker store from before ADR 0010 -------------------------------------------------------------------------
 # dockerd keeps one store per user namespace mapping. Boots before ADR 0010 used /var/lib/docker itself; a remapped
 # dockerd uses /var/lib/docker/<base>.<base> and cannot see the old one. The old store is only read here: nothing
-# in it is changed or removed (deleting it needs the owner's approval, ADR 0010 point 8).
+# in it is changed or removed except by `legacy delete`, which the owner approved (ADR 0010 point 8, D-041).
 OLD=/var/lib/docker
 BASE=100000
 COUNT=65536
@@ -139,6 +143,7 @@ LOCK=/run/vesper/legacy-import.lock
 # (uid BASE) cannot enter it, so no container can swap a path in the copy while root changes owners in it.
 STAGE="$NEW/.vesper-import"
 TEST_STORE=/run/vesper/legacy-test
+DELETE_TEST=/run/vesper/legacy-delete-test
 
 # A Docker volume name: [a-zA-Z0-9][a-zA-Z0-9_.-]* (moby's volume name rule), at most 255 bytes.
 valid_name() {
@@ -227,11 +232,38 @@ import_volume() {
   echo "IMPORTED $name entries=$((entries)) kib=$need unmapped=$((unmapped))"
 }
 
+# Removes the old store $2 (default the real one): every top-level entry except the remapped stores, named
+# <digits>.<digits>, which dockerd keeps inside it. Refused while the old store has a container, while anything is
+# mounted under it outside a remapped store, or during an import. Without --yes ($1) it prints the plan only.
+legacy_delete() {
+  yes="${1:-}"; store="${2:-$OLD}"
+  [ "$yes" = "" ] || [ "$yes" = --yes ] || { echo "ERR usage: vesper-data legacy delete [--yes]"; return 2; }
+  [ -d "$store/image" ] && [ ! -L "$store" ] || { echo "LEGACY absent"; return 0; }
+  c=$(find "$store/containers" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)
+  [ "$((c))" -eq 0 ] || { echo "ERR the old store has $((c)) containers"; return 1; }
+  busy=$(awk -v s="$store/" 'index($2, s) == 1 { r = substr($2, length(s) + 1); sub("/.*", "", r); if (r !~ /^[0-9]+\.[0-9]+$/) print $2 }' /proc/mounts)
+  [ -z "$busy" ] || { echo "ERR mounted under the old store: $(echo $busy)"; return 1; }
+  exec 9>"$LOCK" && flock -n 9 || { echo "ERR an import is running"; return 1; }
+  n=0; kib=0
+  for e in "$store"/* "$store"/.[!.]* "$store"/..?*; do
+    [ -e "$e" ] || [ -L "$e" ] || continue
+    b=$(basename "$e")
+    case "$b" in *[!0-9.]*|.*|*.|*..*) ;; *.*) continue ;; esac
+    k=$(du -sk "$e" 2>/dev/null | awk '{print $1}'); kib=$((kib + ${k:-0})); n=$((n + 1))
+    if [ "$yes" = --yes ]; then rm -rf "${e:?}" || { echo "ERR could not remove $b"; return 1; }
+    else echo "DELETE-PLAN $b kib=${k:-0}"; fi
+  done
+  # HEALTH reads the store's state from a file counted once a boot (vesper-containers); the real store is now gone.
+  [ "$yes" = --yes ] && [ "$store" = "$OLD" ] && [ -f /run/vesper/containers.legacy ] && echo absent > /run/vesper/containers.legacy
+  if [ "$yes" = --yes ]; then echo "DELETED entries=$n kib=$kib"; else echo "DELETE-PLAN total entries=$n kib=$kib (run again with --yes)"; fi
+}
+
 legacy() {
   case "${1:-}" in
     status) legacy_status ;;
     import-volume) import_volume "${2:-}" ;;
-    *) echo "ERR usage: vesper-data legacy status|import-volume NAME"; return 2 ;;
+    delete) legacy_delete "${2:-}" ;;
+    *) echo "ERR usage: vesper-data legacy status|import-volume NAME|delete [--yes]"; return 2 ;;
   esac
 }
 
@@ -281,9 +313,35 @@ test_import() {
   esac
 }
 
+# Suite hook: a scratch store with old entries, a remapped store and an old container, deleted in two passes.
+test_delete() {
+  d="$DELETE_TEST"
+  case "${1:-}" in
+    plant)
+      rm -rf "${d:?}"
+      mkdir -p "$d/image/overlay2" "$d/volumes/v/_data" "$d/containers/c1" "$d/overlay2/l" "$d/$BASE.$BASE/volumes/keep" "$d/1.2" &&
+      echo id > "$d/engine-id" && echo keep > "$d/$BASE.$BASE/volumes/keep/f" && echo x > "$d/volumes/v/_data/f" &&
+      mkdir -p "$d/.hidden" && ln -s /etc "$d/link" || { echo "ERR plant"; return 1; }
+      echo "DELETE-TEST planted" ;;
+    delete)
+      echo "DELETE-TEST with-container $(legacy_delete --yes "$d" | tr '\n' ' ')"
+      rmdir "$d/containers/c1"
+      echo "DELETE-TEST plan $(legacy_delete "" "$d" | tr '\n' ' ')"
+      echo "DELETE-TEST delete $(legacy_delete --yes "$d" | tr '\n' ' ')"
+      echo "DELETE-TEST again $(legacy_delete --yes "$d" | tr '\n' ' ')" ;;
+    check)
+      echo "DELETE-TEST left $(cd "$d" 2>/dev/null && ls -A | tr '\n' ' ')"
+      echo "DELETE-TEST keep $(cat "$d/$BASE.$BASE/volumes/keep/f" 2>/dev/null || echo missing)"
+      echo "DELETE-TEST etc $([ -d /etc ] && echo present || echo missing)" ;;
+    clean) rm -rf "${d:?}"; echo "DELETE-TEST clean" ;;
+    *) echo "ERR usage: vesper-data test-delete plant|delete|check|clean"; return 2 ;;
+  esac
+}
+
 case "${1:-}" in
   legacy) legacy "${2:-}" "${3:-}" ;;
   test-import) test_import "${2:-}" ;;
+  test-delete) test_delete "${2:-}" ;;
   trim) trim ;;
   binds) binds ;;
   label) label ;;
@@ -291,5 +349,5 @@ case "${1:-}" in
   mount) mount_ ;;
   status) status ;;
   stop) stop ;;
-  *) echo "ERR usage: vesper-data mount|status|stop|trim|binds|label|test-relabel LABEL|legacy status|legacy import-volume NAME|test-import plant|import|check|clean"; exit 2 ;;
+  *) echo "ERR usage: vesper-data mount|status|stop|trim|binds|label|test-relabel LABEL|legacy status|legacy import-volume NAME|legacy delete [--yes]|test-import plant|import|check|clean|test-delete plant|delete|check|clean"; exit 2 ;;
 esac

@@ -5,7 +5,7 @@
 # capability Docker still grants, no seccomp filter and the whole System VM bound at /host cannot read root-only
 # Vesper state, enter a microVM's share namespace, reach its share server (ADR 0009, D-034), open the disk, KVM or
 # vsock devices, talk to Docker, containerd or the agent, or load a module; the authorisation plugin refuses
-# requests it cannot read and routes it does not list; dockerd refuses everything while the plugin is down; and a
+# requests it cannot read and routes it does not list; an old Docker store is deleted, never a remapped one (D-041); dockerd refuses everything while the plugin is down; and a
 # data disk that normal boots use refuses a boot that asks for unmapped containers.
 #
 # Needs `make systemvm-up docker-up` on the default data disk. The last two steps restart the System VM twice
@@ -33,7 +33,7 @@ health() { ctl health | sed -n "s/.*\"$1\":\"\\([^\"]*\\)\".*/\\1/p"; }
 cleanup() {
   ctl microvm test-share-listen "${ID}" stop >/dev/null; ctl microvm -- cleanup "${ID}" --logs >/dev/null
   "${DOCKER}" rm -f confine-probe >/dev/null 2>&1; "${DOCKER}" volume rm -f confine-vol >/dev/null 2>&1
-  ctl data test-import clean >/dev/null
+  ctl data test-import clean >/dev/null; ctl data test-delete clean >/dev/null
   if [ -f "${SAVED}" ]; then # a reboot step was interrupted: put the launch config back
     cp "${SAVED}" "${CFG}" && rm -f "${SAVED}"
     bash scripts/systemvm/docker-down.sh >/dev/null 2>&1; bash scripts/systemvm/down.sh >/dev/null 2>&1
@@ -211,6 +211,22 @@ if case "${planted}:${imported}" in *"IMPORT-TEST planted"*":"*"IMPORTED vesper-
   record old_volume_imported_with_owners_shifted true "${imported}; in the store: ${check}; in a container: ${seen}; again: ${again}; ../etc: ${badname}; ${status}"
 else
   record old_volume_imported_with_owners_shifted false "${planted}; ${imported}; again: ${again}; ../etc: ${badname}; store: ${check}; container: ${seen}; ${status}"
+fi
+
+# --- 7c. legacy delete removes an old store but never a remapped one, nor while a container is left (D-041) -----
+planted="$(ctl data test-delete plant)"
+deleted="$(ctl data test-delete delete | tr '\n' ' ')"
+left="$(ctl data test-delete check | tr '\n' ' ')"
+usage="$(ctl data -- legacy delete --force)"
+ctl data test-delete clean >/dev/null
+if case "${planted}" in *"DELETE-TEST planted"*) true ;; *) false ;; esac \
+  && case "${deleted}" in *"with-container ERR the old store has 1 containers"*"plan DELETE-PLAN"*"total entries=7 "*"delete DELETED entries=7 "*"again LEGACY absent"*) true ;; *) false ;; esac \
+  && case "${deleted}" in *"DELETE-PLAN 100000.100000"*|*"DELETE-PLAN 1.2"*) false ;; *) true ;; esac \
+  && case "${left}" in *"DELETE-TEST left 1.2 100000.100000 "*"DELETE-TEST keep keep"*"DELETE-TEST etc present"*) true ;; *) false ;; esac \
+  && case "${usage}" in *"ERR usage"*) true ;; *) false ;; esac; then
+  record old_store_deleted_remapped_kept true "${deleted}; ${left}; --force: ${usage}"
+else
+  record old_store_deleted_remapped_kept false "${planted}; ${deleted}; ${left}; --force: ${usage}"
 fi
 
 # --- 8. A normal data disk refuses an unmapped boot, and the next normal boot is mapped -------------------------

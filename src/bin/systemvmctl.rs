@@ -231,7 +231,7 @@ enum ControlAction {
     Share {
         args: Vec<String>,
     },
-    /// Run `vesper-data <args>` in the guest (mount|status|stop of the persistent data disk, GH #164; legacy status|import-volume NAME, ADR 0010).
+    /// Run `vesper-data <args>` in the guest (mount|status|stop of the persistent data disk, GH #164; legacy status|import-volume NAME|delete [--yes], ADR 0010; pass `--` before options).
     Data {
         args: Vec<String>,
     },

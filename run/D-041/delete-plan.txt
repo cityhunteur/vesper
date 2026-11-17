@@ -1,0 +1,13 @@
+DELETE-PLAN buildkit kib=584
+DELETE-PLAN containerd kib=152
+DELETE-PLAN containers kib=4
+DELETE-PLAN engine-id kib=4
+DELETE-PLAN image kib=4024
+DELETE-PLAN network kib=60
+DELETE-PLAN overlay2 kib=4349652
+DELETE-PLAN plugins kib=8
+DELETE-PLAN runtimes kib=4
+DELETE-PLAN swarm kib=4
+DELETE-PLAN tmp kib=4
+DELETE-PLAN volumes kib=7078504
+DELETE-PLAN total entries=12 kib=11433004 (run again with --yes)

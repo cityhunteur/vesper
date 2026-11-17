@@ -417,7 +417,10 @@ share namespace (ADR 0009, D-034) and away from Vesper's own state.
   second after the other looked; `docker exec -u` gets no refresh; `--runtime runc` gets none; and no uid can
   change the attributes of a share's root directory (TD-038).
 - **Docker data from before this change** stays in `/var/lib/docker` on the data disk, unused. dockerd's mapped
-  store is `/var/lib/docker/100000.100000`. `HEALTH` and `make docker-up` report the old store; nothing deletes it.
+  store is `/var/lib/docker/100000.100000`. `HEALTH` and `make docker-up` report the old store. Only `vesper-data legacy delete --yes` deletes it (owner
+  decision D-041; the store on this host was deleted on 2026-11-17): it refuses while the old store has a container,
+  while anything is mounted under it outside a remapped store, or during an import, and never touches a remapped
+  store (`<digits>.<digits>`); without `--yes` it prints the plan.
   `vesper-data legacy import-volume NAME` (agent verb `DATA`, from macOS only) copies one old volume into a new
   volume, each owner shifted by 100000; an owner outside the 65536-id range becomes the container's `nobody`, so
   no imported file is owned by a System VM uid outside the mapping. It only reads the old store. The copy is made
@@ -429,8 +432,9 @@ share namespace (ADR 0009, D-034) and away from Vesper's own state.
   hard link, in the old volume, to a root-only file elsewhere on the data disk is copied and becomes the
   container's (TD-064).
 - **Test hooks:** `vesper-containers test-authz stop|start`, `vesper-data test-relabel`, `vesper-data test-import`
-  (imports from a scratch store under `/run/vesper/legacy-test`). All need the agent.
-- **Evidence:** `make systemvm-confine-suite` (15 steps, `run/GH-194/m5-confine-report.json`; the import step in
+  (imports from a scratch store under `/run/vesper/legacy-test`), `vesper-data test-delete` (deletes a scratch
+  store under `/run/vesper/legacy-delete-test`). All need the agent.
+- **Evidence:** `make systemvm-confine-suite` (16 steps, `run/GH-194/m5-confine-report.json`; the delete step in `run/D-041/`; the import step in
   `run/GH-194/m6/`); `cd shim && go test
   ./internal/authz ./internal/runcwrap`; 23 other System VM and Docker suites from the same overlay
   (`run/GH-194/td062/battery/summary.txt`). `make binds-suite` checks ownership in a container's first command

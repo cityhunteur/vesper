@@ -123,7 +123,8 @@ the System VM, and we will refuse every Docker API request that is not known to 
    volumes and stopped containers from before the change are invisible afterwards. Images are rebuilt or pulled.
    Volumes are data: `vesper-data legacy status` counts them, `HEALTH` and `make docker-up` report a populated old
    store, and `vesper-data legacy import-volume NAME` copies one into the new store with its ownership shifted.
-   The old store is never deleted without the owner's approval. Going back to an older build shows the old store
+   The old store is never deleted without the owner's approval; `vesper-data legacy delete --yes` deletes it once
+   approved (D-041), and keeps the remapped stores. Going back to an older build shows the old store
    and none of the writes made since; the release note says so.
 
 ## What this guarantees, and what it does not
