@@ -1,0 +1,24 @@
+bash scripts/systemvm/down.sh
+guest acknowledged shutdown
+systemvm-down: guest acknowledged shutdown
+systemvm-down: stopped
+bash scripts/systemvm/fetch-packages.sh
+fetch-packages: 0 downloaded
+verified 32 pinned packages in /Volumes/Workspace/github.com/cityhunteur/vesper/build/systemvm/cache/apks and 2 archive members in /Volumes/Workspace/github.com/cityhunteur/vesper/build/systemvm/cache/archives
+bash scripts/systemvm/build-overlay.sh
+apkovl /Volumes/Workspace/github.com/cityhunteur/vesper/build/systemvm/localhost.apkovl.tar.gz sha256=2aae3d7ff754508abd311634154414e8593338d6a2c0ea985b1d0026964278a2 size=80041482
+initrd /Volumes/Workspace/github.com/cityhunteur/vesper/build/systemvm/initramfs-vesper sha256=8997f45b10ec4676f4757b573b8a3a39775ce7d90d7a7ad1f6d4559e2036246b size=89744512
+verified alpine 3.22.8 aarch64 image in /Volumes/Workspace/github.com/cityhunteur/vesper/build/systemvm: image_id=b1965de508d579c75a9f55c761a9114d42e6220a81d0d101517733ff546e8abe (manifest: /Volumes/Workspace/github.com/cityhunteur/vesper/build/systemvm/image-manifest.json)
+mkdir -p run/WOR-39/share run/WOR-39/share-ro run/WOR-39/share-nowatch
+VESPER_SHARES="/Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share-ro:ro /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share-nowatch:nowatch" bash scripts/systemvm/generate-launch-config.sh
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.04s
+     Running `target/debug/systemvmctl launch-config --from-lock --dir /Volumes/Workspace/github.com/cityhunteur/vesper/build/systemvm --console-log /Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/console.log --out /Volumes/Workspace/github.com/cityhunteur/vesper/build/systemvm/launch-config.json --share /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share --share '/Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share-ro:ro' --share '/Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share-nowatch:nowatch' --data-disk /Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/data.img`
+wrote launch config: /Volumes/Workspace/github.com/cityhunteur/vesper/build/systemvm/launch-config.json (3 shared directories)
+bash scripts/systemvm/up.sh
+systemvm-up: running (pid 78535); bridge run/systemvm/vsock/3.sock; log /Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/vmlauncher.log
+{"status":"bridge-listening","elapsed_ms":110,"ready_pattern":"login:","console_log":"/Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/console.log","bridge":"run/systemvm/vsock/3.sock"}
+{"status":"ready","elapsed_ms":2983,"ready_pattern":"login:","console_log":"/Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/console.log"}
+{"status":"probe-ok","elapsed_ms":6265,"ready_pattern":"login:","console_log":"/Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/console.log"}
+systemvm-up: MOUNTED share0 /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share mode=rw
+systemvm-up: MOUNTED share1 /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share-ro mode=ro
+systemvm-up: MOUNTED share2 /Volumes/Workspace/github.com/cityhunteur/vesper/run/WOR-39/share-nowatch mode=rw

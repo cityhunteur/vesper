@@ -21,7 +21,7 @@ import (
 
 // Config is what `vesper-unfs run` is given by vesper-microvm.
 type Config struct {
-	Mount   string   // the trusted virtio-fs share mount the sources lie in
+	Mounts  []string // the trusted virtio-fs share mounts the sources lie in (Source.Mount indexes it)
 	Sources []Source // exported as /s/0, /s/1, ...
 	Squash  bool     // run unfsd as SquashID with no capabilities (all_squash); else root with RootCaps
 	Root    string   // an empty directory to mount the server's tmpfs root on (in its own mount namespace)
@@ -60,35 +60,37 @@ const (
 	stopGrace = 5 * time.Second
 )
 
-// OpenSources opens each source relative to the share mount, with no symbolic link on the way, beneath the mount
+// OpenSources opens each source relative to its share mount, with no symbolic link on the way, beneath the mount
 // and on it alone, and clones what it opened into detached mount trees with their final attributes: one per source,
 // then one per nest (Nests order) of the read-only source it carries. Nothing opens a source path again after this
 // (ADR 0009, Source binding). The trees are made here because open_tree clones only a mount of the caller's own
 // mount namespace; the sandbox, in a new one, attaches them with move_mount.
-func OpenSources(mount string, srcs []Source, anyFS bool) ([]*os.File, error) {
-	if err := Check(srcs); err != nil {
+func OpenSources(mounts []string, srcs []Source, anyFS bool) ([]*os.File, error) {
+	if err := (Args{Mounts: mounts, Sources: srcs}).Check(); err != nil {
 		return nil, err
 	}
-	mfd, err := unix.Open(mount, unix.O_PATH|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
-	if err != nil {
-		return nil, fmt.Errorf("share mount %s: %w", mount, err)
-	}
-	defer unix.Close(mfd)
-	var sfs unix.Statfs_t
-	if err := unix.Fstatfs(mfd, &sfs); err != nil {
-		return nil, fmt.Errorf("share mount %s: %w", mount, err)
-	}
-	if !anyFS && sfs.Type != unix.FUSE_SUPER_MAGIC { // virtio-fs reports the FUSE magic
-		return nil, fmt.Errorf("share mount %s is not virtio-fs (type %#x)", mount, sfs.Type)
-	}
-	var dirs []int
+	var mfds, dirs []int
 	defer func() {
-		for _, fd := range dirs {
+		for _, fd := range append(mfds, dirs...) {
 			unix.Close(fd)
 		}
 	}()
+	for _, mount := range mounts {
+		mfd, err := unix.Open(mount, unix.O_PATH|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+		if err != nil {
+			return nil, fmt.Errorf("share mount %s: %w", mount, err)
+		}
+		mfds = append(mfds, mfd)
+		var sfs unix.Statfs_t
+		if err := unix.Fstatfs(mfd, &sfs); err != nil {
+			return nil, fmt.Errorf("share mount %s: %w", mount, err)
+		}
+		if !anyFS && sfs.Type != unix.FUSE_SUPER_MAGIC { // virtio-fs reports the FUSE magic
+			return nil, fmt.Errorf("share mount %s is not virtio-fs (type %#x)", mount, sfs.Type)
+		}
+	}
 	for _, s := range srcs {
-		fd, err := openLive(mfd, s.Rel, time.Now().Add(StaleWait))
+		fd, err := openLive(mfds[s.Mount], s.Rel, time.Now().Add(StaleWait))
 		if err != nil {
 			return nil, fmt.Errorf("source %q: %w", s.Rel, err)
 		}
@@ -209,7 +211,7 @@ func detach(fd int, set uint64) (int, error) {
 // TERM, INT and HUP on to it, and returns its exit code. It runs in the microVM's network namespace already
 // (vesper-microvm starts it under nsenter), which the sandbox keeps.
 func Run(cfg Config) (int, error) {
-	files, err := OpenSources(cfg.Mount, cfg.Sources, cfg.AnyFS)
+	files, err := OpenSources(cfg.Mounts, cfg.Sources, cfg.AnyFS)
 	if err != nil {
 		return 1, err
 	}

@@ -129,9 +129,25 @@ else
   record macos_edit_reaches_guest_watcher false "${st}; watched=${w:-none} burst=${b:-none}; queued ${q1:-?} then ${q2:-?}; macOS before ${meta0} after ${meta1}; ${stats}"
 fi
 
+# --- 5e. The share network's rate limiter bounds what a guest can make its server do (TD-069) ----------------------
+# A 2 MB/s test limit makes a 12 MiB read take several seconds; the default (400 MB/s) does not. Times are the guest's.
+dd if=/dev/urandom of="${F}/proj/rate.bin" bs=1048576 count=12 2>/dev/null
+rd='t0=$(date +%s); dd if=/data/rate.bin of=/dev/null bs=65536 2>/dev/null; t1=$(date +%s); echo secs $((t1-t0))'
+set1="$(ctl microvm test-share-rate 2000000 20000)"
+slow="$(runb "${B[@]}" shares-s "${rd}")"
+set2="$(ctl microvm test-share-rate off)"
+fast="$(runb "${B[@]}" shares-t "${rd}")"
+s1="$(printf '%s' "${slow}" | sed -n 's/.*secs \([0-9]*\).*/\1/p')"; s2="$(printf '%s' "${fast}" | sed -n 's/.*secs \([0-9]*\).*/\1/p')"
+rm -f "${F}/proj/rate.bin"
+if [ -n "${s1}" ] && [ -n "${s2}" ] && [ "${s1}" -ge 3 ] && [ "${s2}" -le 2 ]; then
+  record share_rate_limited true "12 MiB read: ${s1} s at 2 MB/s (${set1}), ${s2} s at the default (${set2})"
+else
+  record share_rate_limited false "${set1}: ${slow}; ${set2}: ${fast}"
+fi
+
 # --- 6. Nothing is left -------------------------------------------------------------------------------------------
 left="$(ctl ctr -- leftovers)"; srv=""; gone=true
-for n in shares-a shares-b shares-c shares-d shares-e shares-f shares-g shares-k shares-r shares-n; do
+for n in shares-a shares-b shares-c shares-d shares-e shares-f shares-g shares-k shares-r shares-n shares-s shares-t; do
   u="$(ctl microvm unfs "${n}" | head -1)"; srv="${srv} ${u};"
   [ "${u}" = "UNFS ${n} absent" ] || gone=false   # only the documented answer counts, not an error or nothing
 done

@@ -91,3 +91,48 @@ func TestUnfsdArgs(t *testing.T) {
 		t.Errorf("UnfsdArgs = %s", got)
 	}
 }
+
+// GH #207: a version 2 record round-trips; a version 1 record still reads; bad records are refused whole.
+func TestArgs(t *testing.T) {
+	a := Args{Mounts: []string{"/m", "/n x"}, Squash: true, Sources: []Source{{Rel: "a"}, {Rel: "b:c", ReadOnly: true}, {Mount: 1, Rel: "."}}}
+	raw, err := a.Format()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if raw != ArgsHeader+"\nsquash 1\nmount /m\nsrc a:rw\nsrc b:c:ro\nmount /n x\nsrc .:rw\n" {
+		t.Errorf("format %q", raw)
+	}
+	if got, err := ParseArgs(raw); err != nil || !reflect.DeepEqual(got, a) {
+		t.Errorf("round trip %+v %v", got, err)
+	}
+	if got, err := ParseArgs("/m\n0\na:rw\n"); err != nil || !reflect.DeepEqual(got, Args{Mounts: []string{"/m"}, Sources: []Source{{Rel: "a"}}}) {
+		t.Errorf("v1 %+v %v", got, err)
+	}
+	for name, bad := range map[string]string{
+		"v1 bad source":     "/m\n0\na:rw\nnope\n",
+		"v1 relative mount": "m\n0\na:rw\n",
+		"no squash":         ArgsHeader + "\nmount /m\nsrc a:rw\n",
+		"src before mount":  ArgsHeader + "\nsquash 0\nsrc a:rw\nmount /m\n",
+		"unused mount":      ArgsHeader + "\nsquash 0\nmount /m\nsrc a:rw\nmount /n\n",
+		"same mount twice":  ArgsHeader + "\nsquash 0\nmount /m\nsrc a:rw\nmount /m\nsrc b:rw\n",
+		"unknown line":      ArgsHeader + "\nsquash 0\nmount /m\nsrc a:rw\nexec /bin/sh\n",
+		"bad source":        ArgsHeader + "\nsquash 0\nmount /m\nsrc ../a:rw\n",
+	} {
+		if _, err := ParseArgs(bad); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+	if err := (Args{Mounts: []string{"/m", "/n"}, Sources: []Source{{Mount: 1, Rel: "a"}, {Rel: "b"}}}).Check(); err == nil {
+		t.Error("sources out of mount order were accepted")
+	}
+	if err := CheckRel("a\nb"); err == nil {
+		t.Error("a newline in a source path was accepted")
+	}
+}
+
+// Sources on two mounts never nest, whatever their relative paths (council ARC-8).
+func TestNestsSameMountOnly(t *testing.T) {
+	if got := Nests([]Source{{Rel: "a"}, {Mount: 1, Rel: "a/b", ReadOnly: true}}); len(got) != 0 {
+		t.Errorf("a nest across mounts: %+v", got)
+	}
+}

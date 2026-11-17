@@ -96,6 +96,13 @@ UNFS_PIDS=32
 # At most one CPU per server (council SEC-5, TD-069): a guest can keep its own server busy, but not starve the
 # System VM's other work. Set when the kernel offers the cpu controller; `unfs ID` shows it.
 UNFS_CPU="100000 100000"
+# The share network's Firecracker rate limiter, both directions (council 2026-11-17, TD-069). Every disk operation of
+# a server starts from a guest request on share0, so bounding share0 bounds what a guest can make its server do to
+# virtio-fs. A token bucket per second: bytes, and frames counted as operations. Set high, to stop a runaway guest,
+# not to shape a normal one; the hard NFS mounts turn an excess into a stall in the guest, not an error.
+SHARE_RATE_BYTES=400000000
+SHARE_RATE_OPS=20000
+SHARE_RATE_TEST=$STATE/share-rate  # test hook: "BYTES OPS" for later launches (test-share-rate)
 UNFS_ROOT=/run/vesper/unfs-root    # where each server mounts its own tmpfs root, in its own mount namespace
 NL='
 '
@@ -393,8 +400,9 @@ unfs_down() {
     valid_id "$id" && [ "$(unfs_state "$id")" = stopped ] && echo "$id"
   done
 }
-unfs_start() { # ID MOUNT SQUASH SOURCES(newline-separated) -> a reason on failure (lock held, namespace up)
-  us_id=$1; us_mount=$2; us_sq=$3; us_srcs=$4
+unfs_start() { # ID SPEC SQUASH -> a reason on failure (lock held, namespace up). SPEC: "mount DIR" and "src REL:mode"
+  # lines, each source after its mount (GH #207).
+  us_id=$1; us_spec=$2; us_sq=$3
   mkdir -p "$UNFS" "$UNFS_ROOT" && chmod 0700 "$UNFS" "$UNFS_ROOT" || { echo "state directories"; return 1; }
   grep -qw memory /sys/fs/cgroup/cgroup.subtree_control || echo +memory > /sys/fs/cgroup/cgroup.subtree_control
   grep -qw pids /sys/fs/cgroup/cgroup.subtree_control || echo +pids > /sys/fs/cgroup/cgroup.subtree_control
@@ -406,16 +414,11 @@ unfs_start() { # ID MOUNT SQUASH SOURCES(newline-separated) -> a reason on failu
     grep -qw cpu "$UNFS_CG/cgroup.subtree_control" || echo +cpu > "$UNFS_CG/cgroup.subtree_control"
     echo "$UNFS_CPU" > "$UNFS_CG/$us_id/cpu.max" || { echo "cgroup cpu.max"; return 1; }
   fi
-  set --
-  # Split on newlines only, with pathname expansion off: a source may hold spaces, *, ? or [.
-  us_ifs=$IFS; IFS=$NL; set -f
-  for us_s in $us_srcs; do set -- "$@" --src "$us_s"; done
-  set +f; IFS=$us_ifs
-  [ "$us_sq" = 1 ] && set -- "$@" --squash
   rm -f "$UNFS/$us_id.pid" "$UNFS/$us_id.err" "/var/log/vesper-unfs-$us_id.log.1"
   : > "/var/log/vesper-unfs-$us_id.log"   # a retried id must not read the last launch's error as its own
-  # What the server was started with, for the selfcheck hook and for diagnosis.
-  { echo "$us_mount"; echo "$us_sq"; printf '%s\n' "$us_srcs"; } > "$UNFS/$us_id.args"
+  # The record (unfs.ParseArgs, version 2): what the server starts from on every respawn, what the selfcheck starts
+  # from, and what the fanout maps host paths with. Parsed in Go only (council SEC-6).
+  { echo "#vesper-unfs-args 2"; echo "squash $us_sq"; printf '%s\n' "$us_spec"; } > "$UNFS/$us_id.args"
   # A guest can make unfsd abort with a malformed handle (TD-065), so restarts are bounded by rate, not by a small
   # count: at most one a second and 30 a minute; a guest that crashes it faster loses only its own shares.
   # Not on our stdout or stderr: the agent reads them to end of file, and supervise-daemon outlives this script.
@@ -423,8 +426,8 @@ unfs_start() { # ID MOUNT SQUASH SOURCES(newline-separated) -> a reason on failu
   RC_SVCNAME="vesper-unfs-$us_id" supervise-daemon "vesper-unfs-$us_id" --start --pidfile "$UNFS/$us_id.pid" \
     --respawn-delay 1 --respawn-max 30 --respawn-period 60 --stdout /dev/null \
     --stderr-logger "/usr/local/bin/vesper-boundlog /var/log/vesper-unfs-$us_id.log 262144" \
-    "$(command -v nsenter)" -- "--net=$NETNS/$us_id" /usr/bin/vesper-unfs run --unfsd "$UNFSD" --mount "$us_mount" \
-    --root "$UNFS_ROOT" --cgroup "$UNFS_CG/$us_id" "$@" < /dev/null > /dev/null 2> "$UNFS/$us_id.err" \
+    "$(command -v nsenter)" -- "--net=$NETNS/$us_id" /usr/bin/vesper-unfs run --unfsd "$UNFSD" --args "$UNFS/$us_id.args" \
+    --root "$UNFS_ROOT" --cgroup "$UNFS_CG/$us_id" < /dev/null > /dev/null 2> "$UNFS/$us_id.err" \
     || { echo "supervise-daemon: $(head -n 2 "$UNFS/$us_id.err" | tr '\n' ' ')"; return 1; }
   rm -f "$UNFS/$us_id.err"
   for _ in $(seq 1 40); do
@@ -494,14 +497,9 @@ test_unfs_selfcheck() { # ID [PAUSE_MS]: PAUSE_MS holds the sandbox before it pl
   id=${1:-}; valid_id "$id" || { echo "ERR bad id"; return 2; }
   pause=${2:-0}; digits "$pause" || { echo "ERR bad pause"; return 2; }
   [ -r "$UNFS/$id.args" ] || { echo "ERR $id has no server"; return 1; }
-  set --
-  n=0
-  while IFS= read -r line; do
-    n=$((n + 1))
-    case $n in 1) m=$line ;; 2) [ "$line" = 1 ] && set -- "$@" --squash ;; *) [ -n "$line" ] && set -- "$@" --src "$line" ;; esac
-  done < "$UNFS/$id.args"
   mkdir -p /run/vesper/unfs-check-root && chmod 0700 /run/vesper/unfs-check-root
-  nsenter --net="$NETNS/$id" /usr/bin/vesper-unfs run --selfcheck --test-pause-nests "${pause}ms" --mount "$m" --root /run/vesper/unfs-check-root "$@" 2>&1
+  # The same record the server started from, read by the same parser (council SEC-6).
+  nsenter --net="$NETNS/$id" /usr/bin/vesper-unfs run --selfcheck --test-pause-nests "${pause}ms" --args "$UNFS/$id.args" --root /run/vesper/unfs-check-root 2>&1
 }
 test_unfs_kill() { # ID
   id=${1:-}; valid_id "$id" || { echo "ERR bad id"; return 2; }
@@ -548,7 +546,7 @@ test_unfs_probe() { # ID [probe flags]
 launch() {
   id=$1; shift
   mode=""; rootfs=""; cmd64=""; vsock=0; runc_smoke=0; guestexec=0; sharenet=0; probe=""
-  unfs_mount=""; unfs_srcs=""; unfs_squash=0
+  unfs_spec=""; unfs_srcs=""; unfs_mounts=""; unfs_squash=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --exit) mode=--exit ;;
@@ -557,10 +555,13 @@ launch() {
       --runc-smoke) runc_smoke=1 ;;
       --share-net) sharenet=1 ;;
       --share-probe) probe=$2; shift ;; # test hook: DELAY:PROBES, vesper_probe= for the guest after DELAY seconds
-      --unfs-mount) unfs_mount=${2:-}; shift ;;
+      --unfs-mount)   # repeatable: each --unfs-src belongs to the --unfs-mount before it (GH #207)
+        case "${2:-}" in *"$NL"*|'') echo "ERR bad --unfs-mount"; return 2 ;; esac
+        unfs_mounts="$unfs_mounts${unfs_mounts:+$NL}$2"; unfs_spec="$unfs_spec${unfs_spec:+$NL}mount $2"; shift ;;
       --unfs-src)
         case "${2:-}" in *"$NL"*|'') echo "ERR bad --unfs-src"; return 2 ;; esac
-        unfs_srcs="$unfs_srcs${unfs_srcs:+$NL}$2"; shift ;;
+        [ -n "$unfs_mounts" ] || { echo "ERR --unfs-src before any --unfs-mount"; return 2; }
+        unfs_srcs="$unfs_srcs${unfs_srcs:+$NL}$2"; unfs_spec="$unfs_spec${unfs_spec:+$NL}src $2"; shift ;;
       --unfs-squash) unfs_squash=1 ;;
       --rootfs) rootfs=$2; shift ;;
       --cmd) cmd64=$2; shift ;;
@@ -581,9 +582,14 @@ launch() {
   if [ "$sharenet" = 1 ]; then
     valid_id "$id" || { echo "ERR --share-net needs an id of letters, digits and hyphens"; return 2; }
   fi
-  if [ -n "$unfs_mount$unfs_srcs" ]; then
-    [ "$sharenet" = 1 ] && [ -n "$unfs_mount" ] && [ -n "$unfs_srcs" ] || { echo "ERR --unfs-mount and --unfs-src need each other and --share-net"; return 2; }
-    why=$(unfs_mount_ok "$unfs_mount") || { echo "ERR --unfs-mount: $why"; return 2; }
+  if [ -n "$unfs_spec" ]; then
+    [ "$sharenet" = 1 ] && [ -n "$unfs_mounts" ] && [ -n "$unfs_srcs" ] || { echo "ERR --unfs-mount and --unfs-src need each other and --share-net"; return 2; }
+    us_ifs=$IFS; IFS=$NL; set -f
+    for um in $unfs_mounts; do
+      why=$(unfs_mount_ok "$um") || { set +f; IFS=$us_ifs; echo "ERR --unfs-mount: $why"; return 2; }
+    done
+    set +f; IFS=$us_ifs
+    # vesper-unfs refuses a mount given twice, a mount with no source, and more than 16 mounts.
   fi
   if [ -n "$probe" ]; then
     [ "$sharenet" = 1 ] || { echo "ERR --share-probe needs --share-net"; return 2; }
@@ -614,13 +620,16 @@ launch() {
     [ -z "$why" ] && { echo "pid=$$ start=$(proc_stat $$ | cut -d' ' -f2) t=$(date +%s)" > "$REC/$id" && [ -s "$REC/$id" ] || why="record not written"; }
     [ -z "$why" ] && { why=$(sharenet_up "$id") && why=""; }
     # The server starts in the namespace before the jailer, so the guest finds it listening (ADR 0009, Lifecycle).
-    [ -z "$why" ] && [ -n "$unfs_srcs" ] && { why=$(unfs_start "$id" "$unfs_mount" "$unfs_squash" "$unfs_srcs") && why="" || why="unfs: ${why:-start failed}"; }
+    [ -z "$why" ] && [ -n "$unfs_srcs" ] && { why=$(unfs_start "$id" "$unfs_spec" "$unfs_squash") && why="" || why="unfs: ${why:-start failed}"; }
     if [ -n "$why" ]; then
       cleanup "$id" > /dev/null; unlock; LAUNCHING=""
       echo "ERR share network: $why"; return 1
     fi
     nsarg="--netns $NETNS/$id"
-    netcfg=",\"network-interfaces\":[{\"iface_id\":\"$SHARE_TAP\",\"host_dev_name\":\"$SHARE_TAP\",\"guest_mac\":\"06:00:a9:fe:4d:02\"}]"
+    rb=$SHARE_RATE_BYTES; ro=$SHARE_RATE_OPS
+    [ -r "$SHARE_RATE_TEST" ] && read -r rb ro < "$SHARE_RATE_TEST"
+    rl="{\"bandwidth\":{\"size\":$rb,\"refill_time\":1000},\"ops\":{\"size\":$ro,\"refill_time\":1000}}"
+    netcfg=",\"network-interfaces\":[{\"iface_id\":\"$SHARE_TAP\",\"host_dev_name\":\"$SHARE_TAP\",\"guest_mac\":\"06:00:a9:fe:4d:02\",\"rx_rate_limiter\":$rl,\"tx_rate_limiter\":$rl}]"
   fi
   unlock
   root="$JAIL/firecracker/$id/root"
@@ -802,6 +811,13 @@ case "$cmd" in
   test-unfs-giveup) test_unfs_giveup "$@" ;;
   test-unfs-stall-next) mkdir -p "$UNFS" && : > "$UNFS/stall-next" && echo "STALL next" ;;
   test-unfs-probe) test_unfs_probe "$@" ;;
+  test-share-rate)   # BYTES OPS for later launches, or "off"
+    case "${1:-}:${2:-}" in
+      off:) rm -f "$SHARE_RATE_TEST"; echo "RATE default $SHARE_RATE_BYTES $SHARE_RATE_OPS" ;;
+      [1-9]*:[1-9]*) case "$1$2" in *[!0-9]*) echo "ERR usage: test-share-rate BYTES OPS|off"; exit 2 ;; esac
+        mkdir -p "$STATE" && echo "$1 $2" > "$SHARE_RATE_TEST" && echo "RATE test $1 $2" ;;
+      *) echo "ERR usage: test-share-rate BYTES OPS|off"; exit 2 ;;
+    esac ;;
   reap) reap ;;
   reap-loop) reap_loop "$@" ;;
   setup-user) setup_user ;;

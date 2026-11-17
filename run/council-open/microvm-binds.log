@@ -1,0 +1,10 @@
+bash scripts/systemvm/microvm-binds-suite.sh
+ok   write_then_kill_keeps_every_byte
+ok   stalled_server_fails_the_run
+ok   server_respawn_under_load
+ok   modes_0600_0700_read_and_write
+ok   deep_path_and_rename
+ok   odd_source_path
+ok   binds_from_two_shares
+ok   reaper_clears_after_shim_killed
+microvm-binds suite: passed=true (report: /Volumes/Workspace/github.com/cityhunteur/vesper/run/systemvm/microvm-binds-report.json)

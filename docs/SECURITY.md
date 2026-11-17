@@ -258,10 +258,15 @@ from its own microVM's server. Docker containers do not use the shim and still g
 
 - **Mapping (shim):** a bind mount whose source, with symbolic links followed in the System VM, lies under a
   virtio-fs share mount becomes one export (`--unfs-src`), and the guest mounts it at the bind's destination; a
-  source that is a file, or binds from two different shares, are refused with an error naming the mount; other bind
-  mounts keep today's behaviour (ignored by the microVM path). Both refusals are limits of Vesper's planner and
-  server launch (one share mount per server, directories only), not of unfs3 (council ARC-2, ARC-3); GH #207 and
-  GH #208 track lifting them.
+  source that is a file, or a source that holds another share mount (JDG-1), is refused with an error naming the
+  mount; other bind mounts keep today's behaviour (ignored by the microVM path). Binds from several shares are one
+  server's sources, each opened beneath its own share mount and keyed by it, so the same relative path in two shares
+  is two exports, and read-only nests stay within one share (GH #207, D-047). The file refusal is a limit of Vesper's
+  design, not of unfs3 (council ARC-3); GH #208 tracks it, gated on a prototype (D-048).
+- **The server record** (`/run/vesper/microvm/unfs/ID.args`, version 2: `squash`, then `mount` lines each followed
+  by its `src` lines) is what `vesper-unfs run --args` starts from on every respawn, what the selfcheck starts from,
+  and what the fanout maps host paths with, all through one Go parser (`unfs.ParseArgs`; council SEC-6). A record
+  with a line that does not parse is refused whole (COR-9).
 - **Guest:** `vesper-console shares mount` probes the server for 3 s, then mounts each share under the task's root,
   resolving the destination with `openat2(RESOLVE_IN_ROOT)`, so a symbolic link in the image cannot place a mount
   outside it, and mounting on the descriptor; a link whose target is missing fails the mount. Shares are synced and
@@ -358,14 +363,24 @@ from its own microVM's server. Docker containers do not use the shim and still g
   read-write export can read what the sandbox's root holds: `/usr`, `/lib` and `/etc` (System VM binaries, the
   exports file and libtirpc tables; no secret). The mount view, not unfs3's path checks, is what confines it; the
   probe sets `/dev/null`'s mode through such a link and must be refused (SEC-2). The cgroup bounds memory, pids and
-  CPU (one CPU), not I/O (TD-069). A setuid-root file made by guest root on a share is inert: Apple's virtio-fs drops
+  CPU (one CPU). Firecracker's rate limiter on `share0` (400 MB/s and 20,000 frames/s each way) bounds the requests a
+  guest can send, and so its server's virtio-fs I/O; block-layer `io.max` cannot, since no block device is on that path
+  (TD-069, D-045). A setuid-root file made by guest root on a share is inert: Apple's virtio-fs drops
   the set-id bit and keeps the Mac user as owner (tested 2026-11-17), and the System VM mounts every share
   `nosuid,nodev` besides (SEC-4). A malformed file handle is answered with STALE; unpatched unfs3 0.10.0 aborted on
   an assertion, so a guest could stop its own shares (TD-065, fixed by D-044). `..` at an export's
   root returns a handle of the sandbox's `/s` with its attributes; every operation on it is refused.
 - **A nested read-only source** is bound only on the directory that was opened as that source (same device and
   inode); a directory renamed and replaced on macOS before the bind is placed makes the server refuse to start.
-- **Evidence:** `make systemvm-unfs-suite` (12 steps, `run/GH-160/m3/unfs-report.json`).
+- **Access is the export check, not the handle.** unfs3 resolves a handle by (device, inode) from its cache or by its
+  path hashes from `/`, then decides access by the longest export that prefixes the resolved path (`exports_options`,
+  a prefix match with no `/` boundary, so `/s/1` also matches `/s/10`). That is harmless while every export belongs to
+  the same guest address and the longest match wins; export names must keep it so (council SEC-1, 2026-11-17).
+- **Nested macOS shares.** A source is cloned without its submounts, so a share mounted inside another share's source
+  is not part of that source: the guest would see and write the outer share's view of that directory, even when the
+  inner share is read-only. The planner refuses a source that holds another share mount (council JDG-1, ARC-9).
+- **Evidence:** `make systemvm-unfs-suite` (13 steps, `run/GH-160/m3/unfs-report.json`; the two-share step in
+  `run/council-open/`).
 
 ## Container confinement (ADR 0010, GH #194)
 

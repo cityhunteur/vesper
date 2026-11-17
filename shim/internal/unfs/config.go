@@ -26,8 +26,10 @@ const (
 	maxRel = 4096
 )
 
-// Source is one directory a server exports, as a path relative to the trusted share mount.
+// Source is one directory a server exports, as a path relative to one of its trusted share mounts (Mount is that
+// mount's index; GH #207).
 type Source struct {
+	Mount    int    `json:"mount,omitempty"`
 	Rel      string `json:"rel"`
 	ReadOnly bool   `json:"ro"`
 }
@@ -70,8 +72,8 @@ func CheckRel(rel string) error {
 		return errors.New("empty source path")
 	case len(rel) > maxRel:
 		return fmt.Errorf("source path longer than %d bytes", maxRel)
-	case strings.ContainsRune(rel, 0):
-		return errors.New("source path holds a NUL byte")
+	case strings.ContainsAny(rel, "\x00\n"):
+		return errors.New("source path holds a NUL byte or a newline")
 	case strings.HasPrefix(rel, "/"):
 		return fmt.Errorf("source %q: must be relative to the share mount", rel)
 	}
@@ -98,7 +100,8 @@ func within(outer, inner string) (sub string, ok bool) {
 	return "", false
 }
 
-// Nests lists every read-only source inside a read-write one, shallowest first, so a deeper bind lands on top of
+// Nests lists every read-only source inside a read-write one on the same share mount (sources on two mounts never
+// nest: council ARC-8), shallowest first, so a deeper bind lands on top of
 // a shallower one.
 func Nests(srcs []Source) []Nest {
 	var out []Nest
@@ -107,7 +110,7 @@ func Nests(srcs []Source) []Nest {
 			continue
 		}
 		for j, in := range srcs {
-			if !in.ReadOnly {
+			if !in.ReadOnly || in.Mount != o.Mount {
 				continue
 			}
 			if sub, ok := within(o.Rel, in.Rel); ok {

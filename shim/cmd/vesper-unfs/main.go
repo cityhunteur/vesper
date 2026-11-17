@@ -2,7 +2,8 @@
 
 // vesper-unfs runs one unfs3 server for one shim microVM inside a sandbox (ADR 0009, GH #160 M3), and probes one.
 //
-//	vesper-unfs run --mount DIR --src REL:ro|rw [--src ...] [--squash] [--root DIR] [--cgroup DIR] [--unfsd PATH]
+//	vesper-unfs run --mount DIR --src REL:ro|rw [--src ...] [--mount DIR --src ...] [--squash] [--root DIR] [--cgroup DIR] [--unfsd PATH]
+//	vesper-unfs run --args FILE [--root DIR] [--cgroup DIR] [--unfsd PATH]   (vesper-microvm's record; GH #207)
 //	vesper-unfs run ... --selfcheck   (the same sandbox, running the escape checks in place of unfsd)
 //	vesper-unfs probe [--server ADDR] [--local ADDR] [--uid N --gid N] [--timeout DUR]
 //
@@ -26,15 +27,29 @@ import (
 	"github.com/cityhunteur/vesper/shim/internal/unfs"
 )
 
-type srcFlags []unfs.Source
+// mountFlag and srcFlag fill one unfs.Args in command-line order: each --src belongs to the --mount before it.
+type mountFlag struct{ a *unfs.Args }
+type srcFlag struct{ a *unfs.Args }
 
-func (s *srcFlags) String() string { return fmt.Sprint(*s) }
-func (s *srcFlags) Set(v string) error {
+func (f mountFlag) String() string { return "" }
+func (f mountFlag) Set(v string) error {
+	if err := unfs.CheckMount(v); err != nil {
+		return err
+	}
+	f.a.Mounts = append(f.a.Mounts, v)
+	return nil
+}
+func (f srcFlag) String() string { return "" }
+func (f srcFlag) Set(v string) error {
+	if len(f.a.Mounts) == 0 {
+		return fmt.Errorf("--src %s comes before any --mount", v)
+	}
 	src, err := unfs.ParseSource(v)
 	if err != nil {
 		return err
 	}
-	*s = append(*s, src)
+	src.Mount = len(f.a.Mounts) - 1
+	f.a.Sources = append(f.a.Sources, src)
 	return nil
 }
 
@@ -85,17 +100,19 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: vesper-unfs run --mount DIR --src REL:ro|rw ... [--squash] [--root DIR] [--cgroup DIR] | probe [flags]")
+	fmt.Fprintln(os.Stderr, "usage: vesper-unfs run (--args FILE | --mount DIR --src REL:ro|rw ...) [--squash] [--root DIR] [--cgroup DIR] | probe [flags]")
 	os.Exit(2)
 }
 
 func run(args []string) int {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	var cfg unfs.Config
-	var srcs srcFlags
-	fs.StringVar(&cfg.Mount, "mount", "", "the virtio-fs share mount the sources lie in")
-	fs.Var(&srcs, "src", "a source REL:ro or REL:rw, relative to --mount (repeatable)")
-	fs.BoolVar(&cfg.Squash, "squash", false, "run unfsd as 65534 with no capabilities (all_squash)")
+	var a unfs.Args
+	var argsFile string
+	fs.Var(mountFlag{&a}, "mount", "a virtio-fs share mount the sources after it lie in (repeatable)")
+	fs.Var(srcFlag{&a}, "src", "a source REL:ro or REL:rw, relative to the --mount before it (repeatable)")
+	fs.BoolVar(&a.Squash, "squash", false, "run unfsd as 65534 with no capabilities (all_squash)")
+	fs.StringVar(&argsFile, "args", "", "read the mounts, sources and squash flag from vesper-microvm's record instead")
 	fs.StringVar(&cfg.Root, "root", "/run/vesper/unfs-root", "an empty root-owned directory for the server's root")
 	fs.StringVar(&cfg.Cgroup, "cgroup", "", "a cgroup directory to join first")
 	fs.StringVar(&cfg.Unfsd, "unfsd", "/usr/libexec/vesper/unfsd", "the unfsd binary (under /usr; the default is Vesper's patched build, D-044)")
@@ -107,11 +124,25 @@ func run(args []string) int {
 		fmt.Fprintf(os.Stderr, "vesper-unfs run: %v\n", err) // one line, which vesper-microvm looks for
 		return 2
 	}
-	if cfg.Mount == "" || len(srcs) == 0 || fs.NArg() != 0 || !strings.HasPrefix(cfg.Unfsd, "/usr/") || !strings.HasPrefix(cfg.SelfcheckBin, "/usr/") {
-		fmt.Fprintln(os.Stderr, "vesper-unfs run: need --mount, at least one --src, and --unfsd under /usr")
+	if argsFile != "" {
+		if len(a.Mounts) != 0 || a.Squash {
+			fmt.Fprintln(os.Stderr, "vesper-unfs run: --args excludes --mount, --src and --squash")
+			return 2
+		}
+		raw, err := os.ReadFile(argsFile)
+		if err == nil {
+			a, err = unfs.ParseArgs(string(raw))
+		}
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "vesper-unfs run: --args: %v\n", err)
+			return 2
+		}
+	}
+	if err := a.Check(); err != nil || fs.NArg() != 0 || !strings.HasPrefix(cfg.Unfsd, "/usr/") || !strings.HasPrefix(cfg.SelfcheckBin, "/usr/") {
+		fmt.Fprintf(os.Stderr, "vesper-unfs run: need --args or --mount with --src, and --unfsd under /usr (%v)\n", err)
 		return 2
 	}
-	cfg.Sources = srcs
+	cfg.Mounts, cfg.Sources, cfg.Squash = a.Mounts, a.Sources, a.Squash
 	code, err := unfs.Run(cfg)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "vesper-unfs run: %v\n", err)
