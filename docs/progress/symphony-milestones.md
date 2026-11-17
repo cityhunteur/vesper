@@ -14,6 +14,8 @@ last_reviewed: 2026-11-11
 - Parity unit: none (time-boxed trial). Finds whether Firecracker's upstream integration suite can run against Backend A and how the D-014 pass set is produced
 - Result: keep
 - Verification bundle: none; evidence in `run/GH-166/` (local, not tracked), per-test table `results/combined-classified.tsv`
+  (pruned on 2026-11-17, D-042: the summary, commands, scripts, logs and per-test tables stay; the Firecracker checkout,
+  release binaries and raw per-test output are gone)
 - Council summary: not run (no product change)
 - Harness update: none in the repository; the trial's harness is to be scripted in GH #172
 - Remaining risks: 56 unexplained failures need a Linux aarch64 run (CE-0003) to classify; two 10-hour hangs show the per-test timeout does not work; `tun` is not loaded at boot (#173); no userfaultfd in the System VM kernel (TD-054)
