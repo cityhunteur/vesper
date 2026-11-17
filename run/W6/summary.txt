@@ -1,0 +1,11 @@
+iter 1 rc=0 secs=80
+iter 2 rc=0 secs=80
+iter 3 rc=0 secs=80
+iter 4 rc=0 secs=80
+iter 5 rc=0 secs=80
+iter 6 rc=0 secs=80
+iter 7 rc=0 secs=81
+iter 8 rc=0 secs=80
+iter 9 rc=0 secs=80
+iter 10 rc=0 secs=80
+W6 done: 10 runs, no hang
