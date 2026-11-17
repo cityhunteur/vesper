@@ -98,7 +98,7 @@ func run(args []string) int {
 	fs.BoolVar(&cfg.Squash, "squash", false, "run unfsd as 65534 with no capabilities (all_squash)")
 	fs.StringVar(&cfg.Root, "root", "/run/vesper/unfs-root", "an empty root-owned directory for the server's root")
 	fs.StringVar(&cfg.Cgroup, "cgroup", "", "a cgroup directory to join first")
-	fs.StringVar(&cfg.Unfsd, "unfsd", "/usr/sbin/unfsd", "the unfsd binary (under /usr)")
+	fs.StringVar(&cfg.Unfsd, "unfsd", "/usr/libexec/vesper/unfsd", "the unfsd binary (under /usr; the default is Vesper's patched build, D-044)")
 	fs.BoolVar(&cfg.Selfcheck, "selfcheck", false, "run the escape checks in the sandbox in place of unfsd (tests)")
 	fs.StringVar(&cfg.SelfcheckBin, "selfcheck-bin", "/usr/bin/vesper-unfs", "this binary as the sandbox sees it")
 	fs.DurationVar(&cfg.TestPauseNests, "test-pause-nests", 0, "wait this long before placing nests (tests only)")

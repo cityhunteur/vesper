@@ -280,9 +280,8 @@ from its own microVM's server. Docker containers do not use the shim and still g
 - **Bounds at session start:** a 3 s probe of the server, then each mount in a child process killed after 5 s, so a
   server that accepts the connection but does not answer fails the `RUN` with an error naming the export.
 - **Accepted deviations (D-038):** TD-065, TD-066, TD-067's depth limit, and no host-edit events on read-only binds.
-  Not accepted: an `O_CREAT` open (`>>`, `fopen(…, "a")`) of an existing file the guest has not looked up yet
-  truncates it, because unfs3 opens an unchecked CREATE with `O_TRUNC` (TD-068, P0; the fix is a patched or
-  different server, the owner's decision). Renames are not the cause.
+  Fixed by the patched server (D-044): an `O_CREAT` open (`>>`, `fopen(…, "a")`) of an existing file the guest had
+  not looked up truncated it (TD-068).
   The host-edit events are best effort: a batch the guest's replay has not finished, and an event offered while
   its microVM's sender stops, are lost (council REL-6).
 - **Kill and stop:** a `SIGKILL` to the init process gets 10 s to report `EXIT` (the guest's unmount flushes its
@@ -327,7 +326,8 @@ from its own microVM's server. Docker containers do not use the shim and still g
 ### The share server (GH #160 M3)
 
 - `vesper-microvm launch ID --share-net --unfs-mount DIR --unfs-src REL:ro|rw ...` starts one `unfsd` for that
-  microVM, in its namespace, before the jailer. `DIR` must be a virtio-fs mount whose name holds no newline (white
+  microVM (Vesper's patched unfs3 0.10.0 at `/usr/libexec/vesper/unfsd`, built reproducibly from
+  `third_party/unfs3`, D-044), in its namespace, before the jailer. `DIR` must be a virtio-fs mount whose name holds no newline (white
   space and backslashes are matched in `/proc/mounts`'s escaped form). The server exports each source as `/s/0`, `/s/1`, ... to `169.254.77.2` only, so no source path reaches
   its exports file. It listens on `169.254.77.1` (TCP 2049 and 2050, through an IPv4-mapped IPv6 socket).
 - **Sources** are read once and their attributes fetched afresh before serving, and opened again while the System
@@ -360,9 +360,8 @@ from its own microVM's server. Docker containers do not use the shim and still g
   probe sets `/dev/null`'s mode through such a link and must be refused (SEC-2). The cgroup bounds memory, pids and
   CPU (one CPU), not I/O (TD-069). A setuid-root file made by guest root on a share is inert: Apple's virtio-fs drops
   the set-id bit and keeps the Mac user as owner (tested 2026-11-17), and the System VM mounts every share
-  `nosuid,nodev` besides (SEC-4). Some malformed file handles, of the right length or shortened, make `unfsd` 0.10.0 abort on an
-  assertion; the guest is the only client, so it can stop only its own shares, and after 30 aborts in 60 s they stay
-  down (TD-065). `..` at an export's
+  `nosuid,nodev` besides (SEC-4). A malformed file handle is answered with STALE; unpatched unfs3 0.10.0 aborted on
+  an assertion, so a guest could stop its own shares (TD-065, fixed by D-044). `..` at an export's
   root returns a handle of the sandbox's `/s` with its attributes; every operation on it is refused.
 - **A nested read-only source** is bound only on the directory that was opened as that source (same device and
   inode); a directory renamed and replaced on macOS before the bind is placed makes the server refuse to start.

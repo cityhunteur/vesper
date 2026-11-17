@@ -229,13 +229,12 @@ Backend A runs stock Firecracker on Linux, so its parity depends on the System V
 * 9p is not a supported GA transport for shares.
 * A microVM can use bind-mounted data from a share. **Meets the requirement with accepted deviations** (GH #160,
   [ADR 0009](../design-docs/adr/0009-shares-into-microvms-over-nfs.md), D-038) for containerd tasks on the Vesper
-  shim: a bind from a share is an NFSv3 mount from one sandboxed `unfs3` server per microVM, in that microVM's own
-  network namespace (`make systemvm-unfs-suite`, `make systemvm-microvm-shares-suite`, `make
-  systemvm-microvm-binds-suite`). Deviations: file sources are refused; binds from two shares in one task are
-  refused; at most 39 directories below a bind (TD-067); an append through a descriptor opened before a rename
-  across directories clobbers the file (TD-067); sub-second times are lost on set (TD-066); read-only binds get no
-  host-edit events; a malformed handle can stop the microVM's own shares (TD-065). Docker containers still run on
-  runc with virtio-fs binds (GH #53).
+  shim: a bind from a share is an NFSv3 mount from one sandboxed server per microVM (Vesper's patched `unfs3`,
+  D-044), in that microVM's own network namespace (`make systemvm-unfs-suite`, `make
+  systemvm-microvm-shares-suite`, `make systemvm-microvm-binds-suite`). Deviations: file sources and binds from two
+  shares in one task are refused (GH #207, GH #208); at most 40 directories below a bind (TD-067); read-only binds
+  get no host-edit events. The patched server fixed the data loss on appends (TD-068), whole-second times (TD-066)
+  and the crash on malformed handles (TD-065). Docker containers still run on runc with virtio-fs binds (GH #53).
 * A microVM gets the vCPUs and memory its workload asks for. **Not met** (TD-048): every microVM has 1 vCPU and 256 MiB.
 * Stock Firecracker runs under the jailer in the System VM. **Meets the requirement** (`make systemvm-microvm-suite`).
 * The System VM uses a NAT attachment by default, which needs no restricted entitlement. MicroVM networking is in [Networking strategy](#networking-strategy).

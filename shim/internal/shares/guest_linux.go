@@ -283,8 +283,9 @@ func Replay(r io.Reader, sessionDir, root string) (touched, missing, rejected in
 	return touched, missing, rejected
 }
 
-// touchInRoot sets rel's mtime, found beneath root with no link leaving it: to mtime, the macOS mtime rounded up,
-// when the event carries one and it is not older than what the server now shows, or else to its own value.
+// touchInRoot sets rel's mtime, found beneath root with no link leaving it, to its own value. A server that reports
+// whole seconds (an unpatched unfs3, TD-066) shows no fraction, and setting that would floor the macOS mtime; then
+// the event's mtime, the macOS mtime rounded up, is set instead when it is not older (D-043).
 func touchInRoot(rfd int, rel string, mtime int64) bool {
 	fd, err := unix.Openat2(rfd, rel, &unix.OpenHow{
 		Flags:   unix.O_RDONLY | unix.O_NOFOLLOW | unix.O_NONBLOCK | unix.O_CLOEXEC,
@@ -300,7 +301,7 @@ func touchInRoot(rfd int, rel string, mtime int64) bool {
 	}
 	p := fmt.Sprintf("/proc/self/fd/%d", fd)
 	set := st.Mtim
-	if mtime >= st.Mtim.Sec && mtime > 0 {
+	if st.Mtim.Nsec == 0 && mtime >= st.Mtim.Sec && mtime > 0 {
 		set = unix.Timespec{Sec: mtime, Nsec: 0}
 	}
 	ts := []unix.Timespec{{Sec: 0, Nsec: unix.UTIME_OMIT}, set}

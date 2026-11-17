@@ -1,0 +1,29 @@
+Vesper patch 1 of 3 (TD-068): an UNCHECKED CREATE of an existing file keeps its data.
+
+unfs3 0.10.0 opened every non-exclusive CREATE with O_TRUNC, so a client's open(O_CREAT) of an existing file it had
+not looked up (>>, fopen "a") emptied the file. RFC 1813: an UNCHECKED create of an existing file applies the
+attributes and truncates only when they set the size (atomic_attr allows size 0 alone).
+
+--- a/nfs.c
++++ b/nfs.c
+@@ -499,7 +499,7 @@
+     int fd = -1, res = -1;
+     backend_statstruct buf;
+     uint32 gen;
+-    int flags = O_RDWR | O_CREAT | O_TRUNC | O_NONBLOCK;
++    int flags = O_RDWR | O_CREAT | O_NONBLOCK;
+ 
+     PREP(path, argp->where.dir);
+     result.status = join(cat_name(path, argp->where.name, obj), exports_rw());
+@@ -513,6 +513,11 @@
+     if (argp->how.mode != EXCLUSIVE) {
+ 	new_attr = argp->how.createhow3_u.obj_attributes;
+ 	result.status = join(result.status, atomic_attr(new_attr));
++	/* RFC 1813: an UNCHECKED create of an existing file applies the
++	   attributes; it truncates only when they set the size (atomic_attr
++	   allows size 0 alone). */
++	if (new_attr.size.set_it == TRUE)
++	    flags = flags | O_TRUNC;
+     }
+ 
+     /* Try to open the file */

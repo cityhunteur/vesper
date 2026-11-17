@@ -9,7 +9,10 @@ last_reviewed: 2026-11-14
 Date: 2026-11-13. Supersedes: none. Superseded by: none. Revised twice the same day after two llm-council design
 reviews (`docs/exec-plans/completed/2026-11-13-GH160-shares-into-microvms.md`, Decision Log) and accepted by the owner
 with the second review's fixes (D-032). On 2026-11-14 the owner added the host-root container to the threat table
-(D-034); [ADR 0010](0010-no-container-is-systemvm-root.md) is the mechanism.
+(D-034); [ADR 0010](0010-no-container-is-systemvm-root.md) is the mechanism. On 2026-11-17 the owner chose to run a
+patched build of unfs3 0.10.0 (D-044, [third_party/unfs3](../../../third_party/unfs3/README.md)) after a council
+review found data loss on appends (TD-068), a crash on malformed handles (TD-065) and whole-second times (TD-066) in
+the packaged one.
 
 ## Context and problem
 

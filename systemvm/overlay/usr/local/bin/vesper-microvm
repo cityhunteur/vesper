@@ -80,7 +80,11 @@ SHARE_TAP=share0
 SHARE_SRV=169.254.77.1
 SHARE_GUEST=169.254.77.2
 SHARE_PREFIX=30
-SHARE_PORTS="2049 2050"            # unfsd's NFS and mount ports (TCP)
+SHARE_PORTS="2049 2050"
+# Vesper's patched unfs3 0.10.0 (third_party/unfs3, D-044): an UNCHECKED CREATE keeps an existing file's data
+# (TD-068), malformed handles are refused rather than asserted on (TD-065), times are kept to the nanosecond (TD-066).
+# Alpine's /usr/sbin/unfsd stays installed with its library closure and is not run.
+UNFSD=/usr/libexec/vesper/unfsd            # unfsd's NFS and mount ports (TCP)
 REAP_GRACE=30                      # seconds a record is left alone, whatever runs
 # ---- share server (ADR 0009, GH #160 M3) ----------------------------------------------------------------------
 UNFS=$STATE/unfs                   # unfs/<id>.pid: supervise-daemon's pid file for the server of <id>
@@ -419,7 +423,7 @@ unfs_start() { # ID MOUNT SQUASH SOURCES(newline-separated) -> a reason on failu
   RC_SVCNAME="vesper-unfs-$us_id" supervise-daemon "vesper-unfs-$us_id" --start --pidfile "$UNFS/$us_id.pid" \
     --respawn-delay 1 --respawn-max 30 --respawn-period 60 --stdout /dev/null \
     --stderr-logger "/usr/local/bin/vesper-boundlog /var/log/vesper-unfs-$us_id.log 262144" \
-    "$(command -v nsenter)" -- "--net=$NETNS/$us_id" /usr/bin/vesper-unfs run --mount "$us_mount" \
+    "$(command -v nsenter)" -- "--net=$NETNS/$us_id" /usr/bin/vesper-unfs run --unfsd "$UNFSD" --mount "$us_mount" \
     --root "$UNFS_ROOT" --cgroup "$UNFS_CG/$us_id" "$@" < /dev/null > /dev/null 2> "$UNFS/$us_id.err" \
     || { echo "supervise-daemon: $(head -n 2 "$UNFS/$us_id.err" | tr '\n' ' ')"; return 1; }
   rm -f "$UNFS/$us_id.err"

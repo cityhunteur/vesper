@@ -68,13 +68,10 @@ case "${out}" in "RC 0"*"OUT secret"*"OUT inner"*"OUT wrote"*"OUT appended"*) [ 
 # --- 5. Deep paths, and descriptors that outlive a rename ----------------------------------------------------------
 # unfs3 keeps a file's whole directory path in its 64-byte handle, so it serves a limited depth below an export
 # (TD-067, a recorded deviation; the GH #160 criterion asked for 60). The step measures the limit, counted from the
-# export (/data), and fails if it shrinks below 40. The same path-based handles mishandle a write through a
-# descriptor opened before a rename. Today's outcome across directories is pinned: the old content is lost and the
-# file holds only the late write (council REL-2, COR-4); anything worse fails the step, a fix passes it. More cases
-# are measured and reported, not judged: an append with no rename at all to a file the guest has not looked up, the
-# same after a read, a rename in the same directory (logrotate), a write at an offset, and a rename made on macOS
-# while the guest holds the descriptor. The loss is not about renames: an O_CREAT open of an existing file the
-# guest has not looked up truncates it (TD-068).
+# export (/data), and fails if it shrinks below 40. Writes must keep a file's data (TD-068, fixed by the patched
+# unfs3, D-044: an O_CREAT open of an existing file the guest had not looked up used to truncate it): an append with
+# no rename to a file not looked up first, the same after a read, through a descriptor opened before a rename across
+# directories, in the same directory (logrotate), and on macOS, and a write at an offset; any loss fails the step.
 deep="${F}/w/deep"; p="${deep}"; for i in $(seq 1 60); do p="${p}/d${i}"; done
 mkdir -p "${p}" "${F}/w/ra" "${F}/w/rb" "${F}/w/rc" "${F}/w/rd"
 echo start > "${F}/w/ra/f"; echo start > "${F}/w/ra/log"; echo start > "${F}/w/ra/plain"; echo start > "${F}/w/ra/seen"; printf 'xxxxxxxx' > "${F}/w/ra/w"; echo start > "${F}/w/rc/h"
@@ -86,11 +83,11 @@ for _ in $(seq 1 60); do [ -s "${F}/w/rc/done" ] && break; sleep 0.5; done
 gone binds-hostmv
 depth="$(printf '%s\n' "${out}" | sed -n 's/^OUT depth //p')"
 show() { if [ -e "$1" ]; then od -An -c "$1" | tr -s ' ' | tr '\n' ' '; else printf missing; fi; }
-cross="$(cat "${F}/w/rb/f" 2>/dev/null)"
-case "${cross}" in "start
-late") rename="a fix: the append landed after the old content" ;;
-  late) rename="as recorded: the old content was lost, rb/f holds only the late write (TD-067)" ;;
-  *) rename="" ;; esac
+keeps() { [ "$(cat "$1" 2>/dev/null)" = "start
+late" ]; }
+rename=""
+keeps "${F}/w/rb/f" && keeps "${F}/w/ra/plain" && keeps "${F}/w/ra/seen" && keeps "${F}/w/ra/log.1" && keeps "${F}/w/rd/h" \
+  && [ "$(cat "${F}/w/rb/w" 2>/dev/null)" = ABCDxxxx ] && rename="every write kept the file's data (TD-068 fixed, D-044)"
 facts="append, no rename, file not looked up first: $(show "${F}/w/ra/plain"); looked up first: $(show "${F}/w/ra/seen"); same-dir log.1: $(show "${F}/w/ra/log.1"), log: $(show "${F}/w/ra/log"); offset write rb/w: $(show "${F}/w/rb/w"); macOS rename rd/h: $(show "${F}/w/rd/h"), rc/h: $(show "${F}/w/rc/h"), guest wrote: $(cat "${F}/w/rc/wrote" 2>/dev/null || echo no)"
 case "${out}" in *"OUT late-ok"*) late=true ;; *) late=false ;; esac
 if [ -n "${depth}" ] && [ "${depth}" -ge 40 ] && [ -n "${rename}" ] && [ "${late}" = true ] && [ ! -e "${F}/w/ra/f" ]; then
