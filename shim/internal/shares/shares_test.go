@@ -37,8 +37,8 @@ func TestMakePlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.Mount != "/Users/me" {
-		t.Errorf("mount %q", p.Mount)
+	if !reflect.DeepEqual(p.Mounts, []string{"/Users/me"}) {
+		t.Errorf("mounts %q", p.Mounts)
 	}
 	wantSrc := []unfs.Source{{Rel: "proj"}, {Rel: "proj/conf", ReadOnly: true}}
 	if !reflect.DeepEqual(p.Sources, wantSrc) {
@@ -57,7 +57,6 @@ func TestMakePlan(t *testing.T) {
 func TestMakePlanRefusals(t *testing.T) {
 	cases := map[string][]specs.Mount{
 		"file":       {{Destination: "/f", Type: "bind", Source: "/Users/me/a.txt"}},
-		"two shares": {{Destination: "/a", Type: "bind", Source: "/Users/me/a"}, {Destination: "/b", Type: "bind", Source: "/Volumes/other/b"}},
 		"root dest":  {{Destination: "/", Type: "bind", Source: "/Users/me/a"}},
 	}
 	for name, m := range cases {
@@ -97,7 +96,7 @@ func TestMakePlanBoundaries(t *testing.T) {
 	}
 	for _, order := range [][]string{{"/Users/me", "/Users/me/inner"}, {"/Users/me/inner", "/Users/me"}} {
 		p, err = MakePlan([]specs.Mount{{Destination: "/x", Type: "bind", Source: "/Users/me/inner/a"}}, order, r)
-		if err != nil || p.Mount != "/Users/me/inner" || p.Sources[0].Rel != "a" {
+		if err != nil || !reflect.DeepEqual(p.Mounts, []string{"/Users/me/inner"}) || p.Sources[0].Rel != "a" {
 			t.Errorf("nested shares %v: %+v %v", order, p, err)
 		}
 	}
@@ -114,6 +113,51 @@ func TestMakePlanBoundaries(t *testing.T) {
 	}
 	if err := CheckDest("/my data"); err != nil {
 		t.Errorf("a space in a destination is valid: %v", err)
+	}
+}
+
+// GH #207: binds from two shares are one server's sources, keyed by mount, grouped by mount with the guest's exports
+// renumbered to match; the same relative path in two shares is two sources (council SEC-4); a source that holds
+// another share is refused (JDG-1, ARC-9).
+func TestMakePlanTwoShares(t *testing.T) {
+	shares := []string{"/Users/me", "/Volumes/other", "/Users/me/inner"}
+	p, err := MakePlan([]specs.Mount{
+		{Destination: "/a", Type: "bind", Source: "/Users/me/x", Options: []string{"rw"}},
+		{Destination: "/b", Type: "bind", Source: "/Volumes/other/x", Options: []string{"rw"}},
+		{Destination: "/c", Type: "bind", Source: "/Users/me/y", Options: []string{"ro"}},
+		{Destination: "/d", Type: "bind", Source: "/Volumes/other/x/z", Options: []string{"ro"}},
+	}, shares, fake)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(p.Mounts, []string{"/Users/me", "/Volumes/other"}) {
+		t.Errorf("mounts %q", p.Mounts)
+	}
+	wantSrc := []unfs.Source{{Rel: "x"}, {Rel: "y", ReadOnly: true}, {Mount: 1, Rel: "x"}, {Mount: 1, Rel: "x/z", ReadOnly: true}}
+	if !reflect.DeepEqual(p.Sources, wantSrc) {
+		t.Errorf("sources %+v", p.Sources)
+	}
+	wantShares := []Share{{Dest: "/a", Export: "/s/0"}, {Dest: "/b", Export: "/s/2"}, {Dest: "/c", Export: "/s/1", ReadOnly: true}, {Dest: "/d", Export: "/s/3", ReadOnly: true}}
+	if !reflect.DeepEqual(p.Shares, wantShares) {
+		t.Errorf("shares %+v", p.Shares)
+	}
+	got := strings.Join(p.LaunchArgs(), " ")
+	if got != "--share-net --unfs-mount /Users/me --unfs-src x:rw --unfs-src y:ro --unfs-mount /Volumes/other --unfs-src x:rw --unfs-src x/z:ro" {
+		t.Errorf("launch args %s", got)
+	}
+	if err := (unfs.Args{Mounts: p.Mounts, Sources: p.Sources}).Check(); err != nil {
+		t.Errorf("the plan is not a valid server record: %v", err)
+	}
+	if n := unfs.Nests(p.Sources); !reflect.DeepEqual(n, []unfs.Nest{{Outer: 2, Inner: 3, Sub: "z"}}) {
+		t.Errorf("nests %+v", n)
+	}
+	for _, src := range []string{"/Users/me"} {
+		if _, err := MakePlan([]specs.Mount{{Destination: "/w", Type: "bind", Source: src}}, shares, fake); err == nil || !strings.Contains(err.Error(), "holds another share") {
+			t.Errorf("a source holding another share: %v", err)
+		}
+	}
+	if p, err := MakePlan([]specs.Mount{{Destination: "/w", Type: "bind", Source: "/Users/me/x"}}, shares, fake); err != nil || len(p.Sources) != 1 {
+		t.Errorf("a source beside the inner share: %+v %v", p, err)
 	}
 }
 

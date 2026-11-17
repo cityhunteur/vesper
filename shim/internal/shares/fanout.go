@@ -29,11 +29,26 @@ const EventPort = 1026
 // QueueLimit bounds the paths waiting for one microVM.
 var QueueLimit = 10000
 
-// Server is what the fanout knows of one microVM's share server: its share mount and sources.
+// Server is what the fanout knows of one microVM's share server: its share mounts and sources.
 type Server struct {
 	ID      string
-	Mount   string
+	Mounts  []string
 	Sources []unfs.Source
+}
+
+// locate returns the index of the share mount that holds p (the longest, as the planner chooses) and p relative to
+// it, or -1.
+func (s Server) locate(p string) (int, string) {
+	best := -1
+	for i, m := range s.Mounts {
+		if (p == m || strings.HasPrefix(p, m+"/")) && (best < 0 || len(m) > len(s.Mounts[best])) {
+			best = i
+		}
+	}
+	if best < 0 {
+		return -1, ""
+	}
+	return best, strings.TrimPrefix(strings.TrimPrefix(p, s.Mounts[best]), "/")
 }
 
 // Event is one path on one export: Export is the source index, Rest the path below it ("" for its root). Mtime,
@@ -105,13 +120,13 @@ func RoundUp(sec, nsec int64) int64 {
 // source is not replayed (GH #150 never replays a share root either), nor is a read-only source: the guest can set
 // no times on a read-only mount, so its watchers get no event (a recorded limit, ADR 0009).
 func (s Server) Map(p string) []Event {
-	if p != s.Mount && !strings.HasPrefix(p, s.Mount+"/") {
+	mi, rel := s.locate(p)
+	if mi < 0 {
 		return nil
 	}
-	rel := strings.TrimPrefix(strings.TrimPrefix(p, s.Mount), "/")
 	var out []Event
 	for i, src := range s.Sources {
-		if src.ReadOnly {
+		if src.ReadOnly || src.Mount != mi {
 			continue
 		}
 		var rest string
@@ -181,8 +196,8 @@ func (q *Queue) Take(n int) []Event {
 // Len is the number waiting.
 func (q *Queue) Len() int { return len(q.order) }
 
-// ReadServers lists the running servers from vesper-microvm's records: <dir>/<id>.args holds the share mount, the
-// squash flag and one source per line.
+// ReadServers lists the running servers from vesper-microvm's records (<dir>/<id>.args, unfs.ParseArgs). A record
+// that does not parse is left out whole: a source skipped would shift every later one to another export (COR-9).
 func ReadServers(dir string) ([]Server, error) {
 	names, err := filepath.Glob(filepath.Join(dir, "*.args"))
 	if err != nil {
@@ -194,17 +209,11 @@ func ReadServers(dir string) ([]Server, error) {
 		if err != nil {
 			continue
 		}
-		lines := strings.Split(strings.TrimRight(string(raw), "\n"), "\n")
-		if len(lines) < 3 {
+		a, err := unfs.ParseArgs(string(raw))
+		if err != nil {
 			continue
 		}
-		s := Server{ID: strings.TrimSuffix(filepath.Base(n), ".args"), Mount: lines[0]}
-		for _, l := range lines[2:] {
-			if src, err := unfs.ParseSource(l); err == nil {
-				s.Sources = append(s.Sources, src)
-			}
-		}
-		out = append(out, s)
+		out = append(out, Server{ID: strings.TrimSuffix(filepath.Base(n), ".args"), Mounts: a.Mounts, Sources: a.Sources})
 	}
 	sort.Slice(out, func(a, b int) bool { return out[a].ID < out[b].ID })
 	return out, nil
@@ -277,7 +286,8 @@ func (f *Fanout) Offer(p string) {
 		if len(evs) == 0 {
 			continue
 		}
-		if m := mtime(s.Mount, strings.TrimPrefix(strings.TrimPrefix(p, s.Mount), "/")); m > 0 {
+		mi, rel := s.locate(p)
+		if m := mtime(s.Mounts[mi], rel); m > 0 {
 			for i := range evs {
 				evs[i].Mtime = m
 			}

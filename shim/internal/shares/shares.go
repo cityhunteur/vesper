@@ -115,10 +115,11 @@ func Encode(list []Share) (string, error) {
 	return string(b), err
 }
 
-// Plan is what the shim asks for: the share mount and sources for vesper-microvm launch --unfs-*, and the guest's
-// list. An empty plan (no Sources) means the task has no share-backed bind mounts.
+// Plan is what the shim asks for: the share mounts and sources for vesper-microvm launch --unfs-*, and the guest's
+// list. An empty plan (no Sources) means the task has no share-backed bind mounts. Sources are grouped by mount, in
+// Mounts order (unfs.Args.Check).
 type Plan struct {
-	Mount   string
+	Mounts  []string
 	Sources []unfs.Source
 	Shares  []Share
 }
@@ -179,11 +180,14 @@ var HostResolver = Resolver{
 }
 
 // MakePlan maps a spec's mounts. A bind mount whose resolved source lies under one of shareMounts (the virtio-fs
-// mount points) becomes a share; a file source is refused; other mounts are left as they were (ADR 0009, Shim). All
-// shares must come from one share mount, because one server serves one.
+// mount points) becomes a share; a file source is refused; other mounts are left as they were (ADR 0009, Shim). The
+// sources may come from several share mounts, one server serving them all (GH #207). A source that holds another
+// share mount is refused: it is cloned without its submounts, so the guest would see, and could write, the outer
+// share's view of that directory, even when the inner share is read-only (council JDG-1, ARC-9).
 func MakePlan(mounts []specs.Mount, shareMounts []string, r Resolver) (Plan, error) {
 	var p Plan
 	index := map[unfs.Source]int{}
+	mountIndex := map[string]int{}
 	for _, m := range mounts {
 		if !isBind(m) || !filepath.IsAbs(m.Source) {
 			continue
@@ -197,15 +201,17 @@ func MakePlan(mounts []specs.Mount, shareMounts []string, r Resolver) (Plan, err
 		if sm == "" {
 			continue
 		}
-		if p.Mount != "" && p.Mount != sm {
-			return Plan{}, fmt.Errorf("mount %s: binds from two shares (%s and %s); a task may use one", m.Destination, p.Mount, sm)
-		}
 		dir, err := r.IsDir(src)
 		if err != nil {
 			return Plan{}, fmt.Errorf("mount %s: %w", m.Destination, err)
 		}
 		if !dir {
 			return Plan{}, fmt.Errorf("mount %s: the source %s is a file; only directories from a share can be mounted in a microVM", m.Destination, m.Source)
+		}
+		for _, other := range shareMounts {
+			if other != sm && (other == src || strings.HasPrefix(other, src+"/")) {
+				return Plan{}, fmt.Errorf("mount %s: the source %s holds another share, %s; bind a directory inside one share", m.Destination, m.Source, other)
+			}
 		}
 		if err := CheckDest(path.Clean(m.Destination)); err != nil {
 			return Plan{}, fmt.Errorf("mount %s: %w", m.Destination, err)
@@ -214,37 +220,68 @@ func MakePlan(mounts []specs.Mount, shareMounts []string, r Resolver) (Plan, err
 		if src != sm {
 			rel = src[len(sm)+1:]
 		}
-		s := unfs.Source{Rel: rel, ReadOnly: readOnly(m)}
 		if err := unfs.CheckRel(rel); err != nil {
 			return Plan{}, fmt.Errorf("mount %s: %w", m.Destination, err)
 		}
+		mi, ok := mountIndex[sm]
+		if !ok {
+			mi = len(p.Mounts)
+			mountIndex[sm] = mi
+			p.Mounts = append(p.Mounts, sm)
+		}
+		// The key holds the mount: the same relative path in two shares is two sources (council SEC-4).
+		s := unfs.Source{Mount: mi, Rel: rel, ReadOnly: readOnly(m)}
 		i, ok := index[s]
 		if !ok {
 			i = len(p.Sources)
 			index[s] = i
 			p.Sources = append(p.Sources, s)
 		}
-		p.Mount = sm
 		p.Shares = append(p.Shares, Share{Dest: path.Clean(m.Destination), Export: unfs.ExportPath(i), ReadOnly: s.ReadOnly})
 	}
 	if len(p.Sources) > unfs.MaxSources {
 		return Plan{}, fmt.Errorf("%d share sources; at most %d", len(p.Sources), unfs.MaxSources)
 	}
+	if len(p.Mounts) > unfs.MaxMounts {
+		return Plan{}, fmt.Errorf("binds from %d shares; at most %d", len(p.Mounts), unfs.MaxMounts)
+	}
+	p.group()
 	return p, nil
 }
 
-// LaunchArgs are the vesper-microvm launch arguments for a plan (none when it is empty).
+// group orders the sources by mount, keeping their order within a mount, and renumbers the guest's exports to match.
+func (p *Plan) group() {
+	order := make([]int, len(p.Sources))
+	for i := range order {
+		order[i] = i
+	}
+	sort.SliceStable(order, func(a, b int) bool { return p.Sources[order[a]].Mount < p.Sources[order[b]].Mount })
+	renum := map[string]string{}
+	srcs := make([]unfs.Source, len(p.Sources))
+	for n, old := range order {
+		srcs[n] = p.Sources[old]
+		renum[unfs.ExportPath(old)] = unfs.ExportPath(n)
+	}
+	p.Sources = srcs
+	for i := range p.Shares {
+		p.Shares[i].Export = renum[p.Shares[i].Export]
+	}
+}
+
+// LaunchArgs are the vesper-microvm launch arguments for a plan (none when it is empty): each --unfs-src belongs to
+// the --unfs-mount before it.
 func (p Plan) LaunchArgs() []string {
 	if len(p.Sources) == 0 {
 		return nil
 	}
-	args := []string{"--share-net", "--unfs-mount", p.Mount}
-	for _, s := range p.Sources {
-		mode := "rw"
-		if s.ReadOnly {
-			mode = "ro"
+	args := []string{"--share-net"}
+	for m, mount := range p.Mounts {
+		args = append(args, "--unfs-mount", mount)
+		for _, s := range p.Sources {
+			if s.Mount == m {
+				args = append(args, "--unfs-src", s.Arg())
+			}
 		}
-		args = append(args, "--unfs-src", s.Rel+":"+mode)
 	}
 	return args
 }

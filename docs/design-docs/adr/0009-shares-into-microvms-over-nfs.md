@@ -163,6 +163,11 @@ An OCI bind mount whose resolved source (symlinks followed, checked against the 
 share mount becomes one of these NFS mounts. A source that is a file, not a directory, is refused with an error
 naming the mount, until a later change supports it. Any other bind mount keeps today's behaviour.
 
+Update 2026-11-17 (GH #207, D-047): binds from several shares are served by the task's one server. Each source is
+opened beneath its own share mount and keyed by it, read-only nests stay within one share, and a source that holds
+another share mount is refused, because a source is cloned without its submounts. The server record is versioned
+(`unfs.Args`) and parsed only in Go.
+
 Nothing in the root namespace listens for NFS, so no rule there has to hold for condition 3.
 
 ## Alternatives considered

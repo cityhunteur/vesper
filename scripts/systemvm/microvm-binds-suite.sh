@@ -6,7 +6,8 @@
 # the share; the server killed under load comes back and the writes all land; 0600 files and 0700 directories read
 # and write; at least 40 directories below an export read, a write through a descriptor opened before a rename
 # across directories keeps today's recorded outcome, and three more rename cases are measured; a share source whose
-# path holds spaces and shell characters mounts and reads; after the shim is killed the reaper leaves no server,
+# path holds spaces and shell characters mounts and reads; binds from two shares share one server and stay apart;
+# after the shim is killed the reaper leaves no server,
 # namespace or record. Needs `make systemvm-up-shares`.
 # Report: run/systemvm/microvm-binds-report.json.
 set -uo pipefail
@@ -102,6 +103,18 @@ b64="$(printf '%s' "${odd}" | base64 | tr -d '\n')"
 out="$(runb --bind64="${b64}:/odd:rw" binds-odd 'cat /odd/f; echo back > /odd/g && echo wrote')"
 case "${out}" in "RC 0"*"OUT odd"*"OUT wrote"*) [ "$(cat "${odd}/g" 2>/dev/null)" = back ] && record odd_source_path true "${out}" || record odd_source_path false "${out}; g: $(cat "${odd}/g" 2>&1)" ;;
   *) record odd_source_path false "${out}" ;; esac
+
+# --- 6b. Binds from two shares (GH #207): one server; the same relative path in each share stays two directories,
+# each write lands in its own share, and a read-only bind inside the second share stays read-only ------------------
+SHARE2="${BINDS_SHARE2:-$(dirname "${SHARE}")/share-nowatch}"
+R="$(basename "${F}")/two"; A="${SHARE}/${R}"; Z="${SHARE2}/${R}"
+rm -rf "${SHARE2}"/m7-*; mkdir -p "${A}" "${Z}/sub"; echo first > "${A}/id"; echo second > "${Z}/id"
+out="$(runb --bind="${A}:/a:rw" --bind="${Z}:/b:rw" --bind="${Z}/sub:/b/sub:ro" binds-two 'cat /a/id /b/id; echo from-a > /a/w; echo from-b > /b/w; echo x > /b/sub/no 2>/dev/null && echo RO-WRITTEN || echo ro-refused; grep -c " nfs " /proc/mounts')"
+case "${out}" in "RC 0"*"OUT first"*"OUT second"*"OUT ro-refused"*"OUT 3"*)
+  if [ "$(cat "${A}/w" 2>/dev/null)" = from-a ] && [ "$(cat "${Z}/w" 2>/dev/null)" = from-b ] && [ ! -e "${Z}/sub/no" ] && [ ! -e "${A}/sub" ]; then
+    record binds_from_two_shares true "${out}; macOS: ${A}/w=from-a, ${Z}/w=from-b, sub/no absent"
+  else record binds_from_two_shares false "${out}; a/w=$(cat "${A}/w" 2>&1) b/w=$(cat "${Z}/w" 2>&1)"; fi ;;
+  *) record binds_from_two_shares false "${out}" ;; esac
 
 # --- 7. After the shim is killed, the reaper leaves no server, namespace or record ----------------------------------
 st="$(runb "${B[@]}" --detach binds-shim 'sleep 600')"

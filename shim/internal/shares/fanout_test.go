@@ -15,7 +15,7 @@ import (
 )
 
 func TestServerMap(t *testing.T) {
-	s := Server{Mount: "/Users/me", Sources: []unfs.Source{{Rel: "proj"}, {Rel: "proj/conf", ReadOnly: true}, {Rel: "."}}}
+	s := Server{Mounts: []string{"/Users/me"}, Sources: []unfs.Source{{Rel: "proj"}, {Rel: "proj/conf", ReadOnly: true}, {Rel: "."}}}
 	got := s.Map("/Users/me/proj/conf/app.conf")
 	// The read-only source 1 gets no event: the guest cannot set times on it.
 	want := []Event{{Export: 0, Rest: "conf/app.conf"}, {Export: 2, Rest: "proj/conf/app.conf"}}
@@ -28,8 +28,41 @@ func TestServerMap(t *testing.T) {
 	if got := s.Map("/Users/mex/proj/a"); got != nil {
 		t.Errorf("outside the mount: %+v", got)
 	}
-	if got := (Server{Mount: "/m", Sources: []unfs.Source{{Rel: "a"}}}).Map("/m/ab/x"); got != nil {
+	if got := (Server{Mounts: []string{"/m"}, Sources: []unfs.Source{{Rel: "a"}}}).Map("/m/ab/x"); got != nil {
 		t.Errorf("a sibling prefix: %+v", got)
+	}
+	// Two mounts, one inside the other, each with a source "x": a path maps on the mount that holds it most closely.
+	two := Server{Mounts: []string{"/m", "/m/in"}, Sources: []unfs.Source{{Rel: "x"}, {Rel: "in"}, {Mount: 1, Rel: "x"}}}
+	if got := two.Map("/m/in/x/f"); !reflect.DeepEqual(got, []Event{{Export: 2, Rest: "f"}}) {
+		t.Errorf("two mounts: %+v", got)
+	}
+	if got := two.Map("/m/x/f"); !reflect.DeepEqual(got, []Event{{Export: 0, Rest: "f"}}) {
+		t.Errorf("two mounts, outer: %+v", got)
+	}
+}
+
+// Version 1 and 2 records both read; a record with a line that does not parse is left out whole (COR-9).
+func TestReadServers(t *testing.T) {
+	dir := t.TempDir()
+	write := func(n, s string) {
+		if err := os.WriteFile(filepath.Join(dir, n), []byte(s), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("v1.args", "/m\n0\na:rw\nb:ro\n")
+	write("v2.args", unfs.ArgsHeader+"\nsquash 1\nmount /m\nsrc a:rw\nmount /n x\nsrc b:ro\n")
+	write("bad1.args", "/m\n0\na:rw\nnot-a-source\nc:rw\n")
+	write("bad2.args", unfs.ArgsHeader+"\nsquash 0\nsrc a:rw\nmount /m\n")
+	got, err := ReadServers(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Server{
+		{ID: "v1", Mounts: []string{"/m"}, Sources: []unfs.Source{{Rel: "a"}, {Rel: "b", ReadOnly: true}}},
+		{ID: "v2", Mounts: []string{"/m", "/n x"}, Sources: []unfs.Source{{Rel: "a"}, {Mount: 1, Rel: "b", ReadOnly: true}}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("servers %+v", got)
 	}
 }
 

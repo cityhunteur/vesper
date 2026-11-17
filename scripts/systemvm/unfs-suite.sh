@@ -128,6 +128,22 @@ r3="$(mvm launch unfs-x --share-net --unfs-mount /run --unfs-src .:rw | errline)
 case "${r1}|${r2}|${r3}" in *"m3/swap"*"symbolic links"*"|ERR"*"|"*"not a virtio-fs mount"*) record bad_sources_refused true "symlink: ${r1}; dotdot: ${r2}; not virtio-fs: ${r3}" ;;
   *) record bad_sources_refused false "symlink: ${r1}; dotdot: ${r2}; not virtio-fs: ${r3}" ;; esac
 
+# --- 8b. One server for two shares (GH #207): the same relative path in each is two exports; the escape checks pass
+# in the two-mount sandbox, started from the same record; malformed requests are refused --------------------------
+SHARE2="${UNFS_SHARE2:-$(dirname "${SHARE}")/share-nowatch}"
+# The escape checks expect the fixture's layout (/s/1 nested read-only at /s/0/conf, /s/2 read-only): here /s/2 is
+# m3/ro of the second share, so the same relative path names a directory in each share.
+rm -rf "${SHARE2}/m3"; mkdir -p "${SHARE2}/m3/ro"; echo second > "${SHARE2}/m3/ro/r.txt"
+t1="$(mvm launch unfs-x --share-net --unfs-mount "${SHARE}" --unfs-src m3/proj:rw --unfs-src m3/proj/conf:ro --unfs-mount "${SHARE2}" --unfs-src m3/ro:ro | tail -1)"
+tst="$(mvm unfs unfs-x)"; tiso="$(mvm unfs-isolation unfs-x | grep -c ' /s/')"
+tself="$(mvm test-unfs-selfcheck unfs-x | grep '^SELF-SUMMARY')"
+mvm cleanup unfs-x --logs >/dev/null
+t2="$(mvm launch unfs-x --share-net --unfs-src m3/proj:rw --unfs-mount "${SHARE}" | errline)"; mvm cleanup unfs-x --logs >/dev/null
+t3="$(mvm launch unfs-x --share-net --unfs-mount "${SHARE}" --unfs-src m3/proj:rw --unfs-mount "${SHARE}" --unfs-src m3/ro:ro | errline)"; mvm cleanup unfs-x --logs >/dev/null
+case "${t1}|${tst}|${tself}|${t2}|${t3}" in "LAUNCHED unfs-x "*"|"*"listen=yes"*"|"*"failed=0"*"|ERR --unfs-src before any --unfs-mount|ERR"*"twice"*)
+  record two_shares_one_server true "${t1}; ${tst}; mounts under /s: ${tiso}; selfcheck ${tself}; src first: ${t2}; same mount twice: ${t3}" ;;
+  *) record two_shares_one_server false "${t1}; ${tst}; selfcheck ${tself}; src first: ${t2}; same mount twice: ${t3}" ;; esac
+
 # --- 9. The non-root server (all_squash): the same checks -------------------------------------------------------
 mvm cleanup "${ID}" --logs >/dev/null
 q="$(mvm launch "${SQ}" --share-net --unfs-squash "${SRCS[@]}" | tail -1)"
