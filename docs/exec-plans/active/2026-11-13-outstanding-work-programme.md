@@ -30,7 +30,11 @@ it is why the run comes last.
 - [x] W4 Runtime bounds: console logs (TD-055), memory budget (TD-056), snapshot store quota (TD-053) (PR #191;
   runtime evidence `run/W4/20261113T170614Z`: 7 suites, 121 of 121 steps, and a microVM that outlives its console bounder)
 - [x] W5 #160: host shares into microVMs over NFS from `unfs3` (2026-11-16, PRs #199 to #202; deviations in D-038)
-- [ ] W6 ctr-conformance hang: reproduce, then fix or record it
+- [x] W6 ctr-conformance hang: reproduce, then fix or record it (2026-11-17: not reproduced. `make ctr-conformance-loop`
+  ran ctr-conformance 10 times on `main` at `7fa59f2`, 74 of 74 steps each, about 80 s each, no run near its 20-minute
+  limit; `cargo test` 5 times with no failure, so W1's unnamed failing test did not return either. The loop stays as
+  the regression check; a hang it catches leaves its state in `run/W6/`. Evidence: `run/W6/summary.txt`,
+  `run/W6/cargo-loop.txt`)
 - [x] W7 Repository settings: the owner applies them (D-029); nothing for the agent to do
 - [ ] W8 CE-0003 Linux reference run (gated: quote and quota approval)
 - [ ] Outcomes & Retrospective written; plan moved to completed
