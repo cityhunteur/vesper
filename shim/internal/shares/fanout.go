@@ -36,14 +36,31 @@ type Server struct {
 	Sources []unfs.Source
 }
 
-// Event is one path on one export: Export is the source index, Rest the path below it ("" for its root).
+// Event is one path on one export: Export is the source index, Rest the path below it ("" for its root). Mtime,
+// when not 0, is the whole second the guest sets as the file's mtime: the macOS mtime rounded up. unfs3 keeps and
+// reports whole seconds (TD-066), so the guest cannot see a fraction; setting the value it sees would floor the
+// macOS mtime, and make or ninja on the Mac could then take a source saved after a build for older than its target
+// (council REL-3). Rounded up, the mtime moves forward by less than a second, and the next replay changes nothing.
 type Event struct {
+	Export int
+	Rest   string
+	Mtime  int64
+}
+
+// key is what the queue coalesces on: the path, whatever its mtime.
+type key struct {
 	Export int
 	Rest   string
 }
 
-// Line is the wire form of an event.
-func (e Event) Line() string { return strconv.Itoa(e.Export) + "\t" + e.Rest + "\n" }
+// Line is the wire form of an event: "N<TAB>rest", or "N:MTIME<TAB>rest" with an mtime.
+func (e Event) Line() string {
+	head := strconv.Itoa(e.Export)
+	if e.Mtime > 0 {
+		head += ":" + strconv.FormatInt(e.Mtime, 10)
+	}
+	return head + "\t" + e.Rest + "\n"
+}
 
 // ParseEvent reads a wire line (without its newline).
 func ParseEvent(line string) (Event, error) {
@@ -51,9 +68,20 @@ func ParseEvent(line string) (Event, error) {
 	if i < 0 {
 		return Event{}, fmt.Errorf("event %q: no tab", line)
 	}
-	n, err := strconv.Atoi(line[:i])
-	if err != nil || n < 0 || n >= unfs.MaxSources {
+	head, mt, withMtime := line[:i], "", false
+	if j := strings.IndexByte(head, ':'); j >= 0 {
+		head, mt, withMtime = head[:j], head[j+1:], true
+	}
+	n, err := strconv.Atoi(head)
+	if err != nil || n < 0 || n >= unfs.MaxSources || strings.HasPrefix(head, "+") {
 		return Event{}, fmt.Errorf("event %q: bad export", line)
+	}
+	var mtime int64
+	if withMtime {
+		mtime, err = strconv.ParseInt(mt, 10, 64)
+		if err != nil || mtime <= 0 || strings.HasPrefix(mt, "+") {
+			return Event{}, fmt.Errorf("event %q: bad mtime", line)
+		}
 	}
 	rest := line[i+1:]
 	if rest != "" {
@@ -61,10 +89,19 @@ func ParseEvent(line string) (Event, error) {
 			return Event{}, err
 		}
 	}
-	return Event{Export: n, Rest: rest}, nil
+	return Event{Export: n, Rest: rest, Mtime: mtime}, nil
 }
 
-// Map returns the events a host path gives on this server: one per read-write source that holds it. The root of a
+// RoundUp is the whole second at or after an mtime of sec and nsec.
+func RoundUp(sec, nsec int64) int64 {
+	if nsec > 0 {
+		return sec + 1
+	}
+	return sec
+}
+
+// Map returns the events a host path gives on this server: one per read-write source that holds it, without an
+// mtime (Offer adds it). The root of a
 // source is not replayed (GH #150 never replays a share root either), nor is a read-only source: the guest can set
 // no times on a read-only mount, so its watchers get no event (a recorded limit, ADR 0009).
 func (s Server) Map(p string) []Event {
@@ -96,29 +133,35 @@ func (s Server) Map(p string) []Event {
 	return out
 }
 
-// Queue is a bounded set of waiting events in arrival order.
+// Queue is a bounded set of waiting events in arrival order, one per path: a path that already waits keeps its
+// place and takes the later mtime.
 type Queue struct {
-	order              []Event
-	waiting            map[Event]bool
+	order              []*Event
+	waiting            map[key]*Event
 	Coalesced, Dropped int
 }
 
-// Add queues e unless it already waits; when full it drops the oldest.
+// Add queues e unless its path already waits; when full it drops the oldest.
 func (q *Queue) Add(e Event) {
 	if q.waiting == nil {
-		q.waiting = map[Event]bool{}
+		q.waiting = map[key]*Event{}
 	}
-	if q.waiting[e] {
+	k := key{e.Export, e.Rest}
+	if w := q.waiting[k]; w != nil {
+		if e.Mtime > w.Mtime {
+			w.Mtime = e.Mtime
+		}
 		q.Coalesced++
 		return
 	}
 	if len(q.order) >= QueueLimit {
-		delete(q.waiting, q.order[0])
+		delete(q.waiting, key{q.order[0].Export, q.order[0].Rest})
 		q.order = q.order[1:]
 		q.Dropped++
 	}
-	q.order = append(q.order, e)
-	q.waiting[e] = true
+	p := &e
+	q.order = append(q.order, p)
+	q.waiting[k] = p
 }
 
 // Take removes and returns up to n waiting events.
@@ -126,11 +169,12 @@ func (q *Queue) Take(n int) []Event {
 	if n > len(q.order) {
 		n = len(q.order)
 	}
-	out := append([]Event(nil), q.order[:n]...)
-	q.order = q.order[n:]
-	for _, e := range out {
-		delete(q.waiting, e)
+	out := make([]Event, 0, n)
+	for _, p := range q.order[:n] {
+		out = append(out, *p)
+		delete(q.waiting, key{p.Export, p.Rest})
 	}
+	q.order = q.order[n:]
 	return out
 }
 
@@ -184,6 +228,9 @@ type Fanout struct {
 	Batch    int
 	Refresh  time.Duration
 	Idle     time.Duration // how long an idle sender waits before it checks that its microVM still exists
+	// Mtime returns the rounded-up mtime of rel beneath a share mount, or 0 when it cannot be read; nil is
+	// ShareMtime.
+	Mtime func(mount, rel string) int64
 
 	statMu sync.Mutex // one writer of StatPath at a time
 
@@ -221,10 +268,19 @@ func (f *Fanout) Offer(p string) {
 		}
 		f.read = time.Now()
 	}
+	mtime := f.Mtime
+	if mtime == nil {
+		mtime = ShareMtime
+	}
 	for _, s := range f.servers {
 		evs := s.Map(p)
 		if len(evs) == 0 {
 			continue
+		}
+		if m := mtime(s.Mount, strings.TrimPrefix(strings.TrimPrefix(p, s.Mount), "/")); m > 0 {
+			for i := range evs {
+				evs[i].Mtime = m
+			}
 		}
 		q, ok := f.queues[s.ID]
 		if !ok {

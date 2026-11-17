@@ -34,7 +34,9 @@ mount_() {
   fi
   tags | grep -qx "$tag" || { echo "ERR virtio-fs tag $tag is not present (tags: $(tags | tr '\n' ' '))"; return 1; }
   mkdir -p "$path" || { echo "ERR cannot create $path"; return 1; }
-  opts=""; [ "$mode" = ro ] && opts="-o ro"
+  # nosuid,nodev: nothing on a macOS share is a set-id program or a device node for the System VM, whatever a
+  # client with root on it writes (Apple's virtio-fs drops the set-id bits anyway; council SEC-4, TD-069).
+  opts="-o nosuid,nodev"; [ "$mode" = ro ] && opts="-o ro,nosuid,nodev"
   if out=$(mount -t virtiofs $opts "$tag" "$path" 2>&1); then
     echo "MOUNTED $tag $path mode=$mode"
   else

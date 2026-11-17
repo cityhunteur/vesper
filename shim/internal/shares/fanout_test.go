@@ -143,3 +143,65 @@ func TestFanoutForgetsAStoppedMicroVM(t *testing.T) {
 	}
 	t.Fatalf("vm2 is still tracked: %+v", f.Snapshot())
 }
+
+// An event can carry the rounded-up macOS mtime (TD-066, council REL-3); a queued path keeps its place and takes the
+// later mtime; the fanout sends what Mtime reads.
+func TestEventMtime(t *testing.T) {
+	e := Event{Export: 2, Rest: "a/b", Mtime: 1794933864}
+	if e.Line() != "2:1794933864\ta/b\n" {
+		t.Fatalf("line %q", e.Line())
+	}
+	got, err := ParseEvent(strings.TrimSuffix(e.Line(), "\n"))
+	if err != nil || got != e {
+		t.Fatalf("round trip %+v %v", got, err)
+	}
+	if got, err := ParseEvent("2\ta:b"); err != nil || got != (Event{Export: 2, Rest: "a:b"}) {
+		t.Fatalf("no mtime, colon in rest: %+v %v", got, err)
+	}
+	for _, bad := range []string{"2:\ta", "2:x\ta", "2:-5\ta", "2:0\ta", "2:+5\ta", "+2\ta", ":5\ta"} {
+		if _, err := ParseEvent(bad); err == nil {
+			t.Errorf("accepted %q", bad)
+		}
+	}
+	for _, c := range []struct{ sec, nsec, want int64 }{{10, 0, 10}, {10, 1, 11}, {10, 999999999, 11}} {
+		if got := RoundUp(c.sec, c.nsec); got != c.want {
+			t.Errorf("RoundUp(%d, %d) = %d", c.sec, c.nsec, got)
+		}
+	}
+	var q Queue
+	q.Add(Event{Rest: "a", Mtime: 5})
+	q.Add(Event{Rest: "b"})
+	q.Add(Event{Rest: "a", Mtime: 7})
+	q.Add(Event{Rest: "a", Mtime: 6})
+	if got := q.Take(10); !reflect.DeepEqual(got, []Event{{Rest: "a", Mtime: 7}, {Rest: "b"}}) || q.Coalesced != 2 {
+		t.Fatalf("take %+v coalesced %d", got, q.Coalesced)
+	}
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "vm1.args"), []byte("/Users/me\n0\nproj:rw\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	guest, host := net.Pipe()
+	lines := make(chan string, 4)
+	go func() {
+		sc := bufio.NewScanner(guest)
+		for sc.Scan() {
+			lines <- sc.Text()
+		}
+	}()
+	f := &Fanout{Dir: dir, Dial: func(string) (net.Conn, error) { return host, nil }, Mtime: func(mount, rel string) int64 {
+		if mount != "/Users/me" || rel != "proj/x.txt" {
+			t.Errorf("Mtime(%q, %q)", mount, rel)
+		}
+		return 1794933864
+	}}
+	f.Offer("/Users/me/proj/x.txt")
+	select {
+	case l := <-lines:
+		if l != "0:1794933864\tx.txt" {
+			t.Fatalf("sent %q", l)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("nothing sent")
+	}
+}

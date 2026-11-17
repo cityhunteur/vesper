@@ -4,6 +4,7 @@ package unfs
 
 import (
 	"encoding/binary"
+	"fmt"
 	"testing"
 
 	"golang.org/x/sys/unix"
@@ -70,6 +71,11 @@ func TestFilter(t *testing.T) {
 		{"setns", arch, unix.SYS_SETNS, 0, eperm},
 		{"read", arch, unix.SYS_READ, unix.CLONE_NEWUSER, seccompRetAllow},
 		{"other arch", 0x40000003, unix.SYS_READ, 0, eperm},
+		{"write", arch, unix.SYS_WRITE, 0, seccompRetAllow},
+		{"openat", arch, unix.SYS_OPENAT, 0, seccompRetAllow},
+	}
+	for _, nr := range denied {
+		cases = append(cases, filterCase{fmt.Sprintf("denied %d", nr), arch, uint32(nr), 0, eperm})
 	}
 	if arch == auditArchX86_64 {
 		cases = append(cases,

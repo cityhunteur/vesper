@@ -88,10 +88,7 @@ func OpenSources(mount string, srcs []Source, anyFS bool) ([]*os.File, error) {
 		}
 	}()
 	for _, s := range srcs {
-		fd, err := unix.Openat2(mfd, s.Rel, &unix.OpenHow{
-			Flags:   unix.O_PATH | unix.O_DIRECTORY | unix.O_CLOEXEC,
-			Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_MAGICLINKS | unix.RESOLVE_NO_XDEV,
-		})
+		fd, err := openLive(mfd, s.Rel, time.Now().Add(StaleWait))
 		if err != nil {
 			return nil, fmt.Errorf("source %q: %w", s.Rel, err)
 		}
@@ -124,6 +121,74 @@ func OpenSources(mount string, srcs []Source, anyFS bool) ([]*os.File, error) {
 		files = append(files, os.NewFile(uintptr(t), srcs[n.Inner].Rel))
 	}
 	return files, nil
+}
+
+// StaleWait bounds how long OpenSources waits for the System VM to see a source directory that macOS has just made
+// again under the same name (TD-071).
+var StaleWait = 15 * time.Second
+
+// openLive opens rel beneath mfd (no symbolic link, no other mount) and checks that the directory still exists. A
+// directory deleted on macOS and made again under the same name can still be the deleted one in the System VM for a
+// few seconds: virtio-fs keeps the name's old entry until its timeout. Reading the directory always asks macOS, and
+// the kernel refuses to read a dead one (ENOENT), so a dead directory is opened again until the entry expires or the
+// deadline passes; the server never serves a directory that is gone (TD-071).
+func openLive(mfd int, rel string, deadline time.Time) (int, error) {
+	for {
+		fd, err := unix.Openat2(mfd, rel, &unix.OpenHow{
+			Flags:   unix.O_PATH | unix.O_DIRECTORY | unix.O_CLOEXEC,
+			Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_MAGICLINKS | unix.RESOLVE_NO_XDEV,
+		})
+		if err != nil {
+			return -1, err
+		}
+		err = dirAlive(fd)
+		if err == nil {
+			err = refreshAttrs(fd)
+		}
+		if err == nil {
+			return fd, nil
+		}
+		unix.Close(fd)
+		if !(errors.Is(err, unix.ENOENT) || errors.Is(err, unix.ESTALE)) {
+			return -1, err
+		}
+		if time.Now().After(deadline) {
+			return -1, fmt.Errorf("the directory was deleted and the System VM still sees the deleted one: %w", err)
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+}
+
+// refreshAttrs asks macOS for the directory's attributes again. Apple's virtio-fs answers for a name: a node the
+// System VM still holds for a deleted directory reads as the new one, but its cached inode number is the old one
+// until it expires, and unfs3, which checks a handle's inode against lstat, would then refuse the handles it gave
+// out before the expiry (ESTALE in the guest). A changed inode number means the open raced the remade directory:
+// open it again (TD-071).
+func refreshAttrs(fd int) error {
+	var before unix.Stat_t
+	if err := unix.Fstat(fd, &before); err != nil {
+		return err
+	}
+	var now unix.Statx_t
+	if err := unix.Statx(fd, "", unix.AT_EMPTY_PATH|unix.AT_STATX_FORCE_SYNC, unix.STATX_TYPE|unix.STATX_INO, &now); err != nil {
+		return err
+	}
+	if now.Ino != before.Ino {
+		return fmt.Errorf("inode %d became %d: %w", before.Ino, now.Ino, unix.ESTALE)
+	}
+	return nil
+}
+
+// dirAlive reads the directory fd refers to (an O_PATH descriptor) once.
+func dirAlive(fd int) error {
+	d, err := unix.Openat(fd, ".", unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return err
+	}
+	defer unix.Close(d)
+	buf := make([]byte, 4096)
+	_, err = unix.Getdents(d, buf)
+	return err
 }
 
 // detach clones the directory fd refers to into a detached mount tree and sets its attributes before anything can

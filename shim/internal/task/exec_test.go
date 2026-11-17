@@ -171,8 +171,9 @@ func TestKillFallbackStopsTheMicroVM(t *testing.T) {
 }
 
 // A workload that exited by itself while its share server was dead leaves the guest stuck in the unmount before
-// EXIT, refusing signals; a SIGKILL still fails, but the microVM is stopped after the grace (council REL-1). A
-// refused signal other than SIGKILL starts nothing.
+// EXIT, refusing signals as no longer running; a SIGKILL then succeeds and the microVM is stopped after the grace
+// (council REL-1). A refused signal other than SIGKILL starts nothing, and a SIGKILL the guest refuses for another
+// reason still fails but stops the microVM too.
 func TestKillFallbackWhenTheGuestRefusesTheSignal(t *testing.T) {
 	ctx := context.Background()
 	old := KillGrace
@@ -195,8 +196,8 @@ func TestKillFallbackWhenTheGuestRefusesTheSignal(t *testing.T) {
 		t.Fatal("a refused SIGTERM stopped the microVM")
 	case <-time.After(200 * time.Millisecond):
 	}
-	if _, err := s.Kill(ctx, &taskAPI.KillRequest{ID: "init", Signal: 9}); err == nil {
-		t.Fatal("a refused SIGKILL reported success")
+	if _, err := s.Kill(ctx, &taskAPI.KillRequest{ID: "init", Signal: 9}); err != nil {
+		t.Fatalf("a SIGKILL to a workload that already exited: %v", err)
 	}
 	select {
 	case id := <-b.stopped:
@@ -205,5 +206,23 @@ func TestKillFallbackWhenTheGuestRefusesTheSignal(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("the microVM was not stopped after a refused SIGKILL")
+	}
+
+	b.refuse = errors.New("dial guest: connection refused")
+	s2, err := NewService(ctx, nil, &shutdownProbe{}, b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s2.task = newTask("init", t.TempDir())
+	if err := s2.task.MarkRunning(45); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s2.Kill(ctx, &taskAPI.KillRequest{ID: "init", Signal: 9}); err == nil {
+		t.Fatal("a SIGKILL that did not reach the guest reported success")
+	}
+	select {
+	case <-b.stopped:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the microVM was not stopped after a SIGKILL that did not reach the guest")
 	}
 }
