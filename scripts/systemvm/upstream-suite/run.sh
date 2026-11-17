@@ -374,7 +374,8 @@ judge() {
 judge
 # Isolated rerun (decision D-031): a few tests fail in each full run only because three workers load the host (an
 # SSH or API timeout in a test that passes in other runs). The tests that matched no class run once more, one at a
-# time; one that passes is recorded as passed with its result under load, and the comparator lists it. More than
+# time; one that passes is recorded as passed with its result under load, and the comparator lists it; one that
+# fails again counts only if a class explains its result alone (D-039). More than
 # $RERUN_MAX unmatched tests is not timing, so nothing is rerun and the run fails.
 python3 -I - "$OUT/compare.json" > "$OUT/unmatched.txt" <<'PY' || true
 import json, sys

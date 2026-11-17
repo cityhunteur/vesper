@@ -1,0 +1,2 @@
+integration_tests/functional/test_snapshot_basic.py::test_cycled_snapshot_restore[SnapshotType.FULL-NO_CPU_TMPL-vmlinux-5.10.253-PCI_ON-True]
+integration_tests/functional/test_vmclock.py::test_snapshot_update[SnapshotType.DIFF-vmlinux-5.10.253-PCI_ON-read()]

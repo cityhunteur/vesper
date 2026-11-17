@@ -337,6 +337,9 @@ fn upstream_compare(args: &Args) -> Result<(), String> {
     for u in &c.passed_alone {
         println!("PASSED-ALONE {} under load: {} {}", u.nodeid, u.outcome, u.message.replace('\n', " "));
     }
+    for u in &c.explained_alone {
+        println!("EXPLAINED-ALONE {} as {} alone; under load: {} {}", u.nodeid, u.class, u.outcome, u.message.replace('\n', " "));
+    }
     if c.ok() {
         println!("upstream-compare: every result is explained");
         return Ok(());

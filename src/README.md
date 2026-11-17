@@ -296,7 +296,7 @@ Public symbols by file:
   (`BTreeMap<nodeid, TestResult>`); `ClassFile { version, never_pass_alone, max_passed_alone, classes: Vec<Class> }` with `Class { id, kind, nodeid, any_test,
   message, outcomes, tracked_by, reason }` and `validate`; `glob` (`*` wildcards, no regex crate);
   `compare(results, reference, classes) -> Comparison { reference, total, passed, to_explain, per_class, unmatched, passed_alone,
-  stale_classes, not_passing_on_reference, missing_from_run }`. Without a reference every test is taken to pass
+  explained_alone, stale_classes, not_passing_on_reference, missing_from_run }`. Without a reference every test is taken to pass
   there; with one, only tests that passed there need a class. `Comparison::ok` is "nothing unmatched".
 - `baseline.rs:load` requires non-zero `version`, non-empty `baselines`, and
   non-empty `reporting.required_metadata`; an `upstream_suite` is allowed only under `firecracker` and must pass
