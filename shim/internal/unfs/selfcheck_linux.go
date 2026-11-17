@@ -84,6 +84,22 @@ func Selfcheck(mode, self string, out io.Writer) bool {
 		}
 		check("write "+p, denied(err), "%v", err)
 	}
+	// /dev/null is the System VM's own inode: it opens for writing, but its mode and owner cannot change. The
+	// attempts set what is already there, so a failing check changes nothing.
+	if st, err := os.Stat("/dev/null"); err != nil {
+		check("stat /dev/null", false, "%v", err)
+	} else {
+		sys := st.Sys().(*syscall.Stat_t)
+		err = unix.Fchmodat(unix.AT_FDCWD, "/dev/null", uint32(st.Mode().Perm()), 0)
+		check("chmod /dev/null", denied(err), "%v", err)
+		err = unix.Fchownat(unix.AT_FDCWD, "/dev/null", int(sys.Uid), int(sys.Gid), 0)
+		check("chown /dev/null", denied(err), "%v", err)
+		f, err := os.OpenFile("/dev/null", os.O_WRONLY, 0)
+		if f != nil {
+			f.Close()
+		}
+		check("write /dev/null (control)", err == nil, "%v", err)
+	}
 	// The writable export is writable (control for the checks above).
 	if f, err := os.OpenFile("/s/0/.vesper-selfcheck", os.O_WRONLY|os.O_CREATE, 0o644); err == nil {
 		f.Close()

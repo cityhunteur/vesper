@@ -276,7 +276,10 @@ func Init() error {
 	if err := os.WriteFile(filepath.Join(root, "dev/null"), nil, 0o644); err != nil {
 		return err
 	}
-	if err := step("bind /dev/null", attachPath("/dev/null", filepath.Join(root, "dev/null"), uint64(unix.MOUNT_ATTR_NOSUID|unix.MOUNT_ATTR_NOEXEC))); err != nil {
+	// Read-only: the device still opens for writing, but its inode is the System VM's own, so a SETATTR through a
+	// symbolic link in an export (unfs3 follows them mid-path) must fail with EROFS rather than change the System
+	// VM's /dev/null (council SEC-1).
+	if err := step("bind /dev/null", attachPath("/dev/null", filepath.Join(root, "dev/null"), uint64(unix.MOUNT_ATTR_RDONLY|unix.MOUNT_ATTR_NOSUID|unix.MOUNT_ATTR_NOEXEC))); err != nil {
 		return err
 	}
 	// Each source: the detached tree the parent cloned from the descriptor it opened, attributes already set.

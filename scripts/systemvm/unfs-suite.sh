@@ -38,7 +38,7 @@ rm -rf "${F}"
 mkdir -p "${F}/proj/conf" "${F}/proj/dir700" "${F}/ro" "${F}/outside"
 echo proj > "${F}/proj/file.txt"; echo s > "${F}/proj/secret600"; chmod 600 "${F}/proj/secret600"
 echo inner > "${F}/proj/dir700/inner.txt"; chmod 700 "${F}/proj/dir700"
-ln -s /etc "${F}/proj/link-out"; ln -s ../outside "${F}/proj/link-up"; ln -s /etc "${F}/swap"
+ln -s /etc "${F}/proj/link-out"; ln -s ../outside "${F}/proj/link-up"; ln -s /dev "${F}/proj/link-dev"; ln -s /etc "${F}/swap"
 echo conf > "${F}/proj/conf/app.conf"; echo ro > "${F}/ro/r.txt"; echo secret > "${F}/outside/secret.txt"
 SRCS=(--unfs-mount "${SHARE}" --unfs-src m3/proj:rw --unfs-src m3/proj/conf:ro --unfs-src m3/ro:ro)
 

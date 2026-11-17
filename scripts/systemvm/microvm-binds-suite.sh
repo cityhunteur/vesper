@@ -4,16 +4,19 @@
 #
 # Steps: 32 MiB written then SIGKILL keeps every byte; a stalled server fails the RUN quickly with an error naming
 # the share; the server killed under load comes back and the writes all land; 0600 files and 0700 directories read
-# and write; a file 60 directories deep reads, and a write through a descriptor opened before a rename across
-# directories is recorded; a share source whose path holds spaces and shell characters mounts and reads; after the
-# shim is killed the reaper leaves no server, namespace or record. Needs `make systemvm-up-shares`.
+# and write; at least 40 directories below an export read, a write through a descriptor opened before a rename
+# across directories keeps today's recorded outcome, and three more rename cases are measured; a share source whose
+# path holds spaces and shell characters mounts and reads; after the shim is killed the reaper leaves no server,
+# namespace or record. Needs `make systemvm-up-shares`.
 # Report: run/systemvm/microvm-binds-report.json.
 set -uo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SHARE="${BINDS_SHARE:-${ROOT_DIR}/run/WOR-39/share}"
 REPORT="${ROOT_DIR}/run/systemvm/microvm-binds-report.json"
 CTL=(cargo run -q --bin systemvmctl -- control)
-F="${SHARE}/m7"
+# A new directory each run: a directory deleted on macOS and made again under the same name seconds later can still
+# be the deleted one in the System VM, and a microVM's writes then land nowhere (TD-071).
+F="${SHARE}/m7-$(date +%s)"
 cd "${ROOT_DIR}"; mkdir -p "$(dirname "${REPORT}")"
 steps=()
 record() { local d; d="$(printf '%s' "$3" | tr '\n' ' ' | cut -c1-900 | sed 's/\\/\\\\/g; s/"/\\"/g')"; steps+=("{\"name\":\"$1\",\"ok\":$2,\"detail\":\"${d}\"}"); if [ "$2" = true ]; then echo "ok   $1"; else echo "FAIL $1: ${d}"; fi; }
@@ -23,7 +26,7 @@ wait_stopped() { for _ in $(seq 1 "${2:-60}"); do case "$(ctl ctr -- state "$1")
 gone() { ctl ctr -- kill "$1" 30 >/dev/null; ctl ctr -- delete "$1" >/dev/null; }
 ctl share list | grep -q " ${SHARE} mode=" || { echo "microvm-binds-suite: ${SHARE} is not a share; run 'make systemvm-up-shares'" >&2; exit 2; }
 ctl ctr -- import >/dev/null
-rm -rf "${F}"; mkdir -p "${F}/w" "${F}/load"
+rm -rf "${SHARE}"/m7 "${SHARE}"/m7-*; mkdir -p "${F}/w" "${F}/load"
 B=(--bind="${F}/w:/data:rw")
 
 # --- 1. 32 MiB written without fsync, then SIGKILL: macOS has every byte ------------------------------------------
@@ -62,20 +65,37 @@ out="$(runb "${B[@]}" binds-modes 'cat /data/s600 /data/d700/in; echo from-guest
 case "${out}" in "RC 0"*"OUT secret"*"OUT inner"*"OUT wrote"*"OUT appended"*) [ "$(cat "${F}/w/d700/new")" = from-guest ] && record modes_0600_0700_read_and_write true "${out}" || record modes_0600_0700_read_and_write false "${out}; macOS new: $(cat "${F}/w/d700/new" 2>&1)" ;;
   *) record modes_0600_0700_read_and_write false "${out}" ;; esac
 
-# --- 5. Deep paths, and a descriptor that outlives a rename across directories ------------------------------------
-# unfs3 keeps a file's whole directory path in its 64-byte handle, so it serves at most 39 directories below an
-# export (TD-067, a recorded deviation; the GH #160 criterion asked for 60). The step measures the limit and fails if
-# it shrinks.
+# --- 5. Deep paths, and descriptors that outlive a rename ----------------------------------------------------------
+# unfs3 keeps a file's whole directory path in its 64-byte handle, so it serves a limited depth below an export
+# (TD-067, a recorded deviation; the GH #160 criterion asked for 60). The step measures the limit, counted from the
+# export (/data), and fails if it shrinks below 40. The same path-based handles mishandle a write through a
+# descriptor opened before a rename. Today's outcome across directories is pinned: the old content is lost and the
+# file holds only the late write (council REL-2, COR-4); anything worse fails the step, a fix passes it. Three more
+# cases are measured and reported, not judged: a rename in the same directory (logrotate), a write at an offset
+# (not an append), and a rename made on macOS while the guest holds the descriptor.
 deep="${F}/w/deep"; p="${deep}"; for i in $(seq 1 60); do p="${p}/d${i}"; done
-mkdir -p "${p}" "${F}/w/ra" "${F}/w/rb"; echo start > "${F}/w/ra/f"
-out="$(runb "${B[@]}" binds-deep 'p=/data/deep; d=0; while [ $d -lt 60 ]; do d=$((d+1)); p=$p/d$d; ls $p >/dev/null 2>&1 || { d=$((d-1)); break; }; done; echo depth $d; exec 3>> /data/ra/f; mv /data/ra/f /data/rb/f; echo late >&3 && echo late-ok; exec 3>&-')"
+mkdir -p "${p}" "${F}/w/ra" "${F}/w/rb" "${F}/w/rc" "${F}/w/rd"
+echo start > "${F}/w/ra/f"; echo start > "${F}/w/ra/log"; printf 'xxxxxxxx' > "${F}/w/ra/w"; echo start > "${F}/w/rc/h"
+out="$(runb "${B[@]}" binds-deep 'p=/data/deep; d=1; while [ $d -le 61 ]; do q=$p; [ $d -gt 1 ] && q=$p/d$((d-1)); ls $q >/dev/null 2>&1 || break; p=$q; d=$((d+1)); done; echo depth $((d-1)); exec 3>> /data/ra/f; mv /data/ra/f /data/rb/f; echo late >&3 && echo late-ok; exec 3>&-; exec 4>> /data/ra/log; mv /data/ra/log /data/ra/log.1; echo late >&4 && echo log-ok; exec 4>&-; exec 5<> /data/ra/w; printf AB >&5; mv /data/ra/w /data/rb/w; printf CD >&5 && echo w-ok; exec 5>&-; sync')"
+st="$(runb "${B[@]}" --detach binds-hostmv 'exec 3>> /data/rc/h; echo ready > /data/rc/ready; i=0; while [ ! -e /data/rc/go ] && [ $i -lt 300 ]; do sleep 0.1; i=$((i+1)); done; echo late >&3 && echo ok > /data/rc/wrote; exec 3>&-; sync; echo done > /data/rc/done; sleep 600')"
+for _ in $(seq 1 60); do [ -s "${F}/w/rc/ready" ] && break; sleep 0.5; done
+mv "${F}/w/rc/h" "${F}/w/rd/h"; touch "${F}/w/rc/go"
+for _ in $(seq 1 60); do [ -s "${F}/w/rc/done" ] && break; sleep 0.5; done
+gone binds-hostmv
 depth="$(printf '%s\n' "${out}" | sed -n 's/^OUT depth //p')"
-after="$(od -c "${F}/w/rb/f" 2>/dev/null | head -2 | tr -s ' ' | tr '\n' ' ')"
-case "$(cat "${F}/w/rb/f" 2>/dev/null)" in "start
-late") rename="the append through the old descriptor landed after the old content" ;;
-  *) rename="the append through the old descriptor did not land after the old content: rb/f is ${after:-missing} (TD-067, a recorded deviation)" ;; esac
-[ -n "${depth}" ] && [ "${depth}" -ge 39 ] && record deep_path_and_rename true "${depth} directories below the export read (TD-067); ${rename}" \
-  || record deep_path_and_rename false "depth ${depth:-?}; ${out}"
+show() { if [ -e "$1" ]; then od -An -c "$1" | tr -s ' ' | tr '\n' ' '; else printf missing; fi; }
+cross="$(cat "${F}/w/rb/f" 2>/dev/null)"
+case "${cross}" in "start
+late") rename="a fix: the append landed after the old content" ;;
+  late) rename="as recorded: the old content was lost, rb/f holds only the late write (TD-067)" ;;
+  *) rename="" ;; esac
+facts="same-dir log.1: $(show "${F}/w/ra/log.1"), log: $(show "${F}/w/ra/log"); offset write rb/w: $(show "${F}/w/rb/w"); macOS rename rd/h: $(show "${F}/w/rd/h"), rc/h: $(show "${F}/w/rc/h"), guest wrote: $(cat "${F}/w/rc/wrote" 2>/dev/null || echo no)"
+case "${out}" in *"OUT late-ok"*) late=true ;; *) late=false ;; esac
+if [ -n "${depth}" ] && [ "${depth}" -ge 40 ] && [ -n "${rename}" ] && [ "${late}" = true ] && [ ! -e "${F}/w/ra/f" ]; then
+  record deep_path_and_rename true "${depth} directories below the export read (TD-067); cross-directory rename: ${rename}; measured: ${facts}"
+else
+  record deep_path_and_rename false "depth ${depth:-?}; cross-directory rb/f: $(show "${F}/w/rb/f"); ra/f: $(show "${F}/w/ra/f"); ${facts}; ${out}; ${st}"
+fi
 
 # --- 6. A source path with spaces and shell characters ------------------------------------------------------------
 odd="${F}/w/sp ace;\$(id)&x"; mkdir -p "${odd}"; echo odd > "${odd}/f"

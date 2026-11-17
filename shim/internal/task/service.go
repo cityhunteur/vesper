@@ -311,13 +311,20 @@ func (s *Service) Kill(ctx context.Context, r *taskAPI.KillRequest) (*emptypb.Em
 		}
 		return &emptypb.Empty{}, nil
 	case PhaseRunning:
-		if err := s.backend.Signal(ctx, r.ID, t.Port, r.Signal, r.All); err != nil {
-			return nil, errgrpc.ToGRPCf(errdefs.ErrUnknown, "%v", err)
-		}
 		// A SIGKILL to the init process starts a bounded wait for its EXIT, outside the operation lock. The guest
 		// unmounts its shares before it reports EXIT, so a process stuck in a hard NFS call to a dead server could
-		// hold the task forever; when the wait runs out the VMM is stopped (ADR 0009, Lifecycle; GH #160 M5).
-		if r.ExecID == "" && r.Signal == uint32(syscall.SIGKILL) {
+		// hold the task forever; when the wait runs out the VMM is stopped (ADR 0009, Lifecycle; GH #160 M5). The
+		// wait starts even when the guest refuses the signal: a workload that exited by itself while its share
+		// server was dead leaves the guest stuck in that unmount, refusing signals as no longer running, and the
+		// task could then be neither killed nor deleted (council REL-1).
+		fallback := r.ExecID == "" && r.Signal == uint32(syscall.SIGKILL)
+		if err := s.backend.Signal(ctx, r.ID, t.Port, r.Signal, r.All); err != nil {
+			if fallback {
+				go s.killFallback(r.ID, t)
+			}
+			return nil, errgrpc.ToGRPCf(errdefs.ErrUnknown, "%v", err)
+		}
+		if fallback {
 			go s.killFallback(r.ID, t)
 		}
 		return &emptypb.Empty{}, nil

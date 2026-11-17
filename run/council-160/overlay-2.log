@@ -1,0 +1,7 @@
+bash scripts/systemvm/fetch-packages.sh
+fetch-packages: 0 downloaded
+verified 32 pinned packages in /Volumes/Workspace/github.com/cityhunteur/vesper/build/systemvm/cache/apks and 2 archive members in /Volumes/Workspace/github.com/cityhunteur/vesper/build/systemvm/cache/archives
+bash scripts/systemvm/build-overlay.sh
+apkovl /Volumes/Workspace/github.com/cityhunteur/vesper/build/systemvm/localhost.apkovl.tar.gz sha256=cd7adfaceb4d820abb734edb3746b84c5800c47c299613cf50400b2c7e3357dd size=79982464
+initrd /Volumes/Workspace/github.com/cityhunteur/vesper/build/systemvm/initramfs-vesper sha256=f8bdbf9efde708f53b1694f4ac6abdc0a8ae106d71250414b2081169e33c4649 size=89685276
+verified alpine 3.22.8 aarch64 image in /Volumes/Workspace/github.com/cityhunteur/vesper/build/systemvm: image_id=b1965de508d579c75a9f55c761a9114d42e6220a81d0d101517733ff546e8abe (manifest: /Volumes/Workspace/github.com/cityhunteur/vesper/build/systemvm/image-manifest.json)
