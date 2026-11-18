@@ -17,8 +17,10 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/syslog"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -147,9 +149,29 @@ func run(args []string) int {
 	if guestSock != "" {
 		cfg.NotifyGuest = func(export int) (string, error) { return shares.NotifyBind(guestSock, export) }
 	}
+	started := time.Now()
 	code, err := unfs.Run(cfg)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "vesper-unfs run: %v\n", err)
+	}
+	// Why and when a server ended, where it outlives the server's own log (which goes with the microVM): the System
+	// VM's log, under the name vesper-microvm's unfs-log looks for. unfsd reports a segmentation fault on its
+	// standard output, which nothing else keeps (TD-075). What matters comes first and the line is short: a system
+	// logger may keep only the first 256 bytes of a message.
+	if !cfg.Selfcheck {
+		tag := "vesper-unfs"
+		if argsFile != "" {
+			tag += "-" + strings.TrimSuffix(filepath.Base(argsFile), ".args")
+		}
+		if w, serr := syslog.New(syslog.LOG_DAEMON|syslog.LOG_NOTICE, tag); serr == nil {
+			words, told := unfs.LastWords(80)
+			how := "by itself"
+			if told {
+				how = "as told"
+			}
+			_ = w.Notice(fmt.Sprintf("the server ended %s: code %d after %s (%v); last output: %q", how, code, time.Since(started).Round(time.Millisecond), err, words))
+			w.Close()
+		}
 	}
 	return code
 }

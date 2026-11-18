@@ -27,7 +27,7 @@
 #                                             gets cpu.max of that quota plus a quarter of a CPU for Firecracker
 #        vesper-microvm unfs-stop ID         stop ID's share server (the shim, when the task stops); UNFS ID stopped
 #        vesper-microvm unfs ID              UNFS ID state=running|stopped pid=N listen=yes|no mem_max= mem_peak=
-#                                             oom_kills=, or UNFS ID absent
+#                                             cpu_max= oom_kills= pids_peak= pids_refused=, or UNFS ID absent
 #        vesper-microvm sharenet ID          SHARENET ID links=... addr=... owner=... routes=N input=... forward=...
 #                                             rules=N fc_in_ns=yes|no, or ABSENT ID
 #        vesper-microvm reap                 remove what is left of any --share-net microVM whose launch, shim and
@@ -491,13 +491,14 @@ unfs() { # ID: the server's state, for the suites and for diagnosis
   [ -e "$UNFS/$id.pid" ] || [ -d "$UNFS_CG/$id" ] || { echo "UNFS $id absent"; return 1; }
   l=no; unfs_listening "$id" && l=yes
   cg="$UNFS_CG/$id"
-  echo "UNFS $id state=$(unfs_state "$id") pid=$(unfs_pid "$id") listen=$l mem_max=$(cat "$cg/memory.max" 2>/dev/null) mem_peak=$(cat "$cg/memory.peak" 2>/dev/null) cpu_max=$(cat "$cg/cpu.max" 2>/dev/null | tr ' ' /) oom_kills=$(awk '$1=="oom_kill"{print $2}' "$cg/memory.events" 2>/dev/null)"
+  echo "UNFS $id state=$(unfs_state "$id") pid=$(unfs_pid "$id") listen=$l mem_max=$(cat "$cg/memory.max" 2>/dev/null) mem_peak=$(cat "$cg/memory.peak" 2>/dev/null) cpu_max=$(cat "$cg/cpu.max" 2>/dev/null | tr ' ' /) oom_kills=$(awk '$1=="oom_kill"{print $2}' "$cg/memory.events" 2>/dev/null) pids_peak=$(cat "$cg/pids.peak" 2>/dev/null) pids_refused=$(awk '$1=="max"{print $2}' "$cg/pids.events" 2>/dev/null)"
 }
 unfs_log() { # ID [N]: the server's log and its supervisor's syslog lines, for diagnosis
   id=${1:-}; valid_id "$id" || { echo "ERR bad id"; return 2; }
   n=${2:-40}; digits "$n" || n=40
   cat "/var/log/vesper-unfs-$id.log.1" "/var/log/vesper-unfs-$id.log" 2>/dev/null | tail -n "$n"
-  grep -a "vesper-unfs-$id" /var/log/messages 2>/dev/null | tail -n "$n"
+  # The tag as a whole: "vesper-unfs-a1[" is not the server of a10.
+  grep -a -e " vesper-unfs-$id\[" -e " vesper-unfs-$id:" /var/log/messages 2>/dev/null | tail -n "$n"
 }
 # The server process as the kernel sees it: its ids, capabilities, no_new_privs, and namespaces against the share
 # namespace and the System VM's; and every mount point in its root.

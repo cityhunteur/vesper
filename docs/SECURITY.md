@@ -412,6 +412,10 @@ from its own microVM's server. Docker containers do not use the shim and still g
   supervisor, kills what is left in the cgroup and removes it; `DIRTY` names `unfs` or `unfs-cgroup` otherwise.
 - **Inspection:** `vesper-microvm unfs ID` (state, listening, memory), `unfs-isolation ID` (ids, capabilities,
   `no_new_privs`, seccomp, namespaces and every mount in the server's root), `unfs-log ID`.
+- **A guest could end its own server by the timing of its connections** (TD-075, fixed by unfs3 patch 0005,
+  D-054): unfs3 0.10.0 read freed memory when two descriptors were ready in one round of its main loop and one of
+  them was a new connection. Only that guest's own shares were at stake, and the server came back, within its 30
+  restarts a minute. The supervisor now records each end of a server that it sees in the System VM's log.
 - **What remains:** unfs3 follows a symbolic link in the middle of a path, so a guest that makes a link in a
   read-write export can read what the sandbox's root holds: `/usr`, `/lib` and `/etc` (System VM binaries, the
   exports file and libtirpc tables; no secret). The mount view, not unfs3's path checks, is what confines it; the

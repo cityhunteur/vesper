@@ -129,6 +129,11 @@ reservation. A 2,048 MiB System VM therefore holds one task with a limit of abou
 root drive's copy is booked too), or two with 512 MiB limits. `VESPER_SYSTEMVM_MEMORY_MIB` and
 `VESPER_SYSTEMVM_CPUS` size the System VM. `make systemvm-microvm-size-suite` checks the sizing and the refusals.
 
+When a share server ends, its supervisor writes one line to the System VM's log (`vesper-microvm unfs-log ID`
+shows it): whether it ended `as told` or `by itself`, its exit code, how long it ran and the last 80 bytes of what
+it wrote; `segmentation fault` there is unfsd's own report (TD-075, D-054). A supervisor that is killed writes no
+line. A mount that fails in the guest names the state of the server's two ports.
+
 A task that dies of memory exits 137 in three cases that look the same to its client: the workload's cgroup in the
 guest killed its first process; the System VM killed Firecracker at the microVM's ceiling; someone sent `SIGKILL`.
 No OOM event is published. For the second case `vesper-microvm cleanup` writes a `VESPER-MICROVM-OOM` line to the

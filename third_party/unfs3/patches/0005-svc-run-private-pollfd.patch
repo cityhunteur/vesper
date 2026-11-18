@@ -1,0 +1,68 @@
+Vesper: the main loop polled the RPC library's own descriptor array and let the library walk it.
+A new connection makes the library reallocate that array, and with a second descriptor ready in the
+same round the walk read freed memory: the server ended with a segmentation fault on about one task
+start in three. Poll a copy and dispatch each ready descriptor (TD-075).
+
+--- a/daemon.c
++++ b/daemon.c
+@@ -970,6 +970,9 @@
+ {
+ #if defined(HAVE_SVC_GETREQ_POLL) && HAVE_DECL_SVC_POLLFD
+     int r;
++    /* Vesper: a copy of the library's descriptors for this round */
++    struct pollfd *pfds = NULL;
++    int cap = 0, n, i;
+ #else
+     fd_set readfds;
+     struct timeval tv;
+@@ -979,7 +982,30 @@
+ 	fd_cache_close_inactive();
+ 
+ #if defined(HAVE_SVC_GETREQ_POLL) && HAVE_DECL_SVC_POLLFD
+-	r = poll(svc_pollfd, svc_max_pollfd, 2*1000);
++	/*
++	 * Vesper: svc_pollfd is the library's own array. Taking a new
++	 * connection makes the library reallocate it, which frees the old
++	 * one. svc_getreq_poll(svc_pollfd, r) went on reading the old array
++	 * when a second descriptor was ready in the same round, and the
++	 * server ended with a segmentation fault when that memory was gone:
++	 * a client that connects to the NFS port and at once to the mount
++	 * port, as a mount does, could end the server. So poll a copy, as the
++	 * library's own svc_run does, and hand each ready descriptor to the
++	 * library one by one.
++	 */
++	n = svc_max_pollfd;
++	if (n > cap) {
++		struct pollfd *more = realloc(pfds, (n + 16) * sizeof(*pfds));
++
++		if (!more) {
++			sleep(1);
++			continue;
++		}
++		pfds = more;
++		cap = n + 16;
++	}
++	memcpy(pfds, svc_pollfd, n * sizeof(*pfds));
++	r = poll(pfds, n, 2*1000);
+ 	if (r < 0) {
+ 		if (errno == EINTR) {
+ 		    continue;
+@@ -987,8 +1013,16 @@
+ 		perror("unfs3_svc_run: poll failed");
+ 		return;
+ 	}
+-	else if (r)
+-		svc_getreq_poll(svc_pollfd, r);
++	/* a descriptor the library closed earlier in the round has no
++	   transport any more, and svc_getreq_common does nothing for it
++	   (unless a connection taken in the same round got its number: then
++	   the call waits for that connection's first bytes, as before) */
++	for (i = 0; i < n && r > 0; i++) {
++		if (pfds[i].fd != -1 && pfds[i].revents) {
++			r--;
++			svc_getreq_common(pfds[i].fd);
++		}
++	}
+ 
+ #else
+ 	readfds = svc_fdset;

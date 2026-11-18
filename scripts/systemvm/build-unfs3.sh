@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Builds the System VM's patched unfsd (TD-065, TD-066, TD-068; D-044) in a digest-pinned Alpine 3.22 arm64
-# container, from the pinned unfs3 0.10.0 release, Alpine's two patches and Vesper's four in third_party/unfs3, and
+# container, from the pinned unfs3 0.10.0 release, Alpine's two patches and Vesper's five in third_party/unfs3, and
 # compares the result with the binary the overlay ships (third_party/unfs3/unfsd-aarch64).
 #
 #   build-unfs3.sh            build and check: exit 1 if the build differs from the shipped binary
