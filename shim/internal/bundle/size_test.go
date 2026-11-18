@@ -84,15 +84,22 @@ func TestSizeOfClampsAQuota(t *testing.T) {
 		system int
 		want   Size
 	}{
-		{400000, 2, Size{264, 2, 400000, 100000}},
+		// The quota the microVM's cgroup is held to is at most its vCPUs' worth.
+		{400000, 2, Size{264, 2, 200000, 100000}},
 		{400000, 8, Size{280, 4, 400000, 100000}},
-		{3300000, 64, Size{504, 32, 3300000, 100000}},
-		{3300000, 0, Size{504, 32, 3300000, 100000}},
-		{150000, 1, Size{256, 1, 150000, 100000}},
+		{3300000, 64, Size{504, 32, 3200000, 100000}},
+		{3300000, 0, Size{504, 32, 3200000, 100000}},
+		{150000, 1, Size{256, 1, 100000, 100000}},
+		// A quota too long for the launcher's argument is clamped like any other (council JDG-7).
+		{10000000000, 4, Size{280, 4, 400000, 100000}},
 	} {
 		if got, err := SizeOf(resources(0, c.quota, 100000, "", 0), c.system); err != nil || got != c.want {
 			t.Errorf("quota %d on %d CPUs: %+v, %v; want %+v", c.quota, c.system, got, err, c.want)
 		}
+	}
+	// The guest still gets the quota as asked.
+	if r := GuestResources(resources(0, 10000000000, 100000, "", 0)); r == nil || *r.CPU.Quota != 10000000000 {
+		t.Errorf("guest quota: %+v", r)
 	}
 	if got, err := SizeOf(resources(0, 0, 0, "0-3", 0), 2); err != nil || got.VCPUs != 4 {
 		t.Errorf("a CPU set of 4 on 2 CPUs: %+v, %v; the launcher refuses it, not the shim", got, err)

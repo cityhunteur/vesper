@@ -18,7 +18,8 @@ import (
 type Size struct {
 	MemMiB int
 	VCPUs  int
-	// CPUQuota is the task's CFS quota in microseconds for each CPUPeriod; both are zero when it has none.
+	// CPUQuota is what the microVM's own cgroup is held to, in microseconds for each CPUPeriod: the task's CFS quota,
+	// at most its vCPUs' worth, which is all the microVM can use. Both are zero when the task has no quota.
 	CPUQuota  uint64
 	CPUPeriod uint64
 }
@@ -30,15 +31,15 @@ const (
 	// MaxVCPUs is Firecracker's limit; vesper-microvm also refuses more than the System VM has.
 	MaxVCPUs = 32
 	// What the guest needs beside the workload, fitted to MemAvailable as the workload read it in guests for limits
-	// of 512 MiB to 4 GiB with 1, 4 and 6 vCPUs (run/TD-048/measurements.txt, 2026-11-18). Each term is rounded up
-	// from the largest figure measured, so MemAvailable stays above the limit by 16 MiB or more.
+	// of 512 MiB to 4 GiB with 1, 4 and 6 vCPUs (run/TD-048/measurements.txt, 2026-11-18). The terms were chosen
+	// so that MemAvailable was above the limit by 16 MiB or more in all 24 cases measured again with them.
 	//
 	// guestBaseMiB: the kernel, the unpacked initramfs and the session tools (151 MiB at a 512 MiB limit).
 	guestBaseMiB = 152
 	// guestPerMiB: one MiB more for every guestPerMiB MiB of limit, for the kernel's page array and the memory it
 	// keeps free (overhead grew by 23 MiB from a 512 MiB limit to a 1536 MiB one).
 	guestPerMiB = 32
-	// guestPerVCPUMiB: for each vCPU after the first (up to 7.6 MiB measured).
+	// guestPerVCPUMiB: for each vCPU after the first (5 to 10 MiB in single rows of the measurements).
 	guestPerVCPUMiB = 8
 	// guestHighMiB: a guest over guestHighAtMiB has memory above 4 GiB, because its RAM starts at 2 GiB. The kernel
 	// then keeps a 64 MiB bounce buffer, and about 40 MiB more went at the same step.
@@ -63,6 +64,9 @@ func SizeOf(spec *specs.Spec, systemCPUs int) (Size, error) {
 	r := spec.Linux.Resources
 	if err := s.readCPUs(r, systemCPUs); err != nil {
 		return Size{}, err
+	}
+	if most := uint64(s.VCPUs) * s.CPUPeriod; s.CPUQuota > most { // also keeps the number short for the launcher
+		s.CPUQuota = most
 	}
 	perVCPU := int64(s.VCPUs-1) * guestPerVCPUMiB
 	s.MemMiB = DefaultMemMiB + int(perVCPU)

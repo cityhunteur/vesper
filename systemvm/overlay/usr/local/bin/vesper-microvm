@@ -596,8 +596,11 @@ launch() {
         number "${2:-}" && [ "${#2}" -le 2 ] && [ "$2" -ge 1 ] && [ "$2" -le "$VCPUS_MAX" ] || { echo "ERR bad --vcpus (1 to $VCPUS_MAX)"; return 2; }
         vcpus=$2; shift ;;
       --cpu-quota)   # QUOTA:PERIOD in µs; the kernel takes a period of 1 ms to 1 s and a quota of at least 1 ms
-        cq=${2%%:*}; cp=${2#*:}
-        case "${2:-}" in *:*:*) cq="" ;; esac
+        case "${2:-}" in   # exactly one colon (council JDG-1)
+          *:*:*|'') cq=""; cp="" ;;
+          *:*) cq=${2%%:*}; cp=${2#*:} ;;
+          *) cq=""; cp="" ;;
+        esac
         number "$cq" && number "$cp" && [ "${#cq}" -le 9 ] && [ "${#cp}" -le 7 ] && [ "$cq" -ge 1000 ] && [ "$cp" -ge 1000 ] && [ "$cp" -le 1000000 ] \
           || { echo "ERR bad --cpu-quota (QUOTA:PERIOD in microseconds)"; return 2; }
         cpumax=$(cpu_max_of "$cq" "$cp"); shift ;;
@@ -766,7 +769,11 @@ machine() {
   pid=$(fcpid "$id"); [ -n "$pid" ] || { echo "ERR $id not running"; return 1; }
   # The kernel names a vCPU's descriptor; a thread name is the process's own to set (council SEC-6).
   # Firecracker holds each one more than once, so the distinct names are counted.
-  n=$(ls -l "/proc/$pid/fd" 2>/dev/null | sed -n 's/.*anon_inode:\(kvm-vcpu:[0-9][0-9]*\)$/\1/p' | sort -u | wc -l)
+  # The whole link text is matched: a file the jail made with such a name reads as a path, which starts with "/"
+  # (council JDG-2).
+  n=$(for f in /proc/"$pid"/fd/*; do
+        l=$(readlink "$f" 2>/dev/null); case "$l" in (anon_inode:kvm-vcpu:*) echo "$l" ;; esac
+      done | sort -u | wc -l)
   cg="/sys/fs/cgroup/firecracker/$id"
   # cpu.max exists once a launch has set one: the jailer enables the cpu controller for it, and it stays enabled,
   # so a later microVM without a quota reads "max".

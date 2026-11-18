@@ -2,7 +2,7 @@
 
 Working paper (D-007). Target: the uncommitted change on `feat/td048-microvm-size`, base `e5b919a`.
 Three reviewers, each in its own context, read the first version of the diff: correctness, security, reliability.
-No critical or high finding. A separate judge then checked each disposition against the final diff (last section).
+No critical or high finding. A separate judge then checked each disposition against commit `7b3daf0` (last section).
 
 | ID | Severity | Finding | Disposition |
 |---|---|---|---|
@@ -23,3 +23,29 @@ No critical or high finding. A separate judge then checked each disposition agai
 Checks run on the final tree: `go vet` and `go test ./...` in `shim/`; `cargo test`; `make systemvm-microvm-size-suite`
 9 of 9 twice on the default System VM (2 CPUs, 2,048 MiB) and once with 6 CPUs and 8,192 MiB; shim suite 22, exec
 suite 19, bounds suite and microVM shares suite 11, all passing (`regression/`).
+
+`python3 harness/check_docs.py` reports 0 errors and 0 warnings.
+
+## Judge
+
+A fresh context that wrote neither the code nor the reviews read commit `7b3daf0`. It confirmed all 13 dispositions
+(the measured margins, the CPU figure and the suite runs as the author's runtime claims), recomputed the guest sizes,
+ceilings and CPU limits by hand, and found the change fit to merge. It added eight low findings, all applied in the
+follow-up commit:
+
+| ID | Finding | What was done |
+|---|---|---|
+| JDG-1 | `--cpu-quota` with no colon was read as QUOTA = PERIOD | The parser takes exactly one colon. |
+| JDG-2 | The vCPU count matched a file the jail could name `…anon_inode:kvm-vcpu:9` | Each link is read and matched whole. |
+| JDG-3 | The tracker gave the host peak as if measured on the refitted guest; `size.go` said 7.6 MiB a vCPU where single rows show 5 to 10 | Both reworded. The peak was not measured again. |
+| JDG-4 | This paper named a judge section it did not have | This section. |
+| JDG-5 | `scripts/systemvm/README.md` did not list the suite or the two size variables | Added. |
+| JDG-6 | The suite accepted 32 to 64 CPUs, where its step 4 cannot pass | It takes 2 to 31. |
+| JDG-7 | A quota of 10^9 µs or more passed Create and failed Start on the launcher's digit limit | The quota given to the launcher is at most the vCPUs' worth; the guest still gets the quota as asked. |
+| JDG-8 | A comment said the 560 MiB block shows the cgroup, not the guest, killed `dd` | Comment corrected: the cgroup acts at 512 MiB, and the step asserts more than that was available. |
+
+Not exercised at runtime: the `VESPER-MICROVM-OOM` line (REL-2).
+
+Checked on the System VM after the follow-up: `vesper-microvm launch` refuses `--cpu-quota 50000`, `--cpu-quota` with no
+value, `--cpu-quota 1:2:3`, `--cpu-quota 50000:0100000`, `--mem-mib 0000300` and `--vcpus 02`, each with its `ERR bad …`
+line and nothing booked; the size suite passes 9 of 9 again.

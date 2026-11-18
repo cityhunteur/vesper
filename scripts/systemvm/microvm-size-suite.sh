@@ -43,8 +43,9 @@ ctl ctr -- import >/dev/null
 sweep   # what an interrupted run left
 CPUS="$(field "$(ctl microvm limits | head -1)" cpus)"
 base="$(budget committed)"; room=$(( ($(budget budget) - base) / MIB ))
-if ! between "${CPUS}" 2 64 || [ "${room}" -lt 1500 ]; then
-  echo "microvm-size-suite: needs a System VM with at least 2 CPUs and 1500 MiB of free memory budget; it has ${CPUS:-?} CPUs and ${room} MiB (see VESPER_SYSTEMVM_CPUS and VESPER_SYSTEMVM_MEMORY_MIB)" >&2
+# Step 4 asks for one CPU more than the System VM has, which must still be a CPU count a microVM can have (32).
+if ! between "${CPUS}" 2 31 || [ "${room}" -lt 1500 ]; then
+  echo "microvm-size-suite: needs a System VM with 2 to 31 CPUs and 1500 MiB of free memory budget; it has ${CPUS:-?} CPUs and ${room} MiB (see VESPER_SYSTEMVM_CPUS and VESPER_SYSTEMVM_MEMORY_MIB)" >&2
   exit 2
 fi
 
@@ -62,7 +63,8 @@ fi
 # --- 2. A memory limit: the workload has that much memory, and the cgroup enforces it -----------------------------
 # 512 MiB asks for a 680 MiB guest (the limit, 152 MiB for the guest itself, 1 MiB in 32 for what the kernel keeps)
 # under a ceiling of 680 + 96 + 3 MiB. dd's block is anonymous memory that it fills: 496 MiB fits. 560 MiB is under
-# the guest's memory, so the kernel grants the block, and over the limit, so the cgroup kills dd while it fills it.
+# the guest's memory, so the kernel grants the block, and over the limit: the cgroup kills dd when it has filled
+# 512 MiB. The guest itself is not short then, because the step also asserts that more than 512 MiB was available.
 L=$((512 * MIB))
 g="$(runb --memory="${L}" size-c "${VIEW}; dd if=/dev/zero of=/dev/null bs=496M count=1 2>/dev/null && echo under-ok; dd if=/dev/zero of=/dev/null bs=560M count=1 2>/dev/null; echo over-rc=\$?")"
 m="$(machine size-d --memory="${L}")"
