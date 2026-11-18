@@ -26,6 +26,8 @@
 #                                             task's CFS quota in µs for each period, and the microVM's own cgroup
 #                                             gets cpu.max of that quota plus a quarter of a CPU for Firecracker
 #        vesper-microvm unfs-stop ID         stop ID's share server (the shim, when the task stops); UNFS ID stopped
+#        vesper-microvm unfs-holds ID        HOLDS ID N: how many recorded read-only objects are held, in a mount
+#                                             namespace of their own (TD-076); 0 after the task stopped
 #        vesper-microvm unfs ID              UNFS ID state=running|stopped pid=N listen=yes|no mem_max= mem_peak=
 #                                             cpu_max= oom_kills= pids_peak= pids_refused=, or UNFS ID absent
 #        vesper-microvm sharenet ID          SHARENET ID links=... addr=... owner=... routes=N input=... forward=...
@@ -439,6 +441,9 @@ unfs_start() { # ID SPEC SQUASH -> a reason on failure (lock held, namespace up)
     echo "$UNFS_CPU" > "$UNFS_CG/$us_id/cpu.max" || { echo "cgroup cpu.max"; return 1; }
   fi
   # A new launch starts with no record of read-only objects (TD-073): the record is for this server's own restarts.
+  # The holds of the last launch's recorded objects go first (TD-076): a mount namespace kept at ID.prot.d/ns. The
+  # release drops that one bind and removes the empty mount points, never a directory with something in it.
+  /usr/bin/vesper-unfs release --protect "$UNFS/$us_id.prot" > /dev/null 2>&1
   rm -f "$UNFS/$us_id.pid" "$UNFS/$us_id.err" "$UNFS/$us_id.prot" "$UNFS/.$us_id.prot.tmp" "/var/log/vesper-unfs-$us_id.log.1"
   : > "/var/log/vesper-unfs-$us_id.log"   # a retried id must not read the last launch's error as its own
   # The record (unfs.ParseArgs, version 2): what the server starts from on every respawn, what the selfcheck starts
@@ -487,6 +492,12 @@ unfs_stop() { # ID: stop the supervisor and the server, then remove the cgroup; 
     for _ in $(seq 1 20); do [ -s "$UNFS_CG/$1/cgroup.procs" ] || break; sleep 0.1; done
     rmdir "$UNFS_CG/$1" 2>/dev/null
   fi
+  # The holds of its recorded read-only objects (TD-076), once the supervisor that makes them is gone.
+  /usr/bin/vesper-unfs release --protect "$UNFS/$1.prot" > /dev/null 2>&1
+}
+unfs_holds() { # ID: how many holds are mounted for the server's record (TD-076)
+  id=${1:-}; valid_id "$id" || { echo "ERR bad id"; return 2; }
+  echo "HOLDS $id $(/usr/bin/vesper-unfs holds --protect "$UNFS/$id.prot" 2>/dev/null || echo unknown)"
 }
 unfs() { # ID: the server's state, for the suites and for diagnosis
   id=${1:-}; valid_id "$id" || { echo "ERR bad id"; return 2; }
@@ -861,6 +872,7 @@ cleanup_locked() {
   [ -d "/sys/fs/cgroup/firecracker/$id" ] && dirty="$dirty cgroup"
   [ -d "$UNFS_CG/$id" ] && dirty="$dirty unfs-cgroup"
   [ -e "$UNFS/$id.pid" ] && dirty="$dirty unfs"
+  [ -e "$UNFS/$id.prot.d" ] && dirty="$dirty unfs-holds"   # the release at unfs_stop left something (TD-076)
   grep -q "/firecracker/$id/" /proc/mounts 2>/dev/null && dirty="$dirty mount"
   # A socket named after the id, as a whole word (ids are letters, digits and hyphens): a bare substring also matched other tasks' sockets (containerd
   # names shim sockets by a hex digest, which often contains a short id such as "ca"), and the false DIRTY kept the
@@ -891,6 +903,7 @@ case "$cmd" in
   unfs-isolation) unfs_isolation "$@" ;;
   unfs-down) unfs_down ;;
   unfs-log) unfs_log "$@" ;;
+  unfs-holds) unfs_holds "$@" ;;
   unfs-events) cat "$UNFS/fanout.stat" 2>/dev/null || echo "{}" ;;   # the event hop's counters per microVM (M6)
   unfs-stop) valid_id "${1:-}" || { echo "ERR bad id"; exit 2; }; lock && unfs_stop "$1"; unlock; echo "UNFS $1 stopped" ;;
   test-unfs-selfcheck) test_unfs_selfcheck "$@" ;;

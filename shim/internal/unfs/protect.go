@@ -28,8 +28,9 @@ import (
 //
 // A number is an object's only while something holds the object: the System VM gives a file another number when it
 // has forgotten the file and looks it up again. What a running server serves is held (the sandbox's mounts, and
-// fileWatch.pins for replaced files). An object that an earlier start recorded and that is no longer at a source's
-// path is held by nothing, so its "i" line is right only until the System VM forgets the object (TD-076).
+// fileWatch.pins for replaced files). Every recorded object also has a mount of its own that outlives the
+// supervisor (hold_linux.go), so its "i" line stays right after a task moved it away and the server started again
+// (TD-076).
 
 // ProtectID is an object's device and inode number. Swapped marks one recorded when a file replaced a read-only file
 // source (D-052), as against what a source was at a start of the server.

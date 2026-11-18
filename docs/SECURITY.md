@@ -313,9 +313,11 @@ from its own microVM's server. Docker containers do not use the shim and still g
   under it.
   - The list is `/etc/exports.protect` in the sandbox's read-only root. It names the root of each read-only source
     (`/s/N`, or `/s/N/f` for a file). The server looks at these places before every request that changes
-    something, so a file that replaced a read-only file source (D-052) is known from the first such request after
-    it is attached. An object once found at such a place stays protected while that server runs, also after the
-    task moved it aside and another file took its place.
+    something, at every request of any kind, and on every turn of its main loop, which is at least twice a
+    second. So a file that replaced a read-only file source (D-052) is known though the task sends nothing while
+    it is bound; the supervisor leaves such a file in place for at least 750 ms, and its checks are a second
+    apart. An object once found at such a place stays protected while that server runs, also after the task moved
+    it aside and another file took its place, or macOS made it the backup of a newer file (D-055).
   - The check runs on every changing request, on the path the handle resolves to, so a descriptor the server holds
     open does not carry a write past it. unfs3 follows symbolic links inside a path, so the check resolves the
     directory part of the path through every link before it compares. For a call that acts on what a link points
@@ -333,38 +335,52 @@ from its own microVM's server. Docker containers do not use the shim and still g
     inode number when it has forgotten the file and looks it up again (measured after a cache drop:
     `run/TD-073/notes.txt` 8); it did not give a used number to another file in 300 tries. While a server runs,
     what it serves is held: the sources by the sandbox's mounts, and a replaced read-only file by the supervisor
-    (the newest 256). An object that the record of an earlier start names, and that is no longer at a source's
-    path, is held by nothing (next item).
+    (the newest 256). Each recorded object also has a hold of its own (next item).
   - **Across a restart of the server** the supervisor keeps the numbers in `unfs/ID.prot` (root only). A restart
     opens sources by path again, and the task may have renamed directories since. The new server gets the recorded
     numbers, and the supervisor serves read-only a read-write source whose path, or a directory above it, is a
-    recorded object; it does the same when it attaches a file again for a read-write file source. This holds only
-    while the System VM has not forgotten the object. After the first server ended, nothing holds an object that
-    the task moved away from its source's path, for the rest of the task's life; once the System VM forgets it,
-    its number changes and the record no longer names it (TD-076).
+    recorded object; it does the same when it attaches a file again for a read-write file source. Each recorded
+    object is held by a read-only mount of its own, which stays when the supervisor and its sandbox end, so the
+    object keeps its number after the task moved it away from its source's path (TD-076, D-055).
+    - The holds are mounts of the user's files, so they are not in the System VM's own mount namespace, where a
+      search of `/run` or a list of the shares would find them. They are in a mount namespace of their own that no
+      process is in. Its root is a small tmpfs and it has no mount but the holds, so it keeps nothing else of the
+      System VM alive. It is kept by a bind of its namespace file at `unfs/ID.prot.d/ns` (root only), which is all
+      there is of it in the System VM's own namespace. The bind needs `/run` not to be a shared mount, which it is
+      not; if it were, every hold would fail and be logged.
+    - `vesper-microvm` releases the holds when the task stops or is launched again, through `vesper-unfs release`:
+      it takes off that one bind, which drops every hold, and removes that file (only when it is a regular file
+      of no length) and the directory (only when empty). `cleanup` reports what is left as `unfs-holds`.
+    - A hold that cannot be made is logged and the server starts: that object is then known only while the System
+      VM does not forget it.
   - Not covered:
     - **A new launch of the task.** The record belongs to one launch. A task that renames a read-only directory's
       parent and puts a decoy at the path gets the decoy read-only at its next launch, and reaches the true
       directory through its read-write bind. A bind names a path, and the task can change what the path names.
-    - The restart case once the System VM has forgotten an object that the task moved away from its path
-      (TD-076). A task can add to the memory pressure that makes the System VM forget.
+    - **An earlier version of a read-only file, when the task stops its own server from looking** (TD-078,
+      open). A client can hold the single-threaded server in one unfinished request for as long as it likes: the
+      RPC library waits 35 s for each read, and a client that sends a byte now and then keeps the wait going. If
+      macOS saves the file twice in that time and keeps the first new version (an editor's backup), the server
+      never sees that version at its place, and the task can change the backup afterwards. The task's own file
+      access is stopped for the same time. The next start of the server knows the version from the record.
     - A file in a read-only directory source that has a hard link made on macOS outside that directory. The server
       knows the directory, not each file in it, so the file is writable under that outside name when a read-write
       bind covers the name. A task cannot make such a link itself: the server refuses it.
     - The window of D-052 above (until the new file is attached), and another task or a macOS process, which this
       server does not see.
     - The limits: the supervisor's record keeps the first 150 numbers seen at starts and the newest 50 of replaced
-      files, the supervisor holds the newest 256 replaced files, and a server remembers 768 objects found at
+      files, each with a hold; the supervisor also holds the newest 256 replaced files while it runs, and a server remembers 768 objects found at
       protected places. A task that makes the supervisor attach more files than that (20 at a stretch for each
       read-only file source, then one each 15 s) can push out the oldest; with three such sources the 50 are
       reached in about 20 s.
     - After a restart, a read-write bind that the user put inside a read-only one is not compared with the
       record (it is writable by design). A task that renames directories so that this bind's path lies in another
-      read-only directory of the same name gets it read-write (TD-077).
+      read-only directory of the same name gets it read-write.
     - Whether the System VM can answer with an old number for a name whose object changed a moment ago was tried
       once and not seen (`run/TD-073/notes.txt` 5); it is not ruled out.
   The binds suite steps `read_only_holds_under_every_name`, `replaced_file_stays_read_only_when_moved` and
-  `reattached_under_a_recorded_object_is_read_only` run these ways. With the server of `main` 14 of the 24 changes
+  `reattached_under_a_recorded_object_is_read_only`, `recorded_object_known_after_restart_and_cache_drop` and
+  `earlier_version_stays_read_only_for_an_idle_task` run these ways. With the server of `main` 14 of the 24 changes
   of the first step and 3 of the second went through (`run/TD-073/notes.txt` 9).
 - **One inode through two exports** (TD-072, D-049): unfs3 keys its handle cache on the handle's path hashes too
   (patch 0004), so a handle from one export resolves only into that export; a handle whose object was renamed into

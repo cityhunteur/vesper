@@ -58,6 +58,11 @@ const (
 	coveredChecks = 30
 	// maxPins is how many replaced read-only files stay held (fileWatch.pins).
 	maxPins = 256
+	// seenWait is how long a file attached for a read-only source stays before another takes its place: longer than
+	// the server's idle wait (half a second), so the server has looked at its protected places and knows the file,
+	// though no client sent a request in that time (TD-076). The checks are FileCheck apart, so this delays nothing
+	// in practice; it is the floor that the claim rests on.
+	seenWait = 750 * time.Millisecond
 )
 
 // moveMountBeneath is MOVE_MOUNT_BENEATH (Linux 6.5): attach under the mount that is there, so that removing that
@@ -85,24 +90,28 @@ type notice struct {
 
 // fileWatch is the supervisor's state for the file sources of one server.
 type fileWatch struct {
-	srcs   []Source
-	nests  []Nest
-	mfds   []int  // the share mounts, by Source.Mount
-	procfd int    // /proc/PID of the sandbox's first process, held so the number cannot come to name another
-	nsfd   int    // its mount namespace, which holds the exports
-	server string // the name of the server binary: the sandbox is complete when the process has become it
-	ready  bool
-	notify func(int) (string, error) // tells the guest to look at export N's binds; nil when there is no guest
-	record string                    // Config.ProtectFile
-	logf   func(string, ...any)
+	srcs       []Source
+	nests      []Nest
+	mfds       []int  // the share mounts, by Source.Mount
+	procfd     int    // /proc/PID of the sandbox's first process, held so the number cannot come to name another
+	nsfd       int    // its mount namespace, which holds the exports
+	server     string // the name of the server binary: the sandbox is complete when the process has become it
+	ready      bool
+	notify     func(int) (string, error) // tells the guest to look at export N's binds; nil when there is no guest
+	record     string                    // Config.ProtectFile
+	unrecorded map[int]bool              // Config.unrecorded
+	logf       func(string, ...any)
 
 	ids []fileID // what is attached, by source; unused for a directory
 	att []int    // a descriptor of the attached file, or -1
 	// pins are descriptors of files that were attached as a read-only source and then replaced. The server knows
 	// such a file by its inode number, and the System VM gives a file another number once nothing holds it (measured:
 	// run/TD-073/notes.txt 8), so each is held while this server runs, the newest maxPins of them.
+	// The file a source had at the start is not among them: Run holds its tree until the server ends (council J-8).
+	// The recorded ones (the newest MaxProtectSwaps) also have a mount that outlives this process (hold).
 	pins   []int
-	verify []int // checks left that read the attached file
+	since  []time.Time // when the attached file was attached, by source; zero for the file of the start
+	verify []int       // checks left that read the attached file
 	budget []int
 	refill time.Time
 	said   map[string]bool
@@ -121,8 +130,8 @@ type fileWatch struct {
 func newFileWatch(cfg Config, trees []*os.File, pid int) (*fileWatch, error) {
 	n := len(cfg.Sources)
 	w := &fileWatch{srcs: cfg.Sources, nests: Nests(cfg.Sources), procfd: -1, nsfd: -1, server: filepath.Base(cfg.Unfsd),
-		notify: cfg.NotifyGuest, record: cfg.ProtectFile, said: map[string]bool{}, covered: map[int]int{}, ids: make([]fileID, n), att: make([]int, n),
-		verify: make([]int, n), budget: make([]int, n), tell: make([]notice, n), refill: time.Now()}
+		notify: cfg.NotifyGuest, record: cfg.ProtectFile, unrecorded: cfg.unrecorded, said: map[string]bool{}, covered: map[int]int{}, ids: make([]fileID, n), att: make([]int, n),
+		verify: make([]int, n), budget: make([]int, n), tell: make([]notice, n), refill: time.Now(), since: make([]time.Time, n)}
 	w.logf = func(format string, a ...any) { fmt.Fprintf(os.Stderr, "vesper-unfs run: "+format+"\n", a...) }
 	if real, err := filepath.EvalSymlinks(cfg.Unfsd); err == nil { // the process's exe link names the file itself
 		w.server = filepath.Base(real)
@@ -316,6 +325,9 @@ func (w *fileWatch) checkOne(i int, s Source, mounted map[string]bool) {
 		return
 	}
 	replaced := id != w.ids[i]
+	if replaced && s.ReadOnly && time.Since(w.since[i]) < seenWait {
+		return // the server may not have seen the file that is attached yet: the next check looks again
+	}
 	if !replaced && w.verify[i] > 0 {
 		w.verify[i]--
 		if w.att[i] >= 0 && !reads(w.att[i]) {
@@ -365,7 +377,11 @@ func (w *fileWatch) checkOne(i int, s Source, mounted map[string]bool) {
 				continue
 			}
 			prior, err := ReadProtectIDs(w.record)
-			if err != nil || (len(prior) > 0 && underKnown(w.mfds[s.Mount], s.Rel, knownIDs(prior))) {
+			under := false
+			if err == nil && len(prior) > 0 {
+				under, err = underKnown(w.mfds[s.Mount], s.Rel, knownIDs(prior))
+			}
+			if err != nil || under { // what could not be compared is attached read-only too, until the next attach
 				guarded = true
 				own |= unix.MOUNT_ATTR_RDONLY
 			}
@@ -466,10 +482,22 @@ func (w *fileWatch) checkOne(i int, s Source, mounted map[string]bool) {
 		} else {
 			unix.CloseOnExec(w.att[i])
 		}
-		w.ids[i], w.verify[i] = id, verifyChecks
-		if s.ReadOnly { // the server protects it by its place; a later start of the server needs its number
-			if _, err := RecordProtectIDs(w.record, ProtectID{Dev: id.dev, Ino: id.ino, Swapped: true}); err != nil {
+		w.ids[i], w.verify[i], w.since[i] = id, verifyChecks, time.Now()
+		// The server protects it by its place; a later start of the server needs its number, and the number is
+		// the file's only while something holds the file: a mount that outlives this process (TD-076). The hold
+		// comes first; when it fails, that is logged and the number is recorded all the same, and is then right
+		// only while the System VM does not forget the file. The record's limit is the holds' limit. A source
+		// that the start does not record (Config.unrecorded) is left out here too (council H-6, K-4).
+		if s.ReadOnly && !w.unrecorded[i] {
+			holds := HoldDir(w.record)
+			if err := hold(holds, fd, true); err != nil {
+				w.logf("source %q: its new file is not held across restarts: %v", s.Rel, err)
+			}
+			all, err := RecordProtectIDs(w.record, ProtectID{Dev: id.dev, Ino: id.ino, Swapped: true})
+			if err != nil {
 				w.logf("source %q: its new file is not in the record of read-only objects: %v", s.Rel, err)
+			} else if _, left, err := ReleaseHolds(holds, all); left > 0 {
+				w.logf("%d holds that the record no longer names are still there: %v", left, err)
 			}
 		}
 		w.said = map[string]bool{} // a later failure is news again

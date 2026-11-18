@@ -6,6 +6,8 @@
 //	vesper-unfs run --args FILE [--root DIR] [--cgroup DIR] [--unfsd PATH]   (vesper-microvm's record; GH #207)
 //	vesper-unfs run ... --protect FILE   (what each read-only source was, kept across restarts of this server; TD-073)
 //	vesper-unfs run ... --selfcheck   (the same sandbox, running the escape checks in place of unfsd)
+//	vesper-unfs release --protect FILE   (drop the holds of a server that has stopped; TD-076)
+//	vesper-unfs holds --protect FILE     (print how many objects are held)
 //	vesper-unfs probe [--server ADDR] [--local ADDR] [--uid N --gid N] [--timeout DUR]
 //
 // run is started by vesper-microvm under supervise-daemon, inside the microVM's network namespace. It opens each
@@ -69,6 +71,22 @@ func main() {
 		os.Exit(1)
 	case "probe":
 		os.Exit(probe(os.Args[2:]))
+	case "release": // the holds of a server that has stopped (TD-076); vesper-microvm runs it
+		os.Exit(release(os.Args[2:]))
+	case "holds": // how many objects are held for a server's record (TD-076)
+		fs := flag.NewFlagSet("holds", flag.ContinueOnError)
+		var file string
+		fs.StringVar(&file, "protect", "", "the server's record of read-only objects, as given to run")
+		if err := fs.Parse(os.Args[2:]); err != nil || file == "" {
+			os.Exit(2)
+		}
+		n, err := unfs.CountHolds(unfs.HoldDir(file))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "vesper-unfs holds: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println(n)
+		os.Exit(0)
 	case "fanout": // the share notification sink's paths, to each microVM that exports them (GH #160 M6)
 		f := &shares.Fanout{
 			Dir:      "/run/vesper/microvm/unfs",
@@ -102,8 +120,28 @@ func main() {
 	}
 }
 
+// release drops the holds that keep a server's recorded read-only objects known (unfs.HoldDir), after the server
+// and its supervisor have stopped. It prints "RELEASED n left=m" and fails when something is left.
+func release(args []string) int {
+	fs := flag.NewFlagSet("release", flag.ContinueOnError)
+	var file string
+	fs.StringVar(&file, "protect", "", "the server's record of read-only objects, as given to run")
+	if err := fs.Parse(args); err != nil || file == "" {
+		return 2
+	}
+	n, left, err := unfs.ReleaseHolds(unfs.HoldDir(file), nil)
+	fmt.Printf("RELEASED %d left=%d\n", n, left)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "vesper-unfs release: %v\n", err)
+	}
+	if left > 0 || err != nil {
+		return 1
+	}
+	return 0
+}
+
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: vesper-unfs run (--args FILE | --mount DIR --src REL:ro|rw ...) [--squash] [--root DIR] [--cgroup DIR] [--guest-sock PATH] [--protect FILE] | probe [flags]")
+	fmt.Fprintln(os.Stderr, "usage: vesper-unfs run (--args FILE | --mount DIR --src REL:ro|rw ...) [--squash] [--root DIR] [--cgroup DIR] [--guest-sock PATH] [--protect FILE] | release --protect FILE | probe [flags]")
 	os.Exit(2)
 }
 
