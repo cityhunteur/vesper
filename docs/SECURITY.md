@@ -311,19 +311,37 @@ from its own microVM's server. Docker containers do not use the shim and still g
   device and inode number and refuses (`ROFS`) a request that changes it or anything under it: a write, a change of
   attributes, a create, a removal, a rename of it, onto it or into it, and a new hard link to it or to anything
   under it.
-  - The list is `/etc/exports.protect` in the sandbox's read-only root. It names the root of each read-only source
-    (`/s/N`, or `/s/N/f` for a file). The server looks at these places before every request that changes
-    something, at every request of any kind, and on every turn of its main loop, which is at least twice a
-    second. So a file that replaced a read-only file source (D-052) is known though the task sends nothing while
-    it is bound; the supervisor leaves such a file in place for at least 750 ms, and its checks are a second
-    apart. An object once found at such a place stays protected while that server runs, also after the task moved
-    it aside and another file took its place, or macOS made it the backup of a newer file (D-055).
+  - The list is `/etc/exports.protect` in the sandbox. It names the root of each read-only source (`/s/N`, or
+    `/s/N/f` for a file) as a place, and objects by number. An object once at such a place stays protected while
+    that server runs, also after the task moved it aside and another file took its place, or macOS made it the
+    backup of a newer file.
+  - **The server is told of an object before the object is at a place** (TD-078, D-056). The list is the
+    supervisor's own file (`unfs/ID.prot.list`, mode 0644 in a directory only root can enter), attached read-only
+    in the sandbox. It starts with what is at each place. Just before the supervisor attaches a file that replaced
+    a read-only file (D-052), it adds the file's number to the list, and it attaches only the file whose number
+    it added. The server reads what was added to its list before it judges a request. So what the server knows
+    does not depend on when it looked: a task can keep its server from looking, by keeping it in one request that
+    it does not finish. The server remembers the newest 768 objects told or found (see the limits below).
+    - If the supervisor cannot add the line (the System VM's `/run` is full), it does not attach the file and
+      ends the server. The server then starts again from the paths with a list written anew, or does not serve.
+    - Where a read-write bind holds the path, the supervisor takes the file through that bind. If another file is
+      there by then, it attaches nothing, and the next check takes that file.
+    - The list grows by about 20 bytes for each attach (20 at a stretch for each read-only file source, then one
+      each 15 s). After 1 MiB the supervisor ends the server, which starts again with a list written anew. The
+      server reads only what was added.
+    - Every sandbox has such a list, also one started without a record file.
+  - The server also looks at the places themselves: before every request that changes something, at every
+    request, and on every turn of its main loop. That is a second layer, for an object that came to a place some
+    other way.
   - The check runs on every changing request, on the path the handle resolves to, so a descriptor the server holds
     open does not carry a write past it. unfs3 follows symbolic links inside a path, so the check resolves the
     directory part of the path through every link before it compares. For a call that acts on what a link points
     to, it follows the last name too, whether or not the target exists yet. What it cannot resolve it refuses; what
     is not there it leaves to the call, which fails on it. The nests stay in place as a second layer.
   - A list that exists and cannot be read makes the server refuse every change, and it tries again each second.
+    So does a list with a line that is not one of its three kinds, or with more lines than the server has room
+    for: a number may be lost in it. The binds suite step `broken_list_refuses_every_change` adds such a line; the
+    task's write is refused, and a start of the server mends it.
   - A symbolic link in a read-write bind that points at a protected object cannot have its own owner or times
     changed, nor be hard-linked: unfs3 applies size, mode and times through a link, so the server refuses the
     whole request. `cp -a`, `tar` and `rsync -a` of such a link report a read-only file system.
@@ -357,22 +375,19 @@ from its own microVM's server. Docker containers do not use the shim and still g
     - **A new launch of the task.** The record belongs to one launch. A task that renames a read-only directory's
       parent and puts a decoy at the path gets the decoy read-only at its next launch, and reaches the true
       directory through its read-write bind. A bind names a path, and the task can change what the path names.
-    - **An earlier version of a read-only file, when the task stops its own server from looking** (TD-078,
-      open). A client can hold the single-threaded server in one unfinished request for as long as it likes: the
-      RPC library waits 35 s for each read, and a client that sends a byte now and then keeps the wait going. If
-      macOS saves the file twice in that time and keeps the first new version (an editor's backup), the server
-      never sees that version at its place, and the task can change the backup afterwards. The task's own file
-      access is stopped for the same time. The next start of the server knows the version from the record.
     - A file in a read-only directory source that has a hard link made on macOS outside that directory. The server
       knows the directory, not each file in it, so the file is writable under that outside name when a read-write
       bind covers the name. A task cannot make such a link itself: the server refuses it.
     - The window of D-052 above (until the new file is attached), and another task or a macOS process, which this
       server does not see.
     - The limits: the supervisor's record keeps the first 150 numbers seen at starts and the newest 50 of replaced
-      files, each with a hold; the supervisor also holds the newest 256 replaced files while it runs, and a server remembers 768 objects found at
-      protected places. A task that makes the supervisor attach more files than that (20 at a stretch for each
-      read-only file source, then one each 15 s) can push out the oldest; with three such sources the 50 are
-      reached in about 20 s.
+      files, each with a hold; the supervisor also holds the newest 256 replaced files while it runs, and a server
+      remembers the newest 768 objects that it was told of or found at protected places (the objects of the start
+      among them), counted from when it first learned each one: an object that comes back to a place does not
+      become new again (TD-079). The numbers of the ones beyond the 256 are held by nothing. A task that makes the
+      supervisor attach more files than that (20 at a stretch for each read-only file source, then one each 15 s)
+      can push out the oldest: with three such sources the 50 are reached in about 20 s, and the 768 in about an
+      hour (about three hours with one source).
     - After a restart, a read-write bind that the user put inside a read-only one is not compared with the
       record (it is writable by design). A task that renames directories so that this bind's path lies in another
       read-only directory of the same name gets it read-write.
@@ -380,7 +395,7 @@ from its own microVM's server. Docker containers do not use the shim and still g
       once and not seen (`run/TD-073/notes.txt` 5); it is not ruled out.
   The binds suite steps `read_only_holds_under_every_name`, `replaced_file_stays_read_only_when_moved` and
   `reattached_under_a_recorded_object_is_read_only`, `recorded_object_known_after_restart_and_cache_drop` and
-  `earlier_version_stays_read_only_for_an_idle_task` run these ways. With the server of `main` 14 of the 24 changes
+  `earlier_version_stays_read_only_for_an_idle_task` (with the server stopped across two saves) run these ways. With the server of `main` 14 of the 24 changes
   of the first step and 3 of the second went through (`run/TD-073/notes.txt` 9).
 - **One inode through two exports** (TD-072, D-049): unfs3 keys its handle cache on the handle's path hashes too
   (patch 0004), so a handle from one export resolves only into that export; a handle whose object was renamed into
@@ -468,7 +483,9 @@ from its own microVM's server. Docker containers do not use the shim and still g
 - **Sandbox:** new mount, pid, ipc and uts namespaces; `pivot_root` into a 1 MiB tmpfs that is then read-only, with the
   old root detached. It holds only the exports, a read-only `/usr` and `/lib` (for `unfsd` and its libraries),
   `/dev/null` (read-only: it still opens for writing, but its mode and owner, the System VM's own, cannot change;
-  council SEC-1), and `/etc` with the exports file and libtirpc's tables. No `/proc`, `/sys`, `/run` or device. Each
+  council SEC-1), and `/etc` with the exports file, libtirpc's tables and the list of protected objects, which is
+  the supervisor's own file on the System VM's `/run`, attached read-only, `nosuid,nodev,noexec` (TD-078; its mode,
+  owner and length cannot change from inside). No `/proc`, `/sys`, `/run` or device. Each
   read-only source is bound again, read-only, inside each read-write source that holds it, at a place found beneath
   that export with no symbolic link on the way (a second layer: the server also refuses by the object's number, D-053). The server runs as root with the bounding, permitted and effective
   sets cut to `CAP_CHOWN`, `CAP_DAC_OVERRIDE`, `CAP_FOWNER`, `CAP_FSETID`, `CAP_SETGID` and `CAP_SETUID` (`0xdb`),
@@ -489,7 +506,7 @@ from its own microVM's server. Docker containers do not use the shim and still g
   restarts a minute. The supervisor now records each end of a server that it sees in the System VM's log.
 - **What remains:** unfs3 follows a symbolic link in the middle of a path, so a guest that makes a link in a
   read-write export can read what the sandbox's root holds: `/usr`, `/lib` and `/etc` (System VM binaries, the
-  exports file and libtirpc tables; no secret). The mount view, not unfs3's path checks, is what confines it; the
+  exports file, libtirpc tables and the list of protected objects, which holds places and numbers only; no secret). The mount view, not unfs3's path checks, is what confines it; the
   probe sets `/dev/null`'s mode through such a link and must be refused (SEC-2). The cgroup bounds memory, pids and
   CPU (one CPU). Firecracker's rate limiter on `share0` (400 MB/s and 20,000 frames/s each way) bounds the requests a
   guest can send, and so its server's virtio-fs I/O; block-layer `io.max` cannot, since no block device is on that path

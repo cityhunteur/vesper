@@ -126,6 +126,49 @@ file (see the update of 2026-11-18 below).
 
 M3 proves the sandbox with an escape test. Until M3 passes, the blast-radius statement below is a goal, not a fact.
 
+### What is bound read-only, as built
+
+This section states the design after D-053, D-055 and D-056. `docs/SECURITY.md` gives the limits and the tests.
+
+**The rule.** The server refuses (`ROFS`) a request that changes an object when the object, or a directory above
+it with symbolic links resolved, is in the server's set of protected objects. The set is known by device and inode
+number.
+
+**The layers, in order.**
+
+1. Nests: each read-only source is mounted again, read-only, at its place inside each read-write source that
+   holds it. A nest covers one name in one export.
+2. The server's set, fed by its list. This is what the protection rests on.
+3. The server's own looks at the protected places (before every changing request, at every request, on every turn
+   of its loop). They catch an object that came to a place some other way.
+
+**The stores.**
+
+| Store | Owner | Holds | Limit | Lifetime | Removed by |
+|---|---|---|---|---|---|
+| Record `unfs/ID.prot` | supervisor | numbers of what each read-only source was at a start, and of files that replaced one | first 150 of starts, newest 50 replaced | one launch of the task | launcher, at stop and at a new launch |
+| Holds `unfs/ID.prot.d/ns` | supervisor | a read-only mount of each recorded object, in a mount namespace of the holds' own | as the record | one launch | launcher, through `vesper-unfs release`; the supervisor drops a hold that the record no longer names |
+| List `unfs/ID.prot.list` | supervisor | `p` places, `i` recorded numbers, `s` numbers of objects at or about to be at a place | grows by one line an attach; the server is started again after 1 MiB | one run of the server | launcher; written anew at each start |
+| Set in the server | server | the `i` numbers and a ring of objects told (`s`) or found at a place | 256 and 768 | one run of the server | ends with the server |
+| Pins | supervisor | descriptors of replaced read-only files | newest 256 | one run of the server | end with the supervisor |
+
+**The invariants.**
+
+- Told before attached: the supervisor adds an object's `s` line to the list before it puts the object at a
+  protected place, and the server reads what was added before it judges a request.
+- Only the told file is attached. A file the server cannot be told of is not attached, and the server is ended so
+  that it starts again with a list written anew.
+- A number is an object's only while something holds the object (the System VM gives a forgotten file another
+  number). A running server's sources are held by its mounts, a replaced file by a pin, a recorded object by a hold.
+- A list that cannot be read, or that has a line of no known kind, refuses every change.
+
+**What a replaced read-only file gets, by age.** The file now attached and the newest 768 told or found: refused
+while the server runs. The newest 50 replaced files and the first 150 start objects: also across a restart of the
+server. Nothing carries over to a new launch of the task.
+
+**The list's format** is defined in one place, the comment above `PROT_FIXED` in `Config/exports.y` of unfs3 patch
+0006. `shim/internal/unfs/protect.go` writes it. The two ship in one image.
+
 ### Lifecycle
 
 - **Record and lock:** `vesper-microvm launch` writes a per-id record (with its own pid and start time) under one

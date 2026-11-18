@@ -57,10 +57,10 @@ iso="$(mvm unfs-isolation "${ID}")"
 want="uid=0 gid=0 capbnd=00000000000000db capeff=00000000000000db capamb=0000000000000000 nonewprivs=1"
 mounts_ok=true
 for m in "/s/0 /m3/proj rw,nosuid,nodev,noexec" "/s/1 /m3/proj/conf ro,nosuid,nodev,noexec" "/s/2 /m3/ro ro,nosuid,nodev,noexec" \
-  "/s/0/conf /m3/proj/conf ro,nosuid,nodev,noexec" "/ / ro,nosuid,nodev,noexec" "/usr /usr ro,nosuid,nodev" "/lib /lib ro,nosuid,nodev"; do
+  "/s/0/conf /m3/proj/conf ro,nosuid,nodev,noexec" "/etc/exports.protect /vesper/microvm/unfs/${ID}.prot.list ro,nosuid,nodev,noexec" "/ / ro,nosuid,nodev,noexec" "/usr /usr ro,nosuid,nodev" "/lib /lib ro,nosuid,nodev"; do
   printf '%s\n' "${iso}" | grep -q "^UNFSMOUNT ${m}" || mounts_ok=false
 done
-case "${iso}" in *"${want} seccomp=2 mnt=own pid_ns=own ipc=own uts=own net=share mounts=/,/dev/null,/lib,/s/0,/s/0/conf,/s/1,/s/2,/usr,"*) ;; *) mounts_ok=false ;; esac
+case "${iso}" in *"${want} seccomp=2 mnt=own pid_ns=own ipc=own uts=own net=share mounts=/,/dev/null,/etc/exports.protect,/lib,/s/0,/s/0/conf,/s/1,/s/2,/usr,"*) ;; *) mounts_ok=false ;; esac
 record sandbox_holds_only_the_exports "${mounts_ok}" "${iso}"
 
 # --- 3. The probe: reads, read-only refusals, "..", symbolic links, forged handles --------------------------------

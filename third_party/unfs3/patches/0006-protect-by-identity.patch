@@ -1,7 +1,10 @@
 Vesper: refuse a request that changes an object bound read-only, or anything under it,
 whatever name reaches it: another letter case, a hard link, a symbolic link, a moved directory.
 The server reads the objects from <exports file>.protect and knows them by device and inode
-number, not by a mount on one name (TD-073).
+number, not by a mount on one name (TD-073). The list is a file that the supervisor adds to
+while the server runs: an object is in it before it is put at a protected place, and the
+server reads what was added before it judges a request (TD-078). The comment above PROT_FIXED
+in Config/exports.y is the definition of the list.
 
 --- a/Config/exports.h
 +++ b/Config/exports.h
@@ -61,17 +64,17 @@ number, not by a mount on one name (TD-073).
  
  	/* check for client attempting to use invalid pathname */
  	if (!path || strstr(path, "/../"))
-@@ -949,12 +958,310 @@
+@@ -949,12 +958,409 @@
  nfsstat3 exports_rw(void)
  {
  	if (exports_opts != -1 && (exports_opts & OPT_RW))
 -		return NFS3_OK;
 +		return exports_prot_follow(exports_last_path);
- 	else
- 		return NFS3ERR_ROFS;
- }
- 
- /*
++	else
++		return NFS3ERR_ROFS;
++}
++
++/*
 + * Vesper: objects that stay read-only whatever name reaches them.
 + *
 + * A read-only export that lies inside a read-write one was kept read-only
@@ -84,20 +87,36 @@ number, not by a mount on one name (TD-073).
 + * object. The directory above is found with every symbolic link resolved,
 + * because this server follows links inside a path.
 + *
-+ * The list is the file "<exports file>.protect", read before the first
-+ * request that changes something and when the exports are read again:
++ * The list is the file "<exports file>.protect". It is read at the first
++ * look, and what was added to it is read at every later look; it is read
++ * from the start again when it is another file or the exports were read
++ * again. A look is made before every request that changes something, at
++ * every request, and on every turn of the main loop:
 + *   p PATH      a path in the server's own root; the object there is
-+ *               protected, and is looked up again before every request
-+ *               that changes something, at every request, and on every
-+ *               turn of the main loop, which is at least twice a second
++ *               protected, and is looked up again at every look
 + *   i DEV INO   an object, by number
++ *   s DEV INO   an object that is about to be put at a p path
++ * This comment is the definition of the list; shim/internal/unfs/protect.go
++ * writes it. A line is one of the three kinds and ends in a newline. DEV
++ * and INO are decimal numbers with one space between them, a PATH starts
++ * with "/", and a line is at most NFS_MAXPATHLEN + 7 bytes with its
++ * newline. A last
++ * line with no newline is not whole yet and is left for the next look. A
++ * whole line of no kind, more i lines than PROT_FIXED, more p lines than
++ * PROT_PATHS or a line with a zero byte makes the list broken, and a broken
++ * list refuses every change and is read again from the start once a second.
 + * Without the file nothing is protected and nothing is looked up.
 + *
-+ * An object once found at a p path stays protected while the server runs,
-+ * also after another object took its place there: a file that replaced a
++ * An object once at a p path stays protected while the server runs, also
++ * after another object took its place there: a file that replaced a
 + * read-only file can be moved aside by a client, and is still what was
-+ * bound read-only. The server remembers PROT_SEEN such objects; when there
-+ * are more, the one remembered longest that is at no p path now goes.
++ * bound read-only. The server does not learn such an object by looking at
++ * the right moment, which a client could prevent by keeping the server in
++ * one request: whoever puts an object at a p path first adds its s line to
++ * the list, with one write, and the server reads a list that has grown
++ * before it judges the next request. The objects of the s lines and those
++ * found at the p paths are remembered together, PROT_SEEN of them; when
++ * there are more, the one remembered longest that is at no p path now goes.
 + */
 +#define PROT_FIXED	256
 +#define PROT_SEEN	768
@@ -117,6 +136,11 @@ number, not by a mount on one name (TD-073).
 +static volatile int prot_stale = FALSE;
 +static int prot_said = FALSE;
 +static time_t prot_at = 0;	/* when a list that could not be read was last tried */
++/* the list file as it was read: which file, and how far (the end of its
++   last whole line), to see that it is another file or has grown */
++static int prot_have = FALSE;
++static ino_t prot_ino = 0;
++static off_t prot_off = 0;
 +
 +/* called when the exports were read again, which may be in a signal
 +   handler: only mark the list, and read it again at the next request */
@@ -135,18 +159,130 @@ number, not by a mount on one name (TD-073).
 +	return FALSE;
 +}
 +
++/* remember an object that is, was or will be at a p path; cur are the
++   objects at the p paths now, which are not dropped to make room */
++static void prot_remember(uint64 dev, uint64 ino, const prot_id *cur, int ncur)
++{
++	int j, k;
++
++	if (prot_among(prot_seen, prot_nseen, dev, ino))
++		return;
++	if (prot_nseen < PROT_SEEN) {
++		prot_seen[prot_nseen].dev = dev;
++		prot_seen[prot_nseen].ino = ino;
++		prot_nseen++;
++		return;
++	}
++	/* full: drop the next one that no p path names now (there are more
++	   places than paths, so one is found) */
++	for (j = 0; j < PROT_SEEN; j++) {
++		k = (prot_next + j) % PROT_SEEN;
++		if (!prot_among(cur, ncur, prot_seen[k].dev, prot_seen[k].ino))
++			break;
++	}
++	k = (prot_next + j) % PROT_SEEN;
++	prot_seen[k].dev = dev;
++	prot_seen[k].ino = ino;
++	prot_next = (k + 1) % PROT_SEEN;
++}
++
++/* "DEV INO" and nothing else: two numbers with one space between */
++static int prot_pair(const char *s, uint64 *dev, uint64 *ino)
++{
++	char *end;
++	unsigned long long a, b;
++
++	if (*s < '0' || *s > '9')
++		return FALSE;
++	errno = 0;
++	a = strtoull(s, &end, 10);
++	if (errno || *end != ' ' || end[1] < '0' || end[1] > '9')
++		return FALSE;
++	b = strtoull(end + 1, &end, 10);
++	if (errno || *end != '\0')
++		return FALSE;
++	*dev = a;
++	*ino = b;
++	return TRUE;
++}
++
++/* read the whole lines of the list from where f stands, and move prot_off
++   past them; a last line that is not whole yet is left for the next look */
++static void prot_read(FILE *f)
++{
++	char line[NFS_MAXPATHLEN + 8];
++	uint64 dev, ino;
++	size_t len;
++
++	while (fgets(line, sizeof(line), f)) {
++		len = strlen(line);
++		if (len == 0 || line[len - 1] != '\n') {
++			/* at the end of the file: a line that is not whole
++			   yet. Anywhere else: longer than any line of the
++			   list, or with a zero byte in it */
++			if (!feof(f))
++				prot_broken = TRUE;
++			return;
++		}
++		prot_off += len;
++		line[--len] = '\0';
++		if (line[0] == 'i' && line[1] == ' ' && prot_pair(line + 2, &dev, &ino)) {
++			if (prot_fixed < PROT_FIXED) {
++				prot_ids[prot_fixed].dev = dev;
++				prot_ids[prot_fixed].ino = ino;
++				prot_fixed++;
++			} else
++				prot_broken = TRUE;	/* more numbers than fit: one would be lost */
++		} else if (line[0] == 's' && line[1] == ' ' && prot_pair(line + 2, &dev, &ino)) {
++			prot_remember(dev, ino, NULL, 0);
++		} else if (line[0] == 'p' && line[1] == ' ' && line[2] == '/') {
++			if (prot_np < PROT_PATHS && (prot_paths[prot_np] = strdup(line + 2)))
++				prot_np++;
++			else
++				prot_broken = TRUE;	/* more places than fit, or no memory */
++		} else
++			prot_broken = TRUE;	/* not a line of the list: a number may be lost */
++	}
++	if (ferror(f))
++		prot_broken = TRUE;
++}
++
 +static void prot_refresh(void)
 +{
 +	char name[NFS_MAXPATHLEN];
-+	char line[NFS_MAXPATHLEN + 8];
 +	prot_id cur[PROT_PATHS];
 +	backend_statstruct st;
 +	FILE *f;
-+	int i, j, k, ncur;
++	int i, ncur, have;
++
++	if (snprintf(name, sizeof(name), "%s.protect", opt_exports) >= (int) sizeof(name))
++		name[0] = '\0';	/* no such file can be opened: the list is broken */
 +
 +	/* a list that could not be read is tried again, once a second */
 +	if (prot_broken && time(NULL) != prot_at)
 +		prot_stale = TRUE;
++	/* the list as it is now against the list as it was read */
++	if (prot_loaded && !prot_broken && !prot_stale) {
++		have = name[0] && stat(name, &st) == 0;
++		if (have != prot_have || (have && (st.st_ino != prot_ino || st.st_size < prot_off)))
++			prot_stale = TRUE;	/* it came, went or is another file: from the start */
++		else if (have && st.st_size > prot_off) {
++			/* it has grown: whoever puts an object at a p path adds
++			   its line first. Read what was added. */
++			if ((f = fopen(name, "r"))) {
++				if (fseeko(f, prot_off, SEEK_SET) == 0)
++					prot_read(f);
++				else
++					prot_broken = TRUE;
++				fclose(f);
++			} else
++				prot_broken = TRUE;
++			if (prot_broken) {
++				prot_at = time(NULL);
++				logmsg(LOG_CRIT, "could not read what was added to '%s', refusing every change", name);
++			}
++		}
++	}
 +	if (prot_stale) {
 +		prot_stale = FALSE;
 +		for (i = 0; i < prot_np; i++)
@@ -159,35 +295,20 @@ number, not by a mount on one name (TD-073).
 +	}
 +	if (!prot_loaded) {
 +		prot_loaded = TRUE;
++		prot_have = FALSE;
++		prot_off = 0;
 +		f = NULL;
-+		if (snprintf(name, sizeof(name), "%s.protect", opt_exports) >= (int) sizeof(name))
++		if (!name[0])
 +			prot_broken = TRUE;
 +		else if (!(f = fopen(name, "r")) && errno != ENOENT)
 +			prot_broken = TRUE;	/* a list that exists and does not open */
 +		if (f) {
-+			while (fgets(line, sizeof(line), f)) {
-+				unsigned long long dev, ino;
-+				size_t len = strlen(line);
-+
-+				if (len > 0 && line[len - 1] == '\n')
-+					line[--len] = '\0';
-+				if (line[0] == 'i' && sscanf(line + 1, " %llu %llu", &dev, &ino) == 2) {
-+					if (prot_fixed < PROT_FIXED) {
-+						prot_ids[prot_fixed].dev = dev;
-+						prot_ids[prot_fixed].ino = ino;
-+						prot_fixed++;
-+					}
-+				} else if (line[0] == 'p' && line[1] == ' ' && line[2] == '/') {
-+					if (prot_np >= PROT_PATHS)
-+						continue;
-+					if ((prot_paths[prot_np] = strdup(line + 2)))
-+						prot_np++;
-+					else
-+						prot_broken = TRUE;
-+				}
-+			}
-+			if (ferror(f))
++			if (fstat(fileno(f), &st) == 0) {
++				prot_have = TRUE;
++				prot_ino = st.st_ino;
++			} else
 +				prot_broken = TRUE;
++			prot_read(f);
 +			fclose(f);
 +		}
 +		if (prot_broken) {
@@ -200,9 +321,8 @@ number, not by a mount on one name (TD-073).
 +	}
 +	if (prot_broken || prot_np == 0)
 +		return;
-+	/* every time, not now and then: an object that is at a p path when a
-+	   request arrives is known before that request is judged, so a client
-+	   cannot move it away between two looks */
++	/* after the list, so that an object the list's lines pushed out and
++	   that is at a p path now is known again before a request is judged */
 +	ncur = 0;
 +	for (i = 0; i < prot_np; i++) {
 +		if (backend_lstat(prot_paths[i], &st) == 0) {
@@ -211,24 +331,8 @@ number, not by a mount on one name (TD-073).
 +			ncur++;
 +		}
 +	}
-+	for (i = 0; i < ncur; i++) {
-+		if (prot_among(prot_seen, prot_nseen, cur[i].dev, cur[i].ino))
-+			continue;
-+		if (prot_nseen < PROT_SEEN) {
-+			prot_seen[prot_nseen++] = cur[i];
-+			continue;
-+		}
-+		/* full: drop the next one that no p path names now (there
-+		   are more places than paths, so one is found) */
-+		for (j = 0; j < PROT_SEEN; j++) {
-+			k = (prot_next + j) % PROT_SEEN;
-+			if (!prot_among(cur, ncur, prot_seen[k].dev, prot_seen[k].ino))
-+				break;
-+		}
-+		k = (prot_next + j) % PROT_SEEN;
-+		prot_seen[k] = cur[i];
-+		prot_next = (k + 1) % PROT_SEEN;
-+	}
++	for (i = 0; i < ncur; i++)
++		prot_remember(cur[i].dev, cur[i].ino, cur, ncur);
 +}
 +
 +static int prot_match(uint64 dev, uint64 ino)
@@ -266,7 +370,7 @@ number, not by a mount on one name (TD-073).
 +	leaf = path + (slash - dir) + 1;
 +	if (slash == dir)
 +		dir[1] = '\0';
-+	else
+ 	else
 +		*slash = '\0';
 +
 +	if (!realpath(dir, real)) {
@@ -274,7 +378,7 @@ number, not by a mount on one name (TD-073).
 +		   call that follows it fails there too and changes nothing */
 +		if (links > 0 && (errno == ENOENT || errno == ENOTDIR))
 +			return NFS3_OK;
-+		return NFS3ERR_ROFS;
+ 		return NFS3ERR_ROFS;
 +	}
 +	if (snprintf(full, sizeof(full), "%s%s%s", real,
 +		     real[1] ? "/" : "", leaf) >= (int) sizeof(full))
@@ -326,9 +430,9 @@ number, not by a mount on one name (TD-073).
 +		return prot_check(real, TRUE, links + 1);
 +	}
 +	return NFS3_OK;
-+}
-+
-+/*
+ }
+ 
+ /*
 + * NFS3ERR_ROFS when path names a protected object or lies under one; a
 + * symbolic link as the last name is taken as the link itself
 + */
@@ -343,13 +447,11 @@ number, not by a mount on one name (TD-073).
 +}
 +
 +/*
-+ * Look at the p paths now. The main loop calls this on every turn and the
-+ * dispatchers at every request, so an object that is at a p path for longer
-+ * than the loop's wait is known though no client sent a request that changes
-+ * something in that time: a file that was the read-only file between two
-+ * saves on the host, and is its backup after the second. A client that holds
-+ * the server in one unfinished request (the RPC library waits up to 35 s for
-+ * the rest of a record) stops the looks for that long.
++ * A look at the list and at the p paths now. The main loop calls this on
++ * every turn and the dispatchers at every request. The list is what the
++ * protection rests on: an object is in it before it is at a p path. The
++ * looks at the paths are a second layer, for an object that came to a p path
++ * some other way.
 + */
 +void exports_prot_tick(void)
 +{
@@ -380,23 +482,23 @@ number, not by a mount on one name (TD-073).
      xdrproc_t _xdr_argument, _xdr_result;
      char *(*local) (char *, struct svc_req *);
 +
-+    /* Vesper: every request is a look at the protected objects, so a client
-+       that keeps the server busy cannot keep it from looking (exports.y) */
++    /* Vesper: every request is a look at the protected objects and at their
++       list (exports.y) */
 +    exports_prot_tick();
  
      switch (rqstp->rq_proc) {
  	case NFSPROC3_NULL:
-@@ -612,6 +616,10 @@
-     char *result;
+@@ -613,6 +617,10 @@
      xdrproc_t _xdr_argument, _xdr_result;
      char *(*local) (char *, struct svc_req *);
-+
-+    /* Vesper: every request is a look at the protected objects, so a client
-+       that keeps the server busy cannot keep it from looking (exports.y) */
-+    exports_prot_tick();
  
++    /* Vesper: every request is a look at the protected objects and at their
++       list (exports.y) */
++    exports_prot_tick();
++
      switch (rqstp->rq_proc) {
  	case MOUNTPROC_NULL:
+ 	    _xdr_argument = (xdrproc_t) xdr_void;
 @@ -980,6 +988,7 @@
  
      for (;;) {
@@ -405,18 +507,6 @@ number, not by a mount on one name (TD-073).
  
  #if defined(HAVE_SVC_GETREQ_POLL) && HAVE_DECL_SVC_POLLFD
  	/*
-@@ -1005,7 +1014,10 @@
- 		cap = n + 16;
- 	}
- 	memcpy(pfds, svc_pollfd, n * sizeof(*pfds));
--	r = poll(pfds, n, 2*1000);
-+	/* Vesper: half a second, not two: each turn looks at the protected
-+	   objects, and one that is at its place for a second must be seen
-+	   though no client sends anything */
-+	r = poll(pfds, n, 500);
- 	if (r < 0) {
- 		if (errno == EINTR) {
- 		    continue;
 --- a/nfs.c
 +++ b/nfs.c
 @@ -504,6 +504,10 @@

@@ -55,7 +55,8 @@ The Go module pins containerd 2.1.5 and builds static Linux arm64 binaries with 
   read-only by device and inode number (`ProtectList`: the root of each read-only source as a place, and the numbers
   recorded across the server's restarts by `RecordProtectIDs`); at a restart `GuardSources` (`sandbox_linux.go`) makes
   read-only a read-write source whose path now lies under a recorded object, and the re-attach does the same for a
-  read-write file source; a replaced read-only file is held open (`fileWatch.pins`) so its number stays its own. `hold_linux.go` (TD-076, D-055):
+  read-write file source; a replaced read-only file is held open (`fileWatch.pins`) so its number stays its own. The server's list is the supervisor's own file (`WriteList`), attached in the sandbox; `AppendSeen` adds a
+  file's number to it before the re-attach puts the file at a protected place (TD-078, D-056). `hold_linux.go` (TD-076, D-055):
   each recorded object gets a read-only mount of its own that outlives the supervisor, in a mount namespace that only
   the holds are in (its root is a small tmpfs), kept by a bind of its namespace file beside the record
   (`ID.prot.d/ns`); `ReleaseHolds` (`vesper-unfs release`) takes off that bind and removes that file and the

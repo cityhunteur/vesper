@@ -45,6 +45,8 @@ type Config struct {
 	// ProtectFile is where the supervisor records, across its restarts, what each read-only source was (TD-073):
 	// the server keeps those objects read-only by number. Empty keeps no record.
 	ProtectFile string
+	// list is set by Run: the server's list, open for AppendSeen. The sandbox has that file attached.
+	list *os.File
 	// unrecorded is set by Run: the read-only sources that are neither recorded nor held. They are the read-write
 	// sources that this start serves read-only only because their path could not be compared with the record, and
 	// the sources whose path was also given read-write.
@@ -62,8 +64,6 @@ type childConfig struct {
 	Check string `json:"check,omitempty"`
 	// PauseNestsMs: Config.TestPauseNests.
 	PauseNestsMs int64 `json:"pause_nests_ms,omitempty"`
-	// Protect: objects the server keeps read-only by number (ProtectList).
-	Protect []ProtectID `json:"protect,omitempty"`
 }
 
 const (
@@ -336,7 +336,45 @@ func Run(cfg Config) (int, error) {
 	if _, left, err := ReleaseHolds(holds, protect); left > 0 { // what the record no longer names
 		fmt.Fprintf(os.Stderr, "vesper-unfs run: %d holds that the record no longer names are still there: %v\n", left, err)
 	}
-	cc, _ := json.Marshal(childConfig{Sources: cfg.Sources, Nests: Nests(cfg.Sources), Squash: cfg.Squash, Root: cfg.Root, Unfsd: cfg.Unfsd, Check: check, PauseNestsMs: cfg.TestPauseNests.Milliseconds(), Protect: protect})
+	// The server's list is a file of the supervisor's own, attached read-only in the sandbox: the supervisor adds
+	// an object to it before it puts the object at a protected place (TD-078). It starts with what is at each
+	// protected place now. Every sandbox has one, so there is one shape to test: with no record file (the escape
+	// checks, a direct call) the list is in a directory of its own that goes when this returns.
+	var seen []ProtectID
+	for i, s := range cfg.Sources {
+		if hasPlace(cfg.Sources, s) {
+			id, err := idOf(int(files[i].Fd()))
+			if err != nil {
+				return 1, fmt.Errorf("source %q: %w", s.Rel, err)
+			}
+			seen = append(seen, ProtectID{Dev: id.dev, Ino: id.ino})
+		}
+	}
+	list := ListFile(cfg.ProtectFile)
+	if list == "" || cfg.Selfcheck {
+		dir, err := os.MkdirTemp("", "vesper-unfs-list-")
+		if err != nil {
+			return 1, fmt.Errorf("a directory for the server's list: %w", err)
+		}
+		defer os.RemoveAll(dir) // this directory holds the list and its temporary file, and no mount
+		list = filepath.Join(dir, "list")
+	}
+	if err := WriteList(list, ProtectList(cfg.Sources, protect, seen)); err != nil {
+		return 1, fmt.Errorf("the server's list %s: %w", list, err)
+	}
+	lw, err := OpenList(list)
+	if err != nil {
+		return 1, fmt.Errorf("the server's list %s: %w", list, err)
+	}
+	defer lw.Close()
+	// The sandbox gets a read-only clone of the same file that lw writes to.
+	lt, err := detach(int(lw.Fd()), unix.MOUNT_ATTR_RDONLY|unix.MOUNT_ATTR_NOSUID|unix.MOUNT_ATTR_NODEV|unix.MOUNT_ATTR_NOEXEC)
+	if err != nil {
+		return 1, fmt.Errorf("the server's list %s: %w", list, err)
+	}
+	files = append(files, os.NewFile(uintptr(lt), list)) // after the sources and the nests; closed with them
+	cfg.list = lw
+	cc, _ := json.Marshal(childConfig{Sources: cfg.Sources, Nests: Nests(cfg.Sources), Squash: cfg.Squash, Root: cfg.Root, Unfsd: cfg.Unfsd, Check: check, PauseNestsMs: cfg.TestPauseNests.Milliseconds()})
 	cmd := exec.Command("/proc/self/exe", "init")
 	cmd.Env = []string{configEnv + "=" + string(cc)}
 	// The sandbox's and the server's last words are kept, for whoever asks why the server ended (LastWords). unfsd
@@ -360,6 +398,11 @@ func Run(cfg Config) (int, error) {
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "vesper-unfs run: replaced files will not be attached again: %v\n", err)
 		} else if w != nil {
+			// The watcher ends the server when it cannot tell it of a file: the next start writes the list anew.
+			w.end = func() {
+				lastWords.forList()
+				_ = cmd.Process.Kill()
+			}
 			stop := make(chan struct{})
 			defer close(stop)
 			go w.run(stop)
@@ -421,7 +464,8 @@ func checkRootDir(dir string) error {
 }
 
 // Init is the sandbox: process 1 of a new pid namespace, in a new mount namespace. It builds a tmpfs root holding
-// only the exports, a read-only /usr and /lib for unfsd, /dev/null and the exports file; moves into it with
+// only the exports, a read-only /usr and /lib for unfsd, /dev/null, the exports file and the supervisor's list of
+// protected objects, attached read-only at /etc/exports.protect (TD-078); moves into it with
 // pivot_root and drops the old root; drops privileges; and becomes unfsd. Any failure ends it before unfsd starts.
 func Init() error {
 	runtime.LockOSThread() // capability and no_new_privs settings are per thread; exec happens on this one
@@ -548,7 +592,13 @@ func Init() error {
 		return err
 	}
 	// The objects the server keeps read-only whatever name reaches them (TD-073, unfs3 patch 0006).
-	if err := os.WriteFile(filepath.Join(root, "etc/exports.protect"), []byte(ProtectList(cc.Sources, cc.Protect)), 0o644); err != nil {
+	// The server's list is the supervisor's own file, which it adds to while the server runs (TD-078): the
+	// descriptor after the sources and the nests, attached on an empty file.
+	listAt := filepath.Join(root, "etc/exports.protect")
+	if err := os.WriteFile(listAt, nil, 0o644); err != nil {
+		return err
+	}
+	if err := step("attach the list", attachFd(firstFd+len(cc.Sources)+len(cc.Nests), listAt, true)); err != nil {
 		return err
 	}
 	for _, f := range []string{"netconfig", "protocols", "services"} { // libtirpc's tables, if present
@@ -574,7 +624,7 @@ func Init() error {
 		return err
 	}
 	_ = unix.Sethostname([]byte("vesper-unfs"))
-	for i := 0; i < len(cc.Sources)+len(cc.Nests); i++ { // the server gets no descriptor of a share
+	for i := 0; i < len(cc.Sources)+len(cc.Nests)+1; i++ { // the server gets no descriptor of a share, nor of its list's tree
 		unix.CloseOnExec(firstFd + i)
 	}
 	if cc.Squash {
@@ -780,6 +830,7 @@ type tailBuffer struct {
 	mu   sync.Mutex
 	buf  []byte
 	stop bool
+	list bool
 }
 
 const tailKeep = 1024
@@ -801,17 +852,32 @@ func (t *tailBuffer) told() {
 	t.mu.Unlock()
 }
 
+// forList records that the supervisor ended the server itself, to have its list written anew (TD-078).
+func (t *tailBuffer) forList() {
+	t.mu.Lock()
+	t.list = true
+	t.mu.Unlock()
+}
+
 func (t *tailBuffer) reset() {
 	t.mu.Lock()
-	t.buf, t.stop = nil, false
+	t.buf, t.stop, t.list = nil, false, false
 	t.mu.Unlock()
 }
 
 var lastWords tailBuffer
 
+// EndedForList reports whether the supervisor ended the server of the last Run itself, to have its list written
+// anew: it could not tell the server of a file, or the list had grown too long (TD-078).
+func EndedForList() bool {
+	lastWords.mu.Lock()
+	defer lastWords.mu.Unlock()
+	return lastWords.list
+}
+
 // LastWords is the end of what the sandbox and the server wrote in the last Run, on one line and at most max bytes
 // (the end of it, where a fault is reported), and whether the supervisor was told to stop the server. An end it was
-// not told to make is the server's own.
+// not told to make, and did not make for the list (EndedForList), is the server's own.
 func LastWords(max int) (words string, told bool) {
 	lastWords.mu.Lock()
 	defer lastWords.mu.Unlock()

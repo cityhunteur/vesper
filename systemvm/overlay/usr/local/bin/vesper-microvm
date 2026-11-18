@@ -28,6 +28,8 @@
 #        vesper-microvm unfs-stop ID         stop ID's share server (the shim, when the task stops); UNFS ID stopped
 #        vesper-microvm unfs-holds ID        HOLDS ID N: how many recorded read-only objects are held, in a mount
 #                                             namespace of their own (TD-076); 0 after the task stopped
+#        vesper-microvm unfs-list ID         LIST ID p=N i=N s=N: the lines of the server's list (TD-078): places,
+#                                             recorded numbers, and objects told before they were put at a place
 #        vesper-microvm unfs ID              UNFS ID state=running|stopped pid=N listen=yes|no mem_max= mem_peak=
 #                                             cpu_max= oom_kills= pids_peak= pids_refused=, or UNFS ID absent
 #        vesper-microvm sharenet ID          SHARENET ID links=... addr=... owner=... routes=N input=... forward=...
@@ -444,7 +446,7 @@ unfs_start() { # ID SPEC SQUASH -> a reason on failure (lock held, namespace up)
   # The holds of the last launch's recorded objects go first (TD-076): a mount namespace kept at ID.prot.d/ns. The
   # release drops that one bind and removes the empty mount points, never a directory with something in it.
   /usr/bin/vesper-unfs release --protect "$UNFS/$us_id.prot" > /dev/null 2>&1
-  rm -f "$UNFS/$us_id.pid" "$UNFS/$us_id.err" "$UNFS/$us_id.prot" "$UNFS/.$us_id.prot.tmp" "/var/log/vesper-unfs-$us_id.log.1"
+  rm -f "$UNFS/$us_id.pid" "$UNFS/$us_id.err" "$UNFS/$us_id.prot" "$UNFS/.$us_id.prot.tmp" "$UNFS/$us_id.prot.list" "$UNFS/.$us_id.prot.list.tmp" "/var/log/vesper-unfs-$us_id.log.1"
   : > "/var/log/vesper-unfs-$us_id.log"   # a retried id must not read the last launch's error as its own
   # The record (unfs.ParseArgs, version 2): what the server starts from on every respawn, what the selfcheck starts
   # from, and what the fanout maps host paths with. Parsed in Go only (council SEC-6).
@@ -486,7 +488,7 @@ unfs_stop() { # ID: stop the supervisor and the server, then remove the cgroup; 
     RC_SVCNAME="vesper-unfs-$1" supervise-daemon "vesper-unfs-$1" --stop --pidfile "$UNFS/$1.pid" > /dev/null 2>&1
     rm -f "$UNFS/$1.pid"
   fi
-  rm -f "$UNFS/$1.err" "$UNFS/$1.args" "$UNFS/$1.handles" "$UNFS/$1.prot" "$UNFS/.$1.prot.tmp"
+  rm -f "$UNFS/$1.err" "$UNFS/$1.args" "$UNFS/$1.handles" "$UNFS/$1.prot" "$UNFS/.$1.prot.tmp" "$UNFS/$1.prot.list" "$UNFS/.$1.prot.list.tmp"
   if [ -d "$UNFS_CG/$1" ]; then
     [ -e "$UNFS_CG/$1/cgroup.kill" ] && echo 1 > "$UNFS_CG/$1/cgroup.kill" 2>/dev/null
     for _ in $(seq 1 20); do [ -s "$UNFS_CG/$1/cgroup.procs" ] || break; sleep 0.1; done
@@ -904,12 +906,29 @@ case "$cmd" in
   unfs-down) unfs_down ;;
   unfs-log) unfs_log "$@" ;;
   unfs-holds) unfs_holds "$@" ;;
+  test-unfs-list-break)   # ID: add a line of no kind to the server's list, which must then refuse every change
+    id=${1:-}; valid_id "$id" || { echo "ERR bad id"; exit 2; }
+    [ -f "$UNFS/$id.prot.list" ] || { echo "ERR no list of $id"; exit 1; }
+    echo "x not a line of the list" >> "$UNFS/$id.prot.list" && echo "BROKEN list of $id" ;;
+  unfs-list)   # ID: how many lines of each kind the server's list holds (TD-078)
+    id=${1:-}; valid_id "$id" || { echo "ERR bad id"; exit 2; }
+    [ -f "$UNFS/$id.prot.list" ] || { echo "LIST $id absent"; exit 1; }
+    echo "LIST $id $(awk '{n[$1]++} END {printf "p=%d i=%d s=%d", n["p"], n["i"], n["s"]}' "$UNFS/$id.prot.list")" ;;
   unfs-events) cat "$UNFS/fanout.stat" 2>/dev/null || echo "{}" ;;   # the event hop's counters per microVM (M6)
   unfs-stop) valid_id "${1:-}" || { echo "ERR bad id"; exit 2; }; lock && unfs_stop "$1"; unlock; echo "UNFS $1 stopped" ;;
   test-unfs-selfcheck) test_unfs_selfcheck "$@" ;;
   test-unfs-kill) test_unfs_kill "$@" ;;
   test-unfs-giveup) test_unfs_giveup "$@" ;;
   test-unfs-stall-next) mkdir -p "$UNFS" && : > "$UNFS/stall-next" && echo "STALL next" ;;
+  # Stops and continues the server process itself (not its supervisor), as a task can do to its own server with a
+  # request it does not finish: a test of what the server must know without having looked (TD-078).
+  test-unfs-pause|test-unfs-resume)
+    v=$cmd; id=${1:-}; valid_id "$id" || { echo "ERR bad id"; exit 2; }
+    sig=STOP; [ "$v" = test-unfs-resume ] && sig=CONT; n=0
+    for p in $(cat "$UNFS_CG/$id/cgroup.procs" 2>/dev/null); do
+      [ "$(cat "/proc/$p/comm" 2>/dev/null)" = unfsd ] && kill "-$sig" "$p" && n=$((n + 1))
+    done
+    [ "$n" -gt 0 ] && echo "SIG$sig unfsd $id" || { echo "ERR no unfsd of $id"; exit 1; } ;;
   # Makes the kernel forget the files of the shares it does not hold open, so that a test can tell whether an
   # object keeps its inode number when it is looked up again (TD-073).
   test-drop-caches) sync; echo 2 > /proc/sys/vm/drop_caches && echo "DROPPED" ;;
