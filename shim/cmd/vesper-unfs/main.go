@@ -4,6 +4,7 @@
 //
 //	vesper-unfs run --mount DIR --src REL:ro|rw [--src ...] [--mount DIR --src ...] [--squash] [--root DIR] [--cgroup DIR] [--unfsd PATH]
 //	vesper-unfs run --args FILE [--root DIR] [--cgroup DIR] [--unfsd PATH]   (vesper-microvm's record; GH #207)
+//	vesper-unfs run ... --protect FILE   (what each read-only source was, kept across restarts of this server; TD-073)
 //	vesper-unfs run ... --selfcheck   (the same sandbox, running the escape checks in place of unfsd)
 //	vesper-unfs probe [--server ADDR] [--local ADDR] [--uid N --gid N] [--timeout DUR]
 //
@@ -102,7 +103,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: vesper-unfs run (--args FILE | --mount DIR --src REL:ro|rw ...) [--squash] [--root DIR] [--cgroup DIR] [--guest-sock PATH] | probe [flags]")
+	fmt.Fprintln(os.Stderr, "usage: vesper-unfs run (--args FILE | --mount DIR --src REL:ro|rw ...) [--squash] [--root DIR] [--cgroup DIR] [--guest-sock PATH] [--protect FILE] | probe [flags]")
 	os.Exit(2)
 }
 
@@ -121,6 +122,7 @@ func run(args []string) int {
 	fs.BoolVar(&cfg.Selfcheck, "selfcheck", false, "run the escape checks in the sandbox in place of unfsd (tests)")
 	fs.StringVar(&cfg.SelfcheckBin, "selfcheck-bin", "/usr/bin/vesper-unfs", "this binary as the sandbox sees it")
 	fs.DurationVar(&cfg.TestPauseNests, "test-pause-nests", 0, "wait this long before placing nests (tests only)")
+	fs.StringVar(&cfg.ProtectFile, "protect", "", "a file that keeps, across restarts of this server, what each read-only source was (TD-073)")
 	fs.StringVar(&guestSock, "guest-sock", "", "the microVM's vsock socket: the guest is told there when a file source was replaced (D-052)")
 	fs.SetOutput(io.Discard)
 	if err := fs.Parse(args); err != nil {

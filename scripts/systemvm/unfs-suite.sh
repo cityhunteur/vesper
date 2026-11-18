@@ -40,6 +40,10 @@ echo proj > "${F}/proj/file.txt"; echo s > "${F}/proj/secret600"; chmod 600 "${F
 echo inner > "${F}/proj/dir700/inner.txt"; chmod 700 "${F}/proj/dir700"
 ln -s /etc "${F}/proj/link-out"; ln -s ../outside "${F}/proj/link-up"; ln -s /dev "${F}/proj/link-dev"; ln -s /etc "${F}/swap"
 echo conf > "${F}/proj/conf/app.conf"; echo ro > "${F}/ro/r.txt"; echo secret > "${F}/outside/secret.txt"
+# TD-073: links that reach the read-only nested directory, and a file in it, under another letter case.
+ln -s CONF "${F}/proj/link-CONF"; ln -s CONF/APP.CONF "${F}/proj/link-FILE"
+# Links that reach nothing protected: they must stay usable (a link to nowhere, and one to a name not made yet).
+ln -s /nowhere/at/all "${F}/proj/link-nowhere"; ln -s made-through-link "${F}/proj/link-new"
 SRCS=(--unfs-mount "${SHARE}" --unfs-src m3/proj:rw --unfs-src m3/proj/conf:ro --unfs-src m3/ro:ro)
 
 # --- 1. A microVM with a server ---------------------------------------------------------------------------------
@@ -65,6 +69,9 @@ out="$(mvm test-unfs-probe "${ID}")"; printf '%s\n' "${out}" > "${RAW}/probe-roo
 wait_listen "${ID}"; p1="$(upid "${ID}")"
 restarted="no"; [ "${p0}" != "${p1}" ] && restarted="yes (unfsd ${p0} -> ${p1})"
 sum="$(printf '%s\n' "${out}" | grep '^PROBE-SUMMARY')"
+# The probe tried to change the read-only nested directory through links (TD-073): on macOS it must be as it was.
+intact="$(cat "${F}/proj/conf/app.conf" 2>/dev/null):$(ls "${F}/proj/conf" | tr '\n' ' ')"
+[ "${intact}" = "conf:app.conf " ] || sum="the read-only directory changed on macOS (${intact}); $(printf '%s' "${sum}" | sed 's/failed=0/failed=1-on-macOS/')"
 case "${sum}" in *"failed=0"*) record probe_as_root_finds_nothing_outside true "${sum}; server restarted during the probe: ${restarted}; $(printf '%s\n' "${out}" | grep -E '^INFO|forged' | tr '\n' ';')" ;;
   *) record probe_as_root_finds_nothing_outside false "$(printf '%s\n' "${out}" | grep -E 'FAIL|SUMMARY' | tr '\n' ';')" ;; esac
 # Apple's virtio-fs reports a file's owner as the caller, and the System VM caches that for about a second, so a

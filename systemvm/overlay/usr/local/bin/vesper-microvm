@@ -438,7 +438,8 @@ unfs_start() { # ID SPEC SQUASH -> a reason on failure (lock held, namespace up)
     grep -qw cpu "$UNFS_CG/cgroup.subtree_control" || echo +cpu > "$UNFS_CG/cgroup.subtree_control"
     echo "$UNFS_CPU" > "$UNFS_CG/$us_id/cpu.max" || { echo "cgroup cpu.max"; return 1; }
   fi
-  rm -f "$UNFS/$us_id.pid" "$UNFS/$us_id.err" "/var/log/vesper-unfs-$us_id.log.1"
+  # A new launch starts with no record of read-only objects (TD-073): the record is for this server's own restarts.
+  rm -f "$UNFS/$us_id.pid" "$UNFS/$us_id.err" "$UNFS/$us_id.prot" "$UNFS/.$us_id.prot.tmp" "/var/log/vesper-unfs-$us_id.log.1"
   : > "/var/log/vesper-unfs-$us_id.log"   # a retried id must not read the last launch's error as its own
   # The record (unfs.ParseArgs, version 2): what the server starts from on every respawn, what the selfcheck starts
   # from, and what the fanout maps host paths with. Parsed in Go only (council SEC-6).
@@ -453,7 +454,8 @@ unfs_start() { # ID SPEC SQUASH -> a reason on failure (lock held, namespace up)
     --respawn-delay 1 --respawn-max 30 --respawn-period 60 --stdout /dev/null \
     --stderr-logger "/usr/local/bin/vesper-boundlog /var/log/vesper-unfs-$us_id.log 262144" \
     "$(command -v nsenter)" -- "--net=$NETNS/$us_id" /usr/bin/vesper-unfs run --unfsd "$UNFSD" --args "$UNFS/$us_id.args" \
-    --root "$UNFS_ROOT" --cgroup "$UNFS_CG/$us_id" --guest-sock "$JAIL/firecracker/$us_id/root/v.sock" < /dev/null > /dev/null 2> "$UNFS/$us_id.err" \
+    --root "$UNFS_ROOT" --cgroup "$UNFS_CG/$us_id" --guest-sock "$JAIL/firecracker/$us_id/root/v.sock" \
+    --protect "$UNFS/$us_id.prot" < /dev/null > /dev/null 2> "$UNFS/$us_id.err" \
     || { echo "supervise-daemon: $(head -n 2 "$UNFS/$us_id.err" | tr '\n' ' ')"; return 1; }
   rm -f "$UNFS/$us_id.err"
   for _ in $(seq 1 40); do
@@ -479,7 +481,7 @@ unfs_stop() { # ID: stop the supervisor and the server, then remove the cgroup; 
     RC_SVCNAME="vesper-unfs-$1" supervise-daemon "vesper-unfs-$1" --stop --pidfile "$UNFS/$1.pid" > /dev/null 2>&1
     rm -f "$UNFS/$1.pid"
   fi
-  rm -f "$UNFS/$1.err" "$UNFS/$1.args" "$UNFS/$1.handles"
+  rm -f "$UNFS/$1.err" "$UNFS/$1.args" "$UNFS/$1.handles" "$UNFS/$1.prot" "$UNFS/.$1.prot.tmp"
   if [ -d "$UNFS_CG/$1" ]; then
     [ -e "$UNFS_CG/$1/cgroup.kill" ] && echo 1 > "$UNFS_CG/$1/cgroup.kill" 2>/dev/null
     for _ in $(seq 1 20); do [ -s "$UNFS_CG/$1/cgroup.procs" ] || break; sleep 0.1; done
@@ -895,6 +897,9 @@ case "$cmd" in
   test-unfs-kill) test_unfs_kill "$@" ;;
   test-unfs-giveup) test_unfs_giveup "$@" ;;
   test-unfs-stall-next) mkdir -p "$UNFS" && : > "$UNFS/stall-next" && echo "STALL next" ;;
+  # Makes the kernel forget the files of the shares it does not hold open, so that a test can tell whether an
+  # object keeps its inode number when it is looked up again (TD-073).
+  test-drop-caches) sync; echo 2 > /proc/sys/vm/drop_caches && echo "DROPPED" ;;
   test-unfs-probe) test_unfs_probe "$@" ;;
   test-share-rate)   # BYTES OPS for later launches, or "off"
     case "${1:-}:${2:-}" in

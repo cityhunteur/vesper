@@ -8,7 +8,8 @@
 # across directories keeps today's recorded outcome, and three more rename cases are measured; a share source whose
 # path holds spaces and shell characters mounts and reads; binds from two shares share one server and stay apart;
 # writes land when one inode is reachable read-only and read-write (TD-072); single-file binds (GH #208); a bound
-# file that macOS replaces is bound again within seconds (D-052);
+# file that macOS replaces is bound again within seconds (D-052); what is bound read-only stays read-only under
+# another letter case, after a move into a second read-write bind and after a server restart (TD-073);
 # after the shim is killed the reaper leaves no server,
 # namespace or record. Needs `make systemvm-up-shares`.
 # Report: run/systemvm/microvm-binds-report.json.
@@ -198,6 +199,106 @@ ctl ctr -- delete binds-krep >/dev/null
 last="$(cat "${K}/log/s.40" 2>/dev/null)"; newc="$(grep -l 'k=k2' "${K}"/log/s.* 2>/dev/null | wc -l | tr -d ' ')"
 case "${st}|${last}" in "STARTED binds-krep|k=k2") record replaced_after_a_server_restart true "${killed}; then replaced: ${newc} samples read the new file, the last '${last}'" ;;
   *) record replaced_after_a_server_restart false "${st}; ${killed}; last sample '${last}'; ${newc} samples read the new file" ;; esac
+
+# --- 6h. What is bound read-only stays read-only under every name (TD-073, D-053, unfs3 patch 0006). The server
+# knows a read-only source by its device and inode number and refuses a request that changes it, or anything under
+# it, with every symbolic link in the path resolved.
+# (1) Another letter case: a macOS volume ignores case and the System VM does not, so SECRET is a second name for
+#     secret with no read-only mount on it. The task appends, truncates, removes and renames through it, and creates
+#     and removes in a read-only directory through CONF. (On a volume that keeps case the suite makes SECRET a hard
+#     link and CONF a symbolic link, which reach the same objects.)
+# (2) Links: a hard link macOS made to the file; a hard link the task tries to make out of the read-only directory,
+#     also from a symbolic link to a file in it; symbolic links the task makes to the directory and to the file,
+#     with a change of the file's times through the link's own handle (`touch -h`); a rename onto the file.
+# (3) A move: the task moves the file's directory, and the directory above a read-only directory, into a second
+#     read-write bind inside the first, and tries there.
+# (4) A restart: the task renames directories so that its read-write file bind's path names the read-only file, the
+#     server is killed and starts again from the paths, and the task then writes through that bind.
+# A read-write bind inside a read-only one, and the outer bind itself, still write ------------------------------
+I="${F}/i73"; mkdir -p "${I}/y" "${I}/conf" "${I}/work" "${I}/top/conf2" "${I}/rod/out" "${I}/hx" "${I}/hy"
+echo protected > "${I}/y/secret"; echo keep > "${I}/conf/keep"; echo keep2 > "${I}/top/conf2/keep"
+echo mine > "${I}/hx/secret"; echo guarded > "${I}/hy/secret"; ln "${I}/y/secret" "${I}/y/hard"; touch -t 202001010000 "${I}/y/secret"; mt0="$(stat -f %m "${I}/y/secret")"
+insensitive=yes; [ -e "${I}/y/SECRET" ] || { insensitive=no; ln "${I}/y/secret" "${I}/y/SECRET"; ln -s conf "${I}/CONF"; }
+# One line: the control channel carries a command as one line. The append through the task's own link uses dd with
+# fsync: the client already knows that file, so a plain ">>" opens it with no request to the server, and the
+# server's refusal of the write would come back only at close, where the shell does not look.
+PROT='try() { if e=$("$@" 2>&1); then echo "DONE: $*"; else echo "refused: $* [$(echo "$e" | tail -1 | sed "s/.*: //")]"; fi; }; try sh -c "echo evil >> /d/y/SECRET"; try sh -c ": > /d/y/SECRET"; try rm /d/y/SECRET; try mv /d/y/SECRET /d/y/gone; echo f > /d/free0; try sh -c "echo evil > /d/CONF/new"; try rm /d/CONF/keep; try mv /d/free0 /d/CONF/in; try sh -c "echo evil >> /d/y/hard"; try ln /d/CONF/keep /d/k1; ln -s CONF /d/L 2>/dev/null; try sh -c "echo evil > /d/L/new"; try rm /d/L/keep; ln -s y/SECRET /d/LF 2>/dev/null; try sh -c "echo evil | dd of=/d/LF oflag=append conv=notrunc,fsync"; try touch -h /d/LF; echo f > /d/free1; try mv /d/free1 /d/y/SECRET; ln -s conf/keep /d/L3 2>/dev/null; try ln /d/L3 /d/k3; sync; mv /d/y /d/work/y && mv /d/top /d/work/top && echo moved; try sh -c "echo evil >> /w/y/secret"; try rm /w/y/secret; try sh -c "echo evil > /w/top/conf2/new"; try sh -c "echo evil >> /w/top/conf2/keep"; try rm /w/top/conf2/keep; try mv /w/top/conf2/keep /w/top/conf2/gone; try ln /w/top/conf2/keep /w/k2; try mkdir /w/top/conf2/nd; try ln -s x /w/top/conf2/nl; ln -s /nowhere/at/all /d/dl; case "$(chown -h 0:0 /d/dl 2>&1)" in *Read-only*) echo link-attrs-refused ;; *) echo link-attrs-free ;; esac; rm -f /d/dl; sync; echo ok > /out/written && echo inner-rw-writes; echo free > /d/free && echo outer-rw-writes; rm -f /d/L /d/LF /d/L3 /d/free1 && echo own-links-removed; sync'
+o1="$(runb --bind="${I}:/d:rw" --bind="${I}/y/secret:/b:ro" --bind="${I}/conf:/c:ro" --bind="${I}/top/conf2:/c2:ro" --bind="${I}/work:/w:rw" --bind="${I}/rod:/r:ro" --bind="${I}/rod/out:/out:rw" binds-prot "${PROT}")"
+p0="none"
+st="$(runb --bind="${I}:/d:rw" --bind="${I}/hx/secret:/a:rw" --bind="${I}/hy/secret:/g:ro" --detach binds-prot2 'mv /d/hx /d/hx2 && mv /d/hy /d/hx && mkdir /d/hy && echo decoy > /d/hy/secret && echo renamed > /d/state2; i=0; while [ $i -lt 80 ] && [ ! -e /d/go ]; do i=$((i+1)); sleep 0.5; done; [ -e /d/go ] && echo went > /d/state3; { echo evil >> /a; sync; } 2>/dev/null; { echo evil >> /d/hx/secret; sync; } 2>/dev/null; { echo evil >> /d/hx/SECRET; sync; } 2>/dev/null; sleep 1')"
+for _ in $(seq 1 20); do [ -e "${I}/state2" ] && break; sleep 0.5; done
+# The server process itself: the one killed, and the one that listens afterwards.
+upid2() { ctl microvm unfs-isolation binds-prot2 | sed -n 's/^UNFSISO [^ ]* pid=\([0-9]*\).*/\1/p' | head -1; }
+p0="$(upid2)"; killed="$(ctl microvm test-unfs-kill binds-prot2 | head -1)"
+p1=""; for _ in $(seq 1 40); do case "$(ctl microvm unfs binds-prot2 | head -1)" in *"listen=yes"*) p1="$(upid2)"; [ -n "${p1}" ] && [ "${p1}" != "${p0}" ] && break ;; esac; sleep 0.5; done
+slog="$(ctl microvm unfs-log binds-prot2 40 | grep -a 'served read-only' | tail -1)"; touch "${I}/go"
+wait_stopped binds-prot2 80 || ctl ctr -- kill binds-prot2 30 >/dev/null
+ctl ctr -- delete binds-prot2 >/dev/null; sleep 2
+m1="$(tr '\n' ' ' < "${I}/work/y/secret" 2>/dev/null)"; m2="$(tr '\n' ' ' < "${I}/conf/keep" 2>/dev/null):$(ls "${I}/conf" | tr '\n' ' ')"
+m5="$(tr '\n' ' ' < "${I}/work/top/conf2/keep" 2>/dev/null):$(ls "${I}/work/top/conf2" | tr '\n' ' ')"; m3="$(tr '\n' ' ' < "${I}/hx/secret" 2>/dev/null)"
+m4="$(cat "${I}/rod/out/written" 2>/dev/null)/$(cat "${I}/free" 2>/dev/null)"; stray="$(ls "${I}" "${I}/work" "${I}/work/top/conf2" | grep -c -e '^k[123]$' -e '^n[dl]$')"; mt1="$(stat -f %m "${I}/work/y/secret" 2>/dev/null)"
+done_n="$(printf '%s\n' "${o1}" | grep -c 'DONE:')"; ref_n="$(printf '%s\n' "${o1}" | grep -c 'refused:')"; rofs_n="$(printf '%s\n' "${o1}" | grep -c 'refused:.*\[Read-only file system\]')"
+# Every try must be refused by the server as read-only (another error would not show the check), the link the
+# task made to nowhere must keep its own attributes free, and the restart must have used the record.
+if [ "${done_n}" = 0 ] && [ "${ref_n}" = 24 ] && [ "${rofs_n}" = 24 ] && [ "${mt1}" = "${mt0}" ] && [ -n "${slog}" ] && case "${o1}" in "RC 0"*"OUT moved"*"OUT link-attrs-free"*"OUT inner-rw-writes"*"OUT outer-rw-writes"*"OUT own-links-removed"*) true ;; *) false ;; esac \
+  && [ "${m1}" = "protected " ] && [ "${m2}" = "keep :keep " ] && [ "${m5}" = "keep2 :keep " ] && [ "${m4}" = "ok/free" ] && [ "${stray}" = 0 ] \
+  && [ "${st}" = "STARTED binds-prot2" ] && [ "$(cat "${I}/state3" 2>/dev/null)" = went ] && [ -n "${p1}" ] && [ "${p1}" != "${p0}" ] && [ "${m3}" = "guarded " ]; then
+  record read_only_holds_under_every_name true "volume ignores case: ${insensitive}; ${ref_n} changes through other names, links and after the moves all refused ($(printf '%s\n' "${o1}" | grep 'refused:' | sed 's/.*\[//; s/\]//' | sort | uniq -c | tr '\n' ';')); macOS: secret='${m1}' conf='${m2}' conf2='${m5}'; the server went from pid ${p0} to ${p1} after the renames (${slog:-no line}), the task wrote after that, and macOS still reads '${m3}'; a read-write bind inside a read-only one, and the outer bind, still write (${m4})"
+else
+  record read_only_holds_under_every_name false "volume ignores case: ${insensitive}; ${done_n} changes went through: $(printf '%s\n' "${o1}" | grep 'DONE:' | tr '\n' ';'); ${ref_n} refused (want 24), ${rofs_n} as read-only; mtime ${mt0} -> ${mt1:-none}; out: $(printf '%s' "${o1}" | grep -v 'refused:.*Read-only' | tr '\n' ' ' | cut -c1-360); macOS secret='${m1}' conf='${m2}' conf2='${m5}' written/free='${m4}' stray links ${stray}; restart part: ${st}; ${killed:-not killed}; pid ${p0} -> ${p1:-none}; state3 '$(cat "${I}/state3" 2>/dev/null)'; hx/secret='${m3}' (want 'guarded')"
+fi
+
+# --- 6i. A file that replaced a read-only file stays read-only after the task moves it aside (TD-073). macOS
+# replaces a read-only file that lies in a read-write bind, and the server attaches the new file. The task then
+# moves the file's directory aside and puts a decoy at the path, so the server attaches the decoy. The new file is no
+# longer at the protected place, but the server remembers every object it found there, and refuses a change to it
+# under a name that has no read-only mount: a hard link macOS made, and the other letter case -----------------------
+K="${F}/k73"; mkdir -p "${K}/hz"; echo first > "${K}/hz/secret"
+MOVED='try() { if e=$("$@" 2>&1); then echo "DONE: $*"; else echo "refused: $* [$(echo "$e" | tail -1 | sed "s/.*: //")]"; fi; }; i=0; while [ $i -lt 80 ] && [ ! -e /d/go1 ]; do i=$((i+1)); sleep 0.5; done; mv /d/hz /d/hz2 && mkdir /d/hz && echo decoy > /d/hz/secret && echo moved > /d/state; i=0; while [ $i -lt 80 ] && [ ! -e /d/go2 ]; do i=$((i+1)); sleep 0.5; done; { try dd if=/d/state of=/d/hz2/hard conv=notrunc,fsync; try sh -c ": > /d/hz2/hard"; try rm /d/hz2/hard; try mv /d/hz2/hard /d/gone; [ -e /d/HZ2/secret ] && try dd if=/d/state of=/d/HZ2/secret conv=notrunc,fsync; echo tried; } > /d/out 2>&1; sync'
+st="$(runb --bind="${K}:/d:rw" --bind="${K}/hz/secret:/b:ro" --detach binds-moved "${MOVED}")"
+attaches() { ctl microvm unfs-log binds-moved 80 | grep -a -c 'another file is at its path'; }
+sleep 2; a0="$(attaches)"; echo second > "${K}/hz/secret.new"; mv "${K}/hz/secret.new" "${K}/hz/secret"; ln "${K}/hz/secret" "${K}/hz/hard"
+a1=0; for _ in $(seq 1 30); do a1="$(attaches)"; [ "${a1}" -gt "${a0}" ] && break; sleep 0.5; done
+touch "${K}/go1"; for _ in $(seq 1 30); do [ -e "${K}/state" ] && break; sleep 0.5; done
+a2=0; for _ in $(seq 1 30); do a2="$(attaches)"; [ "${a2}" -gt "${a1}" ] && break; sleep 0.5; done
+# The System VM gives a file another inode number once nothing holds it (run/TD-073/notes.txt 8). The supervisor
+# holds the file it replaced, so the number the server remembers stays that file's after the caches are dropped.
+sleep 2; dropped="$(ctl microvm test-drop-caches | head -1)"; sleep 1; touch "${K}/go2"
+wait_stopped binds-moved 80 || ctl ctr -- kill binds-moved 30 >/dev/null
+ctl ctr -- delete binds-moved >/dev/null; sleep 2
+ko="$(cat "${K}/out" 2>/dev/null)"; kd="$(printf '%s\n' "${ko}" | grep -c 'DONE:')"; kr="$(printf '%s\n' "${ko}" | grep -c 'refused:')"; kro="$(printf '%s\n' "${ko}" | grep -c 'refused:.*\[Read-only file system\]')"
+ks="$(tr '\n' ' ' < "${K}/hz2/secret" 2>/dev/null)"; kh="$(tr '\n' ' ' < "${K}/hz2/hard" 2>/dev/null)"
+if [ "${st}" = "STARTED binds-moved" ] && [ "${a1}" -gt "${a0}" ] && [ "${a2}" -gt "${a1}" ] && [ "${dropped}" = DROPPED ] && [ "${kd}" = 0 ] && [ "${kr}" -ge 4 ] && [ "${kro}" = "${kr}" ] \
+  && case "${ko}" in *tried*) true ;; *) false ;; esac && [ "${ks}" = "second " ] && [ "${kh}" = "second " ]; then
+  record replaced_file_stays_read_only_when_moved true "the server attached the file macOS put in place, then the task's decoy (${a2} attaches), and the System VM dropped its caches; ${kr} changes to the moved file through a hard link and the other letter case all refused ($(printf '%s\n' "${ko}" | grep 'refused:' | sed 's/.*\[//; s/\]//' | sort | uniq -c | tr '\n' ';')); macOS still reads '${ks}'"
+else
+  record replaced_file_stays_read_only_when_moved false "${st}; attaches ${a0}, ${a1} then ${a2}; caches: ${dropped:-not dropped}; ${kd} changes went through: $(printf '%s\n' "${ko}" | grep 'DONE:' | tr '\n' ';'); ${kr} refused; out: $(printf '%s' "${ko}" | tr '\n' ' ' | cut -c1-300); macOS hz2/secret='${ks}' hz2/hard='${kh}' (want 'second ')"
+fi
+
+# --- 6j. After a restart, a read-write file bind that the task points at a file in a read-only directory is
+# attached read-only (TD-073, council S-3). The task first puts a decoy at the read-only directory's path, so the
+# server that starts after a kill has no read-only mount on the true directory; only the supervisor's record names
+# it. The task then renames directories so that its read-write file bind's path names a file in the true directory.
+# The supervisor attaches that file, compares the path with the record, and attaches it read-only -----------------
+J="${F}/j73"; mkdir -p "${J}/p/conf" "${J}/x/conf"; echo keep > "${J}/p/conf/keep"; echo mine > "${J}/x/conf/keep"
+REATT='try() { if e=$("$@" 2>&1); then echo "DONE: $*"; else echo "refused: $* [$(echo "$e" | tail -1 | sed "s/.*: //")]"; fi; }; w() { i=0; while [ $i -lt 80 ] && [ ! -e "$1" ]; do i=$((i+1)); sleep 0.5; done; }; mv /d/p /d/q && mkdir -p /d/p/conf && echo one > /d/state1; w /d/go1; mv /d/x /d/x9 && mv /d/q /d/x && echo two > /d/state2; w /d/go2; { try dd if=/d/state2 of=/a conv=notrunc,fsync; try sh -c ": > /a"; echo tried; } > /d/out 2>&1; sync'
+st="$(runb --bind="${J}:/d:rw" --bind="${J}/p/conf:/c:ro" --bind="${J}/x/conf/keep:/a:rw" --detach binds-reatt "${REATT}")"
+for _ in $(seq 1 30); do [ -e "${J}/state1" ] && break; sleep 0.5; done
+jpid() { ctl microvm unfs-isolation binds-reatt | sed -n 's/^UNFSISO [^ ]* pid=\([0-9]*\).*/\1/p' | head -1; }
+j0="$(jpid)"; jk="$(ctl microvm test-unfs-kill binds-reatt | head -1)"
+j1=""; for _ in $(seq 1 40); do case "$(ctl microvm unfs binds-reatt | head -1)" in *"listen=yes"*) j1="$(jpid)"; [ -n "${j1}" ] && [ "${j1}" != "${j0}" ] && break ;; esac; sleep 0.5; done
+touch "${J}/go1"; for _ in $(seq 1 30); do [ -e "${J}/state2" ] && break; sleep 0.5; done
+jlog=""; for _ in $(seq 1 30); do jlog="$(ctl microvm unfs-log binds-reatt 80 | grep -a 'is attached read-only' | tail -1)"; [ -n "${jlog}" ] && break; sleep 0.5; done
+sleep 2; touch "${J}/go2"
+wait_stopped binds-reatt 80 || ctl ctr -- kill binds-reatt 30 >/dev/null
+ctl ctr -- delete binds-reatt >/dev/null; sleep 2
+jo="$(cat "${J}/out" 2>/dev/null)"; jd="$(printf '%s\n' "${jo}" | grep -c 'DONE:')"; jr="$(printf '%s\n' "${jo}" | grep -c 'refused:')"; jro="$(printf '%s\n' "${jo}" | grep -c 'refused: dd .*\[Read-only file system\]')"
+jm="$(tr '\n' ' ' < "${J}/x/conf/keep" 2>/dev/null)"
+if [ "${st}" = "STARTED binds-reatt" ] && [ -n "${j1}" ] && [ "${j1}" != "${j0}" ] && [ -n "${jlog}" ] && [ "${jd}" = 0 ] && [ "${jr}" = 2 ] && [ "${jro}" = 1 ] && [ "${jm}" = "keep " ]; then
+  record reattached_under_a_recorded_object_is_read_only true "the server went from pid ${j0} to ${j1}; after the task's second renames the supervisor logged: ${jlog}; the write through the file bind was refused as read-only and the truncate failed ($(printf '%s\n' "${jo}" | grep 'refused:' | sed 's/.*\[//; s/\]//' | tr '\n' ';')); macOS still reads '${jm}'"
+else
+  record reattached_under_a_recorded_object_is_read_only false "${st}; ${jk:-not killed}; pid ${j0} -> ${j1:-none}; log: ${jlog:-no line}; ${jd} went through, ${jr} refused, the write as read-only: ${jro}; out: $(printf '%s' "${jo}" | tr '\n' ' ' | cut -c1-300); macOS x/conf/keep='${jm}' (want 'keep ')"
+fi
 
 # --- 7. After the shim is killed, the reaper leaves no server, namespace or record ----------------------------------
 st="$(runb "${B[@]}" --detach binds-shim 'sleep 600')"

@@ -234,9 +234,11 @@ Backend A runs stock Firecracker on Linux, so its parity depends on the System V
   systemvm-microvm-shares-suite`, `make systemvm-microvm-binds-suite`). Deviations: when macOS replaces a bound file by rename, as editors' atomic saves do, the bind is made again
   on the new file (D-052), but reads fail (`ESTALE`) for one to three seconds in between, a descriptor opened before
   stays stale, a guest write to the old file in that time is lost, and a read-only file inside a read-write bind can
-  be written through that bind for about a second, which a hostile task can use to keep the access (TD-074); a
-  read-only bind that lies inside a read-write bind is not protected from a hostile task, which can write it under a
-  name in another letter case or by moving it into a second read-write bind (TD-073);
+  be written through that bind for about a second, which a hostile task can use to keep the access (TD-074); what
+  is bound read-only is read-only through every bind of the task, also where a read-write bind reaches it by another
+  name, a hard link or a symbolic link (D-053), with three limits that `docs/SECURITY.md` states: a new launch of
+  the task, a restart of the share server once the System VM has forgotten the object (TD-076), and a file in a
+  read-only directory that has a hard link made on macOS outside it;
   binds from several shares share one server (GH #207, D-047); at most 40 directories below a bind and 1,024-byte
   paths (TD-067); a share's own I/O is bounded by a rate limit on its network (TD-069, D-045); read-only binds
   get no host-edit events. The patched server fixed the data loss on appends (TD-068) and on writes to a file also reachable read-only (TD-072), whole-second times (TD-066)

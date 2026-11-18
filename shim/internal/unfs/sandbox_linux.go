@@ -42,6 +42,9 @@ type Config struct {
 	// export's file, "again" when it bound one again, "failed", "none" when it has no such bind, or "" when it
 	// said nothing. Nil when there is no guest to tell.
 	NotifyGuest func(export int) (string, error)
+	// ProtectFile is where the supervisor records, across its restarts, what each read-only source was (TD-073):
+	// the server keeps those objects read-only by number. Empty keeps no record.
+	ProtectFile string
 }
 
 // childConfig crosses into the sandbox in the environment; the sources cross as descriptors 3, 4, ...
@@ -55,6 +58,8 @@ type childConfig struct {
 	Check string `json:"check,omitempty"`
 	// PauseNestsMs: Config.TestPauseNests.
 	PauseNestsMs int64 `json:"pause_nests_ms,omitempty"`
+	// Protect: objects the server keeps read-only by number (ProtectList).
+	Protect []ProtectID `json:"protect,omitempty"`
 }
 
 const (
@@ -242,6 +247,17 @@ func Run(cfg Config) (int, error) {
 	// attaching a replaced file ends threads on purpose (inMountNamespace). So this goroutine keeps its thread, and
 	// no other goroutine can run on it or end it (council REL-1).
 	runtime.LockOSThread()
+	// A start after the first: a task may have renamed directories since, so that a read-write source's path now
+	// lies under an object an earlier start knew as read-only. Such a source is served read-only (council SEC-3).
+	prior, err := ReadProtectIDs(cfg.ProtectFile)
+	if err != nil {
+		return 1, fmt.Errorf("record of read-only objects %s: %w", cfg.ProtectFile, err)
+	}
+	cfg.Sources = append([]Source(nil), cfg.Sources...)
+	for _, i := range GuardSources(cfg.Mounts, cfg.Sources, prior) {
+		fmt.Fprintf(os.Stderr, "vesper-unfs run: source %q now lies under an object that was bound read-only; it is served read-only\n", cfg.Sources[i].Rel)
+		cfg.Sources[i].ReadOnly = true
+	}
 	files, err := OpenSources(cfg.Mounts, cfg.Sources, cfg.AnyFS)
 	if err != nil {
 		return 1, err
@@ -263,7 +279,22 @@ func Run(cfg Config) (int, error) {
 	if cfg.Selfcheck {
 		check = cfg.SelfcheckBin
 	}
-	cc, _ := json.Marshal(childConfig{Sources: cfg.Sources, Nests: Nests(cfg.Sources), Squash: cfg.Squash, Root: cfg.Root, Unfsd: cfg.Unfsd, Check: check, PauseNestsMs: cfg.TestPauseNests.Milliseconds()})
+	// What each read-only source is now joins the record of what it was at earlier starts (TD-073).
+	var now []ProtectID
+	for i, s := range cfg.Sources {
+		if s.ReadOnly && !alsoReadWrite(cfg.Sources, s) {
+			id, err := idOf(int(files[i].Fd()))
+			if err != nil {
+				return 1, fmt.Errorf("source %q: %w", s.Rel, err)
+			}
+			now = append(now, ProtectID{Dev: id.dev, Ino: id.ino})
+		}
+	}
+	protect, err := RecordProtectIDs(cfg.ProtectFile, now...)
+	if err != nil {
+		return 1, fmt.Errorf("record of read-only objects %s: %w", cfg.ProtectFile, err)
+	}
+	cc, _ := json.Marshal(childConfig{Sources: cfg.Sources, Nests: Nests(cfg.Sources), Squash: cfg.Squash, Root: cfg.Root, Unfsd: cfg.Unfsd, Check: check, PauseNestsMs: cfg.TestPauseNests.Milliseconds(), Protect: protect})
 	cmd := exec.Command("/proc/self/exe", "init")
 	cmd.Env = []string{configEnv + "=" + string(cc)}
 	// The sandbox's and the server's last words are kept, for whoever asks why the server ended (LastWords). unfsd
@@ -474,6 +505,10 @@ func Init() error {
 	if err := os.WriteFile(filepath.Join(root, "etc/exports"), []byte(Exports(cc.Sources, cc.Squash)), 0o644); err != nil {
 		return err
 	}
+	// The objects the server keeps read-only whatever name reaches them (TD-073, unfs3 patch 0006).
+	if err := os.WriteFile(filepath.Join(root, "etc/exports.protect"), []byte(ProtectList(cc.Sources, cc.Protect)), 0o644); err != nil {
+		return err
+	}
 	for _, f := range []string{"netconfig", "protocols", "services"} { // libtirpc's tables, if present
 		if b, err := os.ReadFile("/etc/" + f); err == nil {
 			if err := os.WriteFile(filepath.Join(root, "etc", f), b, 0o644); err != nil {
@@ -631,6 +666,63 @@ func dropToSquash() error {
 		return err
 	}
 	return unix.Prctl(unix.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)
+}
+
+// GuardSources returns the read-write sources whose path, or a directory above it up to the share mount, is an
+// object in prior, the record of what earlier starts of this server knew as read-only. Sources the configured paths
+// put inside a read-only directory source are left out (MovedUnder). A source whose path cannot be walked now counts
+// too: OpenSources waits for a path that is not there yet, and what it then opens was not compared.
+func GuardSources(mounts []string, srcs []Source, prior []ProtectID) []int {
+	if len(prior) == 0 {
+		return nil
+	}
+	known := knownIDs(prior)
+	var out []int
+	for _, i := range MovedUnder(srcs) {
+		s := srcs[i]
+		if s.Mount < 0 || s.Mount >= len(mounts) || s.Rel == "." {
+			continue
+		}
+		mfd, err := unix.Open(mounts[s.Mount], unix.O_PATH|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+		if err != nil {
+			continue // OpenSources refuses the start
+		}
+		if underKnown(mfd, s.Rel, known) {
+			out = append(out, i)
+		}
+		unix.Close(mfd)
+	}
+	return out
+}
+
+func knownIDs(ids []ProtectID) map[fileID]bool {
+	known := map[fileID]bool{}
+	for _, p := range ids {
+		known[fileID{p.Dev, p.Ino}] = true
+	}
+	return known
+}
+
+// underKnown reports whether rel beneath the share mount mfd, or a directory on the way to it, is an object in
+// known. Every step is opened beneath the mount with no symbolic link. A step that cannot be opened or looked at
+// counts as known: the caller serves read-only what it could not compare.
+func underKnown(mfd int, rel string, known map[fileID]bool) bool {
+	parts := strings.Split(rel, "/")
+	for n := 1; n <= len(parts); n++ {
+		fd, err := unix.Openat2(mfd, strings.Join(parts[:n], "/"), &unix.OpenHow{
+			Flags:   unix.O_PATH | unix.O_CLOEXEC,
+			Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_MAGICLINKS | unix.RESOLVE_NO_XDEV,
+		})
+		if err != nil {
+			return true
+		}
+		id, err := idOf(fd)
+		unix.Close(fd)
+		if err != nil || known[id] {
+			return true
+		}
+	}
+	return false
 }
 
 // tailBuffer keeps the last bytes written to it.

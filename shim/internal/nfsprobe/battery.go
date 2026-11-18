@@ -209,6 +209,51 @@ func (b *Battery) Run() bool {
 	} else {
 		b.check("setattr /dev/null through a symlink", true, "not reachable: status=%v err=%v", st, err)
 	}
+	// TD-073: the server follows a symbolic link whose handle is used as a directory. The fixture's link-CONF points
+	// at the read-only nested directory under another letter case, a name no read-only mount covers on a volume that
+	// ignores case; link-FILE points at a file in it. The server must refuse by the object's number, with the link
+	// resolved (council SEC-1). On a volume that keeps case the links dangle, and what cannot be resolved is refused.
+	if fhL, _, st, _ := n.Lookup(r0, "link-CONF"); st == 0 {
+		_, cs, cerr := n.Create(fhL, "probe-through-link", 0o644)
+		b.check("create in a read-only directory through a link handle", cerr == nil && cs != 0, "status=%v err=%v", cs, cerr)
+		ms, merr := n.Mkdir(fhL, "probe-dir-through-link", 0o755)
+		b.check("mkdir in a read-only directory through a link handle", merr == nil && ms != 0, "status=%v err=%v", ms, merr)
+		rs, rerr := n.Remove(fhL, "app.conf")
+		b.check("remove in a read-only directory through a link handle", rerr == nil && rs != 0, "status=%v err=%v", rs, rerr)
+		if fh, _, st2, _ := n.Lookup(fhL, "app.conf"); st2 == 0 {
+			ws, werr := n.Write(fh, 0, []byte("x"))
+			b.check("write in a read-only directory through a link handle", werr == nil && ws != 0, "status=%v err=%v", ws, werr)
+		}
+	} else {
+		b.check("the fixture has link-CONF", false, "status=%v", st)
+	}
+	if fhF, _, st, _ := n.Lookup(r0, "link-FILE"); st == 0 {
+		cs, cerr := n.Chmod(fhF, 0o600)
+		b.check("setattr through a link to a file in a read-only directory", cerr == nil && cs != 0, "status=%v err=%v", cs, cerr)
+	} else {
+		b.check("the fixture has link-FILE", false, "status=%v", st)
+	}
+	// Links that reach nothing protected stay usable while a read-only source exists (council C-1): a change of
+	// attributes through a link to nowhere fails as it did (no such file), not as read-only, and a create through a
+	// link whose target is not there yet makes the target.
+	if fhN, _, st, _ := n.Lookup(r0, "link-nowhere"); st == 0 {
+		cs, cerr := n.Chmod(fhN, 0o600)
+		b.check("setattr through a link to nowhere is not refused as read-only", cerr == nil && cs != 30, "status=%v err=%v", cs, cerr)
+	} else {
+		b.check("the fixture has link-nowhere", false, "status=%v", st)
+	}
+	if _, _, st, _ := n.Lookup(r0, "link-new"); st == 0 {
+		_, cs, cerr := n.Create(r0, "link-new", 0o644)
+		_, _, ts, _ := n.Lookup(r0, "made-through-link")
+		b.check("create through a link to a new name makes the target", cerr == nil && cs == 0 && ts == 0, "status=%v err=%v target=%v", cs, cerr, ts)
+		_, _ = n.Remove(r0, "made-through-link")
+	} else {
+		b.check("the fixture has link-new", false, "status=%v", st)
+	}
+	if _, _, st, _ := n.Lookup(r0, "link-FILE"); st == 0 { // an UNCHECKED create opens what the name gives
+		_, cs, cerr := n.Create(r0, "link-FILE", 0o644)
+		b.check("create over a link to a file in a read-only directory", cerr == nil && cs != 0, "status=%v err=%v", cs, cerr)
+	}
 	if _, a, st, err := n.Walk(r0, "link-out/exports"); err == nil && st == 0 {
 		b.info("through symlink link-out/exports", "readable residual (SEC-2): %v", a)
 	}

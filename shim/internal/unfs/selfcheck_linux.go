@@ -73,10 +73,18 @@ func Selfcheck(mode, self string, out io.Writer) bool {
 	for _, e := range etc {
 		etcNames = append(etcNames, e.Name())
 	}
-	check("etc-contents", len(etcNames) <= 4, "%v", etcNames)
+	// The exports, the list of objects kept read-only by number (TD-073) and libtirpc's three tables; nothing else.
+	allowed := map[string]bool{"exports": true, "exports.protect": true, "netconfig": true, "protocols": true, "services": true}
+	extra := 0
+	for _, n := range etcNames {
+		if !allowed[n] {
+			extra++
+		}
+	}
+	check("etc-contents", extra == 0 && len(etcNames) <= len(allowed), "%v", etcNames)
 
 	// Writes to the read-only parts.
-	for _, p := range []string{"/x", "/etc/exports", "/usr/x", "/lib/x", "/s/1/x", "/s/2/x", "/s/0/conf/x"} {
+	for _, p := range []string{"/x", "/etc/exports", "/etc/exports.protect", "/usr/x", "/lib/x", "/s/1/x", "/s/2/x", "/s/0/conf/x"} {
 		f, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE, 0o644)
 		if f != nil {
 			f.Close()
