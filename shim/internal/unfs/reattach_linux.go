@@ -58,11 +58,16 @@ const (
 	coveredChecks = 30
 	// maxPins is how many replaced read-only files stay held (fileWatch.pins).
 	maxPins = 256
-	// seenWait is how long a file attached for a read-only source stays before another takes its place: longer than
-	// the server's idle wait (half a second), so the server has looked at its protected places and knows the file,
-	// though no client sent a request in that time (TD-076). The checks are FileCheck apart, so this delays nothing
-	// in practice; it is the floor that the claim rests on.
-	seenWait = 750 * time.Millisecond
+	// maxListGrowth is how many bytes the watcher adds to the server's list before it has the list written anew
+	// by a start of the server: about 50,000 lines, more than a week of attaches at the rate one source allows.
+	maxListGrowth = 1 << 20
+)
+
+var (
+	// errNotTheFileOpened: the file reached through the export is another one than the file opened at the path.
+	errNotTheFileOpened = errors.New("the file reached through the export is not the one that was opened at the path")
+	// errNotTold: the server's list could not be told of a file.
+	errNotTold = errors.New("the server's list was not told")
 )
 
 // moveMountBeneath is MOVE_MOUNT_BENEATH (Linux 6.5): attach under the mount that is there, so that removing that
@@ -109,9 +114,13 @@ type fileWatch struct {
 	// run/TD-073/notes.txt 8), so each is held while this server runs, the newest maxPins of them.
 	// The file a source had at the start is not among them: Run holds its tree until the server ends (council J-8).
 	// The recorded ones (the newest MaxProtectSwaps) also have a mount that outlives this process (hold).
-	pins   []int
-	since  []time.Time // when the attached file was attached, by source; zero for the file of the start
-	verify []int       // checks left that read the attached file
+	pins []int
+	// The server's list (Config.list). The server is told of a file there before the file is put at a protected
+	// place. grown counts the bytes added; end ends the server, which then starts again with a list written anew.
+	list   *os.File
+	grown  int
+	end    func()
+	verify []int // checks left that read the attached file
 	budget []int
 	refill time.Time
 	said   map[string]bool
@@ -131,7 +140,7 @@ func newFileWatch(cfg Config, trees []*os.File, pid int) (*fileWatch, error) {
 	n := len(cfg.Sources)
 	w := &fileWatch{srcs: cfg.Sources, nests: Nests(cfg.Sources), procfd: -1, nsfd: -1, server: filepath.Base(cfg.Unfsd),
 		notify: cfg.NotifyGuest, record: cfg.ProtectFile, unrecorded: cfg.unrecorded, said: map[string]bool{}, covered: map[int]int{}, ids: make([]fileID, n), att: make([]int, n),
-		verify: make([]int, n), budget: make([]int, n), tell: make([]notice, n), refill: time.Now(), since: make([]time.Time, n)}
+		verify: make([]int, n), budget: make([]int, n), tell: make([]notice, n), refill: time.Now(), list: cfg.list}
 	w.logf = func(format string, a ...any) { fmt.Fprintf(os.Stderr, "vesper-unfs run: "+format+"\n", a...) }
 	if real, err := filepath.EvalSymlinks(cfg.Unfsd); err == nil { // the process's exe link names the file itself
 		w.server = filepath.Base(real)
@@ -325,9 +334,6 @@ func (w *fileWatch) checkOne(i int, s Source, mounted map[string]bool) {
 		return
 	}
 	replaced := id != w.ids[i]
-	if replaced && s.ReadOnly && time.Since(w.since[i]) < seenWait {
-		return // the server may not have seen the file that is attached yet: the next check looks again
-	}
 	if !replaced && w.verify[i] > 0 {
 		w.verify[i]--
 		if w.att[i] >= 0 && !reads(w.att[i]) {
@@ -409,6 +415,14 @@ func (w *fileWatch) checkOne(i int, s Source, mounted map[string]bool) {
 		}
 		trees = append(trees, t)
 	}
+	// A list that has grown past maxListGrowth is written anew: the server is ended and starts again, with the
+	// list of a start. Each attach adds a line, and the list is on the System VM's shared /run.
+	tell := replaced && hasPlace(w.srcs, s)
+	if tell && w.grown > maxListGrowth {
+		w.logf("the server's list has grown by %d bytes; the server is ended and starts again with a list written anew", w.grown)
+		w.end()
+		return
+	}
 	holds := Holders(w.srcs, i)
 	var beneath, viaExport, keptRO bool
 	failed, placed := 0, 0
@@ -422,7 +436,29 @@ func (w *fileWatch) checkOne(i int, s Source, mounted map[string]bool) {
 					return err
 				}
 				defer unix.Close(t)
+				// The file found through the export must be the file that was opened at the path: that is
+				// the one the server is told of, and the one that is held and recorded. Another one was put
+				// there in between (a second save), and the next check takes it (council D-1).
+				got, err := idOf(t)
+				if err != nil {
+					return fmt.Errorf("the file reached through the export: %w", err)
+				}
+				if got != id {
+					return fmt.Errorf("%w: %d:%d at the path, %d:%d through the export", errNotTheFileOpened, id.dev, id.ino, got.dev, got.ino)
+				}
 				tree, viaExport, keptRO = t, true, ro && !s.ReadOnly
+			}
+			// The server is told of the file just before the file is put at its protected place, with a line
+			// in its list that it reads before it judges its next request. It then knows the file while it
+			// runs, whether or not it looked while the file was there: a task can keep its server from looking
+			// by keeping it in one request (TD-078). The line is added at every attach: the server forgets an
+			// object after 768 newer ones, and one that is attached again must be told again.
+			if tell {
+				line := ProtectID{Dev: id.dev, Ino: id.ino}
+				if err := AppendSeen(w.list, line); err != nil {
+					return fmt.Errorf("%w: %w", errNotTold, err)
+				}
+				w.grown += len(seenLine(line))
 			}
 			var err error
 			if beneath, err = swapFile(i, tree); err != nil {
@@ -444,8 +480,21 @@ func (w *fileWatch) checkOne(i int, s Source, mounted map[string]bool) {
 		}
 		return nil
 	})
-	if replaced || placed > 0 || failed > 0 { // a look that found the place covered costs the source nothing
+	// A look that found the place covered costs the source nothing, nor does one that found another file through
+	// the export: nothing was mounted, and the source's nests must still be placed at later checks.
+	if (replaced || placed > 0 || failed > 0) && !errors.Is(err, errNotTheFileOpened) {
 		w.budget[i]--
+	}
+	if errors.Is(err, errNotTold) {
+		if errors.Is(err, os.ErrClosed) {
+			return // the server has ended and Run closed the list
+		}
+		// The file is not attached, and the old file's nest went with its name: the new file would stay
+		// writable through the outer export for as long as the server cannot be told. So the server is ended.
+		// The next start opens the sources by path, writes the list whole, or does not serve (council SEC-1).
+		w.logf("source %q was replaced, and the server could not be told of the new file (%v); the server is ended and starts again with a list written anew", s.Rel, err)
+		w.end()
+		return
 	}
 	if err != nil {
 		w.once(fmt.Sprintf("swap %d", i), "source %q was replaced; attaching the new file: %v", s.Rel, err)
@@ -482,7 +531,7 @@ func (w *fileWatch) checkOne(i int, s Source, mounted map[string]bool) {
 		} else {
 			unix.CloseOnExec(w.att[i])
 		}
-		w.ids[i], w.verify[i], w.since[i] = id, verifyChecks, time.Now()
+		w.ids[i], w.verify[i] = id, verifyChecks
 		// The server protects it by its place; a later start of the server needs its number, and the number is
 		// the file's only while something holds the file: a mount that outlives this process (TD-076). The hold
 		// comes first; when it fails, that is logged and the number is recorded all the same, and is then right

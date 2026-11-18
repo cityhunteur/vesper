@@ -1,0 +1,38 @@
+TD-078 runs, 2026-11-18, System VM with 2 CPUs and 2048 MiB; the macOS volume is APFS and ignores letter case.
+
+1. Control: step earlier_version_stays_read_only_for_an_idle_task on the build of main at 252830a (D-055: the
+   server looks at every request and twice a second), with two new launcher test commands that stop and continue
+   the server process (test-unfs-pause, test-unfs-resume).
+   Binds, on the share with no change events: e76 read-write at /d, e76/hz/secret read-only at /b. The task sleeps.
+   The server is stopped (SIGSTOP). macOS saves twice as an editor with a backup does (rename secret to secret~,
+   write a new secret), the second time as soon as the first new file is attached. The server is continued, the
+   caches are dropped, and the task tries /d/hz/secret~, which was the bound file between the saves.
+     attaches 0, 1 then 2; 3 of 3 changes went through (write, truncate, remove); secret~ was gone from macOS.
+   So a server that cannot look while a file is at its place does not know the file afterwards.
+
+2. With this change (unfs3 binary d132fd69..., built twice with the same digest):
+     the same step: the server's list went from 1 to 3 told objects while the server stood still; after it went
+     on and a cache drop, 3 of 3 refused as read-only; after a restart (pid 20554 to 20935) and another cache
+     drop, 3 more; macOS still reads "v1".
+   While the server is stopped it cannot look at anything, and after it goes on the place holds the second new
+   file. The first new file's number can have reached the server only through the list.
+     step broken_list_refuses_every_change: a test command adds "x not a line of the list" to the list of a
+     task with one read-write and one read-only bind. The task's write to the read-write bind is refused as
+     read-only. The server is killed (pid 21375 to 21616) and starts with a list written anew; the task writes.
+   Suites: unfs 13 of 13 (the sandbox's mounts now have /etc/exports.protect, read-only, nosuid, nodev, noexec; the
+   escape checks run with a list attached: 43, 43 and 44 passed in their three runs, 0 failed, with chmod, chown
+   and truncate of the list refused; the probes as root, as uid 1000 and with a squashing server: 74 passed, 0
+   failed each), microVM binds 19 of 19, microVM shares 12 of 12.
+   These numbers are of the last run, on a shim built from the source as merged.
+   Two earlier versions also passed the suites and were not kept: one without the looks (binds 18 of 18), and
+   one that only skipped the attach when the list could not be told.
+
+3. Not run:
+   - a write to the list that fails (a full /run), after which the supervisor ends the server; a list past 1 MiB;
+   - an added line read by the server under a caller that is not root (the first load is: probes as uid 1000 and
+     with a squashing server);
+   - another file put at the path between the supervisor's open and its attach (the supervisor attaches nothing
+     then, and the next check takes the file);
+   - a server stopped at its start, before the first load of the list;
+   - a list with more lines than the server has room for, or with a zero byte;
+   - the cost of the look at the list (one stat at each look). The cost of the looks was measured for D-055.

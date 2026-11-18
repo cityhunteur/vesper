@@ -206,8 +206,11 @@ func run(args []string) int {
 		if w, serr := syslog.New(syslog.LOG_DAEMON|syslog.LOG_NOTICE, tag); serr == nil {
 			words, told := unfs.LastWords(80)
 			how := "by itself"
-			if told {
+			switch {
+			case told:
 				how = "as told"
+			case unfs.EndedForList():
+				how = "by its supervisor, for a list written anew"
 			}
 			_ = w.Notice(fmt.Sprintf("the server ended %s: code %d after %s (%v); last output: %q", how, code, time.Since(started).Round(time.Millisecond), err, words))
 			w.Close()

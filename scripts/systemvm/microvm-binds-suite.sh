@@ -340,11 +340,15 @@ IDLE='try() { if e=$("$@" 2>&1); then echo "DONE: $*"; else echo "refused: $* [$
 st="$(runb --bind="${E}:/d:rw" --bind="${E}/hz/secret:/b:ro" --detach binds-idle "${IDLE}")"
 eatt() { ctl microvm unfs-log binds-idle 80 | grep -a -c 'another file is at its path'; }
 epid() { ctl microvm unfs-isolation binds-idle | sed -n 's/^UNFSISO [^ ]* pid=\([0-9]*\).*/\1/p' | head -1; }
-sleep 2; e0="$(eatt)"
+# The server is stopped across both saves, as a task can do to its own server with a request it does not finish
+# (TD-078): it cannot look at anything in that time, and must know the middle version all the same.
+slines() { ctl microvm unfs-list binds-idle | sed -n 's/^LIST [^ ]* .* s=\([0-9]*\)$/\1/p' | head -1; }
+sleep 2; e0="$(eatt)"; epause="$(ctl microvm test-unfs-pause binds-idle | head -1)"; s0="$(slines)"
 echo v1 > "${E}/hz/new"; mv "${E}/hz/secret" "${E}/hz/secret~"; mv "${E}/hz/new" "${E}/hz/secret"
 e1="${e0}"; for _ in $(seq 1 60); do e1="$(eatt)"; [ "${e1}" -gt "${e0}" ] && break; sleep 0.25; done
 echo v2 > "${E}/hz/new"; mv "${E}/hz/secret" "${E}/hz/secret~"; mv "${E}/hz/new" "${E}/hz/secret"
 e2="${e1}"; for _ in $(seq 1 30); do e2="$(eatt)"; [ "${e2}" -gt "${e1}" ] && break; sleep 0.5; done
+s2="$(slines)"; eres="$(ctl microvm test-unfs-resume binds-idle | head -1)"   # the list was told of both files while the server stood still
 sleep 2; edrop="$(ctl microvm test-drop-caches | head -1)"; echo go > "${E}/go1"   # the first tries read go1 as their data
 for _ in $(seq 1 60); do [ -s "${E}/out1" ] && grep -q tried "${E}/out1" && break; sleep 0.5; done
 p0e="$(epid)"; ctl microvm test-unfs-kill binds-idle >/dev/null
@@ -356,12 +360,37 @@ count() { printf '%s\n' "$1" | grep -c "$2"; }
 eo1="$(cat "${E}/out1" 2>/dev/null)"; eo2="$(cat "${E}/out2" 2>/dev/null)"
 ed="$(( $(count "${eo1}" 'DONE:') + $(count "${eo2}" 'DONE:') ))"; er1="$(count "${eo1}" 'refused:.*\[Read-only file system\]')"; er2="$(count "${eo2}" 'refused:.*\[Read-only file system\]')"
 em="$(tr '\n' ' ' < "${E}/hz/secret~" 2>/dev/null)"
-if [ "${st}" = "STARTED binds-idle" ] && [ "${e1}" -gt "${e0}" ] && [ "${e2}" -gt "${e1}" ] && [ "${edrop}" = DROPPED ] && [ "${edrop2}" = DROPPED ] && [ -n "${p1e}" ] && [ "${p1e}" != "${p0e}" ] \
+if [ "${st}" = "STARTED binds-idle" ] && [ "${e1}" -gt "${e0}" ] && [ "${e2}" -gt "${e1}" ] && [ "${epause}" = "SIGSTOP unfsd binds-idle" ] && [ "${eres}" = "SIGCONT unfsd binds-idle" ] && [ "${s0}" = 1 ] && [ "${s2:-0}" -ge 3 ] && [ "${edrop}" = DROPPED ] && [ "${edrop2}" = DROPPED ] && [ -n "${p1e}" ] && [ "${p1e}" != "${p0e}" ] \
   && [ "${ed}" = 0 ] && [ "${er1}" = 3 ] && [ "${er2}" = 3 ] && [ "${em}" = "v1 " ]; then
-  record earlier_version_stays_read_only_for_an_idle_task true "macOS saved the read-only file twice with a backup, the second time as soon as the first was attached (${e2} attaches), while the task slept; after a cache drop ${er1} changes to the backup, which was the bound file between the saves, were refused as read-only; after the server went from pid ${p0e} to ${p1e} and another cache drop, ${er2} more; macOS still reads '${em}'"
+  record earlier_version_stays_read_only_for_an_idle_task true "macOS saved the read-only file twice with a backup, the second time as soon as the first was attached (${e2} attaches), while the task slept and the server was stopped (its list went from ${s0} to ${s2} told objects); after the server went on and a cache drop ${er1} changes to the backup, which was the bound file between the saves, were refused as read-only; after the server went from pid ${p0e} to ${p1e} and another cache drop, ${er2} more; macOS still reads '${em}'"
 else
-  record earlier_version_stays_read_only_for_an_idle_task false "${st}; attaches ${e0}, ${e1} then ${e2}; caches: ${edrop:-not dropped}, ${edrop2:-not dropped}; pid ${p0e} -> ${p1e:-none}; ${ed} went through: $(printf '%s\n%s\n' "${eo1}" "${eo2}" | grep 'DONE:' | tr '\n' ';'); refused as read-only ${er1} then ${er2} (want 3 and 3); out: $(printf '%s | %s' "${eo1}" "${eo2}" | tr '\n' ' ' | cut -c1-400); macOS hz/secret~='${em}' (want 'v1 ')"
+  record earlier_version_stays_read_only_for_an_idle_task false "${st}; attaches ${e0}, ${e1} then ${e2}; ${epause:-not stopped}, ${eres:-not continued}; told objects in the list ${s0:-?} then ${s2:-?} (want 1, then 3 or more); caches: ${edrop:-not dropped}, ${edrop2:-not dropped}; pid ${p0e} -> ${p1e:-none}; ${ed} went through: $(printf '%s\n%s\n' "${eo1}" "${eo2}" | grep 'DONE:' | tr '\n' ';'); refused as read-only ${er1} then ${er2} (want 3 and 3); out: $(printf '%s | %s' "${eo1}" "${eo2}" | tr '\n' ' ' | cut -c1-400); macOS hz/secret~='${em}' (want 'v1 ')"
 fi
+
+# --- 6m. A list the server cannot take refuses every change, and a start of the server mends it (TD-078). The list
+# is what the protection rests on, so a line of no known kind must not be passed over: a number may be lost in it.
+# A test command adds such a line. The task's write to its read-write bind is then refused. The server is killed and
+# starts again with a list written anew, and the task writes ------------------------------------------------------
+N="${F}/n78"; mkdir -p "${N}/ro"; echo k > "${N}/ro/keep"
+BROKEN='try() { if e=$("$@" 2>&1); then echo "DONE: $*"; else echo "refused: $* [$(echo "$e" | tail -1 | sed "s/.*: //")]"; fi; }; w() { i=0; while [ $i -lt 120 ] && [ ! -e "$1" ]; do i=$((i+1)); sleep 0.5; done; }; w /d/go1; a="$(try sh -c "echo a > /d/one")"; w /d/go2; b="$(try sh -c "echo b > /d/two")"; { echo "$a"; echo "$b"; echo tried; } > /d/out; sync'
+st="$(runb --bind="${N}:/d:rw" --bind="${N}/ro:/r:ro" --detach binds-broken "${BROKEN}")"
+npid() { ctl microvm unfs-isolation binds-broken | sed -n 's/^UNFSISO [^ ]* pid=\([0-9]*\).*/\1/p' | head -1; }
+sleep 2; nbrk="$(ctl microvm test-unfs-list-break binds-broken | head -1)"; touch "${N}/go1"; sleep 5
+n0="$(npid)"; ctl microvm test-unfs-kill binds-broken >/dev/null
+n1=""; for _ in $(seq 1 40); do case "$(ctl microvm unfs binds-broken | head -1)" in *"listen=yes"*) n1="$(npid)"; [ -n "${n1}" ] && [ "${n1}" != "${n0}" ] && break ;; esac; sleep 0.5; done
+touch "${N}/go2"
+wait_stopped binds-broken 90 || ctl ctr -- kill binds-broken 30 >/dev/null
+ctl ctr -- delete binds-broken >/dev/null; sleep 2
+no="$(cat "${N}/out" 2>/dev/null)"; none="$(cat "${N}/one" 2>/dev/null)"; ntwo="$(cat "${N}/two" 2>/dev/null)"
+case "${st}|${nbrk}|$(printf '%s' "${no}" | tr '\n' '|')" in
+  "STARTED binds-broken|BROKEN list of binds-broken|refused: "*"[Read-only file system]|DONE: "*"|tried"*)
+    if [ -n "${n1}" ] && [ "${n1}" != "${n0}" ] && [ -z "${none}" ] && [ "${ntwo}" = b ]; then
+      record broken_list_refuses_every_change true "with a line of no kind in its list the server refused a write to the read-write bind as read-only; after the server went from pid ${n0} to ${n1} with a list written anew, the task wrote (macOS: one absent, two='${ntwo}')"
+    else
+      record broken_list_refuses_every_change false "pid ${n0} -> ${n1:-none}; macOS one='${none}' (want absent) two='${ntwo}' (want b); out: $(printf '%s' "${no}" | tr '\n' ' ' | cut -c1-300)"
+    fi ;;
+  *) record broken_list_refuses_every_change false "${st}; ${nbrk:-list not broken}; pid ${n0} -> ${n1:-none}; out: $(printf '%s' "${no}" | tr '\n' ' ' | cut -c1-300); macOS one='${none}' two='${ntwo}'" ;;
+esac
 
 # --- 7. After the shim is killed, the reaper leaves no server, namespace or record ----------------------------------
 st="$(runb "${B[@]}" --detach binds-shim 'sleep 600')"

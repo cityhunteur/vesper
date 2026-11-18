@@ -1,12 +1,14 @@
 package unfs
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
+	"syscall"
 )
 
 // Objects the server keeps read-only whatever name reaches them (TD-073, unfs3 patch 0006).
@@ -17,11 +19,14 @@ import (
 // server is told which objects are read-only, and refuses a request that changes one, or anything under one, by its
 // device and inode number.
 //
-// The server reads "<exports file>.protect". A "p PATH" line names a place in the sandbox's own root, which a task
+// The server reads "<exports file>.protect". The list's format is defined in unfs3 patch 0006, in the comment above
+// PROT_FIXED in Config/exports.y; this file writes it, and the server takes a line it does not know for a broken
+// list. A "p PATH" line names a place in the sandbox's own root, which a task
 // cannot change: the root of each read-only source. The server looks at it before every request that changes
-// something, so a file that replaced a read-only file source (D-052) is protected from the first such request after
-// it is attached, and it remembers every object it found there, so that file stays protected after a task moved it
-// aside. An "i DEV INO" line names an
+// something, so a file that replaced a read-only file source (D-052) is protected while it is attached. An
+// "s DEV INO" line names an object that is about to be put at such a place: the supervisor adds it to the list
+// before it attaches the file (AppendSeen), and the server reads a list that has grown before its next request, so
+// the file stays protected after a task moved it aside, whatever the server saw of it. An "i DEV INO" line names an
 // object by number: what a read-only source was at an earlier start of this server. A task that renamed directories
 // can make a source's path name another object by the time the server starts again; the object the user bound
 // read-only stays in the list.
@@ -53,7 +58,7 @@ const (
 func ProtectPaths(srcs []Source) []string {
 	var out []string
 	for i, s := range srcs {
-		if !s.ReadOnly || alsoReadWrite(srcs, s) {
+		if !hasPlace(srcs, s) {
 			continue
 		}
 		p := ExportPath(i)
@@ -64,6 +69,10 @@ func ProtectPaths(srcs []Source) []string {
 	}
 	return out
 }
+
+// hasPlace reports whether source s has a protected place in the sandbox, a "p" line of the list: it is served
+// read-only and its path was not also given read-write. ProtectPaths, the list of a start and the watcher go by it.
+func hasPlace(srcs []Source, s Source) bool { return s.ReadOnly && !alsoReadWrite(srcs, s) }
 
 // alsoReadWrite reports whether the object of read-only source s is a read-write source too. The shim's planner makes
 // such a bind one read-write source; given as two, the read-write one must stay writable (council COR-8).
@@ -76,8 +85,10 @@ func alsoReadWrite(srcs []Source, s Source) bool {
 	return false
 }
 
-// ProtectList is the server's protect file.
-func ProtectList(srcs []Source, ids []ProtectID) string {
+// ProtectList is the server's protect file: a "p" line for each protected place, an "i" line for each recorded
+// number, and an "s" line for each object in seen, the objects that are at the protected places when the server
+// starts. With those, every object is in the list before it is at a place, also one the record does not hold.
+func ProtectList(srcs []Source, ids []ProtectID, seen []ProtectID) string {
 	var b strings.Builder
 	for _, p := range ProtectPaths(srcs) {
 		b.WriteString("p " + p + "\n")
@@ -85,8 +96,13 @@ func ProtectList(srcs []Source, ids []ProtectID) string {
 	for _, id := range ids {
 		fmt.Fprintf(&b, "i %d %d\n", id.Dev, id.Ino)
 	}
+	for _, id := range seen {
+		b.WriteString(seenLine(id))
+	}
 	return b.String()
 }
+
+func seenLine(id ProtectID) string { return fmt.Sprintf("s %d %d\n", id.Dev, id.Ino) }
 
 // ParseProtectIDs reads the supervisor's record, one "DEV INO" a line, with " r" after a replaced file's; a line it
 // cannot read is skipped.
@@ -180,6 +196,50 @@ func RecordProtectIDs(file string, ids ...ProtectID) ([]ProtectID, error) {
 		return nil, err
 	}
 	return all, os.Rename(tmp, file)
+}
+
+// ListFile is where the supervisor keeps the server's list of the record at protectFile while a server runs
+// (TD-078); empty when there is no record.
+func ListFile(protectFile string) string {
+	if protectFile == "" {
+		return ""
+	}
+	return protectFile + ".list"
+}
+
+// WriteList writes the server's list whole, at a start of the server: a new file under the same name, so a server
+// that still has the old one does not see it change.
+func WriteList(file, list string) error {
+	tmp := filepath.Join(filepath.Dir(file), "."+filepath.Base(file)+".tmp")
+	if err := os.WriteFile(tmp, []byte(list), 0o644); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmp, 0o644); err != nil { // whatever the umask: a squashing server reads it as nobody
+		return err
+	}
+	return os.Rename(tmp, file)
+}
+
+// AppendSeen tells the running server of an object that is about to be put at a protected place: one "s DEV INO"
+// line added to its list, which the server reads before it judges its next request. list is the list opened for
+// appending (OpenList): the very file the sandbox has attached. The caller puts the object at the place only after
+// this returned without error. So the server knows an object that was at a protected place whether or not it looked
+// while the object was there (it remembers the newest 768); a task can keep its server from looking by keeping it
+// in one request (TD-078).
+//
+// A line this short goes out in one write. After an error the list may end in part of a line, which the server
+// leaves unread until the line is whole. The caller then ends the server, and the next start writes the list anew.
+func AppendSeen(list *os.File, id ProtectID) error {
+	if list == nil {
+		return errors.New("no list")
+	}
+	_, err := list.Write([]byte(seenLine(id)))
+	return err
+}
+
+// OpenList opens the list written by WriteList for AppendSeen.
+func OpenList(file string) (*os.File, error) {
+	return os.OpenFile(file, os.O_WRONLY|os.O_APPEND|syscall.O_NOFOLLOW, 0)
 }
 
 // MovedUnder lists the read-write sources that the configured paths do not put inside a read-only source of the

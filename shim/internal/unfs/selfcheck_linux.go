@@ -108,6 +108,20 @@ func Selfcheck(mode, self string, out io.Writer) bool {
 		}
 		check("write /dev/null (control)", err == nil, "%v", err)
 	}
+	// The list is the supervisor's own file, attached read-only (TD-078): neither its mode, its owner nor its
+	// length can change from in here. The attempts set what is already there.
+	if st, err := os.Stat("/etc/exports.protect"); err != nil {
+		check("stat /etc/exports.protect", false, "%v", err)
+	} else {
+		sys := st.Sys().(*syscall.Stat_t)
+		err = unix.Fchmodat(unix.AT_FDCWD, "/etc/exports.protect", uint32(st.Mode().Perm()), 0)
+		check("chmod /etc/exports.protect", denied(err), "%v", err)
+		err = unix.Fchownat(unix.AT_FDCWD, "/etc/exports.protect", int(sys.Uid), int(sys.Gid), 0)
+		check("chown /etc/exports.protect", denied(err), "%v", err)
+		err = unix.Truncate("/etc/exports.protect", st.Size())
+		check("truncate /etc/exports.protect", denied(err), "%v", err)
+		check("mode of /etc/exports.protect", st.Mode().Perm() == 0o644, "%v", st.Mode())
+	}
 	// The writable export is writable (control for the checks above).
 	if f, err := os.OpenFile("/s/0/.vesper-selfcheck", os.O_WRONLY|os.O_CREATE, 0o644); err == nil {
 		f.Close()

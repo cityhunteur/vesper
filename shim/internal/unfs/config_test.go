@@ -1,6 +1,7 @@
 package unfs
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -177,11 +178,14 @@ func TestHolders(t *testing.T) {
 // The server's protect file names the root of each read-only source and the objects remembered by number (TD-073).
 func TestProtectList(t *testing.T) {
 	srcs := []Source{{Rel: "proj"}, {Rel: "proj/conf", ReadOnly: true}, {Rel: "proj/key", File: true, ReadOnly: true}, {Rel: "proj/a", File: true}}
-	got := ProtectList(srcs, []ProtectID{{Dev: 34, Ino: 1460}, {Dev: 36, Ino: 5, Swapped: true}})
+	got := ProtectList(srcs, []ProtectID{{Dev: 34, Ino: 1460}, {Dev: 36, Ino: 5, Swapped: true}}, nil)
 	if want := "p /s/1\np /s/2/f\ni 34 1460\ni 36 5\n"; got != want {
 		t.Errorf("protect list %q, want %q", got, want)
 	}
-	if got := ProtectList([]Source{{Rel: "proj"}}, nil); got != "" {
+	if got := ProtectList(srcs, nil, []ProtectID{{Dev: 40, Ino: 9}}); !strings.HasSuffix(got, "\ns 40 9\n") || strings.Contains(got, "\ni ") {
+		t.Errorf("a list with the object at a place: %q", got)
+	}
+	if got := ProtectList([]Source{{Rel: "proj"}}, nil, nil); got != "" {
 		t.Errorf("nothing read-only, list %q", got)
 	}
 }
@@ -244,6 +248,76 @@ func TestRecordProtectIDs(t *testing.T) {
 	}
 	if all, err := ReadProtectIDs(filepath.Join(t.TempDir(), "absent")); err != nil || len(all) != 0 {
 		t.Errorf("an absent record: %v, %v", all, err)
+	}
+}
+
+// The server's list: written whole at a start, added to through one descriptor while the server runs (TD-078).
+func TestListFile(t *testing.T) {
+	if ListFile("") != "" || ListFile("/x/a.prot") != "/x/a.prot.list" {
+		t.Errorf("ListFile: %q, %q", ListFile(""), ListFile("/x/a.prot"))
+	}
+	file := filepath.Join(t.TempDir(), "a.prot.list")
+	if _, err := OpenList(file); err == nil {
+		t.Error("a list that is not there opened")
+	}
+	if err := AppendSeen(nil, ProtectID{Dev: 1, Ino: 2}); err == nil {
+		t.Error("a line was added to no list")
+	}
+	// A temporary file left by a start that did not finish, with a mode a squashing server could not read.
+	if err := os.WriteFile(filepath.Join(filepath.Dir(file), ".a.prot.list.tmp"), []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteList(file, "p /s/1/f\ni 7 8\n"); err != nil {
+		t.Fatal(err)
+	}
+	st, err := os.Stat(file)
+	if err != nil || st.Mode().Perm() != 0o644 {
+		t.Fatalf("the list's mode: %v, %v", st, err)
+	}
+	lw, err := OpenList(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lw.Close()
+	for _, id := range []ProtectID{{Dev: 40, Ino: 1506}, {Dev: 40, Ino: 1507, Swapped: true}} {
+		if err := AppendSeen(lw, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	raw, _ := os.ReadFile(file)
+	if string(raw) != "p /s/1/f\ni 7 8\ns 40 1506\ns 40 1507\n" {
+		t.Errorf("the list after two lines were added: %q", raw)
+	}
+	after, _ := os.Stat(file)
+	if !os.SameFile(st, after) {
+		t.Error("adding a line made another file: a server that has the list attached would not see the line")
+	}
+	// A start writes a new file: a server that still has the old one attached does not see it change, and the
+	// descriptor of the old one does not write into the new one.
+	if err := WriteList(file, "p /s/1/f\n"); err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := os.Stat(file); os.SameFile(st, again) {
+		t.Error("a start wrote into the file an earlier server may still have attached")
+	}
+	if err := AppendSeen(lw, ProtectID{Dev: 1, Ino: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if raw, _ := os.ReadFile(file); string(raw) != "p /s/1/f\n" {
+		t.Errorf("a line for the old list went into the new one: %q", raw)
+	}
+	// A symbolic link at the list's name is not followed, and a closed list reports that it is closed.
+	link := filepath.Join(t.TempDir(), "link.list")
+	if err := os.Symlink(file, link); err != nil {
+		t.Fatal(err)
+	}
+	if f, err := OpenList(link); err == nil {
+		f.Close()
+		t.Error("a symbolic link at the list's name was followed")
+	}
+	lw.Close()
+	if err := AppendSeen(lw, ProtectID{Dev: 1, Ino: 1}); !errors.Is(err, os.ErrClosed) {
+		t.Errorf("a line added to a closed list: %v", err)
 	}
 }
 
