@@ -55,6 +55,85 @@ func (b *Battery) dial(port int, prog uint32) (*Conn, error) {
 	return c, nil
 }
 
+// Held sends one request that would change the file at path (below /s/0), a REMOVE or an UNCHECKED CREATE by kind,
+// and holds it, unfinished, until the file until exists; then it sends the rest and reports whether the server
+// refused the request as read-only. While the request is held the server looks at nothing. A file that came to be
+// what path names in that time, and that was the read-only file for a while, must still be refused: the server
+// reads its list inside the request's own check (TD-078, TD-079).
+//
+// It prints "HELD sent KIND PATH (present|absent)" when the request is held, with what the name was just before,
+// and makes the file marker then, so that the caller knows the hold began before what it does next. At the end it
+// prints "HELD KIND PATH status=…" and "HELD control status=…": a file made and removed in the export's root, to
+// show that the server refuses that one request and not every change.
+func (b *Battery) Held(kind, path, until, marker string, limit time.Duration) bool {
+	fail := func(format string, a ...any) bool {
+		fmt.Fprintf(b.Out, "HELD failed: "+format+"\n", a...)
+		return false
+	}
+	if kind != "remove" && kind != "create" {
+		return fail("kind %q", kind)
+	}
+	m, err := b.dial(2050, ProgMount)
+	if err != nil {
+		return fail("mount port: %v", err)
+	}
+	root, st, err := Mount(m, "/s/0")
+	m.Close()
+	if err != nil || st != 0 {
+		return fail("mount /s/0: status=%v err=%v", st, err)
+	}
+	c, err := b.dial(2049, ProgNFS)
+	if err != nil {
+		return fail("nfs port: %v", err)
+	}
+	defer c.Close()
+	n := NFS{c}
+	dir, name := root, path
+	if i := strings.LastIndex(path, "/"); i >= 0 {
+		if dir, _, st, err = n.Walk(root, path[:i]); err != nil || st != 0 {
+			return fail("walk %s: status=%v err=%v", path[:i], st, err)
+		}
+		name = path[i+1:]
+	}
+	was := "absent"
+	if _, _, lst, lerr := n.Lookup(dir, name); lerr != nil {
+		return fail("lookup %s: %v", path, lerr)
+	} else if lst == 0 {
+		was = "present"
+	}
+	wait := func() error {
+		fmt.Fprintf(b.Out, "HELD sent %s %s (%s)\n", kind, path, was)
+		if marker != "" {
+			if err := os.WriteFile(marker, nil, 0o644); err != nil {
+				return fmt.Errorf("marker %s: %w", marker, err)
+			}
+		}
+		var last error
+		for end := time.Now().Add(limit); time.Now().Before(end); time.Sleep(200 * time.Millisecond) {
+			if _, last = os.Stat(until); last == nil {
+				return nil
+			}
+		}
+		return fmt.Errorf("%s did not appear in %s (last: %v)", until, limit, last)
+	}
+	if kind == "remove" {
+		st, err = n.RemoveHeld(dir, name, wait)
+	} else {
+		st, err = n.CreateHeld(dir, name, 0o644, wait)
+	}
+	if err != nil {
+		return fail("%s %s: %v", kind, path, err)
+	}
+	fmt.Fprintf(b.Out, "HELD %s %s status=%v\n", kind, path, st)
+	// The control: the same connection makes and removes a file of its own in the export's root.
+	_, cst, cerr := n.Create(root, ".vesper-held-control", 0o644)
+	if cerr == nil && cst == 0 {
+		cst, cerr = n.Remove(root, ".vesper-held-control")
+	}
+	fmt.Fprintf(b.Out, "HELD control status=%v err=%v\n", cst, cerr)
+	return st == 30 && cerr == nil && cst == 0 // ROFS for the held request, and the control went through
+}
+
 // Run runs the battery and reports whether every check passed.
 func (b *Battery) Run() bool {
 	m, err := b.dial(2050, ProgMount)

@@ -2,6 +2,8 @@ package nfsprobe
 
 import (
 	"encoding/binary"
+	"errors"
+	"fmt"
 	"io"
 	"net"
 	"testing"
@@ -130,5 +132,116 @@ func TestDecShort(t *testing.T) {
 	d.opaque(64)
 	if d.err == nil {
 		t.Error("an opaque over its limit was accepted")
+	}
+}
+
+// A held call arrives in two parts: the server has everything but the last bytes of the arguments until the
+// client's wait returns, and the call is whole afterwards (TD-079).
+func TestRemoveHeld(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	fh := []byte{9, 8, 7, 6}
+	held := make(chan struct{}) // closed when the server has seen that the end of the call is kept back
+	fail := make(chan string, 1)
+	go func() {
+		c, err := ln.Accept()
+		if err != nil {
+			fail <- "accept: " + err.Error()
+			close(held)
+			return
+		}
+		defer c.Close()
+		_ = c.SetReadDeadline(time.Now().Add(5 * time.Second)) // a client that keeps back too much fails this, not hangs
+		var h [4]byte
+		if _, err := io.ReadFull(c, h[:]); err != nil {
+			fail <- "no record mark: " + err.Error()
+			close(held)
+			return
+		}
+		n := int(binary.BigEndian.Uint32(h[:]) &^ (1 << 31))
+		body := make([]byte, n)
+		if _, err := io.ReadFull(c, body[:n-4]); err != nil {
+			fail <- "the first part: " + err.Error()
+			close(held)
+			return
+		}
+		_ = c.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+		if _, err := c.Read(body[n-4:]); err == nil {
+			fail <- "the end of the call arrived before the wait returned"
+			close(held)
+			return
+		}
+		_ = c.SetReadDeadline(time.Now().Add(5 * time.Second))
+		close(held)
+		if _, err := io.ReadFull(c, body[n-4:]); err != nil {
+			fail <- "the rest: " + err.Error()
+			return
+		}
+		d := &dec{b: body}
+		xid := d.u32()
+		d.u32()
+		d.u32()
+		_, _, proc := d.u32(), d.u32(), d.u32()
+		d.u32()
+		d.opaque(400)
+		d.u32()
+		d.opaque(400)
+		dir, name := d.opaque(64), string(d.opaque(255))
+		if proc != procRemove || string(dir) != string(fh) || name != "secret~" || d.err != nil {
+			fail <- fmt.Sprintf("the call as it arrived: proc %d dir %x name %q err %v", proc, dir, name, d.err)
+		}
+		var e enc
+		e.u32(0)
+		e.u32(xid)
+		e.u32(1)
+		e.u32(0)
+		e.u32(0)
+		e.u32(0)
+		e.u32(0)
+		e.u32(30) // ROFS
+		binary.BigEndian.PutUint32(e.b, uint32(len(e.b)-4)|1<<31)
+		_, _ = c.Write(e.b)
+	}()
+	c, err := Dial("", "127.0.0.1", ln.Addr().(*net.TCPAddr).Port, ProgNFS, 2*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	waited := false
+	st, err := NFS{c}.RemoveHeld(fh, "secret~", func() error {
+		select {
+		case <-held:
+		case <-time.After(10 * time.Second):
+			return errors.New("the server never saw the call held")
+		}
+		waited = true
+		return nil
+	})
+	select {
+	case msg := <-fail:
+		t.Fatal(msg)
+	default:
+	}
+	if err != nil || st != 30 || !waited {
+		t.Fatalf("RemoveHeld = %v, %v (waited %v)", st, err, waited)
+	}
+	for _, bad := range []struct {
+		hold int
+		wait func() error
+	}{{5, func() error { return nil }}, {0, func() error { return nil }}, {2, nil}} {
+		if _, err := c.CallHeld(3, procRemove, []byte{1, 2, 3, 4}, bad.hold, bad.wait); err == nil {
+			t.Errorf("a held call with hold %d and wait %v was sent", bad.hold, bad.wait != nil)
+		}
+	}
+	// A wait that fails ends the call with its error, and the connection, which has part of a request on it.
+	stop := errors.New("stop")
+	if _, err := c.CallHeld(3, procRemove, []byte{1, 2, 3, 4, 5, 6, 7, 8}, 4, func() error { return stop }); !errors.Is(err, stop) {
+		t.Errorf("a held call whose wait failed: %v", err)
+	}
+	if _, err := c.Call(3, procGetattr, nil); !errors.Is(err, net.ErrClosed) {
+		t.Errorf("a call on the connection of a held call that failed: %v, want the connection closed", err)
 	}
 }

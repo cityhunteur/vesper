@@ -392,6 +392,44 @@ case "${st}|${nbrk}|$(printf '%s' "${no}" | tr '\n' '|')" in
   *) record broken_list_refuses_every_change false "${st}; ${nbrk:-list not broken}; pid ${n0} -> ${n1:-none}; out: $(printf '%s' "${no}" | tr '\n' ' ' | cut -c1-300); macOS one='${none}' two='${ntwo}'" ;;
 esac
 
+# --- 6n. An object the server is told of again is the newest again (TD-079). The server remembers 768 objects and
+# drops the one that was last told or found longest ago. macOS saves the read-only file twice with a backup, so the
+# first new file is the backup and at no protected place. A test command then tells the server of 760 made-up
+# objects, of that backup again, and of 10 more made-up ones: more than the server remembers. By the order in which
+# the server first learned them the backup is among the oldest and would go; told again, it is among the newest
+# and stays. The task then tries to change it. Then macOS saves twice more, with the server's memory full: the
+# backup is now the third new file, which the server learned last, and it must be refused too (a server that
+# dropped its newest object, or took no new one when full, would let that through) ---------------------------------
+R="${F}/r79"; mkdir -p "${R}/hz"; echo v0 > "${R}/hz/secret"
+RETOLD='try() { if e=$("$@" 2>&1); then echo "DONE: $*"; else echo "refused: $* [$(echo "$e" | tail -1 | sed "s/.*: //")]"; fi; }; w() { i=0; while [ $i -lt 160 ] && [ ! -e "$1" ]; do i=$((i+1)); sleep 0.5; done; }; tries() { try dd if=/d/go1 of="/d/hz/secret~" conv=notrunc,fsync; try sh -c ": > /d/hz/secret~"; try rm "/d/hz/secret~"; echo tried; }; w /d/go1; tries > /d/out1 2>&1; sync; w /d/go2; tries > /d/out2 2>&1; sync'
+st="$(runb --bind="${R}:/d:rw" --bind="${R}/hz/secret:/b:ro" --detach binds-retold "${RETOLD}")"
+ratt() { ctl microvm unfs-log binds-retold 80 | grep -a -c 'another file is at its path'; }
+rsl() { ctl microvm unfs-list binds-retold | sed -n 's/^LIST [^ ]* .* s=\([0-9]*\)$/\1/p' | head -1; }
+rsave() { echo "$1" > "${R}/hz/new"; mv "${R}/hz/secret" "${R}/hz/secret~"; mv "${R}/hz/new" "${R}/hz/secret"; local b a; b="$(ratt)"; a="${b}"; for _ in $(seq 1 60); do a="$(ratt)"; [ "${a}" -gt "$2" ] && break; sleep 0.25; done; echo "${a}"; }
+sleep 2; r0="$(ratt)"; r1="$(rsave v1 "${r0}")"; r2="$(rsave v2 "${r1}")"
+# The second told object is the backup only when the list has just its three told objects: the file of the start
+# and the two new files.
+sleep 1; rs="$(rsl)"; rtold="$(ctl microvm test-unfs-list-retell binds-retold 2 760 10 | head -1)"; rlist="$(ctl microvm unfs-list binds-retold | head -1)"
+echo go > "${R}/go1"
+for _ in $(seq 1 60); do grep -q tried "${R}/out1" 2>/dev/null && break; sleep 0.5; done
+rm1="$(cat "${R}/hz/secret~" 2>/dev/null | tr '\n' ' ')"
+r3="$(rsave v3 "${r2}")"; r4="$(rsave v4 "${r3}")"; sleep 1; echo go > "${R}/go2"
+wait_stopped binds-retold 120 || ctl ctr -- kill binds-retold 30 >/dev/null
+ctl ctr -- delete binds-retold >/dev/null; sleep 2
+cnt() { printf '%s\n' "$1" | grep -c "$2"; }
+ro1="$(cat "${R}/out1" 2>/dev/null)"; ro2="$(cat "${R}/out2" 2>/dev/null)"
+rd="$(( $(cnt "${ro1}" 'DONE:') + $(cnt "${ro2}" 'DONE:') ))"; rr1="$(cnt "${ro1}" 'refused:.*\[Read-only file system\]')"; rr2="$(cnt "${ro2}" 'refused:.*\[Read-only file system\]')"
+rm2="$(cat "${R}/hz/secret~" 2>/dev/null | tr '\n' ' ')"
+case "${st}|${rs}|${rtold}" in
+  "STARTED binds-retold|3|RETOLD s "*)
+    if [ "${r1}" -gt "${r0}" ] && [ "${r2}" -gt "${r1}" ] && [ "${r3}" -gt "${r2}" ] && [ "${r4}" -gt "${r3}" ] && [ "${rd}" = 0 ] && [ "${rr1}" = 3 ] && [ "${rr2}" = 3 ] && [ "${rm1}" = "v1 " ] && [ "${rm2}" = "v3 " ]; then
+      record object_told_again_is_the_newest true "the backup of the read-only file was told again between 770 made-up objects (${rlist}); 3 changes to it were refused as read-only and macOS still read '${rm1}'; after two more saves with the memory full, 3 changes to the new backup were refused and macOS reads '${rm2}'"
+    else
+      record object_told_again_is_the_newest false "attaches ${r0}, ${r1}, ${r2}, ${r3}, ${r4}; ${rlist}; ${rd} went through: $(printf '%s\n%s\n' "${ro1}" "${ro2}" | grep 'DONE:' | tr '\n' ';'); refused as read-only ${rr1} then ${rr2} (want 3 and 3); macOS hz/secret~ '${rm1}' then '${rm2}' (want 'v1 ' then 'v3 ')"
+    fi ;;
+  *) record object_told_again_is_the_newest false "${st}; told objects before the command: ${rs:-?} (want 3: more would make another object the second); ${rtold:-not told again}; attaches ${r0}, ${r1}, ${r2}; out: $(printf '%s | %s' "${ro1}" "${ro2}" | tr '\n' ' ' | cut -c1-300)" ;;
+esac
+
 # --- 7. After the shim is killed, the reaper leaves no server, namespace or record ----------------------------------
 st="$(runb "${B[@]}" --detach binds-shim 'sleep 600')"
 sleep 4; ks="$(ctl ctr -- kill-shim binds-shim)"

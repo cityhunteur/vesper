@@ -910,6 +910,17 @@ case "$cmd" in
     id=${1:-}; valid_id "$id" || { echo "ERR bad id"; exit 2; }
     [ -f "$UNFS/$id.prot.list" ] || { echo "ERR no list of $id"; exit 1; }
     echo "x not a line of the list" >> "$UNFS/$id.prot.list" && echo "BROKEN list of $id" ;;
+  test-unfs-list-retell)   # ID N BEFORE AFTER: tell the server again of the N-th object it was told of, with
+    # BEFORE made-up objects before that line and AFTER after it, to fill its memory (TD-079)
+    id=${1:-}; valid_id "$id" || { echo "ERR bad id"; exit 2; }
+    n=${2:-}; before=${3:-}; after=${4:-}
+    digits "$n" && digits "$before" && digits "$after" && [ "$before" -le 4096 ] && [ "$after" -le 4096 ] \
+      || { echo "ERR usage: test-unfs-list-retell ID N BEFORE AFTER (BEFORE and AFTER at most 4096)"; exit 2; }
+    f="$UNFS/$id.prot.list"; [ -f "$f" ] || { echo "ERR no list of $id"; exit 1; }
+    line=$(awk '$1 == "s"' "$f" | sed -n "${n}p"); [ -n "$line" ] || { echo "ERR the list has no told object $n"; exit 1; }
+    { i=1; while [ "$i" -le "$before" ]; do echo "s 0 $i"; i=$((i + 1)); done
+      echo "$line"
+      i=1; while [ "$i" -le "$after" ]; do echo "s 0 $((before + i))"; i=$((i + 1)); done; } >> "$f" && echo "RETOLD $line" ;;
   unfs-list)   # ID: how many lines of each kind the server's list holds (TD-078)
     id=${1:-}; valid_id "$id" || { echo "ERR bad id"; exit 2; }
     [ -f "$UNFS/$id.prot.list" ] || { echo "LIST $id absent"; exit 1; }

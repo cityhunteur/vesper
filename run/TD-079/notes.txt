@@ -1,0 +1,59 @@
+TD-079 runs, 2026-11-18, System VM with 2 CPUs and 2048 MiB; the macOS volume is APFS and ignores letter case.
+
+1. A request held unfinished across two saves (the judge's J-1 of D-056).
+   `vesper-unfs probe --hold-remove hz/secret~ --until FILE --held-marker FILE2` mounts /s/0 as the guest, looks
+   the name up, sends a REMOVE of it but for its last 4 bytes, makes FILE2, waits until FILE exists, and sends
+   the rest. `--hold-create` does the same with an UNCHECKED CREATE. The server takes the call, looks at its list
+   (the look at the start of every request), and then waits for the end of the arguments. After the held request
+   the client makes and removes a file of its own in the export's root.
+   unfs suite step held_request_judged_with_the_list_as_it_is_then: sources hold read-write and hold/hz/secret as
+   a read-only file. The step waits for FILE2, then macOS saves hz/secret twice as an editor with a backup does,
+   so hz/secret~ comes to be the file that was the read-only file between the saves; then FILE is made. First a
+   held REMOVE (the name is absent when it is sent), then a held CREATE across two more saves.
+
+   Control 1: a server built without the look at the list in either check of a request (`prot_refresh()` taken
+   out of `exports_prot` and `exports_prot_follow`; the looks at the start of a request and on each loop turn
+   kept). Run on the first form of the step, with the REMOVE only:
+     attaches 0, 1 then 2; LIST unfs-h p=1 i=1 s=3; probe: HELD sent; HELD remove hz/secret~ status=OK;
+     hz/secret~ was gone from macOS.
+   So the request is held after the server's look at its start, and that look does not protect the file.
+
+   Control 2: a server built without the look in `exports_prot_follow` only, which is the check that CREATE,
+   SETATTR, WRITE, MKDIR, SYMLINK, MKNOD, LINK and COMMIT use; REMOVE, RMDIR and RENAME also use `exports_prot`:
+     remove: HELD sent remove hz/secret~ (absent); HELD remove hz/secret~ status=ROFS; HELD control status=OK
+     create: HELD sent create hz/secret~ (present); HELD create hz/secret~ status=OK; HELD control status=OK
+   So the held REMOVE alone would not show the loss of that look, and the held CREATE does.
+
+2. An object told again (the judge's J-2 of D-056).
+   `vesper-microvm test-unfs-list-retell ID 2 760 10` adds to the server's list 760 made-up objects, the second
+   told object again, and 10 more made-up objects: 774 told lines and 773 different objects with the three real
+   ones, against the 768 the server remembers.
+   Binds suite step object_told_again_is_the_newest: binds r79 read-write at /d and r79/hz/secret read-only at
+   /b; macOS saves twice with a backup; the second told object is then the backup hz/secret~ (the step requires
+   that the list has just three told objects before the command). After the command the task tries to change the
+   backup. Then macOS saves twice more, with the memory full, and the task tries to change the new backup.
+
+   Control: the server binary of main (d132fd69..., which counts an object from when it first learned it), run
+   on the first form of the step, without the two further saves:
+     LIST binds-retold p=1 i=1 s=774; 3 of 3 changes went through (write, truncate, remove); the backup was gone
+     from macOS. The other 19 steps of the binds suite passed.
+   No control was run for the two further saves.
+
+3. With this change (unfs3 binary d273df0f..., built twice with the same digest), on a shim built from the source
+   as merged:
+     held_request_judged_with_the_list_as_it_is_then: each hold was in place before its first save (the marker);
+       remove: HELD sent remove hz/secret~ (absent); status=ROFS; control status=OK; macOS read "v1" in the backup;
+       create: HELD sent create hz/secret~ (present); status=ROFS; control status=OK; macOS reads "v3";
+       LIST unfs-h p=1 i=1 s=5.
+     object_told_again_is_the_newest: LIST binds-retold p=1 i=1 s=774; 3 of 3 changes to the backup refused as
+       read-only and macOS read "v1"; after two more saves, 3 of 3 changes to the new backup refused and macOS
+       reads "v3".
+   Suites: unfs 14 of 14, microVM binds 20 of 20, microVM shares 12 of 12.
+   Unit tests: TestRemoveHeld (the end of a held call does not arrive before the wait returns; a failing wait
+   ends the call and the connection), TestListFile (an object told again gets a line again), and
+   TestRecordProtectIDs (a replaced file recorded again is the newest).
+
+4. Not run: a request held for longer than the 35 s the server's RPC library gives one read (the probe gives up
+   after 28 s); a held request of another kind than REMOVE and CREATE; a reread of the list in a running server
+   (it no longer tells old lines again: by reading only); that the server's own looks make an object newest; a
+   control for the two further saves of step object_told_again_is_the_newest.

@@ -238,6 +238,33 @@ func (n NFS) Remove(dir []byte, name string) (Status, error) {
 	return Status(d.u32()), d.err
 }
 
+// RemoveHeld is Remove with the request held before the end of the name until wait returns (Conn.CallHeld).
+func (n NFS) RemoveHeld(dir []byte, name string, wait func() error) (Status, error) {
+	var e enc
+	e.opaque(dir)
+	e.str(name)
+	d, err := n.CallHeld(3, procRemove, e.b, 4, wait) // the name's last bytes
+	if err != nil {
+		return 0, err
+	}
+	return Status(d.u32()), d.err
+}
+
+// CreateHeld is Create (UNCHECKED, which opens a file that is there) with the request held before the end of its
+// attributes until wait returns. The server checks a CREATE in another way than a REMOVE.
+func (n NFS) CreateHeld(dir []byte, name string, mode uint32, wait func() error) (Status, error) {
+	var e enc
+	e.opaque(dir)
+	e.str(name)
+	e.u32(0) // UNCHECKED
+	sattrMode(&e, &mode)
+	d, err := n.CallHeld(3, procCreate, e.b, 4, wait)
+	if err != nil {
+		return 0, err
+	}
+	return Status(d.u32()), d.err
+}
+
 // Chmod sets a mode.
 func (n NFS) Chmod(fh []byte, mode uint32) (Status, error) {
 	var e enc

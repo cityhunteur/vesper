@@ -136,6 +136,25 @@ func (e *AcceptError) Error() string {
 
 // Call sends procedure proc with XDR args and returns the XDR result.
 func (c *Conn) Call(vers, proc uint32, args []byte) (*dec, error) {
+	return c.call(vers, proc, args, 0, nil)
+}
+
+// CallHeld is Call with the request sent in two parts: all of it but its last hold bytes, and, when wait has
+// returned, the rest. In between the server has taken the call, started its handler and waits for the end of the
+// arguments: it does nothing else, and what it does with the call it decides after the rest arrived. A task can do
+// this to its own server (TD-078). wait must return within the time the server gives a read (35 s in libtirpc).
+// When wait returns an error, or the rest cannot be sent, the connection has part of a request on it and is closed.
+func (c *Conn) CallHeld(vers, proc uint32, args []byte, hold int, wait func() error) (*dec, error) {
+	if wait == nil {
+		return nil, errors.New("rpc: a held call needs a wait")
+	}
+	if hold <= 0 || hold > len(args) {
+		return nil, fmt.Errorf("rpc: cannot hold %d of %d argument bytes", hold, len(args))
+	}
+	return c.call(vers, proc, args, hold, wait)
+}
+
+func (c *Conn) call(vers, proc uint32, args []byte, hold int, wait func() error) (*dec, error) {
 	c.xid++
 	var e enc
 	e.u32(0) // record mark, filled below
@@ -163,8 +182,22 @@ func (c *Conn) Call(vers, proc uint32, args []byte) (*dec, error) {
 	if c.Timeout > 0 {
 		_ = c.c.SetDeadline(time.Now().Add(c.Timeout))
 	}
-	if _, err := c.c.Write(e.b); err != nil {
+	if _, err := c.c.Write(e.b[:len(e.b)-hold]); err != nil {
 		return nil, err
+	}
+	if hold > 0 {
+		_ = c.c.SetDeadline(time.Time{}) // the wait is the caller's
+		if err := wait(); err != nil {
+			c.c.Close() // part of a request is on it: the next call's first bytes would end this one
+			return nil, err
+		}
+		if c.Timeout > 0 {
+			_ = c.c.SetDeadline(time.Now().Add(c.Timeout))
+		}
+		if _, err := c.c.Write(e.b[len(e.b)-hold:]); err != nil {
+			c.c.Close()
+			return nil, err
+		}
 	}
 	for {
 		rec, err := c.readRecord()

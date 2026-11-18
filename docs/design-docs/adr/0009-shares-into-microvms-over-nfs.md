@@ -149,7 +149,7 @@ number.
 | Record `unfs/ID.prot` | supervisor | numbers of what each read-only source was at a start, and of files that replaced one | first 150 of starts, newest 50 replaced | one launch of the task | launcher, at stop and at a new launch |
 | Holds `unfs/ID.prot.d/ns` | supervisor | a read-only mount of each recorded object, in a mount namespace of the holds' own | as the record | one launch | launcher, through `vesper-unfs release`; the supervisor drops a hold that the record no longer names |
 | List `unfs/ID.prot.list` | supervisor | `p` places, `i` recorded numbers, `s` numbers of objects at or about to be at a place | grows by one line an attach; the server is started again after 1 MiB | one run of the server | launcher; written anew at each start |
-| Set in the server | server | the `i` numbers and a ring of objects told (`s`) or found at a place | 256 and 768 | one run of the server | ends with the server |
+| Set in the server | server | the `i` numbers and the objects told (`s`) or found at a place, newest by when each was last told or found | 256 and 768 | one run of the server | ends with the server |
 | Pins | supervisor | descriptors of replaced read-only files | newest 256 | one run of the server | end with the supervisor |
 
 **The invariants.**

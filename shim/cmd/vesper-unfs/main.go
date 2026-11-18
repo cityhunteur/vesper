@@ -229,12 +229,32 @@ func probe(args []string) int {
 	fs.UintVar(&gid, "gid", 0, "AUTH_SYS gid")
 	fs.DurationVar(&b.Timeout, "timeout", 5*time.Second, "per-call timeout")
 	var out, in string
+	var holdRemove, holdCreate, until, heldMarker string
+	fs.StringVar(&holdRemove, "hold-remove", "", "send a REMOVE of this path below /s/0, hold it unfinished until --until exists, and report the status (TD-079)")
+	fs.StringVar(&holdCreate, "hold-create", "", "the same with an UNCHECKED CREATE of this path")
+	fs.StringVar(&until, "until", "", "with --hold-remove or --hold-create: the file to wait for")
+	fs.StringVar(&heldMarker, "held-marker", "", "with --hold-remove or --hold-create: a file to make when the request is held")
 	fs.StringVar(&out, "handles-out", "", "save handles of /s/0 and /s/0/file.txt to this file, and stop")
 	fs.StringVar(&in, "handles-in", "", "use handles saved by --handles-out (after a restart), and stop")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	b.Cred = nfsprobe.Cred{UID: uint32(uid), GID: uint32(gid)}
+	if holdRemove != "" || holdCreate != "" || until != "" || heldMarker != "" {
+		kind, path := "remove", holdRemove
+		if holdCreate != "" {
+			kind, path = "create", holdCreate
+		}
+		if path == "" || until == "" || (holdRemove != "" && holdCreate != "") {
+			fmt.Fprintln(os.Stderr, "vesper-unfs probe: one of --hold-remove PATH and --hold-create PATH, with --until FILE [--held-marker FILE]")
+			return 2
+		}
+		// Less than the 35 s the server's RPC library gives a read of a request.
+		if !b.Held(kind, path, until, heldMarker, 28*time.Second) {
+			return 1
+		}
+		return 0
+	}
 	if out != "" || in != "" {
 		var err error
 		if out != "" {

@@ -148,6 +148,16 @@ func MergeProtectIDs(old []ProtectID, ids ...ProtectID) []ProtectID {
 			swaps = kept
 			starts = append(starts, id)
 		case has(swaps, id):
+			// Recorded again: it was at a place again, and is the newest again (the server ages it the same way).
+			// It stays a replaced file, also when a start found it as a source and the start numbers are full:
+			// kept as it came, it would be written without its kind and lost at the next merge (council J-1).
+			kept := swaps[:0]
+			for _, o := range swaps {
+				if !o.same(id) {
+					kept = append(kept, o)
+				}
+			}
+			swaps = append(kept, ProtectID{Dev: id.Dev, Ino: id.Ino, Swapped: true})
 		case id.Swapped:
 			swaps = append(swaps, id)
 		case len(starts) < MaxProtectStarts:
