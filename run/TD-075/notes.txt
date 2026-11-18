@@ -1,0 +1,30 @@
+TD-075: the share server ended with a segmentation fault on about one task start in three. 2026-11-18, System VM
+with 2 CPUs and 2048 MiB.
+
+1. Seen while testing TD-073: a task with seven sources (a read-only file source first) sometimes failed to start:
+     ERROR {"stage":"shares","message":"share /b: mount /s/1: connection refused"}
+   Rate with the same seven binds, each task started detached and removed:
+     main at 9ba08db (unfsd 5cf10e27...):            9 failed starts of 30
+     the TD-073 branch (another unfsd, same loop):   2 of 20, 7 of 20
+   So it is not from TD-073. When it began is not known: the layout was first run today.
+
+2. What the guest saw: its connect to the NFS port before the mounts succeeded; the mount failed; straight after,
+   both ports refused a connection (a line added to the mount error for this).
+
+3. What the server did. The supervisor now writes a line to the System VM's log when a server ends:
+     the server ended after 2.111s with code 1 (<nil>); its last output: "UNFS3 unfsd 0.10.0 ... segmentation fault"
+   with no mark of a stop it was told to make. A stop it was told to make reads:
+     ... its last output: "... [the supervisor was sent terminated and passed it on]"
+   unfsd writes its messages to its standard output, which went to /dev/null, so the fault was silent before.
+
+4. Where. A debug build (not shipped) that records what the server is doing:
+     segmentation fault at svc_getreq_poll (proc -1)      in 4 of 4 crashes (21 launches)
+   That is inside libtirpc's walk of its descriptor array, before any request is dispatched. unfs3_svc_run() calls
+   poll(svc_pollfd, ...) and svc_getreq_poll(svc_pollfd, r) on the library's own array. When a connection is taken,
+   the library reallocates the array; with a second descriptor ready in the same round, the walk goes on in the old,
+   freed array. libtirpc's own svc_run() polls a copy for this reason.
+   Not a trigger by itself: 300 rounds of four connections opened at once to the two ports, three times.
+
+5. The fix, unfs3 patch 0005 (binary 0a350fb5..., built twice with the same digest): poll a private copy and give
+   each ready descriptor to svc_getreq_common().
+     0 failed starts of 40 with the same seven binds.

@@ -145,6 +145,30 @@ else
   record share_rate_limited false "${set1}: ${slow}; ${set2}: ${fast}"
 fi
 
+# --- 5f. Tasks start whatever the timing of their first connections (TD-075, unfs3 patch 0005). A guest's start
+# connects to the server's NFS port and at once to its mount port. unfs3 0.10.0 walked the RPC library's descriptor
+# array while the library reallocated it, and with seven sources about one start in three ended the server with a
+# segmentation fault ("mount /s/1: connection refused"; 9 of 30 before the patch). Twelve starts in a row all work,
+# and no server ended by itself --------------------------------------------------------------------------------------
+Z="${F}/starts"; mkdir -p "${Z}/y" "${Z}/conf" "${Z}/work" "${Z}/top/conf2" "${Z}/rod/out"
+echo s > "${Z}/y/secret"; echo k > "${Z}/conf/keep"; echo k > "${Z}/top/conf2/keep"
+# Names of this run only: a server's exit line stays in the System VM's log after the task is gone.
+STARTS="${SHARES_STARTS:-12}"; sfail=0; smsg=""; own=0; told=0; run="z$(date +%s | tail -c 6)"
+for i in $(seq 1 "${STARTS}"); do
+  n="shares-${run}-${i}"
+  st="$(runb --bind="${Z}:/d:rw" --bind="${Z}/y/secret:/b:ro" --bind="${Z}/conf:/c:ro" --bind="${Z}/top/conf2:/c2:ro" --bind="${Z}/work:/w:rw" --bind="${Z}/rod:/r:ro" --bind="${Z}/rod/out:/out:rw" --detach "${n}" 'sleep 2')"
+  case "${st}" in "STARTED ${n}") ;; *) sfail=$((sfail + 1)); smsg="${smsg} $(printf '%s' "${st}" | grep -o 'message[^}]*' | head -1 | cut -c1-160);" ;; esac
+  ctl ctr -- kill "${n}" 20 >/dev/null; ctl ctr -- delete "${n}" >/dev/null
+  # Each end of this task's server, one line each: every one must be a stop the supervisor was told to make.
+  ends="$(ctl microvm unfs-log "${n}" 20 | grep -a 'the server ended')"
+  o="$(printf '%s\n' "${ends}" | grep -c 'the server ended by itself')"; t="$(printf '%s\n' "${ends}" | grep -c 'the server ended as told')"
+  own=$((own + o)); told=$((told + t))
+  [ "${o}" = 0 ] || smsg="${smsg} $(printf '%s\n' "${ends}" | grep 'by itself' | tail -1 | sed 's/.*the server ended/ended/' | cut -c1-200);"
+done
+if [ "${sfail}" = 0 ] && [ "${own}" = 0 ] && [ "${told}" -ge "${STARTS}" ]; then record starts_whatever_the_connection_timing true "${STARTS} starts of a task with seven sources, a file source first: all started; ${told} servers ended as told and none by itself"
+else record starts_whatever_the_connection_timing false "${sfail} of ${STARTS} starts failed; servers ended by themselves: ${own}, as told: ${told};${smsg}"; fi
+
+
 # --- 6. Nothing is left -------------------------------------------------------------------------------------------
 left="$(ctl ctr -- leftovers)"; srv=""; gone=true
 for n in shares-a shares-b shares-c shares-d shares-e shares-f shares-g shares-k shares-r shares-n shares-s shares-t; do

@@ -393,9 +393,29 @@ func mountAt(f *os.File, s Share) error {
 		return fmt.Errorf("the share server did not answer the mount of %s within %s", s.Export, MountTimeout)
 	}
 	if err != nil {
-		return fmt.Errorf("mount %s: %s", s.Export, strings.TrimSpace(string(out)))
+		return fmt.Errorf("mount %s: %s (%s)", s.Export, strings.TrimSpace(string(out)), serverPorts())
 	}
 	return nil
+}
+
+// serverPorts says, for a mount that failed, whether the server's two ports take a connection now: the NFS port,
+// which the probe before the mounts checked, and the mount port, which it did not.
+func serverPorts() string {
+	var parts []string
+	for _, p := range []int{unfs.NFSPort, unfs.MountPort} {
+		state := "open"
+		c, err := net.DialTimeout("tcp", net.JoinHostPort(unfs.ServerAddr, fmt.Sprint(p)), time.Second)
+		if err != nil {
+			state = err.Error()
+			if i := strings.LastIndex(state, ": "); i >= 0 {
+				state = state[i+2:]
+			}
+		} else {
+			c.Close()
+		}
+		parts = append(parts, fmt.Sprintf("port %d: %s", p, state))
+	}
+	return strings.Join(parts, ", ")
 }
 
 // MountOne is the child of mountOne: it mounts export on descriptor 3.

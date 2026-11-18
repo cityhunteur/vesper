@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -13,6 +14,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -264,7 +266,10 @@ func Run(cfg Config) (int, error) {
 	cc, _ := json.Marshal(childConfig{Sources: cfg.Sources, Nests: Nests(cfg.Sources), Squash: cfg.Squash, Root: cfg.Root, Unfsd: cfg.Unfsd, Check: check, PauseNestsMs: cfg.TestPauseNests.Milliseconds()})
 	cmd := exec.Command("/proc/self/exe", "init")
 	cmd.Env = []string{configEnv + "=" + string(cc)}
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = nil, os.Stdout, os.Stderr
+	// The sandbox's and the server's last words are kept, for whoever asks why the server ended (LastWords). unfsd
+	// in the foreground writes its own messages, a segmentation fault among them, to its standard output.
+	lastWords.reset()
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = nil, io.MultiWriter(os.Stdout, &lastWords), io.MultiWriter(os.Stderr, &lastWords)
 	cmd.ExtraFiles = files
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Cloneflags: syscall.CLONE_NEWNS | syscall.CLONE_NEWPID | syscall.CLONE_NEWIPC | syscall.CLONE_NEWUTS,
@@ -293,6 +298,9 @@ func Run(cfg Config) (int, error) {
 	for {
 		select {
 		case s := <-sigs:
+			if s != syscall.SIGHUP { // a reload is not a stop
+				lastWords.told()
+			}
 			_ = cmd.Process.Signal(s)
 			if s != syscall.SIGHUP && kill == nil {
 				kill = time.After(stopGrace)
@@ -623,4 +631,51 @@ func dropToSquash() error {
 		return err
 	}
 	return unix.Prctl(unix.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)
+}
+
+// tailBuffer keeps the last bytes written to it.
+type tailBuffer struct {
+	mu   sync.Mutex
+	buf  []byte
+	stop bool
+}
+
+const tailKeep = 1024
+
+func (t *tailBuffer) Write(p []byte) (int, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.buf = append(t.buf, p...)
+	if len(t.buf) > tailKeep {
+		t.buf = append([]byte(nil), t.buf[len(t.buf)-tailKeep:]...)
+	}
+	return len(p), nil
+}
+
+// told records that the supervisor was sent a signal to stop the server and passed it on.
+func (t *tailBuffer) told() {
+	t.mu.Lock()
+	t.stop = true
+	t.mu.Unlock()
+}
+
+func (t *tailBuffer) reset() {
+	t.mu.Lock()
+	t.buf, t.stop = nil, false
+	t.mu.Unlock()
+}
+
+var lastWords tailBuffer
+
+// LastWords is the end of what the sandbox and the server wrote in the last Run, on one line and at most max bytes
+// (the end of it, where a fault is reported), and whether the supervisor was told to stop the server. An end it was
+// not told to make is the server's own.
+func LastWords(max int) (words string, told bool) {
+	lastWords.mu.Lock()
+	defer lastWords.mu.Unlock()
+	words = strings.Join(strings.Fields(string(lastWords.buf)), " ")
+	if len(words) > max {
+		words = words[len(words)-max:]
+	}
+	return words, lastWords.stop
 }
