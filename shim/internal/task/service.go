@@ -124,7 +124,12 @@ func (s *Service) Create(ctx context.Context, r *taskAPI.CreateTaskRequest) (_ *
 		}
 		annotations = map[string]string{shares.Annotation: v}
 	}
-	config, err := bundle.GuestConfig(spec.Process, annotations)
+	// The machine and the limits the guest applies both come from the spec's resources (TD-048).
+	size, err := bundle.SizeOf(spec, bundle.SystemCPUs())
+	if err != nil {
+		return nil, errgrpc.ToGRPCf(errdefs.ErrInvalidArgument, "%v", err)
+	}
+	config, err := bundle.GuestConfig(spec.Process, annotations, bundle.GuestResources(spec))
 	if err != nil {
 		return nil, errgrpc.ToGRPCf(errdefs.ErrInvalidArgument, "%v", err)
 	}
@@ -150,7 +155,7 @@ func (s *Service) Create(ctx context.Context, r *taskAPI.CreateTaskRequest) (_ *
 	log.G(ctx).WithFields(log.Fields{"task": r.ID, "strategy": meta.Strategy, "cached": meta.Cached, "layers": len(meta.Layers.Lower), "build_ms": meta.BuildMS}).Info("root drive ready")
 	t := newTask(r.ID, r.Bundle)
 	t.Image, t.Config, t.Port = image, config, 1028
-	t.LaunchArgs = plan.LaunchArgs()
+	t.LaunchArgs, t.SizeArgs = plan.LaunchArgs(), size.LaunchArgs()
 	t.Stdin, t.Stdout, t.Stderr, t.Terminal = r.Stdin, r.Stdout, r.Stderr, r.Terminal
 	s.task = t
 	s.persist(ctx, t)
@@ -177,7 +182,7 @@ func (s *Service) Start(ctx context.Context, r *taskAPI.StartRequest) (*taskAPI.
 	}
 	pid := 0
 	if r.ExecID == "" {
-		pid, err = s.backend.Launch(ctx, t.ID, t.Image, t.LaunchArgs)
+		pid, err = s.backend.Launch(ctx, t.ID, t.Image, append(append([]string(nil), t.LaunchArgs...), t.SizeArgs...))
 		if err != nil {
 			_ = s.backend.Cleanup(context.Background(), r.ID, false)
 			return nil, errgrpc.ToGRPCf(errdefs.ErrFailedPrecondition, "launch microVM: %v", err)

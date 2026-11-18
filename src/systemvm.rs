@@ -336,6 +336,28 @@ pub fn default_launch_config(inputs: &LaunchInputs<'_>) -> Result<LaunchConfig, 
     })
 }
 
+/// The least memory a System VM is configured with: dockerd, containerd and the 256 MiB reserve of the microVM
+/// memory budget need it before any microVM fits.
+pub const MIN_SYSTEMVM_MEMORY_MIB: u32 = 1024;
+
+/// Sets the System VM's CPUs and memory when given (TD-048: a microVM sized by its task's limits needs a System VM
+/// with room for it). The launcher clamps both to what Virtualization.framework allows on the Mac.
+pub fn set_machine_size(config: &mut LaunchConfig, cpus: Option<u16>, memory_mib: Option<u32>) -> Result<(), String> {
+    if let Some(cpus) = cpus {
+        if cpus == 0 {
+            return Err("the System VM needs at least 1 CPU".to_string());
+        }
+        config.cpu_count = cpus;
+    }
+    if let Some(memory_mib) = memory_mib {
+        if memory_mib < MIN_SYSTEMVM_MEMORY_MIB {
+            return Err(format!("the System VM needs at least {MIN_SYSTEMVM_MEMORY_MIB} MiB, got {memory_mib}"));
+        }
+        config.memory_mib = memory_mib;
+    }
+    Ok(())
+}
+
 pub fn write_launch_config(path: impl AsRef<Path>, config: &LaunchConfig) -> Result<(), String> {
     let path = path.as_ref();
     ensure_parent(path)?;
@@ -417,6 +439,22 @@ mod tests {
         assert!(!old.watch && !old.read_only);
     }
     use tempfile::tempdir;
+
+    #[test]
+    fn machine_size_is_set_only_when_given_and_in_range() {
+        let inputs = LaunchInputs { kernel_path: "/k", initrd_path: Some("/i"), console_log_path: "/c.log", ..Default::default() };
+        let mut c = default_launch_config(&inputs).expect("config");
+        assert_eq!((c.cpu_count, c.memory_mib), (2, 2048));
+        set_machine_size(&mut c, None, None).expect("nothing given");
+        assert_eq!((c.cpu_count, c.memory_mib), (2, 2048));
+        set_machine_size(&mut c, Some(6), None).expect("cpus");
+        set_machine_size(&mut c, None, Some(8192)).expect("memory");
+        assert_eq!((c.cpu_count, c.memory_mib), (6, 8192));
+        assert!(set_machine_size(&mut c, Some(0), None).is_err());
+        assert!(set_machine_size(&mut c, None, Some(MIN_SYSTEMVM_MEMORY_MIB - 1)).is_err());
+        // A refused size changes nothing.
+        assert_eq!((c.cpu_count, c.memory_mib), (6, 8192));
+    }
 
     #[test]
     fn build_manifest_is_deterministic() {

@@ -32,7 +32,13 @@ if [ $# -eq 0 ]; then
     fi
     DATA_ARGS=(--data-disk "${DATA_DISK}")
   fi
-  exec cargo run --bin systemvmctl -- launch-config --from-lock --dir "${IMAGE_DIR}" --console-log "${CONSOLE_LOG}" --out "${OUT}" "${SHARE_ARGS[@]}" "${DATA_ARGS[@]}"
+  # VESPER_SYSTEMVM_CPUS and VESPER_SYSTEMVM_MEMORY_MIB: the System VM's size (default 2 CPUs and 2048 MiB). A microVM
+  # sized by its task's limits needs room in it (TD-048): at most as many vCPUs as the System VM has CPUs, and memory
+  # within the System VM's memory less a 256 MiB reserve.
+  SIZE_ARGS=()
+  [ -n "${VESPER_SYSTEMVM_CPUS:-}" ] && SIZE_ARGS+=(--cpus "${VESPER_SYSTEMVM_CPUS}")
+  [ -n "${VESPER_SYSTEMVM_MEMORY_MIB:-}" ] && SIZE_ARGS+=(--memory-mib "${VESPER_SYSTEMVM_MEMORY_MIB}")
+  exec cargo run --bin systemvmctl -- launch-config --from-lock --dir "${IMAGE_DIR}" --console-log "${CONSOLE_LOG}" --out "${OUT}" "${SHARE_ARGS[@]}" "${DATA_ARGS[@]}" ${SIZE_ARGS[@]+"${SIZE_ARGS[@]}"}
 fi
 
 KERNEL_PATH="$1"

@@ -205,6 +205,7 @@ Public symbols by file:
   console_log_path, shared_directories, data_disk_path? }`, `ProbeSettings { login_user, shell_prompt,
   commands, success_pattern, shutdown_command }` with `validate()`,
   `LaunchInputs` (borrowed inputs for `default_launch_config`),
+  `set_machine_size(&mut LaunchConfig, cpus?, memory_mib?)` (TD-048: at least 1 CPU and `MIN_SYSTEMVM_MEMORY_MIB`, 1024),
   `BootCheckConfig { …, max_boot_ms: Option }`, `BootCheckReport {
   iterations, successful, failed, failures, durations_ms, max_duration_ms,
   mean_duration_ms, boot_ms, max_boot_ms, max_boot_allowed_ms? }`, `ImageLock {

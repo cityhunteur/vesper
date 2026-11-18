@@ -4,6 +4,8 @@
 #        vesper-ctr run NAME WORDS...             ctr run --rm … sh -c "WORDS"; prints RC <code> then OUT <line> per output line
 #        vesper-ctr run-binds [--bind=SRC:DST:ro|rw ...] [--user=UID:GID] [--detach] NAME WORDS...   the same with bind
 #                                                  mounts; --detach is `ctr run -d` (STARTED NAME)
+#                             [--memory=BYTES] [--cpus=N[.N]] [--cpuset=LIST]   the task's limits (TD-048): ctr's
+#                                                  --memory-limit, --cpus and --cpuset-cpus
 #        vesper-ctr kill NAME [SECONDS]           as kill, waiting up to SECONDS for STOPPED
 #        vesper-ctr start NAME WORDS...           ctr run -d … sh -c "WORDS"; STARTED NAME pid=N
 #        vesper-ctr state NAME                    STATE NAME <STATUS> pid=N
@@ -157,6 +159,15 @@ run_binds() {
       --user=*)
         case "${1#--user=}" in *[!0-9:]*|'') echo "ERR bad --user"; rm -f "$opts"; return 2 ;; esac
         printf '%s\n' --user "${1#--user=}" >> "$opts" ;;
+      --memory=*)
+        case "${1#--memory=}" in *[!0-9]*|'') echo "ERR bad --memory (bytes)"; rm -f "$opts"; return 2 ;; esac
+        printf '%s\n' --memory-limit "${1#--memory=}" >> "$opts" ;;
+      --cpus=*)
+        case "${1#--cpus=}" in *[!0-9.]*|'') echo "ERR bad --cpus"; rm -f "$opts"; return 2 ;; esac
+        printf '%s\n' --cpus "${1#--cpus=}" >> "$opts" ;;
+      --cpuset=*)
+        case "${1#--cpuset=}" in *[!0-9,-]*|'') echo "ERR bad --cpuset"; rm -f "$opts"; return 2 ;; esac
+        printf '%s\n' --cpuset-cpus "${1#--cpuset=}" >> "$opts" ;;
       *) break ;;
     esac
     shift

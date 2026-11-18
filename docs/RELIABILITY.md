@@ -121,6 +121,20 @@ Every Firecracker microVM in the System VM, the shim's and `vesperd`'s, is admit
 `MemTotal` less a 256 MiB reserve, counted as the sum of the microVMs' `memory.max` ceilings (`vesper-memadmit`). A
 launch over it fails at once with `ERR memory: …` instead of pushing the System VM into the OOM killer, which could
 take dockerd or containerd. Docker containers (runc) are outside the budget, so the reserve is all they are sure of.
+A shim microVM's ceiling follows its task's memory limit (TD-048, D-051): 352 MiB with no limit. For a limit of
+L MiB the guest is L + 152 + L/32 MiB, 8 MiB more for each vCPU after the first and 112 MiB more above 2,048 MiB;
+the ceiling is the guest plus 96 MiB and 1 MiB for each 128 MiB of guest above 256. The whole ceiling is booked at
+launch, whatever the task uses, and stays booked until the task is deleted, not until it stops: a memory limit is a
+reservation. A 2,048 MiB System VM therefore holds one task with a limit of about 1.3 GiB and a small image (the
+root drive's copy is booked too), or two with 512 MiB limits. `VESPER_SYSTEMVM_MEMORY_MIB` and
+`VESPER_SYSTEMVM_CPUS` size the System VM. `make systemvm-microvm-size-suite` checks the sizing and the refusals.
+
+A task that dies of memory exits 137 in three cases that look the same to its client: the workload's cgroup in the
+guest killed its first process; the System VM killed Firecracker at the microVM's ceiling; someone sent `SIGKILL`.
+No OOM event is published. For the second case `vesper-microvm cleanup` writes a `VESPER-MICROVM-OOM` line to the
+System VM's log and to the microVM's console log before it removes the cgroup. `ctr task metrics` reads the
+microVM's cgroup, so its memory limit is the ceiling, not the task's limit, and its usage includes the guest
+kernel.
 Each microVM's console log is at most 2 MiB (two 1 MiB files). `make systemvm-bounds-suite` checks both.
 
 ## Escalation rule

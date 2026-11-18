@@ -43,6 +43,8 @@ There is no `.env` file. The binaries take flags, not environment variables; see
 | `VESPER_SHARES` | Host directories to share into the System VM over virtio-fs, space-separated `PATH`, `PATH:ro` or `PATH:nowatch` (no inotify replay of host edits, GH #150); read by `make systemvm-launch-config` | no | empty |
 | `VESPER_DATA_DISK` | Persistent System VM data disk image on macOS (GH #164); a relative path is taken from the repository root; `none` attaches no disk, so the System VM keeps its state in tmpfs. Created sparse on first use; delete it with the System VM stopped to reset all container state ([systemvm-bringup.md](process/systemvm-bringup.md#persistent-data-disk-gh-164)); read by `make systemvm-launch-config` | no | `run/systemvm/data.img` |
 | `VESPER_DATA_DISK_GIB` | Size in GiB of a data disk image that `make systemvm-launch-config` creates; an existing image is never resized | no | `64` |
+| `VESPER_SYSTEMVM_CPUS` | The System VM's CPUs, read by `make systemvm-launch-config` and `make systemvm-up-shares` (`systemvmctl launch-config --cpus`). A shim microVM can have at most this many vCPUs (TD-048) | no | `2` |
+| `VESPER_SYSTEMVM_MEMORY_MIB` | The System VM's memory in MiB, at least 1024 (`systemvmctl launch-config --memory-mib`). The microVM memory budget is this less a 256 MiB reserve, so a task with a large memory limit needs a larger System VM (TD-048, TD-056) | no | `2048` |
 | `VALIDATE_ENTITLEMENTS_FORCE_PYTHON` | Force the Python plist validator | no | `0` |
 | `REPO` | Target repo for `scripts/update-issue-checklists.sh` | no | `cityhunteur/vesper` |
 | `VESPER_ISSUE_ID`, `VESPER_RUN_DIR`, `VESPER_BUNDLE_DIR` | Exported by the `env.sh` that `scripts/harness/init_issue_run.sh` writes | no | per issue |

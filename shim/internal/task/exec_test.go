@@ -7,6 +7,7 @@ import (
 	"github.com/cityhunteur/vesper/shim/internal/backend"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -224,5 +225,40 @@ func TestKillFallbackWhenTheGuestRefusesTheSignal(t *testing.T) {
 	case <-b.stopped:
 	case <-time.After(2 * time.Second):
 		t.Fatal("the microVM was not stopped after a SIGKILL that did not reach the guest")
+	}
+}
+
+// recordingBackend keeps the launch arguments and fails the launch, so Start goes no further.
+type recordingBackend struct {
+	backend.Backend
+	launched []string
+}
+
+func (b *recordingBackend) Launch(_ context.Context, _, _ string, extra []string) (int, error) {
+	b.launched = extra
+	return 0, errors.New("stop here")
+}
+func (b *recordingBackend) Cleanup(context.Context, string, bool) error { return nil }
+
+// Start passes the share arguments and the size arguments to the launch (TD-048, council COR-4).
+func TestStartPassesTheSizeToTheLaunch(t *testing.T) {
+	ctx := context.Background()
+	b := &recordingBackend{}
+	s, err := NewService(ctx, nil, nil, b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task := newTask("init", t.TempDir())
+	task.LaunchArgs = []string{"--share-net"}
+	task.SizeArgs = []string{"--mem-mib", "648", "--vcpus", "2"}
+	s.task = task
+	if _, err := s.Start(ctx, &taskAPI.StartRequest{ID: "init"}); status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("start: %v", err)
+	}
+	if got := strings.Join(b.launched, " "); got != "--share-net --mem-mib 648 --vcpus 2" {
+		t.Fatalf("launch arguments %q", got)
+	}
+	if len(task.LaunchArgs) != 1 {
+		t.Fatalf("the share arguments changed: %q", task.LaunchArgs)
 	}
 }

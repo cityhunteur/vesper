@@ -30,6 +30,14 @@ The Go module pins containerd 2.1.5 and builds static Linux arm64 binaries with 
   for container and volume create; a request that is not listed, or a create whose body dockerd did not pass, is
   refused. `go test ./internal/authz` covers path handling, key case, duplicate keys and missing bodies. Built by
   `build-shim.sh` and installed as `/usr/bin/vesper-authz`.
+- `internal/bundle/size.go` (TD-048, D-051): `SizeOf(spec, systemCPUs)` reads the microVM's machine from the task's OCI resources: a
+  memory limit of L MiB gives a guest of L + 152 + L/32 MiB, 8 MiB more for each vCPU after the first and 112 MiB more
+  above 2,048 MiB, never under 256 (the terms are fitted to `run/TD-048/measurements.txt`); a CPU set gives its count of
+  vCPUs, else a quota gives quota/period rounded up, at most the System VM's CPUs. `Size.LaunchArgs()` gives `--mem-mib`,
+  `--vcpus` and `--cpu-quota QUOTA:PERIOD` for `vesper-microvm launch`, nothing for the default machine.
+  `GuestResources(spec)` carries the memory limit and the CPU quota into the guest's config, where runc sets them on the
+  workload's cgroup; nothing else of `linux.resources` is carried. `Stats` still reads the microVM's cgroup, so a limited
+  task's memory limit reads as its ceiling.
 - `internal/shares`: maps a task's bind mounts from macOS shares onto its microVM's NFS exports (GH #160 M4, M5).
   `MakePlan` turns each bind whose resolved source lies under a virtio-fs mount into an export and a guest share,
   directories and single files (GH #208), refusing sources that hold another share; binds from several shares are one server's sources

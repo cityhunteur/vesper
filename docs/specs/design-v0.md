@@ -237,7 +237,7 @@ Backend A runs stock Firecracker on Linux, so its parity depends on the System V
   paths (TD-067); a share's own I/O is bounded by a rate limit on its network (TD-069, D-045); read-only binds
   get no host-edit events. The patched server fixed the data loss on appends (TD-068) and on writes to a file also reachable read-only (TD-072), whole-second times (TD-066)
   and the crash on malformed handles (TD-065). Docker containers still run on runc with virtio-fs binds (GH #53).
-* A microVM gets the vCPUs and memory its workload asks for. **Not met** (TD-048): every microVM has 1 vCPU and 256 MiB.
+* A microVM gets the vCPUs and memory its workload asks for. **Meets the requirement for shim microVMs** (TD-048, D-051; `make systemvm-microvm-size-suite`): a task's memory limit and CPU quota or CPU set size its microVM, within the System VM's CPUs and memory budget, and are set on the workload's cgroup in the guest. A task with no limit gets 1 vCPU and 256 MiB. Deviations: a memory limit also reserves the microVM's memory in the System VM until the task is deleted, and a limit that does not fit is refused where runc would start the container; a CPU quota above the System VM's CPUs runs on the CPUs there are; the process limit, swap and CPU weight are not carried; a limit cannot be changed on a running task; no OOM event is published.
 * Stock Firecracker runs under the jailer in the System VM. **Meets the requirement** (`make systemvm-microvm-suite`).
 * The System VM uses a NAT attachment by default, which needs no restricted entitlement. MicroVM networking is in [Networking strategy](#networking-strategy).
 
@@ -557,7 +557,7 @@ Firecracker relies on layers: the virtualisation boundary, seccomp, and a jailer
 
 * Process sandboxing: App Sandbox or a seatbelt profile, file access limited to the microVM bundle directories, and no network access unless configured. The status is under [Requirements](#requirements).
 * Privilege separation: `vesperd` runs unprivileged. A root helper exists only if networking needs one; it does network set-up only, validates its input, denies by default and writes an audit record for each call.
-* CPU and memory ceilings in the microVM configuration. **Not met** (TD-048).
+* CPU and memory ceilings in the microVM configuration. **Meets the requirement** (TD-048, D-051): each shim microVM's vCPUs and memory come from its task's limits, and its Firecracker runs under a cgroup memory ceiling counted in the shared budget (TD-056) and, when the task has a CPU quota, a cgroup CPU limit of the quota plus a quarter of a CPU. The limits inside the guest are for the workload's benefit and are not a bound against it.
 * Process priorities and limits on macOS. **Not met** (TD-046).
 * Auditing: structured logs and metrics that record every API call. **Not met** (TD-007): no binary has logging, metrics or tracing.
 * A threat-model review and a security review before parity GA. **Not met** (TD-051): neither has an owner, and the table below is a first draft.
