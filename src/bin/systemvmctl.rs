@@ -63,6 +63,13 @@ enum Commands {
         /// Persistent data disk image on macOS (absolute path), attached writable (GH #164).
         #[arg(long)]
         data_disk: Option<String>,
+        /// The System VM's CPUs (default 2). A microVM can have at most this many vCPUs (TD-048).
+        #[arg(long)]
+        cpus: Option<u16>,
+        /// The System VM's memory in MiB (default 2048, at least 1024). The microVM memory budget is this less a
+        /// 256 MiB reserve (TD-048, TD-056).
+        #[arg(long)]
+        memory_mib: Option<u32>,
         #[arg(long, default_value = "run/systemvm/console.log")]
         console_log: String,
         #[arg(long, default_value = "build/systemvm/launch-config.json")]
@@ -920,6 +927,8 @@ fn run() -> Result<(), String> {
             out,
             shares,
             data_disk,
+            cpus,
+            memory_mib,
         } => {
             let mut config = if from_lock {
                 let lock = vesper::systemvm::load_image_lock(&lock)?;
@@ -944,8 +953,15 @@ fn run() -> Result<(), String> {
             if let Some(path) = data_disk.as_deref() {
                 vesper::systemvm::attach_data_disk(&mut config, path)?;
             }
+            vesper::systemvm::set_machine_size(&mut config, cpus, memory_mib)?;
             vesper::systemvm::write_launch_config(&out, &config)?;
-            println!("wrote launch config: {out} ({} shared director{})", config.shared_directories.len(), if config.shared_directories.len() == 1 { "y" } else { "ies" });
+            println!(
+                "wrote launch config: {out} ({} CPUs, {} MiB, {} shared director{})",
+                config.cpu_count,
+                config.memory_mib,
+                config.shared_directories.len(),
+                if config.shared_directories.len() == 1 { "y" } else { "ies" }
+            );
             Ok(())
         }
         Commands::LockEnv { lock } => {

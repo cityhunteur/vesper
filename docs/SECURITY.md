@@ -560,3 +560,31 @@ Workloads share the microVM's namespaces and receive full guest capabilities. Th
 The terminal receiver uses only guest-local Unix sockets and the existing pinned containerd libraries.
 No new host-visible socket, share or entitlement is required.
 Pause, snapshot and checkpoint parity must account for runc state before those operations can be claimed.
+
+### MicroVM size (TD-048, D-051)
+
+A task's memory limit and CPU quota or CPU set size its microVM, and the guest's runc sets the limit and the quota on
+the workload's cgroup. Those limits inside the guest are for the workload's benefit only. The workload is root in
+its guest with every capability, so it can raise them; the measurement run in `run/TD-048/measurements.txt` does exactly
+that. The bounds that hold against a hostile workload are outside the
+guest:
+
+- the guest's memory and vCPUs, which Firecracker fixes at boot;
+- the `memory.max` of the Firecracker process's cgroup in the System VM (the guest plus 96 MiB, plus 1 MiB for each
+  128 MiB of guest above 256), which the jailer sets before Firecracker runs;
+- for a task with a CPU quota, the `cpu.max` of that cgroup: the quota plus a quarter of a CPU, which is for
+  Firecracker's own threads. `make systemvm-microvm-size-suite` lifts the quota inside the guest and spins on both
+  vCPUs of a 1.5 CPU task; the microVM used 1.75 CPUs (council SEC-1). A task with a CPU set and no quota is
+  bounded by its vCPUs alone;
+- the shared memory budget (`vesper-memadmit`, TD-056), which admits that ceiling before the launch and refuses a
+  microVM that does not fit.
+
+The size comes from the task's OCI spec, so whoever may start a task on the shim chooses it, up to the System VM's
+CPUs and the budget. Today that is root in the System VM and the Mac user through the control channel; dockerd
+refuses the runtime. One task can take the whole budget, and later launches, `vesperd`'s too, are then refused by
+name (`ERR memory`) until it is deleted; a running task is never squeezed. There is no cap for one task (council
+SEC-5); one is needed before a less trusted client reaches this runtime (GH #53). The shim checks the numbers before
+they reach the launcher: sums are checked before they can wrap, a CPU set is counted and refused as soon as it
+passes 32, a limit above 1 TiB is refused, and a quota's period must be one the kernel takes. `vesper-microvm
+launch` accepts only digits with no leading zero for `--mem-mib`, `--vcpus` and `--cpu-quota`, and the same number
+feeds the ceiling, the admission and Firecracker's configuration.

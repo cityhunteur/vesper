@@ -1,0 +1,62 @@
+TD-048 measurements, 2026-11-18, System VM with 2 CPUs and 2048 MiB (MemTotal 2068926464), branch feat/td048-microvm-size.
+
+1. Idle default guest (256 MiB, 1 vCPU), read by the workload:
+   MemTotal 220292 kB, MemFree 153876 kB, MemAvailable 152388 kB, nproc 1, cgroup 0::/workload.
+   So the guest's own use is about 107 MiB; SizeOf adds 128 MiB to a limit.
+
+2. Guest for a 512 MiB limit (648 MiB): the workload reads mem=596 (MiB MemTotal), memory.max=536870912.
+   A 480 MiB anonymous block is filled; a 560 MiB block is killed (dd exit 137). A 600 MiB block is refused by the
+   kernel before the limit acts (exit 1), because it is larger than the guest.
+
+3. Host ceiling with a large guest. `vesper-ctr run-binds --memory=1073741824 --cpus=2`: a 1168 MiB guest, 2 vCPUs.
+   The workload set its own memory.max to max, filled a block of MemAvailable less 16 MiB twice, then read all of
+   /dev/vda. `vesper-microvm machine`:
+     MACHINE size-peak vcpus=2 mem_max=1332740096 mem_peak=1180233728 oom_kills=0
+   Peak 1126 MiB under a 1271 MiB ceiling. The memory budget read committed=0 afterwards.
+
+4. Memory the workload has, against its limit (council REL-1). System VM with 6 CPUs and 8192 MiB
+   (VESPER_SYSTEMVM_CPUS=6 VESPER_SYSTEMVM_MEMORY_MIB=8192), first formula (guest = limit + 128 + limit/64).
+   Read by the workload: MemTotal and MemAvailable in MiB, and the kernel's bounce-buffer line.
+
+   limit  guest  vcpus  MemTotal  MemAvailable  swiotlb   guest - MemAvailable
+     512    648      1       596           497     1 MB    151
+    1024   1168      1      1104          1001     2 MB    167
+    1536   1688      1      1615          1514     2 MB    174
+    1900   2058      1      1916          1773    64 MB    285
+    2048   2208      1      2061          1927    64 MB    281
+    3072   3248      1      3083          2939    64 MB    309
+    4096   4288      1      4099          3949    64 MB    339
+     512    648      4       596           486     1 MB    162
+    1024   1168      4      1104           992     2 MB    176
+    1536   1688      4      1615          1484     2 MB    204
+    1900   2058      4      1916          1745    64 MB    313
+    2048   2208      4      2060          1924    64 MB    284
+    3072   3248      4      3082          2922    64 MB    326
+    4096   4288      4      4098          3930    64 MB    358
+     512    648      6       594           474     2 MB    174
+    1024   1168      6      1104           964     2 MB    204
+    1536   1688      6      1615          1476     2 MB    212
+    1900   2058      6      1915          1753    64 MB    305
+    2048   2208      6      2060          1923    64 MB    285
+    3072   3248      6      3082          2913    64 MB    335
+    4096   4288      6      4098          3927    64 MB    361
+
+   MemAvailable was under the limit in every row, so the first formula was too small. A guest over 2048 MiB has
+   memory above 4 GiB (its RAM starts at 2 GiB), and the kernel then keeps a 64 MiB bounce buffer; about 40 MiB more
+   goes at the same step. Each vCPU after the first costs up to 8 MiB.
+   Second formula (D-051): guest = limit + 152 + limit/32 + 8 for each vCPU after the first, plus 112 when that
+   passes 2048 MiB; a guest with no limit is 256 + 8 for each vCPU after the first.
+
+5. The same rows with the second formula (same System VM, rebuilt shim). MemAvailable less the limit, in MiB:
+
+   limit   1 vCPU  4 vCPUs  6 vCPUs
+     512       16       26       31
+    1024       18       18       27
+    1536       25       36       19
+    1838       31       65       78     (1 vCPU: a 2048 MiB guest, the largest under the step)
+    1839       41       64       81
+    2048       40       55       70
+    3072       48       51       58
+    4096       47       49       57
+
+   MemAvailable is at or above the limit in every row.

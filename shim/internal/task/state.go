@@ -43,6 +43,7 @@ type Task struct {
 	Image       string
 	Config      []byte
 	LaunchArgs  []string // vesper-microvm launch arguments for the task's host shares (GH #160 M5)
+	SizeArgs    []string // vesper-microvm launch arguments for the machine the spec's resources ask for (TD-048)
 	Port        uint32
 	Session     *backend.Session
 	stdinClosed bool

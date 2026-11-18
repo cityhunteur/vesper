@@ -2,6 +2,7 @@
 # Vesper microVM manager (GH #18): stock Firecracker under the jailer inside the System VM.
 # usage: vesper-microvm prepare
 #        vesper-microvm launch ID [--exit] [--rootfs PATH] [--cmd BASE64] [--vsock] [--share-net]
+#                                      [--mem-mib N] [--vcpus N] [--cpu-quota QUOTA:PERIOD]
 #                                             boot a microVM (kernel + busybox initramfs); --exit powers off after the
 #                                             marker; --rootfs attaches an ext4 image as /dev/vda, mounts it, prints
 #                                             VESPER-ROOTFS-OK <source digest> from its provenance and switches root;
@@ -18,6 +19,12 @@
 #                                             namespace, exporting each source as /s/0, /s/1, ... to the guest only,
 #                                             under supervise-daemon in its own memory-capped cgroup, admitted with
 #                                             the microVM; started before the jailer
+#                                             --mem-mib N and --vcpus N size the machine (TD-048; default 256 MiB
+#                                             and 1 vCPU): N MiB of guest memory, at least 256, admitted against the
+#                                             shared memory budget with its overhead, and at most as many vCPUs as
+#                                             the System VM has CPUs (and Firecracker's 32); --cpu-quota is the
+#                                             task's CFS quota in µs for each period, and the microVM's own cgroup
+#                                             gets cpu.max of that quota plus a quarter of a CPU for Firecracker
 #        vesper-microvm unfs-stop ID         stop ID's share server (the shim, when the task stops); UNFS ID stopped
 #        vesper-microvm unfs ID              UNFS ID state=running|stopped pid=N listen=yes|no mem_max= mem_peak=
 #                                             oom_kills=, or UNFS ID absent
@@ -28,6 +35,11 @@
 #                                             then REAP <n> (the vesper-microvm-reaper service runs it every 10 s)
 #        vesper-microvm setup-user           create the uid 10000 user that owns the share taps; USER <name> 10000
 #        vesper-microvm status ID            RUNNING ID pid=N | EXITED ID | ABSENT ID
+#        vesper-microvm machine ID           MACHINE ID vcpus=N mem_max=BYTES mem_peak=BYTES oom_kills=N
+#                                             cpu_max=QUOTA/PERIOD|none cpu_usec=N at_ms=N: Firecracker's vCPU
+#                                             descriptors and its cgroup's memory.max, memory.peak, OOM kills,
+#                                             cpu.max and CPU time used, with the System VM's uptime (TD-048)
+#        vesper-microvm limits               LIMITS cpus=N vcpus_max=32 mem_mib_min=256: what launch accepts here
 #        vesper-microvm isolation ID         JSON with uid, chroot, cgroup and seccomp checks
 #        vesper-microvm stop ID              SIGTERM, wait up to 10 s
 #        vesper-microvm crash ID             SIGKILL (abnormal termination)
@@ -59,11 +71,23 @@ fcpid() {
 }
 now_ms() { awk '{printf "%d", $1 * 1000}' /proc/uptime; }
 logfile() { echo "/var/log/vesper-microvm-$1.log"; }
-# memory.max of each microVM, counted in the shared budget (TD-056): the 256 MiB guest plus 96 MiB for Firecracker,
-# page tables, I/O buffers and reclaimable page cache. A guest that used all its memory peaked at 259 MiB
+# memory.max of each microVM, counted in the shared budget (TD-056): the guest's memory plus 96 MiB for Firecracker,
+# page tables, I/O buffers and reclaimable page cache. A 256 MiB guest that used all its memory peaked at 259 MiB
 # (run/W4/shim-memory-peak.txt). Launch also books the jail's tmpfs copies (kernel and initramfs, about 44 MB, and the
-# rootfs), so a 2 GiB System VM's budget holds four; vesperd's 640 MiB default is for its larger, configurable guests.
-CEILING=369098752
+# rootfs), so a 2 GiB System VM's budget holds four default guests; vesperd's 640 MiB default is for its larger,
+# configurable guests. A larger guest (--mem-mib, TD-048) gets 1 MiB more for each 128 MiB above the default, for
+# the page tables that map its memory, so the default guest's ceiling is unchanged at 352 MiB.
+MEM_MIB=256                        # guest memory without --mem-mib; also the least --mem-mib takes
+VCPUS=1                            # vCPUs without --vcpus
+VCPUS_MAX=32                       # Firecracker's limit
+ceiling_of() { echo $(( ($1 + 96 + ($1 - MEM_MIB) / 128) * 1048576 )); }
+# A number an option takes: digits with no leading zero, which the shell's arithmetic would read as octal while
+# `[` and Firecracker read it as decimal.
+number() { digits "${1:-}" && case "$1" in 0?*) return 1 ;; esac; }
+# cpu.max of a microVM whose task has a CFS quota (TD-048, council SEC-1): the quota plus a quarter of a CPU, in
+# each period. The workload can lift the quota inside its guest, so this is the limit that holds. The quarter is
+# for Firecracker's own threads, which emulate the guest's devices and are charged to the same cgroup.
+cpu_max_of() { echo "$(( $1 + $2 / 4 )) $2"; } # QUOTA PERIOD
 LOG_MAX=1048576                    # console log bound: the log plus one previous file (TD-055)
 
 # ---- share network (ADR 0009) -------------------------------------------------------------------------------
@@ -546,7 +570,7 @@ test_unfs_probe() { # ID [probe flags]
 launch() {
   id=$1; shift
   mode=""; rootfs=""; cmd64=""; vsock=0; runc_smoke=0; guestexec=0; sharenet=0; probe=""
-  unfs_spec=""; unfs_srcs=""; unfs_mounts=""; unfs_squash=0
+  unfs_spec=""; unfs_srcs=""; unfs_mounts=""; unfs_squash=0; mem=$MEM_MIB; vcpus=$VCPUS; cpumax=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --exit) mode=--exit ;;
@@ -565,6 +589,18 @@ launch() {
       --unfs-squash) unfs_squash=1 ;;
       --rootfs) rootfs=$2; shift ;;
       --cmd) cmd64=$2; shift ;;
+      --mem-mib)   # at most 7 digits keeps the byte arithmetic in range; the memory budget decides what fits
+        number "${2:-}" && [ "${#2}" -le 7 ] && [ "$2" -ge "$MEM_MIB" ] || { echo "ERR bad --mem-mib (a whole number of MiB, at least $MEM_MIB)"; return 2; }
+        mem=$2; shift ;;
+      --vcpus)
+        number "${2:-}" && [ "${#2}" -le 2 ] && [ "$2" -ge 1 ] && [ "$2" -le "$VCPUS_MAX" ] || { echo "ERR bad --vcpus (1 to $VCPUS_MAX)"; return 2; }
+        vcpus=$2; shift ;;
+      --cpu-quota)   # QUOTA:PERIOD in µs; the kernel takes a period of 1 ms to 1 s and a quota of at least 1 ms
+        cq=${2%%:*}; cp=${2#*:}
+        case "${2:-}" in *:*:*) cq="" ;; esac
+        number "$cq" && number "$cp" && [ "${#cq}" -le 9 ] && [ "${#cp}" -le 7 ] && [ "$cq" -ge 1000 ] && [ "$cp" -ge 1000 ] && [ "$cp" -le 1000000 ] \
+          || { echo "ERR bad --cpu-quota (QUOTA:PERIOD in microseconds)"; return 2; }
+        cpumax=$(cpu_max_of "$cq" "$cp"); shift ;;
       *) echo "ERR unknown launch option $1"; return 2 ;;
     esac
     shift
@@ -595,6 +631,10 @@ launch() {
     [ "$sharenet" = 1 ] || { echo "ERR --share-probe needs --share-net"; return 2; }
     case "$probe" in *[!A-Za-z0-9.:,_-]*|[!0-9]*) echo "ERR bad --share-probe (DELAY:PROBES)"; return 2 ;; esac
   fi
+  # A guest cannot have more vCPUs than the System VM has CPUs: its vCPU threads would only take turns on them.
+  have=$(nproc 2>/dev/null); digits "$have" || have=1
+  [ "$vcpus" -le "$have" ] || { echo "ERR cpus: the task asks for $vcpus CPUs and the System VM has $have; lower the task's CPU limit or start the System VM with more CPUs"; return 1; }
+  ceiling=$(ceiling_of "$mem"); digits "$ceiling" || { echo "ERR ceiling for $mem MiB"; return 1; }
   # The jail lives on the tmpfs root, so the kernel, initrd and rootfs copied into it use System VM memory outside
   # the cgroup: book them with the ceiling.
   copies=0
@@ -608,8 +648,17 @@ launch() {
   if [ -e "$REC/$id" ] || [ -e "$NETNS/$id" ]; then
     old=$(cleanup "$id") || { unlock; echo "ERR $id: leftovers of an earlier run: $old"; return 1; }
   fi
-  book=$((CEILING + copies)); [ -n "$unfs_srcs" ] && book=$((book + UNFS_MEM))
-  adm=$(/usr/local/bin/vesper-memadmit acquire shim "$id" "$book") || { unlock; echo "$adm" | head -1; return 1; }
+  book=$((ceiling + copies)); [ -n "$unfs_srcs" ] && book=$((book + UNFS_MEM))
+  adm=$(/usr/local/bin/vesper-memadmit acquire shim "$id" "$book") || {
+    unlock; adm=$(echo "$adm" | head -1)
+    # A sized guest names its size, so the reader can tell a large limit from a full System VM.
+    case "$mem:$adm" in
+      "$MEM_MIB":*) echo "$adm" ;;
+      *:"ERR memory: "*) echo "ERR memory: a $mem MiB microVM (the task's memory limit plus the guest's own use) does not fit: ${adm#ERR memory: }; lower the task's memory limit or start the System VM with more memory" ;;
+      *) echo "$adm" ;;
+    esac
+    return 1
+  }
   LAUNCHING=$id
   nsarg=""; netcfg=""
   if [ "$sharenet" = 1 ]; then
@@ -663,7 +712,7 @@ launch() {
     extra="$extra vesper_vsock=1"
     vsockcfg=',"vsock":{"guest_cid":3,"uds_path":"/v.sock"}'
   fi
-  printf '{"boot-source":{"kernel_image_path":"/Image","initrd_path":"/initrd.gz","boot_args":"console=ttyS0 reboot=k panic=1 pci=off rdinit=/init%s"},"drives":%s,"machine-config":{"vcpu_count":1,"mem_size_mib":256}%s%s}\n' "$extra" "$drives" "$vsockcfg" "$netcfg" > "$root/vm.json"
+  printf '{"boot-source":{"kernel_image_path":"/Image","initrd_path":"/initrd.gz","boot_args":"console=ttyS0 reboot=k panic=1 pci=off rdinit=/init%s"},"drives":%s,"machine-config":{"vcpu_count":%s,"mem_size_mib":%s}%s%s}\n' "$extra" "$drives" "$vcpus" "$mem" "$vsockcfg" "$netcfg" > "$root/vm.json"
   chown -R "$JUID:$JGID" "$JAIL/firecracker/$id"
   lf=$(logfile "$id"); pipe="/var/log/.vesper-microvm-$id.pipe"
   rm -f "$lf" "$lf.1" "$pipe"
@@ -674,7 +723,8 @@ launch() {
   start=$(now_ms)
   # shellcheck disable=SC2086
   setsid "$FC_DIR/jailer" --id "$id" --exec-file "$FC_DIR/firecracker" --uid "$JUID" --gid "$JGID" $nsarg \
-    --chroot-base-dir "$JAIL" --cgroup-version 2 --cgroup pids.max=256 --cgroup "memory.max=$CEILING" \
+    --chroot-base-dir "$JAIL" --cgroup-version 2 --cgroup pids.max=256 --cgroup "memory.max=$ceiling" \
+    ${cpumax:+--cgroup "cpu.max=$cpumax"} \
     -- --config-file /vm.json --api-sock /run/firecracker.socket \
     > "$pipe" 2>&1 < /dev/null &
   # With a share network the guest must also report its interface up (it prints that after the marker).
@@ -708,6 +758,20 @@ status() {
     echo "RUNNING $id pid=$pid vsock=$vs$sn"
   elif [ -f "$(logfile "$id")" ]; then echo "EXITED $id"
   else echo "ABSENT $id"; fi
+}
+
+# What a running microVM was given, read from the System VM's side and not from the jail's own files (TD-048).
+machine() {
+  id=${1:-}; valid_id "$id" || { echo "ERR bad id"; return 2; }
+  pid=$(fcpid "$id"); [ -n "$pid" ] || { echo "ERR $id not running"; return 1; }
+  # The kernel names a vCPU's descriptor; a thread name is the process's own to set (council SEC-6).
+  # Firecracker holds each one more than once, so the distinct names are counted.
+  n=$(ls -l "/proc/$pid/fd" 2>/dev/null | sed -n 's/.*anon_inode:\(kvm-vcpu:[0-9][0-9]*\)$/\1/p' | sort -u | wc -l)
+  cg="/sys/fs/cgroup/firecracker/$id"
+  # cpu.max exists once a launch has set one: the jailer enables the cpu controller for it, and it stays enabled,
+  # so a later microVM without a quota reads "max".
+  cm=none; [ -r "$cg/cpu.max" ] && cm=$(tr ' ' / < "$cg/cpu.max")
+  echo "MACHINE $id vcpus=$n mem_max=$(cat "$cg/memory.max" 2>/dev/null) mem_peak=$(cat "$cg/memory.peak" 2>/dev/null) oom_kills=$(awk '$1=="oom_kill"{print $2}' "$cg/memory.events" 2>/dev/null) cpu_max=$cm cpu_usec=$(awk '$1=="usage_usec"{print $2}' "$cg/cpu.stat" 2>/dev/null) at_ms=$(now_ms)"
 }
 
 isolation() {
@@ -762,6 +826,15 @@ cleanup_locked() {
   rm -rf "$JAIL/firecracker/$id"
   rm -f "/var/log/.vesper-microvm-$id.pipe"
   [ "${2:-}" = --logs ] && rm -f "$(logfile "$id")" "$(logfile "$id").1" "/var/log/vesper-unfs-$id.log" "/var/log/vesper-unfs-$id.log.1"
+  # A microVM killed at its memory ceiling looks like any other kill to its task (exit 137). The count goes with
+  # the cgroup, so it is put on record first: in the System VM's log and in the microVM's console log, which a
+  # failure keeps (council REL-2).
+  oomk=$(awk '$1=="oom_kill"{print $2}' "/sys/fs/cgroup/firecracker/$id/memory.events" 2>/dev/null)
+  if digits "$oomk" && [ "$oomk" -gt 0 ]; then
+    msg="VESPER-MICROVM-OOM $id: the System VM killed $oomk process(es) of this microVM at its memory ceiling ($(cat "/sys/fs/cgroup/firecracker/$id/memory.max" 2>/dev/null) bytes)"
+    logger -t vesper-microvm "$msg" 2>/dev/null
+    [ "${2:-}" = --logs ] || { [ -f "$(logfile "$id")" ] && echo "$msg" >> "$(logfile "$id")"; }
+  fi
   for cg in "/sys/fs/cgroup/firecracker/$id" "/sys/fs/cgroup/$id"; do
     [ -d "$cg" ] && rmdir "$cg" 2>/dev/null
   done
@@ -795,6 +868,8 @@ case "$cmd" in
   launch) launch "$@" ;;
   status) status "$@" ;;
   isolation) isolation "$@" ;;
+  machine) machine "$@" ;;
+  limits) have=$(nproc 2>/dev/null); digits "$have" || have=1; echo "LIMITS cpus=$have vcpus_max=$VCPUS_MAX mem_mib_min=$MEM_MIB" ;;
   stop) stop "$@" ;;
   crash) crash "$@" ;;
   cleanup) cleanup "$@" ;;
@@ -827,5 +902,5 @@ case "$cmd" in
   test-abort-launch) test_abort_launch "$@" ;;
   test-drop-record) test_drop_record "$@" ;;
   test-impostor) test_impostor "$@" ;;
-  *) echo "ERR usage: vesper-microvm prepare|launch|status|isolation|stop|crash|cleanup|log|sharenet|unfs|reap|setup-user"; exit 2 ;;
+  *) echo "ERR usage: vesper-microvm prepare|launch|status|machine|limits|isolation|stop|crash|cleanup|log|sharenet|unfs|reap|setup-user"; exit 2 ;;
 esac
