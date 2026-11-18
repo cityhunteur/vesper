@@ -149,6 +149,21 @@ func Nests(srcs []Source) []Nest {
 	return out
 }
 
+// Holders lists the read-write directory sources that hold source i's path, on the same share mount, each with the
+// path of i beneath it. Through any of them a task can change what that path names (D-052).
+func Holders(srcs []Source, i int) []Nest {
+	var out []Nest
+	for j, o := range srcs {
+		if j == i || o.ReadOnly || o.File || o.Mount != srcs[i].Mount {
+			continue
+		}
+		if sub, ok := within(o.Rel, srcs[i].Rel); ok {
+			out = append(out, Nest{Outer: j, Inner: i, Sub: sub})
+		}
+	}
+	return out
+}
+
 // ExportPath is where source i appears in the server's root, and the path the guest mounts.
 func ExportPath(i int) string { return fmt.Sprintf("/s/%d", i) }
 

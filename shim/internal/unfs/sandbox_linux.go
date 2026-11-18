@@ -35,6 +35,11 @@ type Config struct {
 	// TestPauseNests holds the sandbox for this long before it places the nests (tests only: the suite renames a
 	// nested source in the meantime and expects a refusal).
 	TestPauseNests time.Duration
+	// NotifyGuest tells the guest to look again at the binds of file export N, after the supervisor attached the
+	// file that replaced it on the host (D-052), and returns the guest's answer: "same" when its binds are the
+	// export's file, "again" when it bound one again, "failed", "none" when it has no such bind, or "" when it
+	// said nothing. Nil when there is no guest to tell.
+	NotifyGuest func(export int) (string, error)
 }
 
 // childConfig crosses into the sandbox in the environment; the sources cross as descriptors 3, 4, ...
@@ -62,8 +67,9 @@ const (
 
 // OpenSources opens each source relative to its share mount, with no symbolic link on the way, beneath the mount
 // and on it alone, and clones what it opened into detached mount trees with their final attributes: one per source,
-// then one per nest (Nests order) of the read-only source it carries. Nothing opens a source path again after this
-// (ADR 0009, Source binding). The trees are made here because open_tree clones only a mount of the caller's own
+// then one per nest (Nests order) of the read-only source it carries. Nothing opens a directory source's path again
+// after this (ADR 0009, Source binding); a file source's path is looked at again, to attach a file that replaced it
+// (reattach_linux.go, D-052). The trees are made here because open_tree clones only a mount of the caller's own
 // mount namespace; the sandbox, in a new one, attaches them with move_mount.
 func OpenSources(mounts []string, srcs []Source, anyFS bool) ([]*os.File, error) {
 	if err := (Args{Mounts: mounts, Sources: srcs}).Check(); err != nil {
@@ -230,6 +236,10 @@ func detach(fd int, set uint64) (int, error) {
 // TERM, INT and HUP on to it, and returns its exit code. It runs in the microVM's network namespace already
 // (vesper-microvm starts it under nsenter), which the sandbox keeps.
 func Run(cfg Config) (int, error) {
+	// The sandbox is killed when the thread that started it ends (Pdeathsig is the thread's, not the process's), and
+	// attaching a replaced file ends threads on purpose (inMountNamespace). So this goroutine keeps its thread, and
+	// no other goroutine can run on it or end it (council REL-1).
+	runtime.LockOSThread()
 	files, err := OpenSources(cfg.Mounts, cfg.Sources, cfg.AnyFS)
 	if err != nil {
 		return 1, err
@@ -265,6 +275,17 @@ func Run(cfg Config) (int, error) {
 	defer signal.Stop(sigs)
 	if err := cmd.Start(); err != nil {
 		return 1, fmt.Errorf("start sandbox: %w", err)
+	}
+	// File sources are watched for a replacement on the host (D-052). The escape checks have no server to watch.
+	if !cfg.Selfcheck {
+		w, err := newFileWatch(cfg, files, cmd.Process.Pid)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "vesper-unfs run: replaced files will not be attached again: %v\n", err)
+		} else if w != nil {
+			stop := make(chan struct{})
+			defer close(stop)
+			go w.run(stop)
+		}
 	}
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
@@ -369,7 +390,7 @@ func Init() error {
 		return err
 	}
 	// Each source: the detached tree the parent cloned from the descriptor it opened, attributes already set.
-	// A file source goes on an empty file FileName in /s/N, which the read-only root below then keeps from gaining
+	// A file source goes on an empty file FileName in /s/N, which its own read-only tmpfs (below) keeps from gaining
 	// siblings, being renamed or having its mode changed (GH #208, council SEC-7).
 	for i, s := range cc.Sources {
 		dst := filepath.Join(root, ExportPath(i))
@@ -377,8 +398,18 @@ func Init() error {
 			return err
 		}
 		if s.File {
+			// The export of a file is a small file system of its own. The supervisor attaches a file that replaced
+			// this one beneath its mount (D-052), and the kernel refuses that directly under a namespace's root.
+			if err := step(fmt.Sprintf("file system for source %d", i), unix.Mount("vesper-unfs-file", dst, "tmpfs", unix.MS_NOSUID|unix.MS_NODEV|unix.MS_NOEXEC, "size=4k,nr_inodes=4,mode=0755")); err != nil {
+				return err
+			}
+			dir := dst
 			dst = filepath.Join(dst, FileName)
 			if err := os.WriteFile(dst, nil, 0o644); err != nil {
+				return err
+			}
+			// Read-only like the root, so the export cannot gain siblings, or the file be renamed or change mode.
+			if err := step(fmt.Sprintf("read-only file system for source %d", i), unix.MountSetattr(unix.AT_FDCWD, dir, 0, &unix.MountAttr{Attr_set: unix.MOUNT_ATTR_RDONLY})); err != nil {
 				return err
 			}
 		}

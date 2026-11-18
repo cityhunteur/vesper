@@ -100,7 +100,10 @@ server therefore runs:
 - with every read-only source bound again, read-only, at its place inside each read-write source that contains
   it. Without this, `-v $PWD:/app -v $PWD/conf:/app/conf:ro` would leave `conf` writable through `/s/0/conf`: the
   workload is root in its guest and can mount `/s/0` itself. With it, no path the server can reach writes a source
-  the task mounted read-only. M3 tests this case and confirms `unfs3`'s handles still resolve across the inner mount;
+  the task mounted read-only. M3 tests this case and confirms `unfs3`'s handles still resolve across the inner mount.
+  Found wrong on 2026-11-18 (TD-073): a hostile task reaches the source by another name (another letter case on a
+  macOS volume that ignores case, or after moving its directory into a second read-write bind), where no mount
+  covers it. The nest stops a workload's mistakes; a refusal by the file's identity is still to be built;
 - with `no_new_privs` and a capability bounding set of only what NFS service needs to act as each caller
   (`CAP_SETUID`, `CAP_SETGID`, `CAP_CHOWN`, `CAP_DAC_OVERRIDE`, `CAP_FOWNER`, `CAP_FSETID`); without
   `CAP_SYS_CHROOT` and `CAP_SYS_ADMIN`, the nested-chroot escape and new mounts fail.
@@ -117,6 +120,8 @@ the dependency closure.
 swap a directory for a symlink to somewhere outside the share. So the sandbox setup opens each source relative to a
 descriptor of the trusted share mount, refusing symlinks on the way, checks that the opened object is a directory on
 that mount, and binds from the descriptor it holds (`/proc/self/fd/N`). It never opens the path a second time.
+One exception since D-052: the path of a file source is opened again, by the same rules, when macOS has replaced the
+file (see the update of 2026-11-18 below).
 
 M3 proves the sandbox with an escape test. Until M3 passes, the blast-radius statement below is a goal, not a fact.
 
@@ -171,6 +176,38 @@ another share mount is refused, because a source is cloned without its submounts
 Update 2026-11-17 (GH #208, D-050): a file source is supported. The server attaches it on a fixed name `f` in a
 read-only directory `/s/N`, and the guest mounts `/s/N` at a hidden place and binds `f` onto the destination. A
 file replaced on macOS by rename goes stale in the guest (`ESTALE`). The same work found TD-072 (D-049).
+
+Update 2026-11-18 (D-052): a file source that macOS replaces is attached again. An editor's save, `git checkout`
+and `sed -i` rename a new file over the old one. The old file is then gone: every read through the export fails,
+the server refuses the old handle, and a look-up through a directory export of the same file works, because a name
+is looked up again. So:
+
+- The server's supervisor (`vesper-unfs run`, outside the sandbox) looks at each file source's path once a second.
+  When the file there is another one and reads, it attaches it in the sandbox: on one thread it enters the
+  sandbox's mount namespace, attaches the clone beneath the old file's mount and removes the old one. The export of
+  a file is a small read-only tmpfs of its own for this: the kernel refuses to attach beneath a mount that sits
+  directly on a namespace's root.
+- Where the new file is taken from: when a read-write directory source holds the path, a task can rename
+  directories until the path names another file, so the file is opened beneath that source's export in the sandbox,
+  where a read-only nest covers what another bind made read-only, and its clone keeps that. Otherwise it is opened
+  from the share mount by the rules of the first open. The first version took it from the share mount always, and
+  a task could then write a file bound read-only; the council review missed it and a test written for it showed it.
+- Every second the supervisor also reads the sandbox's mounts and places a read-only nest of a file source that is
+  gone, by the checks of the first placing. The kernel drops a nest when the name under it goes.
+- It tells the guest through the microVM's vsock socket, port 1026, with an event whose rest is empty
+  (`--guest-sock`), from a loop of its own. The guest answers `BIND N same`, `again`, `failed` or `none`. The
+  notices stop after two `same` in a row or 30 tries: for a second or two the server can still answer for the old
+  file (`unfsd` holds it open), and a guest that looks then finds nothing changed.
+- The guest's replay (`vesper-console shares replay`) asks the server about the export's file and about the bind.
+  When the bind is stale or another file, it removes the bind by name and attaches the export's file. A stale bind
+  cannot be opened, so nothing can be attached beneath it; between the two calls a look-up finds the image's own
+  file at the destination. A share event for the file does the same check first. A file bound both read-write and
+  read-only has a hidden mount for each mode, and a destination that is a symbolic link is followed as at the
+  first bind. One event may wait 20 s on the server, then the replay process ends.
+
+Left open (TD-074): a descriptor the workload opened before stays stale; reads fail for one to three seconds; a
+write the guest made to the old file after macOS replaced it is lost; and the window of a read-only file inside a
+read-write source, which SECURITY.md describes. Docker on Linux leaves that file writable for good.
 
 Nothing in the root namespace listens for NFS, so no rule there has to hold for condition 3.
 

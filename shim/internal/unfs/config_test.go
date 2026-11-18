@@ -1,6 +1,7 @@
 package unfs
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -142,5 +143,31 @@ func TestArgs(t *testing.T) {
 func TestNestsSameMountOnly(t *testing.T) {
 	if got := Nests([]Source{{Rel: "a"}, {Mount: 1, Rel: "a/b", ReadOnly: true}}); len(got) != 0 {
 		t.Errorf("a nest across mounts: %+v", got)
+	}
+}
+
+// A read-write directory source that holds a file source's path lets a task change what the path names (D-052).
+func TestHolders(t *testing.T) {
+	srcs := []Source{
+		{Rel: "proj"},                                      // 0 read-write directory
+		{Rel: "proj/x/secret", File: true},                 // 1 read-write file inside it
+		{Rel: "proj/y/secret", File: true, ReadOnly: true}, // 2 read-only file inside it
+		{Rel: "proj/ro", ReadOnly: true},                   // 3 read-only directory
+		{Rel: "proj/ro/f", File: true},                     // 4 a file inside the read-only directory too
+		{Rel: "other/f", File: true},                       // 5 held by nothing
+		{Mount: 1, Rel: "proj/x/secret", File: true},       // 6 the same path on another share
+		{Rel: "."}, // 7 the whole share, read-write
+	}
+	for i, want := range map[int]string{1: "0:x/secret 7:proj/x/secret", 2: "0:y/secret 7:proj/y/secret", 4: "0:ro/f 7:proj/ro/f", 5: "7:other/f", 6: "", 0: "7:proj"} {
+		var got []string
+		for _, h := range Holders(srcs, i) {
+			if h.Inner != i {
+				t.Errorf("source %d: holder names source %d", i, h.Inner)
+			}
+			got = append(got, fmt.Sprintf("%d:%s", h.Outer, h.Sub))
+		}
+		if g := strings.Join(got, " "); g != want {
+			t.Errorf("source %d: holders %q, want %q", i, g, want)
+		}
 	}
 }

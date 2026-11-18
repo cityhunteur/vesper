@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -40,4 +41,36 @@ func DialGuest(sock string, port int, timeout time.Duration) (net.Conn, error) {
 	}
 	_ = c.SetDeadline(time.Time{})
 	return c, nil
+}
+
+// NotifyBind tells the guest behind sock to look again at the binds of file export n: an event with an empty rest
+// (D-052). The share server's supervisor sends it after it attached the file that replaced the export's file. It
+// returns the guest's answer (Replay's "BIND n ..." line): "same", "again", "failed" or "none", or "" when the guest
+// sent no such line in time. A guest writes the line, so nothing else of it is kept.
+func NotifyBind(sock string, n int) (string, error) {
+	c, err := DialGuest(sock, EventPort, 2*time.Second)
+	if err != nil {
+		return "", err
+	}
+	defer c.Close()
+	_ = c.SetDeadline(time.Now().Add(3 * time.Second))
+	if _, err := io.WriteString(c, Event{Export: n}.Line()); err != nil {
+		return "", err
+	}
+	want := "BIND " + strconv.Itoa(n) + " "
+	line := make([]byte, 0, 64)
+	var b [1]byte
+	for len(line) < 64 {
+		if _, err := io.ReadFull(c, b[:]); err != nil || b[0] == '\n' {
+			break
+		}
+		line = append(line, b[0])
+	}
+	switch answer := strings.TrimPrefix(string(line), want); answer {
+	case "same", "again", "failed", "none":
+		if strings.HasPrefix(string(line), want) {
+			return answer, nil
+		}
+	}
+	return "", nil
 }

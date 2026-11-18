@@ -51,7 +51,14 @@ The Go module pins containerd 2.1.5 and builds static Linux arm64 binaries with 
   clones it into a detached mount tree, and starts `init` in new mount, pid, ipc and uts namespaces, which attaches
   the trees in a tmpfs root, binds read-only sources again inside read-write ones, pivots, drops privileges, loads a
   seccomp filter against user namespaces and execs `unfsd`. `vesper-unfs probe` runs the escape battery against a
-  server, and `run --selfcheck` runs the escape checks inside the sandbox in place of `unfsd`. `go test
+  server, and `run --selfcheck` runs the escape checks inside the sandbox in place of `unfsd`. `reattach_linux.go`
+  (D-052): the supervisor looks at each file source's path once a second, attaches a file that replaced it on macOS
+  in the sandbox's mount namespace (beneath the old mount, then the old one is removed), places a read-only nest
+  that is gone again and tells the guest through `--guest-sock` (`shares.NotifyBind`) until it answers that its
+  binds are the export's file. When a read-write directory source holds the file's path (`Holders`), the new file
+  is taken through that source's export in the sandbox, so a file under a read-only nest stays read-only.
+  `shares.rebindFile` in the guest's replay binds the export's file again at its destinations and answers `BIND N
+  same|again|failed|none`. `go test
   ./internal/unfs ./internal/nfsprobe` covers parsing, nesting, exports, RPC encoding and the filter program.
   Installed as `/usr/bin/vesper-unfs`.
 - `cmd/vesper-runc` and `internal/runcwrap`: dockerd's default runtime in a normal boot (TD-062, D-036). Every
