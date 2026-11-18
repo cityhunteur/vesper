@@ -5,12 +5,13 @@ number, not by a mount on one name (TD-073).
 
 --- a/Config/exports.h
 +++ b/Config/exports.h
-@@ -34,6 +34,8 @@
+@@ -34,6 +34,9 @@
  char            *export_point_from_fsid(uint32 fsid);
  nfsstat3	exports_compat(const char *path, struct svc_req *rqstp);
  nfsstat3	exports_rw(void);
 +nfsstat3	exports_prot(const char *path);
 +nfsstat3	exports_prot_follow(const char *path);
++void		exports_prot_tick(void);
  uint32		exports_anonuid(void);
  uint32		exports_anongid(void);
  uint32          fnv1a_32(const char *str);
@@ -60,17 +61,17 @@ number, not by a mount on one name (TD-073).
  
  	/* check for client attempting to use invalid pathname */
  	if (!path || strstr(path, "/../"))
-@@ -949,12 +958,291 @@
+@@ -949,12 +958,310 @@
  nfsstat3 exports_rw(void)
  {
  	if (exports_opts != -1 && (exports_opts & OPT_RW))
 -		return NFS3_OK;
 +		return exports_prot_follow(exports_last_path);
-+	else
-+		return NFS3ERR_ROFS;
-+}
-+
-+/*
+ 	else
+ 		return NFS3ERR_ROFS;
+ }
+ 
+ /*
 + * Vesper: objects that stay read-only whatever name reaches them.
 + *
 + * A read-only export that lies inside a read-write one was kept read-only
@@ -87,7 +88,8 @@ number, not by a mount on one name (TD-073).
 + * request that changes something and when the exports are read again:
 + *   p PATH      a path in the server's own root; the object there is
 + *               protected, and is looked up again before every request
-+ *               that changes something
++ *               that changes something, at every request, and on every
++ *               turn of the main loop, which is at least twice a second
 + *   i DEV INO   an object, by number
 + * Without the file nothing is protected and nothing is looked up.
 + *
@@ -264,7 +266,7 @@ number, not by a mount on one name (TD-073).
 +	leaf = path + (slash - dir) + 1;
 +	if (slash == dir)
 +		dir[1] = '\0';
- 	else
++	else
 +		*slash = '\0';
 +
 +	if (!realpath(dir, real)) {
@@ -272,7 +274,7 @@ number, not by a mount on one name (TD-073).
 +		   call that follows it fails there too and changes nothing */
 +		if (links > 0 && (errno == ENOENT || errno == ENOTDIR))
 +			return NFS3_OK;
- 		return NFS3ERR_ROFS;
++		return NFS3ERR_ROFS;
 +	}
 +	if (snprintf(full, sizeof(full), "%s%s%s", real,
 +		     real[1] ? "/" : "", leaf) >= (int) sizeof(full))
@@ -311,6 +313,10 @@ number, not by a mount on one name (TD-073).
 +		n = readlink(full, dir, sizeof(dir) - 1);
 +		if (n <= 0)
 +			return NFS3ERR_ROFS;
++		/* "x/" names what x names: without the slashes the last name
++		   is judged, and followed when it is a link itself */
++		while (n > 1 && dir[n - 1] == '/')
++			n--;
 +		dir[n] = '\0';
 +		if (dir[0] == '/')
 +			memcpy(real, dir, n + 1);
@@ -320,9 +326,9 @@ number, not by a mount on one name (TD-073).
 +		return prot_check(real, TRUE, links + 1);
 +	}
 +	return NFS3_OK;
- }
- 
- /*
++}
++
++/*
 + * NFS3ERR_ROFS when path names a protected object or lies under one; a
 + * symbolic link as the last name is taken as the link itself
 + */
@@ -334,6 +340,20 @@ number, not by a mount on one name (TD-073).
 +	if ((prot_fixed == 0 && prot_nseen == 0) || !path)
 +		return NFS3_OK;
 +	return prot_check(path, FALSE, 0);
++}
++
++/*
++ * Look at the p paths now. The main loop calls this on every turn and the
++ * dispatchers at every request, so an object that is at a p path for longer
++ * than the loop's wait is known though no client sent a request that changes
++ * something in that time: a file that was the read-only file between two
++ * saves on the host, and is its backup after the second. A client that holds
++ * the server in one unfinished request (the RPC library waits up to 35 s for
++ * the rest of a record) stops the looks for that long.
++ */
++void exports_prot_tick(void)
++{
++	prot_refresh();
 +}
 +
 +/*
@@ -353,6 +373,50 @@ number, not by a mount on one name (TD-073).
   * returns the last looked-up anonuid for a mount (ANON_NOTSPECIAL means none in effect)
   */
  uint32 exports_anonuid(void)
+--- a/daemon.c
++++ b/daemon.c
+@@ -424,6 +424,10 @@
+     char *result;
+     xdrproc_t _xdr_argument, _xdr_result;
+     char *(*local) (char *, struct svc_req *);
++
++    /* Vesper: every request is a look at the protected objects, so a client
++       that keeps the server busy cannot keep it from looking (exports.y) */
++    exports_prot_tick();
+ 
+     switch (rqstp->rq_proc) {
+ 	case NFSPROC3_NULL:
+@@ -612,6 +616,10 @@
+     char *result;
+     xdrproc_t _xdr_argument, _xdr_result;
+     char *(*local) (char *, struct svc_req *);
++
++    /* Vesper: every request is a look at the protected objects, so a client
++       that keeps the server busy cannot keep it from looking (exports.y) */
++    exports_prot_tick();
+ 
+     switch (rqstp->rq_proc) {
+ 	case MOUNTPROC_NULL:
+@@ -980,6 +988,7 @@
+ 
+     for (;;) {
+ 	fd_cache_close_inactive();
++	exports_prot_tick();	/* Vesper: the protected objects (exports.y) */
+ 
+ #if defined(HAVE_SVC_GETREQ_POLL) && HAVE_DECL_SVC_POLLFD
+ 	/*
+@@ -1005,7 +1014,10 @@
+ 		cap = n + 16;
+ 	}
+ 	memcpy(pfds, svc_pollfd, n * sizeof(*pfds));
+-	r = poll(pfds, n, 2*1000);
++	/* Vesper: half a second, not two: each turn looks at the protected
++	   objects, and one that is at its place for a second must be seen
++	   though no client sends anything */
++	r = poll(pfds, n, 500);
+ 	if (r < 0) {
+ 		if (errno == EINTR) {
+ 		    continue;
 --- a/nfs.c
 +++ b/nfs.c
 @@ -504,6 +504,10 @@

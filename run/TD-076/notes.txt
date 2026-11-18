@@ -1,0 +1,50 @@
+TD-076 runs, 2026-11-18, System VM with 2 CPUs and 2048 MiB; the macOS volume is APFS and ignores letter case.
+Background: the System VM gives a file another inode number once it has forgotten the file (run/TD-073/notes.txt 8).
+
+1. Control: the two new steps on the build of main at 9932d8c (D-053, no holds, no look by the server itself).
+   recorded_object_known_after_restart_and_cache_drop. Binds: l76 read-write at /d, l76/hy/secret read-only at /g.
+   The task runs  mv /d/hy /d/hx && mkdir /d/hy && echo decoy > /d/hy/secret ; the server is killed (pid 27026 to
+   27255) and starts again from the paths; `vesper-microvm test-drop-caches`; the task then tries /d/hx/secret.
+     3 of 3 changes went through (write, truncate, remove); macOS read an empty hx/secret.
+   earlier_version_stays_read_only_for_an_idle_task. Binds on the share with no change events: e76 read-write at
+   /d, e76/hz/secret read-only at /b. macOS saves twice as an editor with a backup does (rename secret to secret~,
+   write a new secret), 6 s apart; the task sends nothing until then; cache drop; the task tries /d/hz/secret~,
+   which was the bound file between the saves.
+     3 of 3 changes went through; macOS read an empty secret~.
+   (With the fixture on the share that sends change events this step passed on main: the guest's replay of each
+   save is a changing request, at which the server looked.)
+
+2. With this change (unfs3 binary 52e43cef..., built twice with the same digest):
+     recorded_object_known_after_restart_and_cache_drop: pid 16945 to 17207, caches dropped, 3 of 3 refused as
+       read-only; macOS still reads "guarded"; 2 objects held before the kill (the bound file and the decoy), none
+       after the task.
+     earlier_version_stays_read_only_for_an_idle_task: the task sleeps and does not touch its binds; the second
+       save is made as soon as the first is attached; 2 attaches, caches dropped, 3 of 3 refused as read-only;
+       then the server is killed (pid 17684 to 18033), caches dropped again, 3 of 3 refused; macOS still reads
+       "v1". (No control was run for this second half. The guest's own requests after each attach are looks by the
+       server too, so the look on each turn of the server's loop has no test of its own.)
+   Suites: microVM binds 18 of 18, unfs 13 of 13, microVM shares 12 of 12.
+
+3. Holds seen. A task with a read-only directory bind and a read-only file bind (and one read-write bind):
+     while it runs: HOLDS hold-a 2;  after kill and delete: HOLDS hold-a 0
+     `vesper-share list` while it runs shows the three shares only: the holds are in a mount namespace of their
+     own, not in the System VM's. That namespace has a small tmpfs as its root and no other mount but the holds.
+     While a task with a hold ran, another task was killed, deleted, cleaned (CLEAN) and started again under the
+     same name.
+   A first version put the holds in the System VM's own namespace (2 mounts seen there, 0 after). Its reviewer
+   showed that cleanup's `find /run -type s` would walk them; that version was not merged.
+
+4. Cost with the server's look at every request and on every turn of its loop (seconds; 96 MiB with fsync, 400
+   small files, 300 single 4 KiB writes with fsync; then 3000 reads and stats):
+     no read-only bind:      0.18 0.83 0.42;  0.23 0.94 0.48      reads 1.81; 1.76
+     one read-only bind:     0.20 0.88 0.45;  0.22 0.89 0.48
+     eight read-only binds:  0.23 0.89 0.41;  0.26 0.92 0.53      reads 1.80; 1.79
+   The idle wait of the server's loop is half a second now (two wake-ups a second for each idle server).
+
+5. Not run:
+   - the lookup storm the judge of D-053 named (many lookups charged to the server's 32 MiB cgroup, to make the
+     kernel forget). The cache drop forgets everything that nothing holds, so it stands in for it.
+   - a hold that fails to mount; the removal of single holds that the record dropped (more than 50 replaced files).
+   - a server held in one unfinished request across two saves (the reviewer's H-2 and the judge's K-2, from
+     their reading of the RPC library): stated as a limit and tracked as TD-078, not tried.
+   - the CPU an idle server uses now that its loop wakes twice a second.

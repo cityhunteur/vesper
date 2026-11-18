@@ -281,7 +281,7 @@ fi
 # it. The task then renames directories so that its read-write file bind's path names a file in the true directory.
 # The supervisor attaches that file, compares the path with the record, and attaches it read-only -----------------
 J="${F}/j73"; mkdir -p "${J}/p/conf" "${J}/x/conf"; echo keep > "${J}/p/conf/keep"; echo mine > "${J}/x/conf/keep"
-REATT='try() { if e=$("$@" 2>&1); then echo "DONE: $*"; else echo "refused: $* [$(echo "$e" | tail -1 | sed "s/.*: //")]"; fi; }; w() { i=0; while [ $i -lt 80 ] && [ ! -e "$1" ]; do i=$((i+1)); sleep 0.5; done; }; mv /d/p /d/q && mkdir -p /d/p/conf && echo one > /d/state1; w /d/go1; mv /d/x /d/x9 && mv /d/q /d/x && echo two > /d/state2; w /d/go2; { try dd if=/d/state2 of=/a conv=notrunc,fsync; try sh -c ": > /a"; echo tried; } > /d/out 2>&1; sync'
+REATT='try() { if e=$("$@" 2>&1); then echo "DONE: $*"; else echo "refused: $* [$(echo "$e" | tail -1 | sed "s/.*: //")]"; fi; }; w() { i=0; while [ $i -lt 80 ] && [ ! -e "$1" ]; do i=$((i+1)); sleep 0.5; done; }; mv /d/p /d/q && mkdir -p /d/p/conf && echo one > /d/state1; w /d/go1; mv /d/x /d/x9 && mv /d/q /d/x && echo two > /d/state2; w /d/go2; { n=0; while [ $n -lt 10 ]; do r="$(try dd if=/d/state2 of=/a conv=notrunc,fsync)"; case "$r" in *"Stale file handle"*) n=$((n+1)); sleep 1 ;; *) break ;; esac; done; echo "$r"; try sh -c ": > /a"; echo tried; } > /d/out 2>&1; sync'
 st="$(runb --bind="${J}:/d:rw" --bind="${J}/p/conf:/c:ro" --bind="${J}/x/conf/keep:/a:rw" --detach binds-reatt "${REATT}")"
 for _ in $(seq 1 30); do [ -e "${J}/state1" ] && break; sleep 0.5; done
 jpid() { ctl microvm unfs-isolation binds-reatt | sed -n 's/^UNFSISO [^ ]* pid=\([0-9]*\).*/\1/p' | head -1; }
@@ -289,7 +289,7 @@ j0="$(jpid)"; jk="$(ctl microvm test-unfs-kill binds-reatt | head -1)"
 j1=""; for _ in $(seq 1 40); do case "$(ctl microvm unfs binds-reatt | head -1)" in *"listen=yes"*) j1="$(jpid)"; [ -n "${j1}" ] && [ "${j1}" != "${j0}" ] && break ;; esac; sleep 0.5; done
 touch "${J}/go1"; for _ in $(seq 1 30); do [ -e "${J}/state2" ] && break; sleep 0.5; done
 jlog=""; for _ in $(seq 1 30); do jlog="$(ctl microvm unfs-log binds-reatt 80 | grep -a 'is attached read-only' | tail -1)"; [ -n "${jlog}" ] && break; sleep 0.5; done
-sleep 2; touch "${J}/go2"
+sleep 2; touch "${J}/go2"   # the guest binds the new file within seconds; the task tries again while its bind is stale
 wait_stopped binds-reatt 80 || ctl ctr -- kill binds-reatt 30 >/dev/null
 ctl ctr -- delete binds-reatt >/dev/null; sleep 2
 jo="$(cat "${J}/out" 2>/dev/null)"; jd="$(printf '%s\n' "${jo}" | grep -c 'DONE:')"; jr="$(printf '%s\n' "${jo}" | grep -c 'refused:')"; jro="$(printf '%s\n' "${jo}" | grep -c 'refused: dd .*\[Read-only file system\]')"
@@ -298,6 +298,69 @@ if [ "${st}" = "STARTED binds-reatt" ] && [ -n "${j1}" ] && [ "${j1}" != "${j0}"
   record reattached_under_a_recorded_object_is_read_only true "the server went from pid ${j0} to ${j1}; after the task's second renames the supervisor logged: ${jlog}; the write through the file bind was refused as read-only and the truncate failed ($(printf '%s\n' "${jo}" | grep 'refused:' | sed 's/.*\[//; s/\]//' | tr '\n' ';')); macOS still reads '${jm}'"
 else
   record reattached_under_a_recorded_object_is_read_only false "${st}; ${jk:-not killed}; pid ${j0} -> ${j1:-none}; log: ${jlog:-no line}; ${jd} went through, ${jr} refused, the write as read-only: ${jro}; out: $(printf '%s' "${jo}" | tr '\n' ' ' | cut -c1-300); macOS x/conf/keep='${jm}' (want 'keep ')"
+fi
+
+# --- 6k. What was bound read-only is still known after a restart and a cache drop (TD-076). The task moves the
+# read-only file's directory aside and puts a decoy at the path; the server is killed and starts again from the
+# paths, so the true file is at no source's path and only the supervisor's record names it, by inode number. The
+# System VM gives a file another number once it has forgotten the file, so the supervisor holds each recorded
+# object with a mount that outlives it. The caches are dropped after the restart, and the task then tries to change
+# the true file under its new name -------------------------------------------------------------------------------
+L="${F}/l76"; mkdir -p "${L}/hy"; echo guarded > "${L}/hy/secret"
+HELD='try() { if e=$("$@" 2>&1); then echo "DONE: $*"; else echo "refused: $* [$(echo "$e" | tail -1 | sed "s/.*: //")]"; fi; }; w() { i=0; while [ $i -lt 80 ] && [ ! -e "$1" ]; do i=$((i+1)); sleep 0.5; done; }; mv /d/hy /d/hx && mkdir /d/hy && echo decoy > /d/hy/secret && echo one > /d/state1; w /d/go1; { try dd if=/d/state1 of=/d/hx/secret conv=notrunc,fsync; try sh -c ": > /d/hx/secret"; try rm /d/hx/secret; echo tried; } > /d/out 2>&1; sync'
+st="$(runb --bind="${L}:/d:rw" --bind="${L}/hy/secret:/g:ro" --detach binds-held "${HELD}")"
+for _ in $(seq 1 30); do [ -e "${L}/state1" ] && break; sleep 0.5; done
+lpid() { ctl microvm unfs-isolation binds-held | sed -n 's/^UNFSISO [^ ]* pid=\([0-9]*\).*/\1/p' | head -1; }
+sleep 3; l0="$(lpid)"; lheld="$(ctl microvm unfs-holds binds-held | head -1)"; lk="$(ctl microvm test-unfs-kill binds-held | head -1)"
+l1=""; for _ in $(seq 1 40); do case "$(ctl microvm unfs binds-held | head -1)" in *"listen=yes"*) l1="$(lpid)"; [ -n "${l1}" ] && [ "${l1}" != "${l0}" ] && break ;; esac; sleep 0.5; done
+sleep 1; ldrop="$(ctl microvm test-drop-caches | head -1)"; sleep 1; touch "${L}/go1"
+wait_stopped binds-held 80 || ctl ctr -- kill binds-held 30 >/dev/null
+ctl ctr -- delete binds-held >/dev/null; sleep 2
+lo="$(cat "${L}/out" 2>/dev/null)"; ld="$(printf '%s\n' "${lo}" | grep -c 'DONE:')"; lr="$(printf '%s\n' "${lo}" | grep -c 'refused:.*\[Read-only file system\]')"
+lm="$(tr '\n' ' ' < "${L}/hx/secret" 2>/dev/null)"; lleft="$(ctl microvm unfs-holds binds-held | head -1)"
+if [ "${st}" = "STARTED binds-held" ] && [ -n "${l1}" ] && [ "${l1}" != "${l0}" ] && [ "${ldrop}" = DROPPED ] && [ "${ld}" = 0 ] && [ "${lr}" = 3 ] && [ "${lm}" = "guarded " ] && [ "${lleft}" = "HOLDS binds-held 0" ] \
+  && case "${lheld}" in "HOLDS binds-held "[1-9]*) true ;; *) false ;; esac; then
+  record recorded_object_known_after_restart_and_cache_drop true "the server went from pid ${l0} to ${l1} after the task moved the read-only file aside, and the System VM dropped its caches; ${lr} changes to the file under its new name refused as read-only; macOS still reads '${lm}'; holds before the kill: ${lheld#HOLDS binds-held }, after the task: ${lleft#HOLDS binds-held }"
+else
+  record recorded_object_known_after_restart_and_cache_drop false "${st}; ${lk:-not killed}; pid ${l0} -> ${l1:-none}; caches: ${ldrop:-not dropped}; ${ld} went through: $(printf '%s\n' "${lo}" | grep 'DONE:' | tr '\n' ';'); ${lr} refused as read-only (want 3); out: $(printf '%s' "${lo}" | tr '\n' ' ' | cut -c1-300); macOS hx/secret='${lm}' (want 'guarded '); holds before the kill: ${lheld:-unknown}; left: ${lleft:-unknown}"
+fi
+
+# --- 6l. An earlier version of a read-only file stays read-only though the task sent nothing while it was bound
+# (TD-076). An editor that keeps a backup renames the file to "secret~" and writes a new one, twice, as soon as the
+# first new file is attached. The second version was the bound file between the two saves and is the backup after
+# the second. The task does not touch its binds in that time (it sleeps), so the server did not learn the file from
+# a request of the task that changes something; the guest's own requests after each attach, which change nothing,
+# are looks too, and the server's look on each turn of its loop has no test apart from them. Then the server is
+# killed and the caches are dropped: the next server knows that version only by its
+# recorded number, which is its number only because the supervisor held it with a mount when it was attached.
+# The fixture is on the share that sends no change events: with events, the guest's replay of each save is a
+# request that changes something, and the task would not be idle.
+E="${SHARE2}/$(basename "${F}")/e76"; mkdir -p "${E}/hz"; echo v0 > "${E}/hz/secret"
+IDLE='try() { if e=$("$@" 2>&1); then echo "DONE: $*"; else echo "refused: $* [$(echo "$e" | tail -1 | sed "s/.*: //")]"; fi; }; w() { i=0; while [ $i -lt 160 ] && [ ! -e "$1" ]; do i=$((i+1)); sleep 0.5; done; }; tries() { try dd if=/d/go1 of="/d/hz/secret~" conv=notrunc,fsync; try sh -c ": > /d/hz/secret~"; try rm "/d/hz/secret~"; echo tried; }; sleep 22; tries > /d/out1 2>&1; sync; w /d/go2; tries > /d/out2 2>&1; sync'
+st="$(runb --bind="${E}:/d:rw" --bind="${E}/hz/secret:/b:ro" --detach binds-idle "${IDLE}")"
+eatt() { ctl microvm unfs-log binds-idle 80 | grep -a -c 'another file is at its path'; }
+epid() { ctl microvm unfs-isolation binds-idle | sed -n 's/^UNFSISO [^ ]* pid=\([0-9]*\).*/\1/p' | head -1; }
+sleep 2; e0="$(eatt)"
+echo v1 > "${E}/hz/new"; mv "${E}/hz/secret" "${E}/hz/secret~"; mv "${E}/hz/new" "${E}/hz/secret"
+e1="${e0}"; for _ in $(seq 1 60); do e1="$(eatt)"; [ "${e1}" -gt "${e0}" ] && break; sleep 0.25; done
+echo v2 > "${E}/hz/new"; mv "${E}/hz/secret" "${E}/hz/secret~"; mv "${E}/hz/new" "${E}/hz/secret"
+e2="${e1}"; for _ in $(seq 1 30); do e2="$(eatt)"; [ "${e2}" -gt "${e1}" ] && break; sleep 0.5; done
+sleep 2; edrop="$(ctl microvm test-drop-caches | head -1)"; echo go > "${E}/go1"   # the first tries read go1 as their data
+for _ in $(seq 1 60); do [ -s "${E}/out1" ] && grep -q tried "${E}/out1" && break; sleep 0.5; done
+p0e="$(epid)"; ctl microvm test-unfs-kill binds-idle >/dev/null
+p1e=""; for _ in $(seq 1 40); do case "$(ctl microvm unfs binds-idle | head -1)" in *"listen=yes"*) p1e="$(epid)"; [ -n "${p1e}" ] && [ "${p1e}" != "${p0e}" ] && break ;; esac; sleep 0.5; done
+sleep 1; edrop2="$(ctl microvm test-drop-caches | head -1)"; sleep 1; echo go > "${E}/go2"
+wait_stopped binds-idle 120 || ctl ctr -- kill binds-idle 30 >/dev/null
+ctl ctr -- delete binds-idle >/dev/null; sleep 2
+count() { printf '%s\n' "$1" | grep -c "$2"; }
+eo1="$(cat "${E}/out1" 2>/dev/null)"; eo2="$(cat "${E}/out2" 2>/dev/null)"
+ed="$(( $(count "${eo1}" 'DONE:') + $(count "${eo2}" 'DONE:') ))"; er1="$(count "${eo1}" 'refused:.*\[Read-only file system\]')"; er2="$(count "${eo2}" 'refused:.*\[Read-only file system\]')"
+em="$(tr '\n' ' ' < "${E}/hz/secret~" 2>/dev/null)"
+if [ "${st}" = "STARTED binds-idle" ] && [ "${e1}" -gt "${e0}" ] && [ "${e2}" -gt "${e1}" ] && [ "${edrop}" = DROPPED ] && [ "${edrop2}" = DROPPED ] && [ -n "${p1e}" ] && [ "${p1e}" != "${p0e}" ] \
+  && [ "${ed}" = 0 ] && [ "${er1}" = 3 ] && [ "${er2}" = 3 ] && [ "${em}" = "v1 " ]; then
+  record earlier_version_stays_read_only_for_an_idle_task true "macOS saved the read-only file twice with a backup, the second time as soon as the first was attached (${e2} attaches), while the task slept; after a cache drop ${er1} changes to the backup, which was the bound file between the saves, were refused as read-only; after the server went from pid ${p0e} to ${p1e} and another cache drop, ${er2} more; macOS still reads '${em}'"
+else
+  record earlier_version_stays_read_only_for_an_idle_task false "${st}; attaches ${e0}, ${e1} then ${e2}; caches: ${edrop:-not dropped}, ${edrop2:-not dropped}; pid ${p0e} -> ${p1e:-none}; ${ed} went through: $(printf '%s\n%s\n' "${eo1}" "${eo2}" | grep 'DONE:' | tr '\n' ';'); refused as read-only ${er1} then ${er2} (want 3 and 3); out: $(printf '%s | %s' "${eo1}" "${eo2}" | tr '\n' ' ' | cut -c1-400); macOS hz/secret~='${em}' (want 'v1 ')"
 fi
 
 # --- 7. After the shim is killed, the reaper leaves no server, namespace or record ----------------------------------

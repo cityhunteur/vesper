@@ -45,6 +45,10 @@ type Config struct {
 	// ProtectFile is where the supervisor records, across its restarts, what each read-only source was (TD-073):
 	// the server keeps those objects read-only by number. Empty keeps no record.
 	ProtectFile string
+	// unrecorded is set by Run: the read-only sources that are neither recorded nor held. They are the read-write
+	// sources that this start serves read-only only because their path could not be compared with the record, and
+	// the sources whose path was also given read-write.
+	unrecorded map[int]bool
 }
 
 // childConfig crosses into the sandbox in the environment; the sources cross as descriptors 3, 4, ...
@@ -78,7 +82,10 @@ const (
 // after this (ADR 0009, Source binding); a file source's path is looked at again, to attach a file that replaced it
 // (reattach_linux.go, D-052). The trees are made here because open_tree clones only a mount of the caller's own
 // mount namespace; the sandbox, in a new one, attaches them with move_mount.
-func OpenSources(mounts []string, srcs []Source, anyFS bool) ([]*os.File, error) {
+//
+// each, when not nil, is called with every source's own descriptor (an O_PATH descriptor in this mount namespace)
+// before the trees are made, for a caller that needs more than a detached tree of it.
+func OpenSources(mounts []string, srcs []Source, anyFS bool, each func(i int, fd int)) ([]*os.File, error) {
 	if err := (Args{Mounts: mounts, Sources: srcs}).Check(); err != nil {
 		return nil, err
 	}
@@ -108,6 +115,11 @@ func OpenSources(mounts []string, srcs []Source, anyFS bool) ([]*os.File, error)
 			return nil, fmt.Errorf("source %q: %w", s.Rel, err)
 		}
 		dirs = append(dirs, fd)
+	}
+	if each != nil {
+		for i, fd := range dirs {
+			each(i, fd)
+		}
 	}
 	var files []*os.File
 	fail := func(err error) ([]*os.File, error) {
@@ -253,12 +265,39 @@ func Run(cfg Config) (int, error) {
 	if err != nil {
 		return 1, fmt.Errorf("record of read-only objects %s: %w", cfg.ProtectFile, err)
 	}
+	given := cfg.Sources // as configured: what is bound both ways is judged by this, not by what a start changes
 	cfg.Sources = append([]Source(nil), cfg.Sources...)
-	for _, i := range GuardSources(cfg.Mounts, cfg.Sources, prior) {
+	hit, failed := GuardSources(cfg.Mounts, cfg.Sources, prior)
+	for _, i := range hit {
 		fmt.Fprintf(os.Stderr, "vesper-unfs run: source %q now lies under an object that was bound read-only; it is served read-only\n", cfg.Sources[i].Rel)
 		cfg.Sources[i].ReadOnly = true
 	}
-	files, err := OpenSources(cfg.Mounts, cfg.Sources, cfg.AnyFS)
+	// A source that could not be compared is served read-only too, for this start only: its own object is neither
+	// recorded nor held, so the next start compares it again (council J-4).
+	for i, err := range failed {
+		fmt.Fprintf(os.Stderr, "vesper-unfs run: source %q could not be compared with the record of read-only objects (%v); it is served read-only until this server starts again\n", cfg.Sources[i].Rel, err)
+		cfg.Sources[i].ReadOnly = true
+	}
+	// One rule for the start and for the watcher (council K-4): a read-only source is recorded and held unless
+	// it could not be compared, or the same path was also given read-write.
+	cfg.unrecorded = map[int]bool{}
+	for i, s := range cfg.Sources {
+		if _, unsure := failed[i]; s.ReadOnly && (unsure || alsoReadWrite(given, s)) {
+			cfg.unrecorded[i] = true
+		}
+	}
+	recorded := func(i int) bool { return cfg.Sources[i].ReadOnly && !cfg.unrecorded[i] }
+	// Each read-only source's object gets a mount that outlives this process, so that it keeps its inode number
+	// when a task moves it away and this server starts again (TD-076). A hold that fails is reported and the
+	// start goes on: the object is then known only while the System VM does not forget it.
+	holds := HoldDir(cfg.ProtectFile)
+	files, err := OpenSources(cfg.Mounts, cfg.Sources, cfg.AnyFS, func(i int, fd int) {
+		if recorded(i) && !cfg.Selfcheck {
+			if err := hold(holds, fd, cfg.Sources[i].File); err != nil {
+				fmt.Fprintf(os.Stderr, "vesper-unfs run: source %q: its object is not held across restarts: %v\n", cfg.Sources[i].Rel, err)
+			}
+		}
+	})
 	if err != nil {
 		return 1, err
 	}
@@ -282,7 +321,7 @@ func Run(cfg Config) (int, error) {
 	// What each read-only source is now joins the record of what it was at earlier starts (TD-073).
 	var now []ProtectID
 	for i, s := range cfg.Sources {
-		if s.ReadOnly && !alsoReadWrite(cfg.Sources, s) {
+		if recorded(i) {
 			id, err := idOf(int(files[i].Fd()))
 			if err != nil {
 				return 1, fmt.Errorf("source %q: %w", s.Rel, err)
@@ -293,6 +332,9 @@ func Run(cfg Config) (int, error) {
 	protect, err := RecordProtectIDs(cfg.ProtectFile, now...)
 	if err != nil {
 		return 1, fmt.Errorf("record of read-only objects %s: %w", cfg.ProtectFile, err)
+	}
+	if _, left, err := ReleaseHolds(holds, protect); left > 0 { // what the record no longer names
+		fmt.Fprintf(os.Stderr, "vesper-unfs run: %d holds that the record no longer names are still there: %v\n", left, err)
 	}
 	cc, _ := json.Marshal(childConfig{Sources: cfg.Sources, Nests: Nests(cfg.Sources), Squash: cfg.Squash, Root: cfg.Root, Unfsd: cfg.Unfsd, Check: check, PauseNestsMs: cfg.TestPauseNests.Milliseconds(), Protect: protect})
 	cmd := exec.Command("/proc/self/exe", "init")
@@ -670,14 +712,15 @@ func dropToSquash() error {
 
 // GuardSources returns the read-write sources whose path, or a directory above it up to the share mount, is an
 // object in prior, the record of what earlier starts of this server knew as read-only. Sources the configured paths
-// put inside a read-only directory source are left out (MovedUnder). A source whose path cannot be walked now counts
-// too: OpenSources waits for a path that is not there yet, and what it then opens was not compared.
-func GuardSources(mounts []string, srcs []Source, prior []ProtectID) []int {
+// put inside a read-only directory source are left out (MovedUnder). failed holds the sources whose path could not
+// be walked now, with the error: OpenSources waits for a path that is not there yet, and what it then opens was not
+// compared.
+func GuardSources(mounts []string, srcs []Source, prior []ProtectID) (hit []int, failed map[int]error) {
+	failed = map[int]error{}
 	if len(prior) == 0 {
-		return nil
+		return nil, failed
 	}
 	known := knownIDs(prior)
-	var out []int
 	for _, i := range MovedUnder(srcs) {
 		s := srcs[i]
 		if s.Mount < 0 || s.Mount >= len(mounts) || s.Rel == "." {
@@ -687,12 +730,16 @@ func GuardSources(mounts []string, srcs []Source, prior []ProtectID) []int {
 		if err != nil {
 			continue // OpenSources refuses the start
 		}
-		if underKnown(mfd, s.Rel, known) {
-			out = append(out, i)
-		}
+		under, err := underKnown(mfd, s.Rel, known)
 		unix.Close(mfd)
+		switch {
+		case err != nil:
+			failed[i] = err
+		case under:
+			hit = append(hit, i)
+		}
 	}
-	return out
+	return hit, failed
 }
 
 func knownIDs(ids []ProtectID) map[fileID]bool {
@@ -704,9 +751,9 @@ func knownIDs(ids []ProtectID) map[fileID]bool {
 }
 
 // underKnown reports whether rel beneath the share mount mfd, or a directory on the way to it, is an object in
-// known. Every step is opened beneath the mount with no symbolic link. A step that cannot be opened or looked at
-// counts as known: the caller serves read-only what it could not compare.
-func underKnown(mfd int, rel string, known map[fileID]bool) bool {
+// known. Every step is opened beneath the mount with no symbolic link. A step that cannot be opened or looked at is
+// an error, and the caller serves read-only what it could not compare.
+func underKnown(mfd int, rel string, known map[fileID]bool) (bool, error) {
 	parts := strings.Split(rel, "/")
 	for n := 1; n <= len(parts); n++ {
 		fd, err := unix.Openat2(mfd, strings.Join(parts[:n], "/"), &unix.OpenHow{
@@ -714,15 +761,18 @@ func underKnown(mfd int, rel string, known map[fileID]bool) bool {
 			Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_MAGICLINKS | unix.RESOLVE_NO_XDEV,
 		})
 		if err != nil {
-			return true
+			return false, err
 		}
 		id, err := idOf(fd)
 		unix.Close(fd)
-		if err != nil || known[id] {
-			return true
+		if err != nil {
+			return false, err
+		}
+		if known[id] {
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
 }
 
 // tailBuffer keeps the last bytes written to it.
