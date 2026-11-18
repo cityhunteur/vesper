@@ -27,7 +27,7 @@ upid() { mvm unfs-isolation "$1" | head -1 | sed -n 's/.* pid=\([0-9]*\).*/\1/p'
 # A forged handle can make unfs3 abort (TD-065); supervise-daemon starts it again within about a second.
 wait_listen() { for _ in $(seq 1 40); do case "$(mvm unfs "$1")" in *listen=yes*) return 0 ;; esac; sleep 0.5; done; return 1; }
 errline() { grep -m1 '^ERR' || echo "no ERR line"; }
-cleanup() { for i in "${ID}" "${OTHER}" "${SQ}" unfs-x; do mvm cleanup "$i" --logs >/dev/null; done; }
+cleanup() { for i in "${ID}" "${OTHER}" "${SQ}" unfs-x unfs-h; do mvm cleanup "$i" --logs >/dev/null; done; }
 trap cleanup EXIT
 ctl share list | grep -q " ${SHARE} virtiofs\| ${SHARE} mode=" || { echo "unfs-suite: ${SHARE} is not a share; run 'make systemvm-up-shares'" >&2; exit 2; }
 cleanup
@@ -162,6 +162,47 @@ qself="$(printf '%s\n' "${qs}" | grep '^SELF-SUMMARY')"
 case "${q}:${qiso}:${qsum}:${qself}" in *"LAUNCHED ${SQ} "*":"*"uid=65534 gid=65534 capbnd=0000000000000000 capeff=0000000000000000"*"nonewprivs=1 seccomp=2"*":"*"failed=0"*":"*"failed=0"*)
   record squash_server_confined_and_serving true "${qiso}; probe ${qsum}; ${qown}; selfcheck ${qself}" ;;
   *) record squash_server_confined_and_serving false "${q}; ${qiso}; ${qsum}; ${qself}; $(printf '%s\n%s\n' "${qp}" "${qs}" | grep FAIL | tr '\n' ';')" ;; esac
+
+# --- 9b. A request held unfinished is judged with the list as it is when it ends (TD-078, TD-079). A task can send
+# a request to its own server and keep back the last bytes; the single-threaded server then waits and looks at
+# nothing. Here a raw client sends a REMOVE of "hz/secret~", but for its last bytes, while that name does not exist
+# yet. macOS then saves the read-only file hz/secret twice as an editor with a backup does, so the file that was
+# the read-only file between the saves becomes hz/secret~. The supervisor tells the server's list of each new file
+# before it attaches it. The client then sends the rest. The server must read its list inside that request's own
+# check, after the arguments arrived: its look at the start of the request was before both saves. A second held
+# request, an UNCHECKED CREATE of the same name across two more saves, does the same for the procedures that are
+# checked in one place only (a REMOVE is checked in two). The client makes a marker file when its request is held,
+# and the saves wait for it; after each held request it makes and removes a file of its own, which must go through.
+HF="${F}/hold"; mkdir -p "${HF}/hz"; echo v0 > "${HF}/hz/secret"
+hl="$(mvm launch unfs-h --share-net --unfs-mount "${SHARE}" --unfs-src m3/hold:rw --unfs-src m3/hold/hz/secret:rof | tail -1)"
+hatt() { mvm unfs-log unfs-h 80 | grep -a -c 'another file is at its path'; }
+hsave() { echo "$1" > "${HF}/hz/new"; mv "${HF}/hz/secret" "${HF}/hz/secret~"; mv "${HF}/hz/new" "${HF}/hz/secret"; }
+# held KIND TAG V1 V2: a held request across two saves; prints "held-in-time attaches" and leaves the probe's output
+held() {
+  local before a1 a2 intime=no
+  ( mvm test-unfs-probe unfs-h "--hold-$1" 'hz/secret~' --until "${HF}/go-$2" --held-marker "${HF}/held-$2" > "${RAW}/held-$2.txt" 2>&1 ) &
+  local pid=$!
+  for _ in $(seq 1 60); do [ -e "${HF}/held-$2" ] && { intime=yes; break; }; sleep 0.25; done
+  before="$(hatt)"; hsave "$3"
+  a1="${before}"; for _ in $(seq 1 30); do a1="$(hatt)"; [ "${a1}" -gt "${before}" ] && break; sleep 0.25; done
+  hsave "$4"
+  a2="${a1}"; for _ in $(seq 1 30); do a2="$(hatt)"; [ "${a2}" -gt "${a1}" ] && break; sleep 0.25; done
+  touch "${HF}/go-$2"; wait "${pid}"
+  [ "${a1}" -gt "${before}" ] && [ "${a2}" -gt "${a1}" ] && echo "${intime} two-attaches" || echo "${intime} attaches-${before}-${a1}-${a2}"
+}
+h1="$(held remove r v1 v2)"; hout1="$(cat "${RAW}/held-r.txt" 2>/dev/null | tr '\n' ';')"; hback1="$(cat "${HF}/hz/secret~" 2>/dev/null | tr '\n' ' ')"
+h2="$(held create c v3 v4)"; hout2="$(cat "${RAW}/held-c.txt" 2>/dev/null | tr '\n' ';')"; hback2="$(cat "${HF}/hz/secret~" 2>/dev/null | tr '\n' ' ')"
+hlist="$(mvm unfs-list unfs-h | head -1)"
+case "${hl}|${h1}|${hout1}|${h2}|${hout2}" in
+  "LAUNCHED unfs-h "*"|yes two-attaches|HELD sent remove hz/secret~ (absent);HELD remove hz/secret~ status=ROFS;HELD control status=OK err=<nil>;"*"|yes two-attaches|HELD sent create hz/secret~ (present);HELD create hz/secret~ status=ROFS;HELD control status=OK err=<nil>;"*)
+    if [ "${hback1}" = "v1 " ] && [ "${hback2}" = "v3 " ]; then
+      record held_request_judged_with_the_list_as_it_is_then true "a REMOVE of hz/secret~, held from before the first save, was refused as read-only when it ended after two saves, and macOS still read '${hback1}' in the backup; an UNCHECKED CREATE of it held across two more saves was refused too (by its status: such a create keeps a file's data, so the backup, '${hback2}', shows nothing); the client's own file went through each time (${hlist})"
+    else
+      record held_request_judged_with_the_list_as_it_is_then false "macOS hz/secret~ after the held remove '${hback1}' (want 'v1 '), after the held create '${hback2}' (want 'v3 '); ${hlist}; remove: ${hout1} create: ${hout2}"
+    fi ;;
+  *) record held_request_judged_with_the_list_as_it_is_then false "${hl}; remove: ${h1}: ${hout1} create: ${h2}: ${hout2} ${hlist}; macOS hz/secret~ '${hback1}' then '${hback2}'" ;;
+esac
+mvm cleanup unfs-h --logs >/dev/null
 
 # --- 10. Cleanup leaves nothing ----------------------------------------------------------------------------------
 c="$(mvm cleanup "${SQ}" --logs)"; u="$(mvm unfs "${SQ}")"

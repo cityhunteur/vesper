@@ -193,6 +193,19 @@ func TestProtectList(t *testing.T) {
 // The record keeps each object once across restarts of the server. What a start saw is never pushed out by later
 // entries: a task can add entries (it renames directories, and a file replaces a read-only file), and the first
 // ones are what the user bound (council SEC-4).
+// recordText is the record as RecordProtectIDs writes it.
+func recordText(ids []ProtectID) string {
+	var b strings.Builder
+	for _, id := range ids {
+		fmt.Fprintf(&b, "%d %d", id.Dev, id.Ino)
+		if id.Swapped {
+			b.WriteString(" r")
+		}
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
 func TestRecordProtectIDs(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "x.prot")
 	id := func(dev, ino uint64) ProtectID { return ProtectID{Dev: dev, Ino: ino} }
@@ -230,6 +243,21 @@ func TestRecordProtectIDs(t *testing.T) {
 	}
 	if last := got[len(got)-1]; !last.same(swap(2, uint64(MaxProtectSwaps+39))) || !got[MaxProtectStarts].same(swap(2, 40)) {
 		t.Errorf("replaced files kept from %v to %v, want the newest %d", got[MaxProtectStarts], last, MaxProtectSwaps)
+	}
+	// A replaced file that is recorded again is the newest again.
+	if got := MergeProtectIDs([]ProtectID{swap(5, 5), swap(6, 6), swap(7, 7)}, swap(5, 5)); !reflect.DeepEqual(got, []ProtectID{swap(6, 6), swap(7, 7), swap(5, 5)}) {
+		t.Errorf("a replaced file recorded again: %v", got)
+	}
+	// With the start numbers full, a replaced file that a start finds as a source stays a replaced file, through
+	// this merge and the next.
+	full := append([]ProtectID(nil), many[:MaxProtectStarts]...)
+	full = append(full, swap(5, 5))
+	once := MergeProtectIDs(full, id(5, 5))
+	twice := MergeProtectIDs(ParseProtectIDs(recordText(once)), id(1, 0))
+	for _, got := range [][]ProtectID{once, twice} {
+		if len(got) != MaxProtectStarts+1 || !reflect.DeepEqual(got[len(got)-1], swap(5, 5)) {
+			t.Errorf("a replaced file found as a source with the start numbers full: %d kept, last %v", len(got), got[len(got)-1])
+		}
 	}
 	// A replaced file that a later start finds as a source is kept as a source.
 	if got := MergeProtectIDs([]ProtectID{id(1, 1), swap(5, 5), swap(6, 6)}, id(5, 5)); !reflect.DeepEqual(got, []ProtectID{id(1, 1), id(5, 5), swap(6, 6)}) {
@@ -284,9 +312,13 @@ func TestListFile(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// An object that is told again gets a line again: the server makes it the newest by that line (TD-079).
+	if err := AppendSeen(lw, ProtectID{Dev: 40, Ino: 1506}); err != nil {
+		t.Fatal(err)
+	}
 	raw, _ := os.ReadFile(file)
-	if string(raw) != "p /s/1/f\ni 7 8\ns 40 1506\ns 40 1507\n" {
-		t.Errorf("the list after two lines were added: %q", raw)
+	if string(raw) != "p /s/1/f\ni 7 8\ns 40 1506\ns 40 1507\ns 40 1506\n" {
+		t.Errorf("the list after three lines were added: %q", raw)
 	}
 	after, _ := os.Stat(file)
 	if !os.SameFile(st, after) {

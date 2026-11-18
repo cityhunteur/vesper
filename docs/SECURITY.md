@@ -381,13 +381,13 @@ from its own microVM's server. Docker containers do not use the shim and still g
     - The window of D-052 above (until the new file is attached), and another task or a macOS process, which this
       server does not see.
     - The limits: the supervisor's record keeps the first 150 numbers seen at starts and the newest 50 of replaced
-      files, each with a hold; the supervisor also holds the newest 256 replaced files while it runs, and a server
+      files (newest by when each was last recorded), each with a hold; the supervisor also holds the newest 256 replaced files while it runs, and a server
       remembers the newest 768 objects that it was told of or found at protected places (the objects of the start
-      among them), counted from when it first learned each one: an object that comes back to a place does not
-      become new again (TD-079). The numbers of the ones beyond the 256 are held by nothing. A task that makes the
+      among them), newest by when each was last told or found: an object that comes back to a place is
+      the newest again (TD-079). The numbers of the ones beyond the 256 are held by nothing. A task that makes the
       supervisor attach more files than that (20 at a stretch for each read-only file source, then one each 15 s)
       can push out the oldest: with three such sources the 50 are reached in about 20 s, and the 768 in about an
-      hour (about three hours with one source).
+      hour (about three hours with one source). With 39 or more read-only file sources, which the user chooses, the first 20 attaches of each are enough.
     - After a restart, a read-write bind that the user put inside a read-only one is not compared with the
       record (it is writable by design). A task that renames directories so that this bind's path lies in another
       read-only directory of the same name gets it read-write.
@@ -464,6 +464,15 @@ from its own microVM's server. Docker containers do not use the shim and still g
 - **Test hooks**, for `make systemvm-sharenet-suite` only: `launch --share-probe`, `test-share-listen`,
   `test-share-reach`, `test-age`, `test-abort-launch`, `test-drop-record` and `test-impostor`. They need root in the System VM, like every `vesper-microvm`
   command.
+- **Test hooks of the share server**, for the unfs, binds and shares suites only: `test-unfs-probe` (a raw NFS
+  client that calls as the guest; with `--hold-remove` or `--hold-create` it holds one request unfinished for up
+  to 28 s, in which that task's server answers nothing), `test-unfs-selfcheck`, `test-unfs-kill`,
+  `test-unfs-giveup`, `test-unfs-pause` and `test-unfs-resume`, `test-unfs-list-break` and
+  `test-unfs-list-retell` (they add lines to a server's list: the first makes the server refuse every change, the
+  second fills its memory with made-up objects, at most 4,096 on each side). Each of these acts on one task's
+  server. Three act more widely: `test-unfs-stall-next` stops the next server that starts, of any task,
+  `test-share-rate` sets the rate limit of the share network for later launches, and `test-drop-caches` makes the
+  whole System VM forget the files it does not hold. They all need root in the System VM.
 - **Evidence:** `make systemvm-sharenet-suite` (12 steps, `run/GH-160/m2-sharenet-suite.json`).
 
 ### The share server (GH #160 M3)

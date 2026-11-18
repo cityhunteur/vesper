@@ -70,7 +70,9 @@ The Go module pins containerd 2.1.5 and builds static Linux arm64 binaries with 
   `shares.rebindFile` in the guest's replay binds the export's file again at its destinations and answers `BIND N
   same|again|failed|none`. `go test
   ./internal/unfs ./internal/nfsprobe` covers parsing, nesting, exports, RPC encoding and the filter program.
-  Installed as `/usr/bin/vesper-unfs`.
+  Installed as `/usr/bin/vesper-unfs`. `vesper-unfs probe --hold-remove PATH --until FILE` or `--hold-create` (`nfsprobe.Battery.Held`) sends a REMOVE or
+  an UNCHECKED CREATE and holds it before its last bytes until FILE exists, as a task can do to its own server
+  (TD-079).
 - `cmd/vesper-runc` and `internal/runcwrap`: dockerd's default runtime in a normal boot (TD-062, D-036). Every
   runc command but `create` replaces itself with `/usr/bin/runc`. For `create` it runs runc, and then asks each
   bind source on a macOS share for its attributes with `statx(AT_STATX_FORCE_SYNC)`, as the container process's
