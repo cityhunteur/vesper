@@ -238,3 +238,48 @@ func TestEventMtime(t *testing.T) {
 		t.Fatal("nothing sent")
 	}
 }
+
+// The supervisor's notice for a replaced file (D-052) is an event with an empty rest, sent through the jail's vsock
+// socket after its CONNECT line; the guest's answer comes back on the same connection.
+func TestNotifyBind(t *testing.T) {
+	if e, err := ParseEvent(strings.TrimSuffix(Event{Export: 3}.Line(), "\n")); err != nil || e != (Event{Export: 3}) {
+		t.Fatalf("a notice does not parse back: %+v, %v", e, err)
+	}
+	sock := filepath.Join(t.TempDir(), "v.sock")
+	l, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	replies := []string{"BIND 3 again\n", "BIND 3 same\n", "BIND 4 same\n", "BIND 3 same and more\n", "junk\n", ""}
+	got := make(chan string, len(replies))
+	go func() {
+		for _, reply := range replies {
+			c, err := l.Accept()
+			if err != nil {
+				got <- "accept: " + err.Error()
+				return
+			}
+			r := bufio.NewReader(c)
+			hello, _ := r.ReadString('\n')
+			_, _ = io.WriteString(c, "OK 1073741824\n")
+			line, _ := r.ReadString('\n')
+			_, _ = io.WriteString(c, reply)
+			c.Close()
+			got <- hello + line
+		}
+	}()
+	// Only the four answers for the export asked about are taken; anything else from the guest is no answer.
+	for i, want := range []string{"again", "same", "", "", "", ""} {
+		answer, err := NotifyBind(sock, 3)
+		if err != nil || answer != want {
+			t.Errorf("reply %q: answer %q, %v; want %q", replies[i], answer, err, want)
+		}
+		if g := <-got; g != "CONNECT 1026\n3\t\n" {
+			t.Fatalf("the guest was sent %q", g)
+		}
+	}
+	if _, err := NotifyBind(filepath.Join(t.TempDir(), "absent.sock"), 0); err == nil {
+		t.Fatal("no socket, and no error")
+	}
+}

@@ -51,6 +51,13 @@ func main() {
 	}
 	// shares replay: share events from the System VM on stdin (vsock port 1026, GH #160 M6).
 	if len(os.Args) == 3 && os.Args[1] == "shares" && os.Args[2] == "replay" {
+		// The console, not stderr: socat sends stderr to the sender of the events, which may be gone (D-052).
+		if tty, err := os.OpenFile("/dev/ttyS0", os.O_WRONLY|os.O_APPEND, 0); err == nil {
+			defer tty.Close()
+			shares.ReplayLog = tty
+		}
+		shares.ReplayAnswer = os.Stdout // socat carries it back to the sender of a notice
+		shares.ReplayStall = 20 * time.Second
 		t, m, r := shares.Replay(os.Stdin, "/run/sessions/p1028", "/newroot")
 		fmt.Fprintf(os.Stderr, "VESPER-SHARE-REPLAY touched=%d missing=%d rejected=%d\n", t, m, r)
 		return

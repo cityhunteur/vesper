@@ -7,7 +7,8 @@
 # and write; at least 40 directories below an export read, a write through a descriptor opened before a rename
 # across directories keeps today's recorded outcome, and three more rename cases are measured; a share source whose
 # path holds spaces and shell characters mounts and reads; binds from two shares share one server and stay apart;
-# writes land when one inode is reachable read-only and read-write (TD-072); single-file binds (GH #208);
+# writes land when one inode is reachable read-only and read-write (TD-072); single-file binds (GH #208); a bound
+# file that macOS replaces is bound again within seconds (D-052);
 # after the shim is killed the reaper leaves no server,
 # namespace or record. Needs `make systemvm-up-shares`.
 # Report: run/systemvm/microvm-binds-report.json.
@@ -129,7 +130,7 @@ case "${out}|${w1}|${pt}" in "RC 0"*"OUT ro-refused"*"|w b |p b ") record writes
 # --- 6d. Single-file binds (GH #208, D-048): read and write; a read-only file bind and a read-only file nested in a
 # read-write directory refuse writes; one file bound both ways keeps its writes; the export's directory refuses new
 # entries, renames and removal from a hostile task; a file onto a directory is refused; a macOS edit reaches a
-# watcher; a rename-replace on macOS is recorded (the bind goes stale: ESTALE, not the old content) ----------------
+# watcher (the next step replaces files on macOS) --------------------------------------------------------------------
 G="${F}/g208"; mkdir -p "${G}/dir"; echo one > "${G}/a.txt"; echo conf > "${G}/dir/conf.txt"; echo w > "${G}/w.txt"
 nfsopt='addr=169.254.77.1,vers=3,proto=tcp,port=2049,mountport=2050,mountproto=tcp,nolock'
 out="$(runb --bind="${G}/a.txt:/etc/a.txt:rw" --bind="${G}/dir:/app:rw" --bind="${G}/dir/conf.txt:/app/conf.txt:ro" --bind="${G}/a.txt:/ro/a.txt:ro" binds-file "cat /etc/a.txt; echo two >> /etc/a.txt; { echo x > /app/conf.txt; } 2>/dev/null && echo NEST-WRITTEN || echo nest-ro-refused; { echo y > /ro/a.txt; } 2>/dev/null && echo RO-WRITTEN || echo ro-refused; mv /etc/a.txt /etc/b.txt 2>/dev/null && echo MOVED || echo rename-busy; mkdir -p /mnt/x; mount -t nfs -o ${nfsopt} 169.254.77.1:/s/0 /mnt/x && echo export-entries \$(ls /mnt/x); touch /mnt/x/sib 2>/dev/null && echo SIBLING || echo sibling-refused; rm /mnt/x/f 2>/dev/null && echo REMOVED || echo remove-refused")"
@@ -139,16 +140,64 @@ case "${out}|${dirdest}" in "RC 0"*"OUT one"*"OUT nest-ro-refused"*"OUT ro-refus
     record file_binds true "${out}; macOS a.txt='one two', conf.txt unchanged; onto a directory: ${dirdest}"
   else record file_binds false "${out}; macOS a.txt='$(tr '\n' ' ' < "${G}/a.txt")'"; fi ;;
   *) record file_binds false "${out}; onto a directory: ${dirdest}" ;; esac
-mkdir -p "${G}/log"; echo v1 > "${G}/e.txt"
-st="$(runb --bind="${G}/e.txt:/e.txt:rw" --bind="${G}/log:/log:rw" --detach binds-file-ev 'inotifyd - /e.txt:c > /log/ev 2>&1 & sleep 9; cat /e.txt > /log/before 2>&1; sleep 7; cat /e.txt > /log/after 2>&1; echo rc=$? >> /log/after; kill %1')"
-sleep 5; echo v2 >> "${G}/e.txt"; sleep 6
-printf 'v3\n' > "${G}/e.tmp" && mv "${G}/e.tmp" "${G}/e.txt"
-wait_stopped binds-file-ev 40; ctl ctr -- delete binds-file-ev >/dev/null
-ev="$(grep -c e.txt "${G}/log/ev" 2>/dev/null)"; before="$(tr '\n' ' ' < "${G}/log/before" 2>/dev/null)"; after="$(tr '\n' ' ' < "${G}/log/after" 2>/dev/null)"
-case "${st}|${before}|${after}" in "STARTED binds-file-ev|v1 v2 |"*)
-  if [ "${ev:-0}" -ge 1 ]; then record file_bind_events_and_rename_replace true "edit seen: '${before}', ${ev} IN_MODIFY; after a rename-replace on macOS the guest reads: '${after}' (recorded: a file bind pins the replaced file, D-048)"
-  else record file_bind_events_and_rename_replace false "no event; before '${before}' after '${after}'"; fi ;;
-  *) record file_bind_events_and_rename_replace false "${st}; before '${before}'; after '${after}'; events ${ev:-none}" ;; esac
+# --- 6e. A file that macOS replaces is bound again (D-052). An editor's save, `git checkout` and `sed -i` rename a
+# new file over the old one. The share server attaches the new file and the guest binds it again: a file bound both
+# read-write and read-only, a read-only file inside a read-write directory, and a read-only file on a share that
+# sends no change events. The task reads them twice a second, with its uptime. Before the replacement an edit in
+# place reaches a watcher. Afterwards every bind shows the new content within 8 s by the guest's clock and to the
+# end; each of the four binds was made again once or twice, not at every notice; the read-write bind still writes,
+# and that write is in the new file on macOS; the nested file refuses a write at the guest's bind and, with that
+# bind removed, through the outer export too, where only the server's own read-only nest stands ------------------
+mkdir -p "${G}/log" "${G}/rdir" "${SHARE2}/$(basename "${F}")"; N="${SHARE2}/$(basename "${F}")/n.txt"
+echo v1 > "${G}/e.txt"; echo r1 > "${G}/rdir/conf.txt"; echo n1 > "${N}"
+st="$(runb --bind="${G}/e.txt:/e.txt:rw" --bind="${G}/e.txt:/ro/e.txt:ro" --bind="${G}/rdir:/app:rw" --bind="${G}/rdir/conf.txt:/app/conf.txt:ro" --bind="${N}:/n.txt:ro" --bind="${G}/log:/log:rw" --detach binds-file-ev 'inotifyd - /e.txt:c > /log/ev 2>&1 & sleep 9; cat /e.txt > /log/before 2>&1; i=0; while [ $i -lt 44 ]; do i=$((i+1)); echo "$(cut -d" " -f1 /proc/uptime) e=$(cat /e.txt 2>&1 | tail -1) ro=$(cat /ro/e.txt 2>&1 | tail -1) conf=$(cat /app/conf.txt 2>&1 | tail -1) n=$(cat /n.txt 2>&1 | tail -1)" > /log/s.$i; sleep 0.5; done; { echo x >> /app/conf.txt; } 2>/dev/null && echo NEST-WRITTEN > /log/nest || echo nest-refused > /log/nest; { echo y >> /ro/e.txt; } 2>/dev/null && echo RO-WRITTEN >> /log/nest || echo ro-refused >> /log/nest; echo guest >> /e.txt; sync; if umount /app/conf.txt; then { echo outer >> /app/conf.txt; sync; } 2>/dev/null; echo outer-tried >> /log/nest; else echo guest-bind-not-removed >> /log/nest; fi; kill %1')"
+sleep 5; echo v2 >> "${G}/e.txt"; sleep 8
+at="$(ls "${G}/log" | grep -c '^s\.')"   # the samples taken before the replacement
+for f in "${G}/e.txt:v3" "${G}/rdir/conf.txt:r2" "${N}:n2"; do p="${f%%:*}"; printf '%s\n' "${f##*:}" > "${p}.tmp" && mv "${p}.tmp" "${p}"; done
+wait_stopped binds-file-ev 70 || ctl ctr -- kill binds-file-ev 30 >/dev/null
+# Each of the four destinations made again: counted by name, so one bind made twice does not stand in for another.
+rebound="$(ctl microvm log binds-file-ev 300 | tr -d '\r' | grep -a 'VESPER-SHARE-REBOUND' | sort | uniq -c | awk '{n++; t += $1; d = d " " $3 "x" $1} END {printf "%d of 4 destinations, %d times:%s", n, t, d}')"; ctl ctr -- delete binds-file-ev >/dev/null
+for _ in $(seq 1 20); do grep -q guest "${G}/e.txt" 2>/dev/null && break; sleep 0.5; done   # the write-back reaches macOS a moment later
+ev="$(grep -c e.txt "${G}/log/ev" 2>/dev/null)"; before="$(tr '\n' ' ' < "${G}/log/before" 2>/dev/null)"; nest="$(tr '\n' ' ' < "${G}/log/nest" 2>/dev/null)"
+want="e=v3 ro=v3 conf=r2 n=n2"; first=""
+for i in $(seq 1 44); do [ "$(cut -d' ' -f2- "${G}/log/s.${i}" 2>/dev/null)" = "${want}" ] && { first="${i}"; break; }; done
+last="$(cut -d' ' -f2- "${G}/log/s.44" 2>/dev/null)"; mac="$(tr '\n' ' ' < "${G}/e.txt")|$(tr '\n' ' ' < "${G}/rdir/conf.txt")|$(tr '\n' ' ' < "${N}")"
+# Seconds on the guest's clock from the last sample before the replacement to the first with all four new.
+secs="$(awk -v a="$(cut -d' ' -f1 "${G}/log/s.${at}" 2>/dev/null)" -v b="$(cut -d' ' -f1 "${G}/log/s.${first:-0}" 2>/dev/null)" 'BEGIN { if (a > 0 && b >= a) printf "%d", b - a + 0.999; else print 99 }')"
+if [ "${st}" = "STARTED binds-file-ev" ] && [ "${before}" = "v1 v2 " ] && [ "${ev:-0}" -ge 1 ] && [ -n "${first}" ] && [ "${secs}" -le 8 ] \
+  && [ "${last}" = "${want}" ] && [ "${nest}" = "nest-refused ro-refused outer-tried " ] && [ "${mac}" = "v3 guest |r2 |n2 " ] \
+  && case "${rebound}" in "4 of 4 destinations, "[4-8]" times:"*) true ;; *) false ;; esac; then
+  record file_bind_follows_a_replaced_file true "edit in place seen: '${before}', ${ev} IN_MODIFY; all four binds new within ${secs} s of the replacement and to the end; ${nest}; binds made again: ${rebound}; macOS: ${mac}"
+else
+  record file_bind_follows_a_replaced_file false "${st}; before '${before}'; events ${ev:-none}; replaced after sample ${at}, first all-new sample '${first:-none}' (${secs} s), last '${last}'; ${nest:-no nest result}; binds made again: ${rebound:-none}; macOS: ${mac}; s.$((at + 4)): $(cat "${G}/log/s.$((at + 4))" 2>/dev/null)"
+fi
+
+# --- 6f. A task cannot use the re-attach to write a file bound read-only (D-052). With a read-write directory bind
+# the task renames directories so that the path of its read-write file bind names another file, which a second bind
+# made read-only. The server sees another file at the path and attaches it, taken through the directory's export,
+# where the read-only nest covers it: the clone is read-only. The file on macOS keeps its content ----------------
+H="${F}/h52"; mkdir -p "${H}/x" "${H}/y"; echo mine > "${H}/x/secret"; echo protected > "${H}/y/secret"
+st="$(runb --bind="${H}:/d:rw" --bind="${H}/x/secret:/a:rw" --bind="${H}/y/secret:/b:ro" --detach binds-swap 'mv /d/x /d/x2 && mv /d/y /d/x && echo renamed > /d/state; sleep 8; { echo evil >> /a; sync; } 2>/dev/null; { echo evil >> /d/x/secret; sync; } 2>/dev/null; cat /a > /d/a-now 2>&1; sleep 2')"
+wait_stopped binds-swap 60 || ctl ctr -- kill binds-swap 30 >/dev/null
+slog="$(ctl microvm unfs-log binds-swap 60 | grep -a 'another file is at its path' | tr '\n' ' ')"; ctl ctr -- delete binds-swap >/dev/null
+sleep 2; prot="$(tr '\n' ' ' < "${H}/x/secret" 2>/dev/null)"; mine="$(tr '\n' ' ' < "${H}/x2/secret" 2>/dev/null)"; anow="$(tr '\n' ' ' < "${H}/a-now" 2>/dev/null)"
+case "${st}|$(cat "${H}/state" 2>/dev/null)|${prot}|${slog}" in
+  "STARTED binds-swap|renamed|protected |"*"x/secret"*"taken through the export"*"stays read-only"*)
+    record renamed_into_place_keeps_read_only true "after the renames the server attached the file at the path read-only (${slog}); macOS: x/secret='${prot}' x2/secret='${mine}'; the task's /a then read '${anow}'" ;;
+  *) record renamed_into_place_keeps_read_only false "${st}; state '$(cat "${H}/state" 2>/dev/null)'; macOS x/secret='${prot}' (want 'protected') x2/secret='${mine}'; /a read '${anow}'; server log: ${slog:-no attach logged}" ;;
+esac
+
+# --- 6g. A file replaced after the server came back is bound again too (D-052): the export of a file is a small
+# file system that each new sandbox makes anew, and the guest must still be able to look the file up in it -----------
+K="${F}/k52"; mkdir -p "${K}/log"; echo k1 > "${K}/k.txt"
+st="$(runb --bind="${K}/k.txt:/k.txt:rw" --bind="${K}/log:/log:rw" --detach binds-krep 'i=0; while [ $i -lt 40 ]; do i=$((i+1)); echo "k=$(cat /k.txt 2>&1 | tail -1)" > /log/s.$i; sleep 0.5; done')"
+sleep 4; killed="$(ctl microvm test-unfs-kill binds-krep | head -1)"; sleep 5
+printf 'k2\n' > "${K}/k.tmp" && mv "${K}/k.tmp" "${K}/k.txt"
+wait_stopped binds-krep 60 || ctl ctr -- kill binds-krep 30 >/dev/null
+ctl ctr -- delete binds-krep >/dev/null
+last="$(cat "${K}/log/s.40" 2>/dev/null)"; newc="$(grep -l 'k=k2' "${K}"/log/s.* 2>/dev/null | wc -l | tr -d ' ')"
+case "${st}|${last}" in "STARTED binds-krep|k=k2") record replaced_after_a_server_restart true "${killed}; then replaced: ${newc} samples read the new file, the last '${last}'" ;;
+  *) record replaced_after_a_server_restart false "${st}; ${killed}; last sample '${last}'; ${newc} samples read the new file" ;; esac
 
 # --- 7. After the shim is killed, the reaper leaves no server, namespace or record ----------------------------------
 st="$(runb "${B[@]}" --detach binds-shim 'sleep 600')"

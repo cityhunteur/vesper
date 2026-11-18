@@ -231,8 +231,12 @@ Backend A runs stock Firecracker on Linux, so its parity depends on the System V
   [ADR 0009](../design-docs/adr/0009-shares-into-microvms-over-nfs.md), D-038) for containerd tasks on the Vesper
   shim: a bind from a share is an NFSv3 mount from one sandboxed server per microVM (Vesper's patched `unfs3`,
   D-044), in that microVM's own network namespace (`make systemvm-unfs-suite`, `make
-  systemvm-microvm-shares-suite`, `make systemvm-microvm-binds-suite`). Deviations: a single-file bind goes stale (`ESTALE`)
-  when macOS replaces the file by rename, as editors' atomic saves do, until the task restarts (GH #208, D-050);
+  systemvm-microvm-shares-suite`, `make systemvm-microvm-binds-suite`). Deviations: when macOS replaces a bound file by rename, as editors' atomic saves do, the bind is made again
+  on the new file (D-052), but reads fail (`ESTALE`) for one to three seconds in between, a descriptor opened before
+  stays stale, a guest write to the old file in that time is lost, and a read-only file inside a read-write bind can
+  be written through that bind for about a second, which a hostile task can use to keep the access (TD-074); a
+  read-only bind that lies inside a read-write bind is not protected from a hostile task, which can write it under a
+  name in another letter case or by moving it into a second read-write bind (TD-073);
   binds from several shares share one server (GH #207, D-047); at most 40 directories below a bind and 1,024-byte
   paths (TD-067); a share's own I/O is bounded by a rate limit on its network (TD-069, D-045); read-only binds
   get no host-edit events. The patched server fixed the data loss on appends (TD-068) and on writes to a file also reachable read-only (TD-072), whole-second times (TD-066)

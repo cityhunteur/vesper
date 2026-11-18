@@ -100,7 +100,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: vesper-unfs run (--args FILE | --mount DIR --src REL:ro|rw ...) [--squash] [--root DIR] [--cgroup DIR] | probe [flags]")
+	fmt.Fprintln(os.Stderr, "usage: vesper-unfs run (--args FILE | --mount DIR --src REL:ro|rw ...) [--squash] [--root DIR] [--cgroup DIR] [--guest-sock PATH] | probe [flags]")
 	os.Exit(2)
 }
 
@@ -108,7 +108,7 @@ func run(args []string) int {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	var cfg unfs.Config
 	var a unfs.Args
-	var argsFile string
+	var argsFile, guestSock string
 	fs.Var(mountFlag{&a}, "mount", "a virtio-fs share mount the sources after it lie in (repeatable)")
 	fs.Var(srcFlag{&a}, "src", "a source REL:ro or REL:rw, relative to the --mount before it (repeatable)")
 	fs.BoolVar(&a.Squash, "squash", false, "run unfsd as 65534 with no capabilities (all_squash)")
@@ -119,6 +119,7 @@ func run(args []string) int {
 	fs.BoolVar(&cfg.Selfcheck, "selfcheck", false, "run the escape checks in the sandbox in place of unfsd (tests)")
 	fs.StringVar(&cfg.SelfcheckBin, "selfcheck-bin", "/usr/bin/vesper-unfs", "this binary as the sandbox sees it")
 	fs.DurationVar(&cfg.TestPauseNests, "test-pause-nests", 0, "wait this long before placing nests (tests only)")
+	fs.StringVar(&guestSock, "guest-sock", "", "the microVM's vsock socket: the guest is told there when a file source was replaced (D-052)")
 	fs.SetOutput(io.Discard)
 	if err := fs.Parse(args); err != nil {
 		fmt.Fprintf(os.Stderr, "vesper-unfs run: %v\n", err) // one line, which vesper-microvm looks for
@@ -143,6 +144,9 @@ func run(args []string) int {
 		return 2
 	}
 	cfg.Mounts, cfg.Sources, cfg.Squash = a.Mounts, a.Sources, a.Squash
+	if guestSock != "" {
+		cfg.NotifyGuest = func(export int) (string, error) { return shares.NotifyBind(guestSock, export) }
+	}
 	code, err := unfs.Run(cfg)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "vesper-unfs run: %v\n", err)

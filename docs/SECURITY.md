@@ -266,11 +266,51 @@ from its own microVM's server. Docker containers do not use the shim and still g
   and the task holds write access to it anyway (D-049).
 - **Single-file binds** (GH #208, D-050): a file source is opened with `openat2` without `O_DIRECTORY`, no symbolic
   link on the way, and must be a regular file (a FIFO or socket would hang the single-threaded server). It is
-  attached on an empty file `f`, a fixed name, in a directory `/s/N` of the read-only sandbox root, so the guest
+  attached on an empty file `f`, a fixed name, in `/s/N`, a small read-only tmpfs of its own (D-052), so the guest
   cannot add entries next to it, rename or remove it, or change `/s/N` (`EROFS`); a hard link out of it fails
   (`EXDEV`). A read-only file inside a read-write directory source is nested like a directory. The guest mounts `/s/N`
   at a hidden directory of its session, outside the task's root, and binds `f` onto the destination (made as an
   empty file when missing; a directory there is refused), read-only and `nosuid,nodev` as asked.
+- **A file source that macOS replaces** (D-052): the supervisor looks at a file source's path once a second and,
+  when another file is there, attaches it in the sandbox in place of the old one and tells the guest, which binds it
+  again. This is the one place a source path is used after the server has started, and a task can change what a
+  path names: with a read-write directory bind it can rename directories until the path of one of its file binds
+  names a file that another bind made read-only. So where the new file is taken from depends on who can reach the
+  path.
+  - No read-write directory source of this task holds the path: the task cannot change what it names (another task
+    or container with a read-write bind over a directory above it can, and the bind then follows; TD-074). The
+    file is opened from
+    the share mount by the rules of the first open (`openat2` beneath the mount, on it alone, no symbolic link, a
+    regular file) and cloned with the bind's attributes.
+  - A read-write directory source holds the path: the file is opened beneath that source's export inside the
+    sandbox, crossing mounts as an NFS request does, and cloned there. A file under a read-only nest is cloned from
+    the nest and stays read-only, whatever the file bind's own mode. The binds suite step
+    `renamed_into_place_keeps_read_only` runs the renames; with the file taken from the share mount instead, the
+    task wrote the read-only file (`run/D-052/notes.txt`).
+  The supervisor is root in the System VM. It holds the sandbox's process directory and mount namespace from the
+  start, so a process number that comes to name something else is not followed, and it acts only once the sandbox's
+  first process has become the server. It enters the namespace on a thread it then discards, names only `/s/N/f`
+  in the export's own read-only tmpfs, and finds everything else beneath an export with no symbolic link. One
+  source is attached or nested again at most 20 times at a stretch, then once in 15 s. It writes one line to the
+  microVM's vsock socket, as the event fanout does, and reads back at most 64 bytes, of which it keeps one of four
+  words.
+- **Read-only nests are placed again, but a window stays** (D-052, TD-074): when macOS replaces a read-only file
+  that lies inside a read-write source, the kernel drops the server's read-only nest with the old name, and the
+  guest's bind with it, as Linux does for any bind whose name is renamed over. The supervisor reads the sandbox's
+  mounts every second and places a nest that is gone again, and the guest binds again. In between, about a second
+  (up to 15 s when the source's 20 attaches at a stretch are spent), the task can write the new file through the
+  outer export, and the binds suite saw one write land. A task that
+  acts in that second can keep the access: it can rename the new file away, link it under another name, or hold
+  it open for writing. Only a macOS process can open the window; a task cannot rename over a nested file
+  (`EBUSY`). Docker on Linux drops the read-only bind for good in the same case.
+- **A read-only bind inside a read-write bind is not a boundary against a hostile task** (TD-073, found on
+  2026-11-18, present before D-052). The nest is a read-only mount on one name in one export. A task gets round it
+  with the same name in another letter case on a macOS volume that ignores case (the default), by moving the
+  file's directory into a second read-write bind that lies inside the first, or after a server restart that follows
+  its renames. Two of the three were run: macOS read `protected evil`. Until the server refuses such writes by the
+  file's identity, treat this layout as Docker treats it: what a read-write bind holds, the task can write. A
+  read-only bind that is not inside a read-write bind is not affected, and nor is the rule that a task reaches only
+  its own exports.
 - **One inode through two exports** (TD-072, D-049): unfs3 keys its handle cache on the handle's path hashes too
   (patch 0004), so a handle from one export resolves only into that export; a handle whose object was renamed into
   another directory still resolves within its own export. Before, a read through a read-only export made writes
@@ -351,14 +391,15 @@ from its own microVM's server. Docker containers do not use the shim and still g
   VM still sees a directory macOS deleted and remade under the same name (up to 15 s, TD-071). They are opened by
   `vesper-unfs run` with `openat2` beneath the share mount, with no symbolic link on the way
   and no crossing to another mount, then cloned into detached mount trees (`open_tree`) with their final attributes
-  (`nosuid,nodev,noexec`, plus `ro` for a read-only source). Nothing opens a source path again. A symbolic link, a
+  (`nosuid,nodev,noexec`, plus `ro` for a read-only source). Nothing opens a directory source's path again; a file
+  source's path is looked at again to attach a file that replaced it (D-052, below). A symbolic link, a
   `..` component or a mount that is not virtio-fs is refused, and the launch fails.
 - **Sandbox:** new mount, pid, ipc and uts namespaces; `pivot_root` into a 1 MiB tmpfs that is then read-only, with the
   old root detached. It holds only the exports, a read-only `/usr` and `/lib` (for `unfsd` and its libraries),
   `/dev/null` (read-only: it still opens for writing, but its mode and owner, the System VM's own, cannot change;
   council SEC-1), and `/etc` with the exports file and libtirpc's tables. No `/proc`, `/sys`, `/run` or device. Each
   read-only source is bound again, read-only, inside each read-write source that holds it, at a place found beneath
-  that export with no symbolic link on the way. The server runs as root with the bounding, permitted and effective
+  that export with no symbolic link on the way (this stops a workload's mistakes, not a hostile one: TD-073). The server runs as root with the bounding, permitted and effective
   sets cut to `CAP_CHOWN`, `CAP_DAC_OVERRIDE`, `CAP_FOWNER`, `CAP_FSETID`, `CAP_SETGID` and `CAP_SETUID` (`0xdb`),
   no ambient capabilities, `no_new_privs`, and a seccomp filter that refuses user namespaces (`unshare` and `clone`
   with `CLONE_NEWUSER`), `setns`, and `clone3` (D-037), and the calls an exploited server could use against the System

@@ -1,0 +1,61 @@
+D-052 experiments, 2026-11-18, System VM with 2 CPUs and 2048 MiB, macOS share run/WOR-39/share (watched) and
+run/WOR-39/share-nowatch (no change events).
+
+1. Before the change (main at fc41ec7). A task binds d/conf.txt as a file and d/ as a directory, and reads both
+   every second. macOS then runs: echo two > d/conf.tmp && mv d/conf.tmp d/conf.txt.
+     file bind:            cat: can't open '/conf.txt': Stale file handle     (for the 12 s watched, every time)
+     through the dir bind: two
+     the export's own file (read from the guest's hidden mount): cat: read error: Stale file handle
+   So the server's export of the file is dead as well as the guest's bind; a name looked up again is current.
+
+2. Server side attaches the new file (mount beneath, then the old mount removed):
+     vesper-unfs run: source "fb1/d/conf.txt" was replaced on the host; the new file is attached in place of the old one
+   Guest side, first version (open the bind, attach beneath, unmount the old):
+     VESPER-SHARE-REBIND-FAILED /conf.txt: stale file handle
+   A stale NFS bind cannot be opened, even with O_PATH. The guest now unmounts it by name and attaches after.
+
+3. Guest check, first version: statx(AT_STATX_FORCE_SYNC, STATX_INO|STATX_TYPE) on the export's file and the bind.
+   It reported the old inode for both for 10 s (ten notices) while the task's cat failed with a stale handle. The NFS
+   client does not ask the server when only the inode number and the type are requested. With STATX_BASIC_STATS the
+   check sees the stale bind.
+
+4. Final version, three rounds. One task binds a read-write file (a), a read-only file inside a read-write
+   directory bind (conf), and a read-only file on the share with no change events (n); it reads all three and tries
+   to append to conf twice a second. macOS replaces all three.
+     before:        a=a1 conf=c1 nestwrite=refused n=n1
+     first sample:  a=stale conf="c2 x" nestwrite=WROTE n=n1     (one append reached the new conf.txt on macOS)
+     0.5 to 1.5 s:  a=a2 conf="c2 x" nestwrite=refused n=n2      (to the end of each round, 12 s or more)
+   Guest console: VESPER-SHARE-REBOUND for each of the three. In one round a first try failed
+   (VESPER-SHARE-REBIND-FAILED /etc/a.txt: open_tree: stale file handle) and the next notice made the bind.
+
+5. Suites on the final build: microVM binds 11 of 11 (file_bind_follows_a_replaced_file: all three binds current
+   5 half-seconds after the replacement; an edit in place still gives IN_MODIFY; the guest's later write is in the
+   new file on macOS), unfs 13 of 13, microVM shares 11 of 11. Reports in this directory.
+
+6. Council review (correctness, security, reliability), then a second version. Findings and what was done with each
+   are in council.md. Runs on the second version:
+
+   a. The rename attack. Binds: h52 read-write at /d, h52/x/secret read-write (a file) at /a, h52/y/secret
+      read-only (a file) at /b. The task runs: mv /d/x /d/x2 && mv /d/y /d/x, waits 8 s, then appends "evil" to /a.
+      The path of the read-write file bind now names the file that was bound read-only.
+        with the fix:    macOS x/secret = "protected"; server log: another file is at its path; it is attached in
+                         place of the old one, taken through the export that holds its path; it lies under a
+                         read-only bind and stays read-only; the task's /a reads "protected"
+        negative control (the file taken from the share mount, as in the first version):
+                         macOS x/secret = "protected evil"
+   b. microVM binds suite 13 of 13: file_bind_follows_a_replaced_file (a file bound both ways, a nested read-only
+      file, a file on the share with no change events: all four binds new within 3 s on the guest's clock; 4 binds
+      made again; the nested file refuses a write at the guest's bind and, with that bind removed, through the outer
+      export; the read-write bind's later write is in the new file on macOS), renamed_into_place_keeps_read_only,
+      replaced_after_a_server_restart (unfsd killed, then the file replaced: bound again).
+   c. unfs suite 13 of 13, microVM shares suite 11 of 11.
+
+7. Two older gaps in the read-only nests, found during the review (TD-073). Both are on main at fc41ec7; neither
+   needs the change of D-052.
+   a. A second read-write bind inside the first. Binds: hole1 read-write at /p, hole1/work read-write at /w,
+      hole1/y/secret read-only (a file) at /s. The task ran: mv /p/y /p/work/y; echo evil >> /w/y/secret.
+        macOS work/y/secret: "protected evil"
+   b. Another letter case. The macOS volume is APFS and ignores case. Binds: case1 read-write at /d,
+      case1/y/secret read-only (a file) at /b. The task ran: echo evil >> /d/y/SECRET (its direct write to
+      /d/y/secret was refused first).
+        macOS y/secret: "protected evil"; ls in the guest shows one name, secret.

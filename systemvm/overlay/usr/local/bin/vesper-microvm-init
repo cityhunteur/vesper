@@ -97,7 +97,7 @@ if /bin/busybox grep -q vesper_rootfs=1 /proc/cmdline; then
       echo VESPER-EXEC-READY
       # macOS edits to the task's shares, from the System VM's fanout (GH #160 M6), replayed on the NFS mounts.
       if [ -n "$sharenet" ]; then
-        /usr/bin/socat VSOCK-LISTEN:1026,reuseaddr,fork "EXEC:/usr/bin/vesper-console shares replay,stderr" < /dev/null > /dev/ttyS0 2>&1 &
+        /usr/bin/socat VSOCK-LISTEN:1026,reuseaddr,fork,max-children=16 "EXEC:/usr/bin/vesper-console shares replay,stderr" < /dev/null > /dev/ttyS0 2>&1 &
       fi
       exec /sbin/tini-static -- /usr/bin/socat VSOCK-LISTEN:1025,reuseaddr,fork EXEC:/bin/vesper-guest-session
     fi

@@ -90,3 +90,25 @@ func TestOpenLiveFile(t *testing.T) {
 		t.Error("a file opened as a directory source")
 	}
 }
+
+// The supervisor finds a nest that is gone in the sandbox's mountinfo (D-052): the fifth field is the mount point,
+// with a space, a tab, a newline and a backslash written as octal escapes.
+func TestParseMountPoints(t *testing.T) {
+	got := parseMountPoints("" +
+		"812 780 0:61 / / ro,nosuid,nodev,noexec - tmpfs vesper-unfs rw,size=1024k\n" +
+		"815 812 0:42 /proj /s/0 rw,nosuid,nodev,noexec - virtiofs share0 rw\n" +
+		"816 815 0:42 /proj/my\\040conf.txt /s/0/my\\040conf.txt ro,nosuid,nodev,noexec - virtiofs share0 rw\n" +
+		"817 815 0:42 /proj/a\\134b /s/0/a\\134b ro - virtiofs share0 rw\n" +
+		"short line\n")
+	for _, p := range []string{"/", "/s/0", "/s/0/my conf.txt", `/s/0/a\b`} {
+		if !got[p] {
+			t.Errorf("mount point %q not found in %v", p, got)
+		}
+	}
+	if len(got) != 4 {
+		t.Errorf("%d mount points, want 4: %v", len(got), got)
+	}
+	if u := unescapeMount(`a\04`); u != `a\04` {
+		t.Errorf("a short escape changed: %q", u)
+	}
+}

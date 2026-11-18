@@ -443,6 +443,8 @@ unfs_start() { # ID SPEC SQUASH -> a reason on failure (lock held, namespace up)
   # The record (unfs.ParseArgs, version 2): what the server starts from on every respawn, what the selfcheck starts
   # from, and what the fanout maps host paths with. Parsed in Go only (council SEC-6).
   { echo "#vesper-unfs-args 2"; echo "squash $us_sq"; printf '%s\n' "$us_spec"; } > "$UNFS/$us_id.args"
+  # --guest-sock: the microVM's vsock socket, which exists once Firecracker runs. The supervisor tells the guest
+  # there when it has attached a file that replaced a file source on macOS (D-052).
   # A guest can make unfsd abort with a malformed handle (TD-065), so restarts are bounded by rate, not by a small
   # count: at most one a second and 30 a minute; a guest that crashes it faster loses only its own shares.
   # Not on our stdout or stderr: the agent reads them to end of file, and supervise-daemon outlives this script.
@@ -451,7 +453,7 @@ unfs_start() { # ID SPEC SQUASH -> a reason on failure (lock held, namespace up)
     --respawn-delay 1 --respawn-max 30 --respawn-period 60 --stdout /dev/null \
     --stderr-logger "/usr/local/bin/vesper-boundlog /var/log/vesper-unfs-$us_id.log 262144" \
     "$(command -v nsenter)" -- "--net=$NETNS/$us_id" /usr/bin/vesper-unfs run --unfsd "$UNFSD" --args "$UNFS/$us_id.args" \
-    --root "$UNFS_ROOT" --cgroup "$UNFS_CG/$us_id" < /dev/null > /dev/null 2> "$UNFS/$us_id.err" \
+    --root "$UNFS_ROOT" --cgroup "$UNFS_CG/$us_id" --guest-sock "$JAIL/firecracker/$us_id/root/v.sock" < /dev/null > /dev/null 2> "$UNFS/$us_id.err" \
     || { echo "supervise-daemon: $(head -n 2 "$UNFS/$us_id.err" | tr '\n' ' ')"; return 1; }
   rm -f "$UNFS/$us_id.err"
   for _ in $(seq 1 40); do
