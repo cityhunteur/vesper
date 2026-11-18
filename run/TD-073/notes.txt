@@ -1,0 +1,87 @@
+TD-073 runs, 2026-11-18, System VM with 2 CPUs and 2048 MiB; the macOS volume is APFS and ignores letter case.
+
+1. Before the patch (run/D-052/notes.txt 7): macOS read "protected evil" after `echo evil >> /d/y/SECRET`, and after
+   `mv /p/y /p/work/y; echo evil >> /w/y/secret`.
+
+2. One identity under every name. Binds: case2 read-write at /d, case2/work read-write at /w, case2/y/secret
+   read-only at /b; macOS also made a hard link y/hard. Device:inode as the guest's stat reports it:
+     the bind 28:1460; /d/y/secret 29:1460; /d/y/SECRET 29:1460; /d/y/hard 29:1460; /d/y 29:1459; /d/Y 29:1459
+     after mv /d/y /d/work/y: /w/y/secret 29:1460; /d/work/y/secret 29:1460; /w/y 29:1459
+   The inode number is the same under the other letter case, the hard link and after the move.
+
+3. With unfs3 patch 0006 as merged (binary 243795b6..., built twice with the same digest):
+   binds suite step read_only_holds_under_every_name: 24 tries, each refused with "Read-only file system":
+     through SECRET (the file's other letter case): append, truncate, remove, rename, a rename onto it;
+     through CONF (the read-only directory's other case): create, remove, a rename into it;
+     links: append through a hard link macOS made; a hard link out of the read-only directory, also from a
+       symbolic link to a file in it; create and remove through a symbolic link to the directory; a write, and a
+       change of times through the link's own handle (touch -h), through a symbolic link to the file;
+     after the file's directory, and the directory above a read-only directory, were moved into the second
+       read-write bind: append, remove, create, rename, hard link, mkdir, symlink.
+   macOS: secret "protected" with its time unchanged, conf and conf2 hold only "keep". A link the task made to
+   nowhere keeps its own attributes free (chown -h is not refused as read-only). After the task's renames and a
+   killed server (pid 503 to 756) the supervisor logged: source ".../hx/secret" now lies under an object that was
+   bound read-only; it is served read-only. The task wrote after that, and macOS still read "guarded". A read-write
+   bind inside a read-only one, and the outer bind, still write.
+   step reattached_under_a_recorded_object_is_read_only (council S-3): binds j73 read-write at /d, j73/p/conf
+   read-only at /c, the file j73/x/conf/keep read-write at /a. The task puts a decoy at p/conf, the server is
+   killed and starts again, the task renames x away and the true directory to x. The supervisor logged: source
+   ".../x/conf/keep": another file is at its path; ... it is, or lies under, an object that was bound read-only, and
+   is attached read-only. The write through /a was refused as read-only; macOS still reads "keep". No control run
+   was made for this step.
+   unfs suite, raw NFS client: 74 probes passed, 0 failed, among them SETATTR, CREATE, MKDIR, REMOVE and WRITE through
+   the handles of link-CONF and link-FILE refused, a change of attributes through a link to nowhere not refused as
+   read-only, and a create through a link to a new name making the target. (These link probes pass on the server
+   of main too: see 9.)
+   Suites: microVM binds 16 of 16, unfs 13 of 13, microVM shares 12 of 12.
+
+4. Cost. A task writes 96 MiB with fsync, then 400 small files, then 300 single 4 KiB writes each with fsync,
+   seven directories below its bind (seconds; the server looks at every protected place before each change):
+     no read-only bind:      0.24 0.86 0.38;  0.20 0.95 0.50;  0.24 0.90 0.43
+     one read-only bind:     0.23 0.95 0.44;  0.21 0.85 0.42;  0.22 0.95 0.57
+     eight read-only binds:  0.24 0.98 0.49;  0.23 0.96 0.44;  0.25 0.96 0.39
+
+5. Council SEC-5: can a stale name make a create land in a read-only directory? Binds: lag1 read-write at /d,
+   lag1/p/conf read-only at /c. The task looked at /d/Q/conf (the other case of q, a decoy, inode 441), then ran
+   mv /d/q /d/q_old && mv /d/p /d/q, and at once wrote /d/Q/conf/new and appended to /d/Q/conf/keep.
+     both refused; /d/Q/conf then read inode 443 (the read-only directory's); a create 3 s later refused too.
+     macOS: q/conf (the read-only directory) holds only keep = "protected"; the decoy is unchanged.
+   Not reproduced in one run on the first version of the patch.
+
+6. Found while testing this change, and older than it: the server ended with a segmentation fault on about a
+   third of task starts of a layout with seven sources. Fixed apart from this change (TD-075, D-054, unfs3 patch
+   0005, merged as 71d3c05); see run/TD-075/notes.txt.
+
+7. Found by the author between the two reviews: a file that replaced a read-only file lost its protection when
+   the task moved it aside. Binds: k73 read-write at /d, k73/hz/secret read-only at /b. macOS renames a new file
+   into place and makes a hard link hz/hard to it; the server attaches the new file. The task runs
+     mv /d/hz /d/hz2 && mkdir /d/hz && echo decoy > /d/hz/secret
+   and the server attaches the decoy. The new file is then at no protected place.
+     a binary that forgot it (fcb192ba...): the task wrote over /d/hz2/hard, emptied it and removed it; macOS
+       read an empty hz2/secret.
+     as merged: 5 tries refused as read-only (write, truncate, remove and rename through the hard link; write
+       through the other letter case), also after the System VM dropped its caches; macOS still reads "second".
+   The server remembers every object it found at a protected place (768 of them) while it runs, and looks at the
+   places before every changing request (council S-1: a look once a second could be dodged).
+
+8. Inode numbers on the share (Apple's virtio-fs), measured in a guest through the server:
+     300 files made, removed, and 300 more made: numbers 1506..1805, then 1806..2105; none used twice.
+     a directory, a file in it, a directory below and a file there; then the same in a second task; then after
+     `vesper-microvm test-drop-caches` in the System VM (nothing held them):
+       run 1:       3 /d/dir; 5 /d/dir/file; 4 /d/dir/sub; 6 /d/dir/sub/deep; 5 /d/DIR/FILE
+       run 2:       the same numbers
+       after drop:  8 /d/dir; 9 /d/dir/file; 10 /d/dir/sub; 11 /d/dir/sub/deep; 9 /d/DIR/FILE
+   So the device counts up, and a file that the System VM forgot gets a new number. A number is an object's only
+   while something holds the object. What a running server serves is held. An object that the task moved away
+   from its source's path before a restart is held by nothing afterwards (TD-076).
+
+9. Control: the same suites with the server binary of main (0a350fb5..., no patch 0006), the rest as merged.
+     read_only_holds_under_every_name: 14 of 24 changes went through: append, truncate and remove through SECRET;
+       append through the macOS hard link; the write and the change of times through the link to the file (macOS
+       time 1577836800 became 1795020334); the rename onto SECRET; a hard link from the symbolic link; and after
+       the moves append, create, remove, mkdir and symlink. The other ten were refused by the read-only mounts or
+       failed after an earlier change.
+     replaced_file_stays_read_only_when_moved: 3 went through (write, truncate, remove); macOS read an empty file.
+     unfs suite: 13 of 13, link probes included. The fixture's links reach the read-only directory under its
+       other letter case, and a directory has one entry in the System VM's kernel, so the read-only mount answers.
+       No test shows that a link's handle used as a directory needs the patch.

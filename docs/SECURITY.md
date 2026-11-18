@@ -300,17 +300,72 @@ from its own microVM's server. Docker containers do not use the shim and still g
   mounts every second and places a nest that is gone again, and the guest binds again. In between, about a second
   (up to 15 s when the source's 20 attaches at a stretch are spent), the task can write the new file through the
   outer export, and the binds suite saw one write land. A task that
-  acts in that second can keep the access: it can rename the new file away, link it under another name, or hold
-  it open for writing. Only a macOS process can open the window; a task cannot rename over a nested file
-  (`EBUSY`). Docker on Linux drops the read-only bind for good in the same case.
-- **A read-only bind inside a read-write bind is not a boundary against a hostile task** (TD-073, found on
-  2026-11-18, present before D-052). The nest is a read-only mount on one name in one export. A task gets round it
-  with the same name in another letter case on a macOS volume that ignores case (the default), by moving the
-  file's directory into a second read-write bind that lies inside the first, or after a server restart that follows
-  its renames. Two of the three were run: macOS read `protected evil`. Until the server refuses such writes by the
-  file's identity, treat this layout as Docker treats it: what a read-write bind holds, the task can write. A
-  read-only bind that is not inside a read-write bind is not affected, and nor is the rule that a task reaches only
-  its own exports.
+  renames the new file away in that time keeps it writable, because the path then names nothing to attach. A link
+  to it or a descriptor held open no longer helps: once the new file is attached the server refuses by its number
+  (D-053). Only a macOS process can open the window; a task cannot rename over a nested file
+  (the server refuses it). Docker on Linux drops the read-only bind for good in the same case.
+- **What is bound read-only stays read-only under every name** (TD-073, D-053, unfs3 patch 0006). A read-only nest
+  is a mount on one name in one export, and a task reached the object under other names: in another letter case on
+  a macOS volume that ignores case (the default), by moving its directory into a second read-write bind inside the
+  first, or after a server restart that followed its renames. So the server knows each read-only source by its
+  device and inode number and refuses (`ROFS`) a request that changes it or anything under it: a write, a change of
+  attributes, a create, a removal, a rename of it, onto it or into it, and a new hard link to it or to anything
+  under it.
+  - The list is `/etc/exports.protect` in the sandbox's read-only root. It names the root of each read-only source
+    (`/s/N`, or `/s/N/f` for a file). The server looks at these places before every request that changes
+    something, so a file that replaced a read-only file source (D-052) is known from the first such request after
+    it is attached. An object once found at such a place stays protected while that server runs, also after the
+    task moved it aside and another file took its place.
+  - The check runs on every changing request, on the path the handle resolves to, so a descriptor the server holds
+    open does not carry a write past it. unfs3 follows symbolic links inside a path, so the check resolves the
+    directory part of the path through every link before it compares. For a call that acts on what a link points
+    to, it follows the last name too, whether or not the target exists yet. What it cannot resolve it refuses; what
+    is not there it leaves to the call, which fails on it. The nests stay in place as a second layer.
+  - A list that exists and cannot be read makes the server refuse every change, and it tries again each second.
+  - A symbolic link in a read-write bind that points at a protected object cannot have its own owner or times
+    changed, nor be hard-linked: unfs3 applies size, mode and times through a link, so the server refuses the
+    whole request. `cp -a`, `tar` and `rsync -a` of such a link report a read-only file system.
+  - An object bound read-only is read-only through every export of that task, also where a read-write bind reaches
+    it by a hard link. This holds for one object bound read-only under one spelling and read-write under another
+    on a volume that ignores case: it is read-only through both. (The same path bound both ways is one read-write
+    source, as before.)
+  - **The number is the object's only while something holds the object.** The System VM gives a file another
+    inode number when it has forgotten the file and looks it up again (measured after a cache drop:
+    `run/TD-073/notes.txt` 8); it did not give a used number to another file in 300 tries. While a server runs,
+    what it serves is held: the sources by the sandbox's mounts, and a replaced read-only file by the supervisor
+    (the newest 256). An object that the record of an earlier start names, and that is no longer at a source's
+    path, is held by nothing (next item).
+  - **Across a restart of the server** the supervisor keeps the numbers in `unfs/ID.prot` (root only). A restart
+    opens sources by path again, and the task may have renamed directories since. The new server gets the recorded
+    numbers, and the supervisor serves read-only a read-write source whose path, or a directory above it, is a
+    recorded object; it does the same when it attaches a file again for a read-write file source. This holds only
+    while the System VM has not forgotten the object. After the first server ended, nothing holds an object that
+    the task moved away from its source's path, for the rest of the task's life; once the System VM forgets it,
+    its number changes and the record no longer names it (TD-076).
+  - Not covered:
+    - **A new launch of the task.** The record belongs to one launch. A task that renames a read-only directory's
+      parent and puts a decoy at the path gets the decoy read-only at its next launch, and reaches the true
+      directory through its read-write bind. A bind names a path, and the task can change what the path names.
+    - The restart case once the System VM has forgotten an object that the task moved away from its path
+      (TD-076). A task can add to the memory pressure that makes the System VM forget.
+    - A file in a read-only directory source that has a hard link made on macOS outside that directory. The server
+      knows the directory, not each file in it, so the file is writable under that outside name when a read-write
+      bind covers the name. A task cannot make such a link itself: the server refuses it.
+    - The window of D-052 above (until the new file is attached), and another task or a macOS process, which this
+      server does not see.
+    - The limits: the supervisor's record keeps the first 150 numbers seen at starts and the newest 50 of replaced
+      files, the supervisor holds the newest 256 replaced files, and a server remembers 768 objects found at
+      protected places. A task that makes the supervisor attach more files than that (20 at a stretch for each
+      read-only file source, then one each 15 s) can push out the oldest; with three such sources the 50 are
+      reached in about 20 s.
+    - After a restart, a read-write bind that the user put inside a read-only one is not compared with the
+      record (it is writable by design). A task that renames directories so that this bind's path lies in another
+      read-only directory of the same name gets it read-write (TD-077).
+    - Whether the System VM can answer with an old number for a name whose object changed a moment ago was tried
+      once and not seen (`run/TD-073/notes.txt` 5); it is not ruled out.
+  The binds suite steps `read_only_holds_under_every_name`, `replaced_file_stays_read_only_when_moved` and
+  `reattached_under_a_recorded_object_is_read_only` run these ways. With the server of `main` 14 of the 24 changes
+  of the first step and 3 of the second went through (`run/TD-073/notes.txt` 9).
 - **One inode through two exports** (TD-072, D-049): unfs3 keys its handle cache on the handle's path hashes too
   (patch 0004), so a handle from one export resolves only into that export; a handle whose object was renamed into
   another directory still resolves within its own export. Before, a read through a read-only export made writes
@@ -399,7 +454,7 @@ from its own microVM's server. Docker containers do not use the shim and still g
   `/dev/null` (read-only: it still opens for writing, but its mode and owner, the System VM's own, cannot change;
   council SEC-1), and `/etc` with the exports file and libtirpc's tables. No `/proc`, `/sys`, `/run` or device. Each
   read-only source is bound again, read-only, inside each read-write source that holds it, at a place found beneath
-  that export with no symbolic link on the way (this stops a workload's mistakes, not a hostile one: TD-073). The server runs as root with the bounding, permitted and effective
+  that export with no symbolic link on the way (a second layer: the server also refuses by the object's number, D-053). The server runs as root with the bounding, permitted and effective
   sets cut to `CAP_CHOWN`, `CAP_DAC_OVERRIDE`, `CAP_FOWNER`, `CAP_FSETID`, `CAP_SETGID` and `CAP_SETUID` (`0xdb`),
   no ambient capabilities, `no_new_privs`, and a seccomp filter that refuses user namespaces (`unshare` and `clone`
   with `CLONE_NEWUSER`), `setns`, and `clone3` (D-037), and the calls an exploited server could use against the System

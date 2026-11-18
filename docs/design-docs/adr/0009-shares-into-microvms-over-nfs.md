@@ -103,7 +103,8 @@ server therefore runs:
   the task mounted read-only. M3 tests this case and confirms `unfs3`'s handles still resolve across the inner mount.
   Found wrong on 2026-11-18 (TD-073): a hostile task reaches the source by another name (another letter case on a
   macOS volume that ignores case, or after moving its directory into a second read-write bind), where no mount
-  covers it. The nest stops a workload's mistakes; a refusal by the file's identity is still to be built;
+  covers it. Since D-053 the server also refuses by the object's device and inode number (unfs3 patch 0006), and
+  the nest is the second layer;
 - with `no_new_privs` and a capability bounding set of only what NFS service needs to act as each caller
   (`CAP_SETUID`, `CAP_SETGID`, `CAP_CHOWN`, `CAP_DAC_OVERRIDE`, `CAP_FOWNER`, `CAP_FSETID`); without
   `CAP_SYS_CHROOT` and `CAP_SYS_ADMIN`, the nested-chroot escape and new mounts fail.

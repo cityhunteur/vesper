@@ -2,6 +2,8 @@ package unfs
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -169,5 +171,96 @@ func TestHolders(t *testing.T) {
 		if g := strings.Join(got, " "); g != want {
 			t.Errorf("source %d: holders %q, want %q", i, g, want)
 		}
+	}
+}
+
+// The server's protect file names the root of each read-only source and the objects remembered by number (TD-073).
+func TestProtectList(t *testing.T) {
+	srcs := []Source{{Rel: "proj"}, {Rel: "proj/conf", ReadOnly: true}, {Rel: "proj/key", File: true, ReadOnly: true}, {Rel: "proj/a", File: true}}
+	got := ProtectList(srcs, []ProtectID{{Dev: 34, Ino: 1460}, {Dev: 36, Ino: 5, Swapped: true}})
+	if want := "p /s/1\np /s/2/f\ni 34 1460\ni 36 5\n"; got != want {
+		t.Errorf("protect list %q, want %q", got, want)
+	}
+	if got := ProtectList([]Source{{Rel: "proj"}}, nil); got != "" {
+		t.Errorf("nothing read-only, list %q", got)
+	}
+}
+
+// The record keeps each object once across restarts of the server. What a start saw is never pushed out by later
+// entries: a task can add entries (it renames directories, and a file replaces a read-only file), and the first
+// ones are what the user bound (council SEC-4).
+func TestRecordProtectIDs(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "x.prot")
+	id := func(dev, ino uint64) ProtectID { return ProtectID{Dev: dev, Ino: ino} }
+	swap := func(dev, ino uint64) ProtectID { return ProtectID{Dev: dev, Ino: ino, Swapped: true} }
+	if all, err := RecordProtectIDs(file, id(1, 2), id(1, 3)); err != nil || len(all) != 2 {
+		t.Fatalf("first record: %v, %v", all, err)
+	}
+	all, err := RecordProtectIDs(file, id(1, 3), swap(9, 9), swap(1, 2))
+	if err != nil || !reflect.DeepEqual(all, []ProtectID{id(1, 2), id(1, 3), swap(9, 9)}) {
+		t.Fatalf("second record: %v, %v", all, err)
+	}
+	if again, _ := ReadProtectIDs(file); !reflect.DeepEqual(again, all) {
+		t.Errorf("read back %v, want %v", again, all)
+	}
+	if st, err := os.Stat(file); err != nil || st.Mode().Perm() != 0o600 {
+		t.Errorf("the record's mode: %v, %v", st, err)
+	}
+	if err := os.WriteFile(file, []byte("1 2\njunk\n3\n-4 5\n7 8 r\n7 9 x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if all, _ := RecordProtectIDs(file); !reflect.DeepEqual(all, []ProtectID{id(1, 2), swap(7, 8)}) {
+		t.Errorf("a record with bad lines: %v", all)
+	}
+	// The originals stay, however many come after.
+	var many []ProtectID
+	for i := 0; i < MaxProtectStarts+40; i++ {
+		many = append(many, id(1, uint64(i)))
+	}
+	for i := 0; i < MaxProtectSwaps+40; i++ {
+		many = append(many, swap(2, uint64(i)))
+	}
+	got := MergeProtectIDs(nil, many...)
+	if len(got) != MaxProtectStarts+MaxProtectSwaps || !got[0].same(id(1, 0)) || !got[MaxProtectStarts-1].same(id(1, uint64(MaxProtectStarts-1))) {
+		t.Errorf("%d kept, first %v, last start %v", len(got), got[0], got[MaxProtectStarts-1])
+	}
+	if last := got[len(got)-1]; !last.same(swap(2, uint64(MaxProtectSwaps+39))) || !got[MaxProtectStarts].same(swap(2, 40)) {
+		t.Errorf("replaced files kept from %v to %v, want the newest %d", got[MaxProtectStarts], last, MaxProtectSwaps)
+	}
+	// A replaced file that a later start finds as a source is kept as a source.
+	if got := MergeProtectIDs([]ProtectID{id(1, 1), swap(5, 5), swap(6, 6)}, id(5, 5)); !reflect.DeepEqual(got, []ProtectID{id(1, 1), id(5, 5), swap(6, 6)}) {
+		t.Errorf("a replaced file seen at a start: %v", got)
+	}
+	// Nothing new: no file is written.
+	none := filepath.Join(t.TempDir(), "none.prot")
+	if all, err := RecordProtectIDs(none); err != nil || len(all) != 0 {
+		t.Errorf("an empty record: %v, %v", all, err)
+	}
+	if _, err := os.Stat(none); !os.IsNotExist(err) {
+		t.Errorf("an empty record made a file: %v", err)
+	}
+	if all, err := RecordProtectIDs("", id(4, 4)); err != nil || len(all) != 1 {
+		t.Errorf("no record file: %v, %v", all, err)
+	}
+	if all, err := ReadProtectIDs(filepath.Join(t.TempDir(), "absent")); err != nil || len(all) != 0 {
+		t.Errorf("an absent record: %v, %v", all, err)
+	}
+}
+
+// A read-write source the user put inside a read-only directory source stays writable; any other read-write source
+// is compared with the record at a restart (council SEC-3).
+func TestMovedUnder(t *testing.T) {
+	srcs := []Source{
+		{Rel: "proj", ReadOnly: true},               // 0
+		{Rel: "proj/out"},                           // 1 inside the read-only directory by the user's own paths
+		{Rel: "work"},                               // 2
+		{Rel: "work/x/key", File: true},             // 3
+		{Rel: "proj/f", File: true, ReadOnly: true}, // 4 read-only itself
+		{Mount: 1, Rel: "proj/out"},                 // 5 the same path on another share
+		{Rel: "cfg", File: true, ReadOnly: true},    // 6 a read-only file holds nothing
+		{Rel: "cfg/x"},                              // 7
+	}
+	if got := MovedUnder(srcs); !reflect.DeepEqual(got, []int{2, 3, 5, 7}) {
+		t.Errorf("sources to compare with the record: %v, want [2 3 5 7]", got)
 	}
 }

@@ -51,7 +51,11 @@ The Go module pins containerd 2.1.5 and builds static Linux arm64 binaries with 
   clones it into a detached mount tree, and starts `init` in new mount, pid, ipc and uts namespaces, which attaches
   the trees in a tmpfs root, binds read-only sources again inside read-write ones, pivots, drops privileges, loads a
   seccomp filter against user namespaces and execs `unfsd`. `vesper-unfs probe` runs the escape battery against a
-  server, and `run --selfcheck` runs the escape checks inside the sandbox in place of `unfsd`. `reattach_linux.go`
+  server, and `run --selfcheck` runs the escape checks inside the sandbox in place of `unfsd`. `protect.go` (TD-073, D-053): the list of objects the patched server keeps
+  read-only by device and inode number (`ProtectList`: the root of each read-only source as a place, and the numbers
+  recorded across the server's restarts by `RecordProtectIDs`); at a restart `GuardSources` (`sandbox_linux.go`) makes
+  read-only a read-write source whose path now lies under a recorded object, and the re-attach does the same for a
+  read-write file source; a replaced read-only file is held open (`fileWatch.pins`) so its number stays its own. `reattach_linux.go`
   (D-052): the supervisor looks at each file source's path once a second, attaches a file that replaced it on macOS
   in the sandbox's mount namespace (beneath the old mount, then the old one is removed), places a read-only nest
   that is gone again and tells the guest through `--guest-sock` (`shares.NotifyBind`) until it answers that its

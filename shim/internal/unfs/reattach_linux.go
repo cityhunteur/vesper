@@ -56,6 +56,8 @@ const (
 	verifyChecks = 3
 	// coveredChecks is for how many checks a nest found under another read-only mount is left alone.
 	coveredChecks = 30
+	// maxPins is how many replaced read-only files stay held (fileWatch.pins).
+	maxPins = 256
 )
 
 // moveMountBeneath is MOVE_MOUNT_BENEATH (Linux 6.5): attach under the mount that is there, so that removing that
@@ -91,11 +93,16 @@ type fileWatch struct {
 	server string // the name of the server binary: the sandbox is complete when the process has become it
 	ready  bool
 	notify func(int) (string, error) // tells the guest to look at export N's binds; nil when there is no guest
+	record string                    // Config.ProtectFile
 	logf   func(string, ...any)
 
-	ids    []fileID // what is attached, by source; unused for a directory
-	att    []int    // a descriptor of the attached file, or -1
-	verify []int    // checks left that read the attached file
+	ids []fileID // what is attached, by source; unused for a directory
+	att []int    // a descriptor of the attached file, or -1
+	// pins are descriptors of files that were attached as a read-only source and then replaced. The server knows
+	// such a file by its inode number, and the System VM gives a file another number once nothing holds it (measured:
+	// run/TD-073/notes.txt 8), so each is held while this server runs, the newest maxPins of them.
+	pins   []int
+	verify []int // checks left that read the attached file
 	budget []int
 	refill time.Time
 	said   map[string]bool
@@ -114,7 +121,7 @@ type fileWatch struct {
 func newFileWatch(cfg Config, trees []*os.File, pid int) (*fileWatch, error) {
 	n := len(cfg.Sources)
 	w := &fileWatch{srcs: cfg.Sources, nests: Nests(cfg.Sources), procfd: -1, nsfd: -1, server: filepath.Base(cfg.Unfsd),
-		notify: cfg.NotifyGuest, said: map[string]bool{}, covered: map[int]int{}, ids: make([]fileID, n), att: make([]int, n),
+		notify: cfg.NotifyGuest, record: cfg.ProtectFile, said: map[string]bool{}, covered: map[int]int{}, ids: make([]fileID, n), att: make([]int, n),
 		verify: make([]int, n), budget: make([]int, n), tell: make([]notice, n), refill: time.Now()}
 	w.logf = func(format string, a ...any) { fmt.Fprintf(os.Stderr, "vesper-unfs run: "+format+"\n", a...) }
 	if real, err := filepath.EvalSymlinks(cfg.Unfsd); err == nil { // the process's exe link names the file itself
@@ -349,6 +356,21 @@ func (w *fileWatch) checkOne(i int, s Source, mounted map[string]bool) {
 	if s.ReadOnly {
 		own |= unix.MOUNT_ATTR_RDONLY
 	}
+	// A read-write file source whose path now names a recorded read-only object, or lies under one: an earlier start
+	// of this server knew it as read-only, and this start has no nest on it (council S-3). It is attached read-only.
+	guarded := false
+	if replaced && !s.ReadOnly && w.record != "" {
+		for _, k := range MovedUnder(w.srcs) {
+			if k != i {
+				continue
+			}
+			prior, err := ReadProtectIDs(w.record)
+			if err != nil || (len(prior) > 0 && underKnown(w.mfds[s.Mount], s.Rel, knownIDs(prior))) {
+				guarded = true
+				own |= unix.MOUNT_ATTR_RDONLY
+			}
+		}
+	}
 	var trees []int // the source's own tree when it was replaced, then one for each nest to place
 	defer func() {
 		for _, t := range trees {
@@ -424,9 +446,20 @@ func (w *fileWatch) checkOne(i int, s Source, mounted map[string]bool) {
 		if keptRO {
 			how += "; it lies under a read-only bind and stays read-only"
 		}
+		if guarded {
+			how += "; it is, or lies under, an object that was bound read-only, and is attached read-only"
+		}
 		w.logf("source %q: another file is at its path; it is attached %s", s.Rel, how)
 		if w.att[i] >= 0 {
-			unix.Close(w.att[i])
+			if s.ReadOnly {
+				w.pins = append(w.pins, w.att[i])
+				if len(w.pins) > maxPins {
+					unix.Close(w.pins[0])
+					w.pins = w.pins[1:]
+				}
+			} else {
+				unix.Close(w.att[i])
+			}
 		}
 		if w.att[i], err = unix.Dup(fd); err != nil {
 			w.att[i] = -1
@@ -434,6 +467,11 @@ func (w *fileWatch) checkOne(i int, s Source, mounted map[string]bool) {
 			unix.CloseOnExec(w.att[i])
 		}
 		w.ids[i], w.verify[i] = id, verifyChecks
+		if s.ReadOnly { // the server protects it by its place; a later start of the server needs its number
+			if _, err := RecordProtectIDs(w.record, ProtectID{Dev: id.dev, Ino: id.ino, Swapped: true}); err != nil {
+				w.logf("source %q: its new file is not in the record of read-only objects: %v", s.Rel, err)
+			}
+		}
 		w.said = map[string]bool{} // a later failure is news again
 		w.mu.Lock()
 		w.tell[i] = notice{left: noticesAfterSwap, swap: true, gen: w.tell[i].gen + 1}
