@@ -160,6 +160,7 @@ func run(args []string) int {
 	fs.BoolVar(&cfg.Selfcheck, "selfcheck", false, "run the escape checks in the sandbox in place of unfsd (tests)")
 	fs.StringVar(&cfg.SelfcheckBin, "selfcheck-bin", "/usr/bin/vesper-unfs", "this binary as the sandbox sees it")
 	fs.DurationVar(&cfg.TestPauseNests, "test-pause-nests", 0, "wait this long before placing nests (tests only)")
+	fs.BoolVar(&cfg.TestNoAnchors, "test-no-anchors", false, "leave out the anchors, the directories a task may not rename (tests only; TD-080)")
 	fs.StringVar(&cfg.ProtectFile, "protect", "", "a file that keeps, across restarts of this server, what each read-only source was (TD-073)")
 	fs.StringVar(&guestSock, "guest-sock", "", "the microVM's vsock socket: the guest is told there when a file source was replaced (D-052)")
 	fs.SetOutput(io.Discard)
@@ -233,6 +234,8 @@ func probe(args []string) int {
 	fs.StringVar(&holdRemove, "hold-remove", "", "send a REMOVE of this path below /s/0, hold it unfinished until --until exists, and report the status (TD-079)")
 	fs.StringVar(&holdCreate, "hold-create", "", "the same with an UNCHECKED CREATE of this path")
 	fs.StringVar(&until, "until", "", "with --hold-remove or --hold-create: the file to wait for")
+	var rawRemove string
+	fs.StringVar(&rawRemove, "remove", "", "send one REMOVE of this path below /s/0, a directory too, and report the status (TD-080)")
 	fs.StringVar(&heldMarker, "held-marker", "", "with --hold-remove or --hold-create: a file to make when the request is held")
 	fs.StringVar(&out, "handles-out", "", "save handles of /s/0 and /s/0/file.txt to this file, and stop")
 	fs.StringVar(&in, "handles-in", "", "use handles saved by --handles-out (after a restart), and stop")
@@ -240,6 +243,12 @@ func probe(args []string) int {
 		return 2
 	}
 	b.Cred = nfsprobe.Cred{UID: uint32(uid), GID: uint32(gid)}
+	if rawRemove != "" {
+		if !b.RawRemove(rawRemove) {
+			return 1
+		}
+		return 0
+	}
 	if holdRemove != "" || holdCreate != "" || until != "" || heldMarker != "" {
 		kind, path := "remove", holdRemove
 		if holdCreate != "" {

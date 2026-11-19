@@ -1,0 +1,5 @@
+=== RUN   TestAnchors
+--- PASS: TestAnchors (0.00s)
+=== RUN   TestCheckChains
+--- PASS: TestCheckChains (0.00s)
+PASS

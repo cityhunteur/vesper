@@ -134,6 +134,43 @@ func (b *Battery) Held(kind, path, until, marker string, limit time.Duration) bo
 	return st == 30 && cerr == nil && cst == 0 // ROFS for the held request, and the control went through
 }
 
+// RawRemove sends one REMOVE of the object at path (below /s/0) and prints "REMOVE PATH status=…". A REMOVE of a
+// directory is something a kernel client never sends (its unlink of a directory fails before it asks the server),
+// and unfs3 answers it with a removal of the directory when it is empty. It reports whether the call was answered.
+func (b *Battery) RawRemove(path string) bool {
+	fail := func(format string, a ...any) bool {
+		fmt.Fprintf(b.Out, "REMOVE failed: "+format+"\n", a...)
+		return false
+	}
+	m, err := b.dial(2050, ProgMount)
+	if err != nil {
+		return fail("mount port: %v", err)
+	}
+	root, st, err := Mount(m, "/s/0")
+	m.Close()
+	if err != nil || st != 0 {
+		return fail("mount /s/0: status=%v err=%v", st, err)
+	}
+	c, err := b.dial(2049, ProgNFS)
+	if err != nil {
+		return fail("nfs port: %v", err)
+	}
+	defer c.Close()
+	n := NFS{c}
+	dir, name := root, path
+	if i := strings.LastIndex(path, "/"); i >= 0 {
+		if dir, _, st, err = n.Walk(root, path[:i]); err != nil || st != 0 {
+			return fail("walk %s: status=%v err=%v", path[:i], st, err)
+		}
+		name = path[i+1:]
+	}
+	if st, err = n.Remove(dir, name); err != nil {
+		return fail("remove %s: %v", path, err)
+	}
+	fmt.Fprintf(b.Out, "REMOVE %s status=%v\n", path, st)
+	return true
+}
+
 // Run runs the battery and reports whether every check passed.
 func (b *Battery) Run() bool {
 	m, err := b.dial(2050, ProgMount)

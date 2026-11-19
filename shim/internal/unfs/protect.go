@@ -86,9 +86,10 @@ func alsoReadWrite(srcs []Source, s Source) bool {
 }
 
 // ProtectList is the server's protect file: a "p" line for each protected place, an "i" line for each recorded
-// number, and an "s" line for each object in seen, the objects that are at the protected places when the server
-// starts. With those, every object is in the list before it is at a place, also one the record does not hold.
-func ProtectList(srcs []Source, ids []ProtectID, seen []ProtectID) string {
+// number, an "s" line for each object in seen, the objects that are at the protected places when the server starts,
+// and an "a" line for each anchor, a directory on the way to a read-only source that a task may not rename (TD-080).
+// With the "s" lines, every object is in the list before it is at a place, also one the record does not hold.
+func ProtectList(srcs []Source, ids, seen, anchors []ProtectID) string {
 	var b strings.Builder
 	for _, p := range ProtectPaths(srcs) {
 		b.WriteString("p " + p + "\n")
@@ -99,7 +100,21 @@ func ProtectList(srcs []Source, ids []ProtectID, seen []ProtectID) string {
 	for _, id := range seen {
 		b.WriteString(seenLine(id))
 	}
+	for _, id := range anchors {
+		b.WriteString(anchorLine(id))
+	}
 	return b.String()
+}
+
+func anchorLine(id ProtectID) string { return fmt.Sprintf("a %d %d\n", id.Dev, id.Ino) }
+
+// AppendAnchor tells the running server of an anchor, as AppendSeen tells it of an object.
+func AppendAnchor(list *os.File, id ProtectID) error {
+	if list == nil {
+		return errors.New("no list")
+	}
+	_, err := list.Write([]byte(anchorLine(id)))
+	return err
 }
 
 func seenLine(id ProtectID) string { return fmt.Sprintf("s %d %d\n", id.Dev, id.Ino) }
