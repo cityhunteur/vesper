@@ -1,0 +1,81 @@
+TD-081: a directory that macOS puts at a read-only directory bind's path. Notes of 2026-11-19.
+
+1. Control: binds suite step path_to_a_read_only_bind_cannot_be_changed, as first extended for this change, on
+   the build of main at 401298b (control-main-binds.log, control-main-binds-report.json). 20 of 21 steps passed;
+   this step failed, as it should. Binds: a80:/d rw, a80/top:/t rw, a80/hy/secret:/b ro, a80/top/mid/conf:/c ro,
+   a80/ed/leaf:/e ro, a80/rootconf:/rc ro, a80/own:/o ro. After macOS replaced top/mid (with conf in it) and
+   rootconf, and removed own, the record has 6 "DONE" lines:
+     echo y > /d/top/mid/conf/w1; echo y > /d/rootconf/w1; echo y > /d/ROOTCONF/w2 (the volume ignores case);
+     rm /d/rootconf/keep (the user's new file: macOS then had no rootconf/keep); mkdir /d/rootconf/sub;
+     echo y > /d/own/last, after all 20 writes of the loop in the directory that the task made at /d/own.
+   The renames of the new directories were refused (they are anchors since TD-080), and the server was told of no
+   object (told lines 5 then 5). The second launch could not read /rc/keep: the task had removed it.
+   The control ran the step before the council's changes to it (section 4); the tries it shows going through are
+   all still in the step.
+
+2. The same step on the first build of this change (microvm-binds-report-first.json; the record there is cut at
+   900 characters, before the values of the kill and the second launch): 21 of 21. After the same changes on
+   macOS the supervisor told the server before the suite's first look (the record says "within 0 s", in whole
+   seconds; 14 anchor lines, told lines 5 to 8: the two new directories and the one last told for the removed
+   directory); 12 tries were refused as read-only, among them the two writes, the write under the other letter
+   case, the removal and the mkdir in the directories now at the read-only directory binds' paths; a file in the
+   new directory on the way (top/mid, an anchor and no more) was written and removed. In the directory that the
+   task made where macOS had removed one, 2 writes went through before the server was told, then the next was
+   refused; macOS has that directory with those 2 files.
+
+3. The server binary. Patch 0006 changed in its comment only (the definition of the s line). The build from the
+   changed patch equals the shipped binary byte for byte: 10500352758fbcb4... (unfs3-build.log).
+
+4. Council review (council.md). Four reviewers read the first version; none found a fault in the code. Changed
+   afterwards:
+     the step: the task says which directories its names reach before it tries ("sees: rnew new" is required);
+       two more tries (through the second read-write bind, and an append to the user's file); when the removed
+       file comes back, the list must gain 2 or more told lines and no anchor line (the file and the directories
+       told again with it); the first count of told lines must be set; the task's whole output is kept beside the
+       report; the task reads its two mount points after the restart;
+     the unit test: an anchor line that cannot be written ends the server;
+     comments and documents: the list's growth, the hard link, the symbolic link, the mount point.
+   No change to the logic of the shim.
+
+5. Measured for the review (SEC-2, COR-2), on the first build of this change. A task with td:/d rw and
+   td/conf:/c ro tries four times a second to write /d/CONF/uN and /d/conf/lN and reads /c/keep and
+   /d/conf/keep. macOS replaces conf at the task's line 8; the server is killed at line 41 (in the second and
+   third run).
+     mv conf conf.old; mkdir conf (measure-aside-restart.txt): 2 lines wrote under both names (about half a
+       second), then refused. /c/keep read "old" and /d/conf/keep "new". After the restart /c/keep gave "Stale
+       file handle"; /d/conf/keep read "new"; writes refused.
+     rm -r conf; mkdir conf (measure-remake.txt, measure-remake-restart.txt): 5 and 6 lines wrote under CONF
+       (about a second and a half), none under conf; then refused. /c/keep and /d/conf/keep gave "No such file or
+       directory" until the restart: the System VM kept the removed directory under the name's own spelling.
+       After the restart /c/keep gave "Stale file handle" and /d/conf/keep read "new"; writes refused.
+   So the task's own mount point of a directory bind does not follow a replaced directory (TD-083), and the
+   window is about a second, up to about a second and a half when the directory is removed and made again.
+
+6. Final runs, on a build from the final source (build-final.log; the shim's logic is as in section 2, the
+   comments and the unit test changed).
+     binds suite, first final run (microvm-binds-report-append-try.json, anchor-out-append-try.txt): 20 of 21.
+       The step failed on one try that the testing reviewer had asked for, `echo y >> /d/rootconf/keep`: the
+       shell reported no error. macOS still read "rnew" in that file. An NFS client learns of a refused write when
+       the file is closed, and the shell does not report that; the other steps of this suite write with
+       `dd conv=notrunc,fsync` for that reason. The try was changed to that form, with a truncation beside it.
+       The fault was in the test.
+     binds suite, final (binds-final.log, microvm-binds-report.json, microvm-binds-report-anchor-out.txt):
+       21 of 21. In the step: the task read "rnew new" at the two names; 15 tries of part 2 refused as read-only,
+       among them the write with dd and fsync and the truncation of the user's file, the write through the second
+       read-write bind and the one under the other letter case; 1 write in the directory that the task made, then
+       refused; when the removed file came back the told lines went from 11 to 15 (the file and three
+       directories) with the anchor lines unchanged; after the killed server 6 more refused and both mount points
+       gave "Stale file handle"; the second launch read guarded, new, rnew.
+     unfs suite 14 of 14 (unfs-final.log); microVM shares suite 12 of 12 (shares-final.log). Both ran on the
+       final build, before the try of the binds step was changed; that change is in the suite's script only.
+     unit tests of shim/internal/unfs on Linux (an Alpine container, cross-compiled from the final source):
+       18 tests passed, none failed (unit-tests-linux.txt); `go test ./...` in shim passes on macOS.
+     harness/check_docs.py: 0 errors.
+
+7. After the judge (council.md, section 3): four changes, to two sentences of docs/SECURITY.md, one comment in
+   protect.go, the tracker row's wording, and the step's count of told lines when the file comes back (4 in place
+   of 2). The supervisor binary built after the comment change is byte for byte the one of section 6
+   (build-j4.log; digests compared). The binds suite was run again on the final script (binds-final.log,
+   microvm-binds-report.json, microvm-binds-report-anchor-out.txt, which replace those of section 6): 21 of 21;
+   in the step 15 tries of part 2 refused, 2 writes in the directory that the task made, told lines 11 to 15 with
+   the anchor lines unchanged, 6 more refused after the killed server, the second launch read guarded, new, rnew.

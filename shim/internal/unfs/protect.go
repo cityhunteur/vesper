@@ -26,7 +26,10 @@ import (
 // something, so a file that replaced a read-only file source (D-052) is protected while it is attached. An
 // "s DEV INO" line names an object that is about to be put at such a place: the supervisor adds it to the list
 // before it attaches the file (AppendSeen), and the server reads a list that has grown before its next request, so
-// the file stays protected after a task moved it aside, whatever the server saw of it. An "i DEV INO" line names an
+// the file stays protected after a task moved it aside, whatever the server saw of it. An "s" line also names the
+// directory that is now at a read-only directory source's path, which macOS can replace while the server runs: no
+// place holds that directory, and the supervisor tells it again after every other object (TD-081, anchor_linux.go).
+// An "i DEV INO" line names an
 // object by number: what a read-only source was at an earlier start of this server. A task that renamed directories
 // can make a source's path name another object by the time the server starts again; the object the user bound
 // read-only stays in the list.
@@ -86,7 +89,7 @@ func alsoReadWrite(srcs []Source, s Source) bool {
 }
 
 // ProtectList is the server's protect file: a "p" line for each protected place, an "i" line for each recorded
-// number, an "s" line for each object in seen, the objects that are at the protected places when the server starts,
+// number, an "s" line for each object in seen (what is at the protected places and at the leafList paths at a start),
 // and an "a" line for each anchor, a directory on the way to a read-only source that a task may not rename (TD-080).
 // With the "s" lines, every object is in the list before it is at a place, also one the record does not hold.
 func ProtectList(srcs []Source, ids, seen, anchors []ProtectID) string {
@@ -251,6 +254,10 @@ func WriteList(file, list string) error {
 // this returned without error. So the server knows an object that was at a protected place whether or not it looked
 // while the object was there (it remembers the newest 768); a task can keep its server from looking by keeping it
 // in one request (TD-078).
+//
+// The same line tells the server of the directory now at a read-only directory source's path (TD-081,
+// anchor_linux.go). That directory is put at no place: it is where macOS put it, and the line is added as soon as
+// the watcher finds it there.
 //
 // A line this short goes out in one write. After an error the list may end in part of a line, which the server
 // leaves unread until the line is whole. The caller then ends the server, and the next start writes the list anew.

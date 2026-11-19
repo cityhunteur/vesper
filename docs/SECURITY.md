@@ -327,8 +327,10 @@ from its own microVM's server. Docker containers do not use the shim and still g
     - Where a read-write bind holds the path, the supervisor takes the file through that bind. If another file is
       there by then, it attaches nothing, and the next check takes that file.
     - The list grows by about 20 bytes for each attach (20 at a stretch for each read-only file source, then one
-      each 15 s). After 1 MiB the supervisor ends the server, which starts again with a list written anew. The
-      server reads only what was added.
+      each 15 s), and by as much again for each directory at a read-only directory bind's path inside a read-write
+      bind, which is told again with the file (TD-081, below). After 1 MiB the supervisor ends the server, which
+      starts again with a list written anew: after more than a week of attaches at that rate with no such
+      directory, after under a day with ten. The server reads only what was added.
     - Every sandbox has such a list, also one started without a record file.
   - The server also looks at the places themselves: before every request that changes something, at every
     request, and on every turn of its main loop. That is a second layer, for an object that came to a place some
@@ -364,7 +366,8 @@ from its own microVM's server. Docker containers do not use the shim and still g
       not forgotten while the server runs: a directory that macOS moved off a chain (the user's `mid.old`) cannot
       be renamed or removed by the task until the server starts again. A directory that a task made at a name of a
       chain in one of the windows below is on the chain: it stays an anchor, across starts too, for as long as it
-      is at that name, and at a read-only directory bind's own path the next start serves it read-only.
+      is at that name, and at a read-only directory bind's own path it is read-only to the task within about a
+      second (the next rule).
     - What stays open is opened on macOS only: for about a second after macOS replaced the file (the window of
       D-052), a directory of the chain or the directory of a read-only directory bind; while one of them is absent;
       or while macOS has a file or a symbolic link at a name of the chain (the supervisor walks directories only,
@@ -374,9 +377,54 @@ from its own microVM's server. Docker containers do not use the shim and still g
       A watcher that could not start (logged once at the start) leaves these windows open for the whole run. So
       does a change that would give the server more than 1,024 current anchors: the supervisor tells nothing,
       keeps what it last told, and logs that once.
-    - Not part of this rule: what lies in the directory that macOS put at a read-only directory bind's path. The
-      task still reads the old directory at its mount point, and the new one is an ordinary directory in the
-      read-write bind, writable there, until the server starts again (TD-081).
+  - **The directory that macOS puts at a read-only directory bind's path is read-only, with what lies in it**
+    (TD-081, D-059). A directory source is attached once. When the user replaces the directory on macOS while the
+    task runs (`mv conf conf.old; mkdir conf`, or a checkout that removes the directory and makes it again), the
+    bind's own mount point does not show the new directory (it shows the old one, or an error when that is gone),
+    and the new directory is an ordinary one in the read-write bind that holds its path. Before, the task could write in it there, and the next start of the server and the next
+    launch bound it read-only with what the task wrote. Now the supervisor tells the server of the directory at
+    the path as a read-only object (`s DEV INO`, the line of a file that replaced a read-only file). It is the last
+    directory of the chain of the rule above, found by the same walk every second, and told at a start too. The
+    server then refuses every change to it and to what lies in it, under every name.
+    - The directory is at no protected place (the source's place still holds the old directory), so nothing would
+      keep the server from dropping it as the oldest of the 768 objects that it remembers. The supervisor
+      therefore tells it again whenever a chain changed, and after every file that it tells, so it is always among
+      the newest. The supervisor holds it, as an anchor, for as long as it is at the path.
+    - The source is not attached again, and the mount on its name inside the read-write bind (the nest) is not
+      placed again: until the server starts again the new directory is protected by its number alone. A start
+      attaches it as the source, with its nest.
+    - The task's own mount point of the bind does not follow (measured, `run/TD-081/notes.txt` 5). While the
+      server runs it shows the old directory when the user moved that aside, and "No such file or directory" when
+      the user removed it. After a start of the server, which serves the new directory, it gives "Stale file
+      handle". The next launch binds the new directory. Docker on Linux keeps the old directory at the mount point
+      (TD-083).
+    - The cost: a task cannot write in the directory that is at a read-only directory bind's path, also one that it
+      made there itself while macOS had none (it could not rename or remove that one since the rule above, and the
+      next start bound it read-only). Docker on Linux lets a task write through the outer bind at all times;
+      Vesper has refused that for the bound directory since ADR 0009, and now refuses it for the directory that
+      replaced it.
+    - What stays open is what the rule above leaves open, because the same walk finds the directory:
+      - About a second after a directory came to the path. Measured with a task that writes four times a second:
+        2 rounds of writes went through after `mv conf conf.old; mkdir conf`, and 5 and 6 rounds (about a second
+        and a half) after `rm -r conf; mkdir conf`, those only under the other letter case of the name. Under the name's own
+        spelling the System VM kept the removed directory, and the task could neither read nor write there until
+        the server started again.
+      - While macOS has no directory there. A task can then make one, and write in it until the server is told
+        (binds suite: 1 or 2 writes). It can also put a symbolic link there: the supervisor does not walk through a
+        link, so it tells the server nothing, logs once, and what the user then puts "in" that name with a command
+        that follows links lands where the link points, which the task writes.
+      - A watcher that could not start, and a change that would give the server more than 1,024 anchors, of which
+        the supervisor tells nothing.
+    - What a task did in such a window stays, and can outlast the window:
+      - What it wrote there stays, and the next launch binds it.
+      - A hard link that it made, to a name outside the directory, of a file in the directory. The server knows
+        the directory by its number, not each file in it, so the task writes that file through the other name
+        for the rest of the run and in later launches. The same holds with no window when the user makes the new
+        directory inside the read-write bind and then renames it into place: the task can link its files before.
+      - Another of its read-write binds whose directory it moved into the new directory: that bind stays writable
+        through its own export until the server starts again.
+    - A directory that was at the path and is there no longer is not held: the server remembers its number, which
+      is the directory's only while the System VM does not forget it.
   - The check runs on every changing request, on the path the handle resolves to, so a descriptor the server holds
     open does not carry a write past it. unfs3 follows symbolic links inside a path, so the check resolves the
     directory part of the path through every link before it compares. For a call that acts on what a link points
@@ -418,18 +466,21 @@ from its own microVM's server. Docker containers do not use the shim and still g
   - Not covered:
     - **A new launch of the task** starts with an empty record: nothing of the earlier versions of a read-only
       file carries over. (The path itself is the user's again: since TD-080 a task cannot put a decoy there, but
-      in the windows that macOS opens, named above; and the next launch binds a directory that macOS put at a
-      read-only directory bind's path with what the task wrote in it, TD-081.)
+      in the windows that macOS opens, named above; and since TD-081 a task cannot write in a directory that macOS
+      put at a read-only directory bind's path, but in the second after it came there.)
     - A file in a read-only directory source that has a hard link made on macOS outside that directory. The server
       knows the directory, not each file in it, so the file is writable under that outside name when a read-write
-      bind covers the name. A task cannot make such a link itself: the server refuses it.
+      bind covers the name. A task cannot make such a link itself, because the server refuses it, but for a file
+      in a directory that came to a read-only directory bind's path while the task ran: there it can, before the
+      server is told of the directory (TD-081, above).
     - The window of D-052 above (until the new file is attached), and another task or a macOS process, which this
       server does not see.
     - The limits: the supervisor's record keeps the first 150 numbers seen at starts and the newest 50 of replaced
       files (newest by when each was last recorded), each with a hold; the supervisor also holds the newest 256 replaced files while it runs, and a server
       remembers the newest 768 objects that it was told of or found at protected places (the objects of the start
       among them), newest by when each was last told or found: an object that comes back to a place is
-      the newest again (TD-079). The numbers of the ones beyond the 256 are held by nothing. A server also
+      the newest again (TD-079). The directories now at the read-only directory binds' paths, 64 at most, are
+      among them and are told again after every other object (TD-081). The numbers of the ones beyond the 256 are held by nothing. A server also
       remembers the newest 2,048 anchors; the current ones, 1,024 at most, are told again whenever one changed, so
       only directories that are no longer on a chain are dropped. These count
       the user's saves: since TD-080 a task cannot make the supervisor attach files of its choosing, but for one
@@ -517,7 +568,8 @@ from its own microVM's server. Docker containers do not use the shim and still g
   `test-unfs-list-retell` (they add lines to a server's list: the first makes the server refuse every change, the
   second fills its memory with made-up objects, at most 4,096 on each side). Each of these acts on one task's
   server. `test-unfs-no-anchors-next ID` is one of them too: it starts the next
-  server of task ID without anchors (TD-080), for that task's whole life; the server's log says so at each start,
+  server of task ID without anchors (TD-080), and so without the rule for a directory that macOS puts at a read-only
+  directory bind's path (TD-081), for that task's whole life; the server's log says so at each start,
   and `test-unfs-no-anchors-next none` takes the order back. Three act more widely: `test-unfs-stall-next` stops
   the next server that starts, of any task, `test-share-rate` sets the rate limit of the share network for later launches, and `test-drop-caches` makes the
   whole System VM forget the files it does not hold. They all need root in the System VM.

@@ -1,0 +1,15 @@
+STARTED td081-m-aside
+lines before: 8 at 1795124469
+replaced (aside) at 1795124469, task line 8
+server killed at task line 41: KILLED unfsd 22125
+--- supervisor log
+vesper-unfs run: a directory on the way to a read-only source was replaced; the server was told of the 1 directories now on the way, and of the 1 now at the paths of read-only directory sources, which stay read-only with what lies in them
+Nov 19 21:41:18 vesper daemon.notice vesper-unfs-td081-m-aside[22105]: the server ended by itself: code 137 after 13.742s (<nil>); last output: " ip ::ffff:169.254.77.2/128 options 5 /s/1: ip ::ffff:169.254.77.2/128 options 1"
+Nov 19 21:41:37 vesper daemon.notice vesper-unfs-td081-m-aside[22622]: the server ended as told: code 1 after 17.708s (<nil>); last output: " ip ::ffff:169.254.77.2/128 options 5 /s/1: ip ::ffff:169.254.77.2/128 options 1"
+--- task log (changes only)
+0 1795124467 CONF:refused conf:refused c=old d=old
+8 1795124469 CONF:WROTE conf:WROTE c=old d=new
+10 1795124469 CONF:refused conf:refused c=old d=new
+42 1795124481 CONF:refused conf:refused c=Stale file handle d=new
+--- macOS conf now: keep l8 l9 u8 u9 
+--- wrote: CONF 2 conf 2

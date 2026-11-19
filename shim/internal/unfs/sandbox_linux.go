@@ -388,6 +388,17 @@ func Run(cfg Config) (int, error) {
 			return 1, err
 		}
 		cfg.anchors, anchorIDs = a, ids
+		// The directory now at a read-only directory source's path is read-only with what lies in it (TD-081). It
+		// is the source that was just opened, which is in seen already, unless macOS replaced it in between.
+		for _, leaf := range leafList(cfg.Sources, a.chains) {
+			known := false
+			for _, id := range seen {
+				known = known || id.same(leaf)
+			}
+			if !known {
+				seen = append(seen, leaf)
+			}
+		}
 	}
 	if err := WriteList(list, ProtectList(cfg.Sources, protect, seen, anchorIDs)); err != nil {
 		return 1, fmt.Errorf("the server's list %s: %w", list, err)

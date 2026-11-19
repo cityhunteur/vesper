@@ -1,0 +1,16 @@
+STARTED td081-m-remake
+lines before: 8 at 1795124504
+replaced (remake) at 1795124504, task line 8
+server killed at task line 41: KILLED unfsd 23506
+--- supervisor log
+vesper-unfs run: a directory on the way to a read-only source was replaced; the server was told of the 1 directories now on the way, and of the 1 now at the paths of read-only directory sources, which stay read-only with what lies in them
+Nov 19 21:40:31 vesper daemon.notice vesper-unfs-td081-m-remake[20684]: the server ended as told: code 1 after 29.41s (<nil>); last output: " ip ::ffff:169.254.77.2/128 options 5 /s/1: ip ::ffff:169.254.77.2/128 options 1"
+Nov 19 21:41:53 vesper daemon.notice vesper-unfs-td081-m-remake[23486]: the server ended by itself: code 137 after 13.523s (<nil>); last output: " ip ::ffff:169.254.77.2/128 options 5 /s/1: ip ::ffff:169.254.77.2/128 options 1"
+Nov 19 21:42:12 vesper daemon.notice vesper-unfs-td081-m-remake[24018]: the server ended as told: code 1 after 17.663s (<nil>); last output: " ip ::ffff:169.254.77.2/128 options 5 /s/1: ip ::ffff:169.254.77.2/128 options 1"
+--- task log (changes only)
+0 1795124502 CONF:refused conf:refused c=old d=old
+8 1795124504 CONF:WROTE conf:refused c=No such file or directory d=No such file or directory
+14 1795124505 CONF:refused conf:refused c=No such file or directory d=No such file or directory
+42 1795124516 CONF:refused conf:refused c=Stale file handle d=new
+--- macOS conf now: keep u10 u11 u12 u13 u8 u9 
+--- wrote: CONF 6 conf 0

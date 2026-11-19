@@ -1,0 +1,2 @@
+bash scripts/systemvm/build-shim.sh
+built /Volumes/Workspace/github.com/cityhunteur/vesper/build/shim/containerd-shim-vesper-v2 (11993212 bytes, version 401298b)

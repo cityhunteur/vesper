@@ -24,6 +24,14 @@ import (
 // directory at the path, the server goes on serving the old one, and the new one would be an ordinary directory
 // that the task could rename aside to put its own at the user's path for the next start and the next launch.
 //
+// The task could also write in that new directory, which the next start and the next launch bind read-only
+// (TD-081, D-059). So the directory now at a read-only directory source's path, the leaf of its chain, is told to
+// the server as a read-only object too (an "s DEV INO" line, as for a file that replaced a read-only file source):
+// the server then refuses every change to it and to what lies in it, under every name. The source is not attached
+// again: at its own mount point the task goes on reading the old directory when the user moved it aside, and gets
+// errors when the user removed it; after a start of the server, which serves the new directory, the mount point
+// gives "Stale file handle" until the task's next launch (measured: run/TD-081/notes.txt).
+//
 // The chain is found by identity, not by the text of the paths: each directory on the way is opened beneath the
 // share mount, and the chain starts below the first of them that is the root of a read-write directory source. So a
 // read-write source given under another spelling of the path (a volume that ignores letter case) holds the chain
@@ -35,7 +43,8 @@ import (
 const maxAnchors = 1024
 
 // anchorState is what Run finds at a start and the watcher keeps current. After the watcher has started, only the
-// watcher's goroutine uses it. Its descriptors are held until the process ends: Run does not wait for the watcher,
+// watcher uses it: its own goroutine, and the goroutine of inMountNamespace that checkOne waits for (tellLeaves
+// reads chains there), never two at a time. Its descriptors are held until the process ends: Run does not wait for the watcher,
 // so it cannot close them without a race, and the process ends when Run returns.
 type anchorState struct {
 	roots  map[fileID]bool // the roots of the read-write directory sources
@@ -220,10 +229,47 @@ func anchorList(chains [][]fileID) []ProtectID {
 	return out
 }
 
+// leafList is the directory now at the path of each read-only directory source that a task can reach through a
+// read-write one: the last anchor of its chain. The server is told of each as a read-only object (TD-081).
+func leafList(srcs []Source, chains [][]fileID) []ProtectID {
+	var out []ProtectID
+	seen := map[fileID]bool{}
+	for i, chain := range chains {
+		if i >= len(srcs) || srcs[i].File || len(chain) == 0 {
+			continue
+		}
+		if id := chain[len(chain)-1]; !seen[id] {
+			seen[id] = true
+			out = append(out, ProtectID{Dev: id.dev, Ino: id.ino})
+		}
+	}
+	return out
+}
+
+// tellLeaves tells the server again of the directories of leafList as they were last found. The watcher calls it
+// after every other object that it tells: the server remembers its newest objects, and these directories are at no
+// protected place that would keep them (the source's place still holds the old directory), so they are told
+// again, and are never among the oldest.
+func (w *fileWatch) tellLeaves() error {
+	if w.anchors == nil {
+		return nil
+	}
+	for _, line := range leafList(w.srcs, w.anchors.chains) {
+		if err := AppendSeen(w.list, line); err != nil {
+			return err
+		}
+		w.grown += len(seenLine(line))
+	}
+	return nil
+}
+
 // checkChains walks the chains again. When a chain is not what was last told (macOS replaced a directory on it, or
 // the directory at a read-only directory source's path), the server is told of every anchor of every chain as it
-// is now: the new ones, and the others again, so that all the current ones are its newest. The new set is held in
-// place of the old. A chain that cannot be walked now keeps what was last told for it, and that is logged once.
+// is now: the new ones, and the others again, so that all the current ones are its newest. It is told as well of
+// the directory now at each read-only directory source's path, as a read-only object (leafList), before the
+// anchors: a server that reads the list between two of these lines then knows the new directory as read-only
+// before it knows it as an anchor, and both refuse the task. The new set is held in place of the old. A chain that
+// cannot be walked now keeps what was last told for it, and that is logged once.
 func (w *fileWatch) checkChains() {
 	a := w.anchors
 	if a == nil || len(a.roots) == 0 || w.list == nil {
@@ -261,21 +307,32 @@ func (w *fileWatch) checkChains() {
 		closeAll(held)
 		return
 	}
+	notTold := func(err error) {
+		closeAll(held)
+		if errors.Is(err, os.ErrClosed) {
+			return // the server has ended and Run closed the list
+		}
+		// A directory that the server cannot be told of could be renamed by the task, or written in. The server
+		// is ended, and the next start writes the list anew, with the chains as they are then.
+		w.logf("a directory on the way to a read-only source was replaced, and the server could not be told of it (%v); the server is ended and starts again with a list written anew", err)
+		w.end()
+	}
+	leaves := leafList(w.srcs, chains)
+	for _, line := range leaves {
+		if err := AppendSeen(w.list, line); err != nil {
+			notTold(err)
+			return
+		}
+		w.grown += len(seenLine(line))
+	}
 	for _, line := range anchorList(chains) {
 		if err := AppendAnchor(w.list, line); err != nil {
-			closeAll(held)
-			if errors.Is(err, os.ErrClosed) {
-				return // the server has ended and Run closed the list
-			}
-			// A directory that the server cannot be told of could be renamed by the task. The server is ended,
-			// and the next start writes the list anew, with the chains as they are then.
-			w.logf("a directory on the way to a read-only source was replaced, and the server could not be told of it (%v); the server is ended and starts again with a list written anew", err)
-			w.end()
+			notTold(err)
 			return
 		}
 		w.grown += len(anchorLine(line))
 	}
-	w.logf("a directory on the way to a read-only source was replaced; the server was told of the %d directories now on the way", len(held))
+	w.logf("a directory on the way to a read-only source was replaced; the server was told of the %d directories now on the way, and of the %d now at the paths of read-only directory sources, which stay read-only with what lies in them", len(held), len(leaves))
 	closeAll(a.held)
 	a.chains, a.held = chains, held
 	if w.grown > maxListGrowth {
