@@ -178,14 +178,14 @@ func TestHolders(t *testing.T) {
 // The server's protect file names the root of each read-only source and the objects remembered by number (TD-073).
 func TestProtectList(t *testing.T) {
 	srcs := []Source{{Rel: "proj"}, {Rel: "proj/conf", ReadOnly: true}, {Rel: "proj/key", File: true, ReadOnly: true}, {Rel: "proj/a", File: true}}
-	got := ProtectList(srcs, []ProtectID{{Dev: 34, Ino: 1460}, {Dev: 36, Ino: 5, Swapped: true}}, nil)
+	got := ProtectList(srcs, []ProtectID{{Dev: 34, Ino: 1460}, {Dev: 36, Ino: 5, Swapped: true}}, nil, nil)
 	if want := "p /s/1\np /s/2/f\ni 34 1460\ni 36 5\n"; got != want {
 		t.Errorf("protect list %q, want %q", got, want)
 	}
-	if got := ProtectList(srcs, nil, []ProtectID{{Dev: 40, Ino: 9}}); !strings.HasSuffix(got, "\ns 40 9\n") || strings.Contains(got, "\ni ") {
+	if got := ProtectList(srcs, nil, []ProtectID{{Dev: 40, Ino: 9}}, []ProtectID{{Dev: 40, Ino: 3}, {Dev: 40, Ino: 4}}); !strings.HasSuffix(got, "\ns 40 9\na 40 3\na 40 4\n") || strings.Contains(got, "\ni ") {
 		t.Errorf("a list with the object at a place: %q", got)
 	}
-	if got := ProtectList([]Source{{Rel: "proj"}}, nil, nil); got != "" {
+	if got := ProtectList([]Source{{Rel: "proj"}}, nil, nil, nil); got != "" {
 		t.Errorf("nothing read-only, list %q", got)
 	}
 }

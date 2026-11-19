@@ -28,8 +28,9 @@
 #        vesper-microvm unfs-stop ID         stop ID's share server (the shim, when the task stops); UNFS ID stopped
 #        vesper-microvm unfs-holds ID        HOLDS ID N: how many recorded read-only objects are held, in a mount
 #                                             namespace of their own (TD-076); 0 after the task stopped
-#        vesper-microvm unfs-list ID         LIST ID p=N i=N s=N: the lines of the server's list (TD-078): places,
-#                                             recorded numbers, and objects told before they were put at a place
+#        vesper-microvm unfs-list ID         LIST ID p=N i=N a=N s=N: the lines of the server's list (TD-078): places,
+#                                             recorded numbers, anchors (directories a task may not rename, TD-080),
+#                                             and objects told before they were put at a place
 #        vesper-microvm unfs ID              UNFS ID state=running|stopped pid=N listen=yes|no mem_max= mem_peak=
 #                                             cpu_max= oom_kills= pids_peak= pids_refused=, or UNFS ID absent
 #        vesper-microvm sharenet ID          SHARENET ID links=... addr=... owner=... routes=N input=... forward=...
@@ -448,6 +449,8 @@ unfs_start() { # ID SPEC SQUASH -> a reason on failure (lock held, namespace up)
   /usr/bin/vesper-unfs release --protect "$UNFS/$us_id.prot" > /dev/null 2>&1
   rm -f "$UNFS/$us_id.pid" "$UNFS/$us_id.err" "$UNFS/$us_id.prot" "$UNFS/.$us_id.prot.tmp" "$UNFS/$us_id.prot.list" "$UNFS/.$us_id.prot.list.tmp" "/var/log/vesper-unfs-$us_id.log.1"
   : > "/var/log/vesper-unfs-$us_id.log"   # a retried id must not read the last launch's error as its own
+  # Test hook (test-unfs-no-anchors-next): this server starts without anchors, at every respawn too.
+  us_na=""; [ "$(cat "$UNFS/no-anchors-next" 2>/dev/null)" = "$us_id" ] && { rm -f "$UNFS/no-anchors-next"; us_na="--test-no-anchors"; }
   # The record (unfs.ParseArgs, version 2): what the server starts from on every respawn, what the selfcheck starts
   # from, and what the fanout maps host paths with. Parsed in Go only (council SEC-6).
   { echo "#vesper-unfs-args 2"; echo "squash $us_sq"; printf '%s\n' "$us_spec"; } > "$UNFS/$us_id.args"
@@ -462,7 +465,7 @@ unfs_start() { # ID SPEC SQUASH -> a reason on failure (lock held, namespace up)
     --stderr-logger "/usr/local/bin/vesper-boundlog /var/log/vesper-unfs-$us_id.log 262144" \
     "$(command -v nsenter)" -- "--net=$NETNS/$us_id" /usr/bin/vesper-unfs run --unfsd "$UNFSD" --args "$UNFS/$us_id.args" \
     --root "$UNFS_ROOT" --cgroup "$UNFS_CG/$us_id" --guest-sock "$JAIL/firecracker/$us_id/root/v.sock" \
-    --protect "$UNFS/$us_id.prot" < /dev/null > /dev/null 2> "$UNFS/$us_id.err" \
+    --protect "$UNFS/$us_id.prot" $us_na < /dev/null > /dev/null 2> "$UNFS/$us_id.err" \
     || { echo "supervise-daemon: $(head -n 2 "$UNFS/$us_id.err" | tr '\n' ' ')"; return 1; }
   rm -f "$UNFS/$us_id.err"
   for _ in $(seq 1 40); do
@@ -924,13 +927,22 @@ case "$cmd" in
   unfs-list)   # ID: how many lines of each kind the server's list holds (TD-078)
     id=${1:-}; valid_id "$id" || { echo "ERR bad id"; exit 2; }
     [ -f "$UNFS/$id.prot.list" ] || { echo "LIST $id absent"; exit 1; }
-    echo "LIST $id $(awk '{n[$1]++} END {printf "p=%d i=%d s=%d", n["p"], n["i"], n["s"]}' "$UNFS/$id.prot.list")" ;;
+    echo "LIST $id $(awk '{n[$1]++} END {printf "p=%d i=%d a=%d s=%d", n["p"], n["i"], n["a"], n["s"]}' "$UNFS/$id.prot.list")" ;;
   unfs-events) cat "$UNFS/fanout.stat" 2>/dev/null || echo "{}" ;;   # the event hop's counters per microVM (M6)
   unfs-stop) valid_id "${1:-}" || { echo "ERR bad id"; exit 2; }; lock && unfs_stop "$1"; unlock; echo "UNFS $1 stopped" ;;
   test-unfs-selfcheck) test_unfs_selfcheck "$@" ;;
   test-unfs-kill) test_unfs_kill "$@" ;;
   test-unfs-giveup) test_unfs_giveup "$@" ;;
   test-unfs-stall-next) mkdir -p "$UNFS" && : > "$UNFS/stall-next" && echo "STALL next" ;;
+  # The next server of task ID starts without anchors: a task can then rename a directory on the way to a
+  # read-only source, as before TD-080, so that a suite can test the layers beneath that rule. "none" takes the
+  # order back. The server's log says that it started so.
+  test-unfs-no-anchors-next)
+    case "${1:-}" in
+      none) rm -f "$UNFS/no-anchors-next"; echo "NOANCHORS none" ;;
+      *) valid_id "${1:-}" || { echo "ERR usage: test-unfs-no-anchors-next ID|none"; exit 2; }
+         mkdir -p "$UNFS" && printf '%s\n' "$1" > "$UNFS/no-anchors-next" && echo "NOANCHORS next $1" ;;
+    esac ;;
   # Stops and continues the server process itself (not its supervisor), as a task can do to its own server with a
   # request it does not finish: a test of what the server must know without having looked (TD-078).
   test-unfs-pause|test-unfs-resume)

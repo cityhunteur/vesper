@@ -3,17 +3,20 @@ whatever name reaches it: another letter case, a hard link, a symbolic link, a m
 The server reads the objects from <exports file>.protect and knows them by device and inode
 number, not by a mount on one name (TD-073). The list is a file that the supervisor adds to
 while the server runs: an object is in it before it is put at a protected place, and the
-server reads what was added before it judges a request (TD-078). The comment above PROT_FIXED
-in Config/exports.y is the definition of the list.
+server reads what was added before it judges a request (TD-078). A directory on the way to a
+read-only export inside a read-write one, an anchor, cannot be renamed or removed, so that a
+client cannot change what the read-only export's path names (TD-080). The comment above
+PROT_FIXED in Config/exports.y is the definition of the list.
 
 --- a/Config/exports.h
 +++ b/Config/exports.h
-@@ -34,6 +34,9 @@
+@@ -34,6 +34,10 @@
  char            *export_point_from_fsid(uint32 fsid);
  nfsstat3	exports_compat(const char *path, struct svc_req *rqstp);
  nfsstat3	exports_rw(void);
 +nfsstat3	exports_prot(const char *path);
 +nfsstat3	exports_prot_follow(const char *path);
++nfsstat3	exports_anchor(const char *path);
 +void		exports_prot_tick(void);
  uint32		exports_anonuid(void);
  uint32		exports_anongid(void);
@@ -64,11 +67,10 @@ in Config/exports.y is the definition of the list.
  
  	/* check for client attempting to use invalid pathname */
  	if (!path || strstr(path, "/../"))
-@@ -949,12 +958,435 @@
+@@ -949,12 +958,541 @@
  nfsstat3 exports_rw(void)
  {
  	if (exports_opts != -1 && (exports_opts & OPT_RW))
--		return NFS3_OK;
 +		return exports_prot_follow(exports_last_path);
 +	else
 +		return NFS3ERR_ROFS;
@@ -96,8 +98,10 @@ in Config/exports.y is the definition of the list.
 + *               protected, and is looked up again at every look
 + *   i DEV INO   an object, by number
 + *   s DEV INO   an object that is about to be put at a p path
++ *   a DEV INO   an anchor: a directory on the way from the root of a
++ *               read-write export to a read-only export inside it
 + * This comment is the definition of the list; shim/internal/unfs/protect.go
-+ * writes it. A line is one of the three kinds and ends in a newline. DEV
++ * writes it. A line is one of the four kinds and ends in a newline. DEV
 + * and INO are decimal numbers with one space between them, a PATH starts
 + * with "/", and a line is at most NFS_MAXPATHLEN + 7 bytes with its
 + * newline. A last
@@ -105,7 +109,10 @@ in Config/exports.y is the definition of the list.
 + * whole line of no kind, more i lines than PROT_FIXED, more p lines than
 + * PROT_PATHS or a line with a zero byte makes the list broken, and a broken
 + * list refuses every change and is read again from the start once a second.
-+ * Without the file nothing is protected and nothing is looked up.
++ * Without the file nothing is protected and nothing is looked up. More a
++ * lines than PROT_ANCHORS do not break the list: the anchor told longest ago
++ * goes, and the supervisor tells every current anchor again whenever one of
++ * them changed, so the current ones are the newest.
 + *
 + * An object once at a p path stays protected while the server runs, also
 + * after another object took its place there: a file that replaced a
@@ -125,6 +132,7 @@ in Config/exports.y is the definition of the list.
 +#define PROT_SEEN	768
 +#define PROT_PATHS	64
 +#define PROT_LINKS	40	/* as many links in a row as the kernel follows */
++#define PROT_ANCHORS	2048
 +
 +typedef struct { uint64 dev; uint64 ino; } prot_id;
 +static prot_id prot_ids[PROT_FIXED];	/* the i entries */
@@ -145,9 +153,26 @@ in Config/exports.y is the definition of the list.
 +static int prot_have = FALSE;
 +static ino_t prot_ino = 0;
 +static off_t prot_off = 0;
-+/* how far the s lines of which list file were taken already: a list that is
-+   read again from the start does not tell its old lines again, which would
-+   put the objects' ages back to the order of the lines */
++/*
++ * Anchors. A read-only export that lies inside a read-write one is reached
++ * by a chain of names: the directories from the read-write export's root
++ * down to it. A client that could rename or remove one of these directories
++ * could put another object at the read-only export's path: its supervisor
++ * would then serve that object, and so would the next start. So a client
++ * cannot rename an anchor, rename something in its place, or remove it, by
++ * any name. Only the directory itself is an anchor: what lies in it is not,
++ * and stays as writable as it was. The supervisor tells the anchors as it
++ * tells the s objects, and again when a directory on a chain was replaced on
++ * the host. PROT_ANCHORS are remembered; when there are more, the one told
++ * longest ago goes.
++ */
++static prot_id prot_anch[PROT_ANCHORS];
++static unsigned long long prot_anch_age[PROT_ANCHORS];
++static int prot_nanch = 0;
++
++/* how far the s and a lines of which list file were taken already: a list
++   that is read again from the start does not tell its old lines again, which
++   would put the objects' ages back to the order of the lines */
 +static ino_t prot_told_ino = 0;
 +static off_t prot_told = 0;
 +
@@ -203,6 +228,30 @@ in Config/exports.y is the definition of the list.
 +	prot_age[k] = ++prot_clock;
 +}
 +
++/* remember an anchor; one that is told again is the newest again */
++static void prot_anchor(uint64 dev, uint64 ino)
++{
++	int j, k;
++
++	for (j = 0; j < prot_nanch; j++) {
++		if (prot_anch[j].ino == ino && prot_anch[j].dev == dev) {
++			prot_anch_age[j] = ++prot_clock;
++			return;
++		}
++	}
++	if (prot_nanch < PROT_ANCHORS) {
++		k = prot_nanch++;
++	} else {
++		k = 0;
++		for (j = 1; j < PROT_ANCHORS; j++)
++			if (prot_anch_age[j] < prot_anch_age[k])
++				k = j;
++	}
++	prot_anch[k].dev = dev;
++	prot_anch[k].ino = ino;
++	prot_anch_age[k] = ++prot_clock;
++}
++
 +/* "DEV INO" and nothing else: two numbers with one space between */
 +static int prot_pair(const char *s, uint64 *dev, uint64 *ino)
 +{
@@ -253,6 +302,11 @@ in Config/exports.y is the definition of the list.
 +		} else if (line[0] == 's' && line[1] == ' ' && prot_pair(line + 2, &dev, &ino)) {
 +			if (prot_off > prot_told) {
 +				prot_remember(dev, ino, NULL, 0);
++				prot_told = prot_off;
++			}
++		} else if (line[0] == 'a' && line[1] == ' ' && prot_pair(line + 2, &dev, &ino)) {
++			if (prot_off > prot_told) {
++				prot_anchor(dev, ino);
 +				prot_told = prot_off;
 +			}
 +		} else if (line[0] == 'p' && line[1] == ' ' && line[2] == '/') {
@@ -396,7 +450,7 @@ in Config/exports.y is the definition of the list.
 +	leaf = path + (slash - dir) + 1;
 +	if (slash == dir)
 +		dir[1] = '\0';
- 	else
++	else
 +		*slash = '\0';
 +
 +	if (!realpath(dir, real)) {
@@ -404,7 +458,7 @@ in Config/exports.y is the definition of the list.
 +		   call that follows it fails there too and changes nothing */
 +		if (links > 0 && (errno == ENOENT || errno == ENOTDIR))
 +			return NFS3_OK;
- 		return NFS3ERR_ROFS;
++		return NFS3ERR_ROFS;
 +	}
 +	if (snprintf(full, sizeof(full), "%s%s%s", real,
 +		     real[1] ? "/" : "", leaf) >= (int) sizeof(full))
@@ -427,7 +481,7 @@ in Config/exports.y is the definition of the list.
 +	}
 +
 +	if (!*leaf)
-+		return NFS3_OK;
+ 		return NFS3_OK;
 +	if (backend_lstat(full, &st) != 0) {
 +		/* no object by that name yet; an object that cannot be
 +		   looked at may be a protected one */
@@ -456,9 +510,9 @@ in Config/exports.y is the definition of the list.
 +		return prot_check(real, TRUE, links + 1);
 +	}
 +	return NFS3_OK;
- }
- 
- /*
++}
++
++/*
 + * NFS3ERR_ROFS when path names a protected object or lies under one; a
 + * symbolic link as the last name is taken as the link itself
 + */
@@ -473,6 +527,60 @@ in Config/exports.y is the definition of the list.
 +}
 +
 +/*
++ * NFS3ERR_ROFS when the object that path names is an anchor. Only that
++ * object counts, not the directories above it: the check is for a call that
++ * takes the object's name away (a rename of it, a rename onto it, a
++ * removal), and a file in an anchor may be renamed and removed as before.
++ * The directory part of path is resolved through every symbolic link; a
++ * last name that is a symbolic link is the link, which is no anchor.
++ */
++nfsstat3 exports_anchor(const char *path)
++{
++	char dir[PATH_MAX];
++	char real[PATH_MAX];
++	char full[PATH_MAX];
++	backend_statstruct st;
++	const char *leaf;
++	char *slash;
++	size_t len;
++	int j;
++
++	prot_refresh();
++	if (prot_broken)
++		return NFS3ERR_ROFS;
++	if (prot_nanch == 0 || !path)
++		return NFS3_OK;
++	len = strlen(path);
++	if (len == 0 || len >= sizeof(dir) || path[0] != '/')
++		return NFS3ERR_ROFS;
++	memcpy(dir, path, len + 1);
++	slash = strrchr(dir, '/');
++	leaf = path + (slash - dir) + 1;
++	if (slash == dir)
++		dir[1] = '\0';
+ 	else
++		*slash = '\0';
++	if (!*leaf)
++		return NFS3_OK;
++	if (!realpath(dir, real))
+ 		return NFS3ERR_ROFS;
++	if (snprintf(full, sizeof(full), "%s%s%s", real,
++		     real[1] ? "/" : "", leaf) >= (int) sizeof(full))
++		return NFS3ERR_ROFS;
++	if (backend_lstat(full, &st) != 0) {
++		if (errno == ENOENT || errno == ENOTDIR)
++			return NFS3_OK;	/* no object by that name */
++		return NFS3ERR_ROFS;
++	}
++	if (!S_ISDIR(st.st_mode))
++		return NFS3_OK;
++	for (j = 0; j < prot_nanch; j++)
++		if (prot_anch[j].ino == st.st_ino && prot_anch[j].dev == st.st_dev)
++			return NFS3ERR_ROFS;
++	return NFS3_OK;
+ }
+ 
+ /*
 + * A look at the list and at the p paths now. The main loop calls this on
 + * every turn and the dispatchers at every request. The list is what the
 + * protection rests on: an object is in it before it is at a p path. The
@@ -546,44 +654,56 @@ in Config/exports.y is the definition of the list.
  
      cluster_create(obj, rqstp, &result.status);
  
-@@ -833,6 +837,8 @@
+@@ -833,6 +837,11 @@
      PREP(path, argp->object.dir);
      result.status =
  	join(cat_name(path, argp->object.name, obj), exports_rw());
 +    if (result.status == NFS3_OK)
 +	result.status = exports_prot(obj);
++    /* nor a directory on the way to a read-only export (Vesper) */
++    if (result.status == NFS3_OK)
++	result.status = exports_anchor(obj);
  
      cluster_lookup(obj, rqstp, &result.status);
  
-@@ -860,6 +866,8 @@
+@@ -860,6 +869,11 @@
      PREP(path, argp->object.dir);
      result.status =
  	join(cat_name(path, argp->object.name, obj), exports_rw());
 +    if (result.status == NFS3_OK)
 +	result.status = exports_prot(obj);
++    /* nor a directory on the way to a read-only export (Vesper) */
++    if (result.status == NFS3_OK)
++	result.status = exports_anchor(obj);
  
      cluster_lookup(obj, rqstp, &result.status);
  
-@@ -892,6 +900,8 @@
+@@ -892,6 +906,11 @@
      pre = get_pre_cached();
      result.status =
  	join(cat_name(from, argp->from.name, from_obj), exports_rw());
 +    if (result.status == NFS3_OK)
 +	result.status = exports_prot(from_obj);
++    /* a directory on the way to a read-only export keeps its name (Vesper) */
++    if (result.status == NFS3_OK)
++	result.status = exports_anchor(from_obj);
  
      cluster_lookup(from_obj, rqstp, &result.status);
  
-@@ -901,6 +911,9 @@
+@@ -901,6 +920,12 @@
  	result.status =
  	    join(cat_name(to, argp->to.name, to_obj),
  		 exports_compat(to, rqstp));
 +	/* neither over a protected object nor into a protected directory */
 +	if (result.status == NFS3_OK)
 +	    result.status = exports_prot(to_obj);
++	/* nor in place of a directory on the way to a read-only export */
++	if (result.status == NFS3_OK)
++	    result.status = exports_anchor(to_obj);
  
  	cluster_create(to_obj, rqstp, &result.status);
  
-@@ -942,6 +955,12 @@
+@@ -942,6 +967,12 @@
  
      old = fh_decomp(argp->file);
  

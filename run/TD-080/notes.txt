@@ -1,0 +1,99 @@
+TD-080 runs, 2026-11-18, System VM with 2 CPUs and 2048 MiB; the macOS volume is APFS and ignores letter case.
+
+1. Control: binds suite step path_to_a_read_only_bind_cannot_be_changed, as it was first written, on the build of
+   main at 9945b4a (with the new `vesper-unfs probe --remove` in the shim; the server is main's). The raw REMOVE
+   of this run was NOT sent: the suite's call lacked a `--`, and the report holds the command's usage error. The
+   control of section 5 sends it.
+   Binds: a80 read-write at /d, a80/top read-write at /t, the file a80/hy/secret read-only at /b, the directory
+   a80/top/mid/conf read-only at /c, the file a80/ed/leaf read-only at /e. The task tries to rename or remove the
+   directories on the way to the read-only binds; then macOS removes ed/leaf and replaces top/mid; the task tries
+   again.
+     7 went through: mv /d/hy /d/t1; mv /d/top /d/t2; mv /t/mid /t/m3; mv -T /d/e1 /d/hy; rmdir /d/hy;
+       mv /d/top/mid /d/top/m9; rmdir /d/ed.
+     macOS afterwards: hy/secret, top/mid.old/conf/keep, ed and top/mid were all gone from their paths.
+     A second launch with the same binds: cat: can't open '/b': No such file or directory.
+   So on main a task moves the directory of a read-only file bind aside, and the next launch has nothing, or
+   whatever the task put there, at the user's path.
+
+2. Measured for the design: how fast the System VM sees a directory that macOS replaced. A task prints the inode
+   numbers of /d/a and /d/a/b and the content of /d/a/b/f twice a second while macOS runs
+   `mv a a.old; mkdir -p a/b; echo new > a/b/f`:
+     uptime 1.02: a=1574 b=1575 f=old   ...   uptime 7.23: a=1577 b=1578 f=new   (the sample after the replacement)
+   The new directory has a new number at once, and is seen within about half a second.
+
+3. With the first version of this change (before the council review; superseded by section 4, kept as the record
+   of what the reviewers read):
+     path_to_a_read_only_bind_cannot_be_changed: 7 renames and removals of directories on the way to a read-only
+       bind refused as read-only (mv /d/hy, mv /d/HY, mv /d/top, mv /d/top/mid, mv /t/mid through the second
+       bind, mv -T /d/e1 onto /d/hy, rmdir /d/hy); a file made, renamed and removed inside /d/hy, and another
+       directory made, renamed and removed, went through; macOS then removed ed/leaf and replaced top/mid, and the
+       caches were dropped: mv /d/top/mid (the new directory), rmdir /d/ed and mv /d/hy refused; a raw REMOVE of
+       the emptied directory: REMOVE ed status=ROFS; the supervisor attached no other file; macOS: hy/secret
+       "guarded", the old conf with "keep", ed and top/mid in place; a second launch read "guarded" from /b and
+       "new" from /c/keep (the directory macOS put at the path).
+     The six older steps whose task renames such a directory start their server without anchors
+     (`vesper-microvm test-unfs-no-anchors-next`) and pass as before.
+   A server's list for a task with a read-write bind, a read-only file two levels down and a read-only directory
+   three levels down: LIST an-a p=2 i=2 s=2, with three "a" lines (the count of "a" lines was added to the
+   command after this run).
+
+4. After the council review (2026-11-19; `council.md`). Changed: the directory at a read-only DIRECTORY bind's path
+   is an anchor too (the first version left it to the task after macOS replaced it); the supervisor tells the
+   server of every chain again when one changed; a chain that cannot be looked at fails a start and is logged by
+   the watcher; the test hook names one task, and the server's log says that it started without anchors. The step
+   was rewritten: binds a80:/d rw, a80/top:/t rw, file a80/hy/secret:/b ro, directory a80/top/mid/conf:/c ro, file
+   a80/ed/leaf:/e ro, directory a80/rootconf:/rc ro (right under the read-write root). The reports beside this
+   file are of this build (server 10500352..., the same binary as before: only a comment of the patch changed).
+     path_to_a_read_only_bind_cannot_be_changed (binds suite, 21 of 21 steps):
+       part 1: 7 refused as read-only: mv /d/hy, mv /d/HY, mv /d/top, mv /d/top/mid, mv /t/mid (the second bind),
+         mv /d/top/mid/conf and mv /d/rootconf (the read-only directory binds' own directories). A file made,
+         renamed and removed inside /d/hy; a directory made, renamed and removed inside /d/top; another directory
+         made, renamed and removed under /d: all three went through. 6 anchors in the server's list.
+       macOS then removed ed/leaf, replaced top/mid (with conf in it) and replaced rootconf. The step waits for
+         the supervisor's log line ("the server was told of the ... directories now on the way") and for three
+         more anchors in the list: seen at the first look (under half a second); 12 anchor lines.
+       part 2, after a raw REMOVE of the emptied directory (REMOVE ed status=ROFS) and dropped caches: 6 refused:
+         mv /d/top/mid (the new directory), mv /d/top/mid/conf (the new directory at the directory bind's path),
+         mv /d/rootconf (the new one), rmdir /d/ed, mv -T /d/e2 /d/ed (a rename onto the empty anchor), mv /d/hy.
+       part 3, after the server was killed and started again from the paths (pid 19601 to 20038, 6 anchors):
+         3 refused: mv /d/hy, mv /d/top/mid, mv /d/rootconf.
+       macOS afterwards: hy/secret "guarded", top/mid.old/conf/keep "keep", top/mid/conf/keep "new",
+         rootconf/keep "rnew", ed in place. A second launch read "guarded", "new" and "rnew".
+     Unit tests of the chain code (TestAnchors, TestCheckChains) are Linux-only; run here in an Alpine container
+       from a cross-compiled test binary: both pass. CI runs them on ubuntu.
+
+5. Control for section 4: the same step on the same build, with the rule switched off for that task
+   (`vesper-microvm test-unfs-no-anchors-next binds-anchor`; the server's log: "started with --test-no-anchors").
+   One-off script made from the suite; not part of the repository.
+     6 went through: mv /d/hy /d/t1; mv /d/top /d/t2; mv /t/mid /t/m3; after macOS replaced the directories:
+       mv /d/top/mid /d/top/m9; mv /d/rootconf /d/rc9; mv -T /d/e2 /d/ed.
+     mv /d/rootconf /d/rc2 in part 1 was refused as read-only also without anchors: at a start that directory is
+       the source itself, which the server protects. After macOS replaced it, mv /d/rootconf /d/rc9 went through:
+       that is the case the security reviewer found by reading (SEC-1), shown here.
+     The raw REMOVE of the emptied directory: REMOVE ed status=OK. So unfs3 does remove an empty directory on a
+       REMOVE, and the ROFS of section 4 comes from the anchor.
+     0 anchors in the list. macOS afterwards: hy/secret, both conf/keep and rootconf/keep all gone from their
+       paths. The server did not start again (its file source's directory was gone). A second launch could not
+       open /b, /c/keep or /rc/keep.
+
+6. Not part of this change (TD-081), shown on this build: what lies in the directory that macOS puts at a read-only
+   directory bind's path. Binds: td081:/d rw, td081/conf:/c ro.
+     Before the replacement: echo x > /d/conf/w0 failed (read-only).
+     macOS: mv conf conf.old; mkdir conf; echo new > conf/keep. Four seconds later, in the task:
+       echo y > /d/conf/w1 went through (the file w1 is in conf on macOS);
+       mv /d/conf /d/conf2: Read-only file system (the new directory is an anchor);
+       cat /c/keep: "old" (the task still reads the old directory); cat /d/conf/keep: "new".
+
+7. The other suites on the build of section 4: unfs suite 14 of 14, microVM shares suite 12 of 12.
+
+8. After the judge (council.md, section 3). The shim changed in one log line (the test hook's line now begins
+   "vesper-unfs test:", so that the launcher does not take it for a failed start) and the unit test got two more
+   cases; the documents were corrected. The image was built again and the three suites were run again on it. The
+   report files beside this are of this last run:
+     binds suite 21 of 21; path_to_a_read_only_bind_cannot_be_changed as in section 4 (7, 6 and 3 refused; the
+       supervisor told the server at the first look, 12 anchor lines; REMOVE ed status=ROFS; server pid 19536 to
+       19972; a second launch read "guarded", "new" and "rnew").
+     unfs suite 14 of 14; microVM shares suite 12 of 12.
+     unit-tests-linux.txt: TestAnchors and TestCheckChains pass in an Alpine container (a cross-compiled test
+       binary of the final source).
+   The control of section 5 was not run again: nothing that it exercises changed.

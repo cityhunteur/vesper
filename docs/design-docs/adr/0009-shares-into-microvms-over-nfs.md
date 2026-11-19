@@ -122,17 +122,29 @@ swap a directory for a symlink to somewhere outside the share. So the sandbox se
 descriptor of the trusted share mount, refusing symlinks on the way, checks that the opened object is a directory on
 that mount, and binds from the descriptor it holds (`/proc/self/fd/N`). It never opens the path a second time.
 One exception since D-052: the path of a file source is opened again, by the same rules, when macOS has replaced the
-file (see the update of 2026-11-18 below).
+file (see the update of 2026-11-18 below). A second since D-058: the directories on the way to a read-only source
+inside a read-write one, and the directory at a read-only directory source's path, are opened again each second, by
+the same rules, only to learn their numbers.
 
 M3 proves the sandbox with an escape test. Until M3 passes, the blast-radius statement below is a goal, not a fact.
 
 ### What is bound read-only, as built
 
-This section states the design after D-053, D-055 and D-056. `docs/SECURITY.md` gives the limits and the tests.
+This section states the design after D-053, D-055, D-056, D-057 and D-058. `docs/SECURITY.md` gives the limits and the tests.
 
 **The rule.** The server refuses (`ROFS`) a request that changes an object when the object, or a directory above
 it with symbolic links resolved, is in the server's set of protected objects. The set is known by device and inode
 number.
+
+**The path.** A task cannot change what the path of a read-only source names. The directories from the root of a
+read-write source down to a read-only source inside it are anchors: the server refuses a rename of an anchor, a
+rename onto it and a removal of it, by any name. For a read-only directory source the directory now at the source's
+path is an anchor too: a directory source is attached once, so a directory that macOS puts there later is otherwise
+an ordinary one. The supervisor finds the anchors by identity, tells the server (`a` lines), holds them, and tells
+the server of all of them again when macOS replaced one (D-058). So the object at the path is the one the user, on
+macOS, put there, but in the windows that macOS opens and `docs/SECURITY.md` names. What lies in a directory that
+macOS puts at a read-only directory source's path while the server runs is not part of this: the task can write it
+through the read-write source until the server starts again (TD-081).
 
 **The layers, in order.**
 
@@ -148,8 +160,9 @@ number.
 |---|---|---|---|---|---|
 | Record `unfs/ID.prot` | supervisor | numbers of what each read-only source was at a start, and of files that replaced one | first 150 of starts, newest 50 replaced | one launch of the task | launcher, at stop and at a new launch |
 | Holds `unfs/ID.prot.d/ns` | supervisor | a read-only mount of each recorded object, in a mount namespace of the holds' own | as the record | one launch | launcher, through `vesper-unfs release`; the supervisor drops a hold that the record no longer names |
-| List `unfs/ID.prot.list` | supervisor | `p` places, `i` recorded numbers, `s` numbers of objects at or about to be at a place | grows by one line an attach; the server is started again after 1 MiB | one run of the server | launcher; written anew at each start |
+| List `unfs/ID.prot.list` | supervisor | `p` places, `i` recorded numbers, `s` numbers of objects at or about to be at a place, `a` anchors | grows by one line an attach, and by a line for each current anchor when macOS replaced one; the server is started again after 1 MiB | one run of the server | launcher; written anew at each start |
 | Set in the server | server | the `i` numbers and the objects told (`s`) or found at a place, newest by when each was last told or found | 256 and 768 | one run of the server | ends with the server |
+| Anchors | supervisor, then server | the directories on the way to each read-only source inside a read-write one, and the directory at a read-only directory source's path | 1,024 current ones (a start with more fails); the server remembers 2,048, newest by when last told, and is told of all the current ones whenever one changed | one run of the server; found again at each start | end with the supervisor and the server |
 | Pins | supervisor | descriptors of replaced read-only files | newest 256 | one run of the server | end with the supervisor |
 
 **The invariants.**
@@ -161,6 +174,8 @@ number.
 - A number is an object's only while something holds the object (the System VM gives a forgotten file another
   number). A running server's sources are held by its mounts, a replaced file by a pin, a recorded object by a hold.
 - A list that cannot be read, or that has a line of no known kind, refuses every change.
+- An anchor keeps its name: only the directory itself, not what lies in it. The current anchors are the newest
+  that the server remembers.
 
 **What a replaced read-only file gets, by age.** The file now attached and the newest 768 told or found: refused
 while the server runs. The newest 50 replaced files and the first 150 start objects: also across a restart of the

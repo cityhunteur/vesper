@@ -115,6 +115,9 @@ type fileWatch struct {
 	// The file a source had at the start is not among them: Run holds its tree until the server ends (council J-8).
 	// The recorded ones (the newest MaxProtectSwaps) also have a mount that outlives this process (hold).
 	pins []int
+	// anchors are the directories on the way to the read-only sources (Config.anchors); checkChains keeps the
+	// server told of them.
+	anchors *anchorState
 	// The server's list (Config.list). The server is told of a file there before the file is put at a protected
 	// place. grown counts the bytes added; end ends the server, which then starts again with a list written anew.
 	list   *os.File
@@ -135,12 +138,12 @@ type fileWatch struct {
 
 // newFileWatch holds the sandbox's process and mount namespace, opens the share mounts again and takes the identity
 // of each file source from its tree, which is the file the sandbox attaches. It returns nil when no source is a
-// file.
+// file and no read-only source can lie in a read-write one (anchorState.watched).
 func newFileWatch(cfg Config, trees []*os.File, pid int) (*fileWatch, error) {
 	n := len(cfg.Sources)
 	w := &fileWatch{srcs: cfg.Sources, nests: Nests(cfg.Sources), procfd: -1, nsfd: -1, server: filepath.Base(cfg.Unfsd),
 		notify: cfg.NotifyGuest, record: cfg.ProtectFile, unrecorded: cfg.unrecorded, said: map[string]bool{}, covered: map[int]int{}, ids: make([]fileID, n), att: make([]int, n),
-		verify: make([]int, n), budget: make([]int, n), tell: make([]notice, n), refill: time.Now(), list: cfg.list}
+		verify: make([]int, n), budget: make([]int, n), tell: make([]notice, n), refill: time.Now(), list: cfg.list, anchors: cfg.anchors}
 	w.logf = func(format string, a ...any) { fmt.Fprintf(os.Stderr, "vesper-unfs run: "+format+"\n", a...) }
 	if real, err := filepath.EvalSymlinks(cfg.Unfsd); err == nil { // the process's exe link names the file itself
 		w.server = filepath.Base(real)
@@ -148,7 +151,9 @@ func newFileWatch(cfg Config, trees []*os.File, pid int) (*fileWatch, error) {
 	if w.server == "." || w.server == "" {
 		w.server = "unfsd"
 	}
-	any := false
+	// A server whose read-only sources can lie in a read-write one is watched too, though none of its sources is a
+	// file: macOS can replace a directory on the way to a read-only directory source.
+	any := cfg.anchors.watched(cfg.Sources)
 	for i := range w.att {
 		w.att[i], w.budget[i] = -1, swapBudget
 	}
@@ -293,6 +298,14 @@ func (w *fileWatch) check() {
 				w.budget[i]++
 			}
 		}
+	}
+	w.checkChains()
+	files := false
+	for _, s := range w.srcs {
+		files = files || s.File
+	}
+	if !files {
+		return // only the chains are watched
 	}
 	mounted, err := w.mountPoints()
 	if err != nil {

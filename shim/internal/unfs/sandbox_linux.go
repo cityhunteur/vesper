@@ -37,6 +37,9 @@ type Config struct {
 	// TestPauseNests holds the sandbox for this long before it places the nests (tests only: the suite renames a
 	// nested source in the meantime and expects a refusal).
 	TestPauseNests time.Duration
+	// TestNoAnchors leaves the anchors out (tests only: the suites' steps that begin with a task renaming a
+	// directory on the way to a read-only source, to reach the layers beneath; TD-080).
+	TestNoAnchors bool
 	// NotifyGuest tells the guest to look again at the binds of file export N, after the supervisor attached the
 	// file that replaced it on the host (D-052), and returns the guest's answer: "same" when its binds are the
 	// export's file, "again" when it bound one again, "failed", "none" when it has no such bind, or "" when it
@@ -47,6 +50,8 @@ type Config struct {
 	ProtectFile string
 	// list is set by Run: the server's list, open for AppendSeen. The sandbox has that file attached.
 	list *os.File
+	// anchors is set by Run: the directories on the way to the read-only sources, which the watcher keeps current.
+	anchors *anchorState
 	// unrecorded is set by Run: the read-only sources that are neither recorded nor held. They are the read-write
 	// sources that this start serves read-only only because their path could not be compared with the record, and
 	// the sources whose path was also given read-write.
@@ -78,9 +83,10 @@ const (
 
 // OpenSources opens each source relative to its share mount, with no symbolic link on the way, beneath the mount
 // and on it alone, and clones what it opened into detached mount trees with their final attributes: one per source,
-// then one per nest (Nests order) of the read-only source it carries. Nothing opens a directory source's path again
-// after this (ADR 0009, Source binding); a file source's path is looked at again, to attach a file that replaced it
-// (reattach_linux.go, D-052). The trees are made here because open_tree clones only a mount of the caller's own
+// then one per nest (Nests order) of the read-only source it carries. Nothing binds from a directory source's
+// path again after this (ADR 0009, Source binding); a file source's path is looked at again, to attach a file that
+// replaced it (reattach_linux.go, D-052), and the directories of a chain are opened again only to learn their
+// numbers (anchor_linux.go, D-058). The trees are made here because open_tree clones only a mount of the caller's own
 // mount namespace; the sandbox, in a new one, attaches them with move_mount.
 //
 // each, when not nil, is called with every source's own descriptor (an O_PATH descriptor in this mount namespace)
@@ -359,7 +365,31 @@ func Run(cfg Config) (int, error) {
 		defer os.RemoveAll(dir) // this directory holds the list and its temporary file, and no mount
 		list = filepath.Join(dir, "list")
 	}
-	if err := WriteList(list, ProtectList(cfg.Sources, protect, seen)); err != nil {
+	// The directories on the way to each read-only source inside a read-write one: the server refuses a rename or
+	// a removal of them, so that a task cannot change what a read-only source's path names (TD-080).
+	var anchorIDs []ProtectID
+	switch {
+	case cfg.Selfcheck:
+	case cfg.TestNoAnchors:
+		fmt.Fprintln(os.Stderr, "vesper-unfs test: started with --test-no-anchors: a task can rename the directories on the way to its read-only sources")
+	default:
+		roots := map[fileID]bool{}
+		for i, s := range cfg.Sources {
+			if !s.ReadOnly && !s.File { // a task can rename directories through a read-write directory source
+				id, err := idOf(int(files[i].Fd()))
+				if err != nil {
+					return 1, fmt.Errorf("source %q: %w", s.Rel, err)
+				}
+				roots[id] = true
+			}
+		}
+		a, ids, err := startAnchors(cfg.Mounts, cfg.Sources, roots)
+		if err != nil {
+			return 1, err
+		}
+		cfg.anchors, anchorIDs = a, ids
+	}
+	if err := WriteList(list, ProtectList(cfg.Sources, protect, seen, anchorIDs)); err != nil {
 		return 1, fmt.Errorf("the server's list %s: %w", list, err)
 	}
 	lw, err := OpenList(list)
@@ -396,7 +426,7 @@ func Run(cfg Config) (int, error) {
 	if !cfg.Selfcheck {
 		w, err := newFileWatch(cfg, files, cmd.Process.Pid)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "vesper-unfs run: replaced files will not be attached again: %v\n", err)
+			fmt.Fprintf(os.Stderr, "vesper-unfs run: replaced files will not be attached again, and the directories on the way to the read-only sources are not looked at again: %v\n", err)
 		} else if w != nil {
 			// The watcher ends the server when it cannot tell it of a file: the next start writes the list anew.
 			w.end = func() {
