@@ -1,0 +1,54 @@
+unfs3-0.10.0.tar.gz: OK
+patches/0001-create-unchecked-keeps-data.patch: OK
+patches/0002-fh-decode-refuses-malformed-handles.patch: OK
+patches/0003-nanosecond-times.patch: OK
+patches/0004-fh-cache-keyed-by-handle-path.patch: OK
+patches/0005-svc-run-private-pollfd.patch: OK
+patches/0006-protect-by-identity.patch: OK
+patches/alpine-implicit.patch: OK
+patches/alpine-lfs64.patch: OK
+build-packages.txt: OK
+build-in-container.sh: OK
+In file included from daemon.c:40:
+/usr/include/sys/poll.h:1:2: warning: #warning redirecting incorrect #include <sys/poll.h> to <poll.h> [-Wcpp]
+    1 | #warning redirecting incorrect #include <sys/poll.h> to <poll.h>
+      |  ^~~~~~~
+daemon.c: In function 'nfs3_program_3':
+daemon.c:434:29: warning: cast between incompatible function types from 'bool_t (*)(void)' {aka 'int (*)(void)'} to 'bool_t (*)(XDR *, ...)' {aka 'int (*)(struct __rpc_xdr *, ...)'} [-Wcast-function-type]
+  434 |             _xdr_argument = (xdrproc_t) xdr_void;
+      |                             ^
+daemon.c:435:27: warning: cast between incompatible function types from 'bool_t (*)(void)' {aka 'int (*)(void)'} to 'bool_t (*)(XDR *, ...)' {aka 'int (*)(struct __rpc_xdr *, ...)'} [-Wcast-function-type]
+  435 |             _xdr_result = (xdrproc_t) xdr_void;
+      |                           ^
+daemon.c: In function 'mountprog_3':
+daemon.c:626:29: warning: cast between incompatible function types from 'bool_t (*)(void)' {aka 'int (*)(void)'} to 'bool_t (*)(XDR *, ...)' {aka 'int (*)(struct __rpc_xdr *, ...)'} [-Wcast-function-type]
+  626 |             _xdr_argument = (xdrproc_t) xdr_void;
+      |                             ^
+daemon.c:627:27: warning: cast between incompatible function types from 'bool_t (*)(void)' {aka 'int (*)(void)'} to 'bool_t (*)(XDR *, ...)' {aka 'int (*)(struct __rpc_xdr *, ...)'} [-Wcast-function-type]
+  627 |             _xdr_result = (xdrproc_t) xdr_void;
+      |                           ^
+daemon.c:639:29: warning: cast between incompatible function types from 'bool_t (*)(void)' {aka 'int (*)(void)'} to 'bool_t (*)(XDR *, ...)' {aka 'int (*)(struct __rpc_xdr *, ...)'} [-Wcast-function-type]
+  639 |             _xdr_argument = (xdrproc_t) xdr_void;
+      |                             ^
+daemon.c:647:27: warning: cast between incompatible function types from 'bool_t (*)(void)' {aka 'int (*)(void)'} to 'bool_t (*)(XDR *, ...)' {aka 'int (*)(struct __rpc_xdr *, ...)'} [-Wcast-function-type]
+  647 |             _xdr_result = (xdrproc_t) xdr_void;
+      |                           ^
+daemon.c:653:29: warning: cast between incompatible function types from 'bool_t (*)(void)' {aka 'int (*)(void)'} to 'bool_t (*)(XDR *, ...)' {aka 'int (*)(struct __rpc_xdr *, ...)'} [-Wcast-function-type]
+  653 |             _xdr_argument = (xdrproc_t) xdr_void;
+      |                             ^
+daemon.c:654:27: warning: cast between incompatible function types from 'bool_t (*)(void)' {aka 'int (*)(void)'} to 'bool_t (*)(XDR *, ...)' {aka 'int (*)(struct __rpc_xdr *, ...)'} [-Wcast-function-type]
+  654 |             _xdr_result = (xdrproc_t) xdr_void;
+      |                           ^
+daemon.c:660:29: warning: cast between incompatible function types from 'bool_t (*)(void)' {aka 'int (*)(void)'} to 'bool_t (*)(XDR *, ...)' {aka 'int (*)(struct __rpc_xdr *, ...)'} [-Wcast-function-type]
+  660 |             _xdr_argument = (xdrproc_t) xdr_void;
+      |                             ^
+fh.c: In function 'fh_decode':
+fh.c:511:27: warning: comparison of integer expressions of different signedness: 'u_int' {aka 'unsigned int'} and 'int' [-Wsign-compare]
+  511 |     if (fh->data.data_len != (FH_MINLEN + obj.len) || obj.len > FH_MAXLEN)
+      |                           ^~
+nfs.c: In function 'nfsproc3_access_3_svc':
+nfs.c:241:12: warning: variable 'mode' set but not used [-Wunused-but-set-variable]
+  241 |     mode_t mode;
+      |            ^~~~
+10500352758fbcb4c66dac43ed80c7a2fdaa6350ffbf4e84afe78acddb2d19fb  /out/unfsd
+build-unfs3: the build matches the shipped binary (10500352758fbcb4c66dac43ed80c7a2fdaa6350ffbf4e84afe78acddb2d19fb)

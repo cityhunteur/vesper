@@ -59,7 +59,9 @@ The Go module pins containerd 2.1.5 and builds static Linux arm64 binaries with 
   file's number to it before the re-attach puts the file at a protected place (TD-078, D-056). `anchor_linux.go` (TD-080, D-058): the directories on the way to a read-only source inside a read-write one,
   and the directory at a read-only directory source's path (`chainOf`, `anchorsOf`, by identity), which the server
   is told of at a start and, all of them again, by the watcher's `checkChains` when one changed, so that a task
-  cannot rename them. `hold_linux.go` (TD-076, D-055):
+  cannot rename them. The directory now at a read-only directory source's path is told as a read-only object too
+  (`leafList`, an `s` line; `tellLeaves` tells it again after every file), so that a task cannot write in a
+  directory that macOS put there (TD-081, D-059). `hold_linux.go` (TD-076, D-055):
   each recorded object gets a read-only mount of its own that outlives the supervisor, in a mount namespace that only
   the holds are in (its root is a small tmpfs), kept by a bind of its namespace file beside the record
   (`ID.prot.d/ns`); `ReleaseHolds` (`vesper-unfs release`) takes off that bind and removes that file and the

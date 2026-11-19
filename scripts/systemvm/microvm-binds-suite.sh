@@ -454,28 +454,40 @@ esac
 # server of the new directories (its log line, and more anchors in the list); the caches are dropped; the task
 # tries again, the new directories too. Part 3: the server is killed and starts again from the paths; the task
 # tries once more. Then a second launch must bind what is at the user's paths.
-A="${F}/a80"; mkdir -p "${A}/hy" "${A}/top/mid/conf" "${A}/ed" "${A}/rootconf"; echo guarded > "${A}/hy/secret"; echo keep > "${A}/top/mid/conf/keep"; echo gone > "${A}/ed/leaf"; echo rk > "${A}/rootconf/keep"
-ANCHOR='try() { if e=$("$@" 2>&1); then echo "DONE: $*"; else echo "refused: $* [$(echo "$e" | tail -1 | sed "s/.*: //")]"; fi; }; w() { i=0; while [ $i -lt 200 ] && [ ! -e "$1" ]; do i=$((i+1)); sleep 0.5; done; }; { try mv /d/hy /d/t1; [ -e /d/HY ] && try mv /d/HY /d/t1b; try mv /d/top /d/t2; try mv /d/top/mid /d/top/m2; try mv /t/mid /t/m3; try mv /d/top/mid/conf /d/top/mid/c2; try mv /d/rootconf /d/rc2; echo x > /d/hy/other && mv /d/hy/other /d/hy/other2 && rm /d/hy/other2 && echo inside-free; mkdir /d/top/sub && mv /d/top/sub /d/top/sub2 && rmdir /d/top/sub2 && echo dirs-inside-free; mkdir /d/free && mv /d/free /d/free2 && rmdir /d/free2 && echo other-dirs-free; echo tried; } > /d/out1 2>&1; sync; w /d/go1; { try mv /d/top/mid /d/top/m9; try mv /d/top/mid/conf /d/top/mid/c9; try mv /d/rootconf /d/rc9; try rmdir /d/ed; mkdir /d/e2; try mv -T /d/e2 /d/ed; rmdir /d/e2; try mv /d/hy /d/t9; echo tried; } > /d/out2 2>&1; sync; w /d/go2; { try mv /d/hy /d/t10; try mv /d/top/mid /d/top/m10; try mv /d/rootconf /d/rc10; echo tried; } > /d/out3 2>&1; sync'
-ABINDS=(--bind="${A}:/d:rw" --bind="${A}/top:/t:rw" --bind="${A}/hy/secret:/b:ro" --bind="${A}/top/mid/conf:/c:ro" --bind="${A}/ed/leaf:/e:ro" --bind="${A}/rootconf:/rc:ro")
-acase=no; [ -e "${A}/HY" ] && acase=yes; awant1=6; [ "${acase}" = yes ] && awant1=7
+# What lies in a directory that macOS put at a read-only directory bind's path is read-only too (TD-081): in part 2
+# the task says which directories its names reach, then tries to write, remove and make things in the two new
+# ones, by name, in the other letter case and through the second bind (the write to the user's file with dd and
+# fsync: a shell's append reports no error, because an NFS client learns of the refusal when the file is closed);
+# a file in a new directory that is only on the way stays free. Where macOS removed such a directory and left none, the task makes one and writes in it until
+# it is refused. The task's whole output is kept beside the report.
+A="${F}/a80"; mkdir -p "${A}/hy" "${A}/top/mid/conf" "${A}/ed" "${A}/rootconf" "${A}/own"; echo ok > "${A}/own/keep"; echo guarded > "${A}/hy/secret"; echo keep > "${A}/top/mid/conf/keep"; echo gone > "${A}/ed/leaf"; echo rk > "${A}/rootconf/keep"
+ANCHOR='try() { if e=$("$@" 2>&1); then echo "DONE: $*"; else echo "refused: $* [$(echo "$e" | tail -1 | sed "s/.*: //")]"; fi; }; w() { i=0; while [ $i -lt 200 ] && [ ! -e "$1" ]; do i=$((i+1)); sleep 0.5; done; }; { try mv /d/hy /d/t1; [ -e /d/HY ] && try mv /d/HY /d/t1b; try mv /d/top /d/t2; try mv /d/top/mid /d/top/m2; try mv /t/mid /t/m3; try mv /d/top/mid/conf /d/top/mid/c2; try mv /d/rootconf /d/rc2; echo x > /d/hy/other && mv /d/hy/other /d/hy/other2 && rm /d/hy/other2 && echo inside-free; mkdir /d/top/sub && mv /d/top/sub /d/top/sub2 && rmdir /d/top/sub2 && echo dirs-inside-free; mkdir /d/free && mv /d/free /d/free2 && rmdir /d/free2 && echo other-dirs-free; echo tried; } > /d/out1 2>&1; sync; w /d/go1; { try mv /d/top/mid /d/top/m9; try mv /d/top/mid/conf /d/top/mid/c9; try mv /d/rootconf /d/rc9; try rmdir /d/ed; mkdir /d/e2; try mv -T /d/e2 /d/ed; rmdir /d/e2; try mv /d/hy /d/t9; echo "sees: $(cat /d/rootconf/keep) $(cat /d/top/mid/conf/keep)"; try sh -c "echo y > /d/top/mid/conf/w1"; try sh -c "echo y > /t/mid/conf/w4"; try dd if=/d/out1 of=/d/rootconf/keep conv=notrunc,fsync; try sh -c ": > /d/rootconf/keep"; try sh -c "echo y > /d/rootconf/w1"; [ -e /d/ROOTCONF ] && try sh -c "echo y > /d/ROOTCONF/w2"; try rm /d/rootconf/keep; try mkdir /d/rootconf/sub; echo x > /d/top/mid/free1 && rm /d/top/mid/free1 && echo chain-free; j=0; while [ $j -lt 40 ] && ! mkdir /d/own 2>/dev/null; do j=$((j+1)); sleep 0.5; done; i=0; while [ $i -lt 20 ] && sh -c "echo y > /d/own/w$i" 2>/dev/null; do i=$((i+1)); sleep 0.5; done; echo "own-writes: $i"; try sh -c "echo y > /d/own/last"; echo tried; } > /d/out2 2>&1; sync; w /d/go2; { try mv /d/hy /d/t10; try mv /d/top/mid /d/top/m10; try mv /d/rootconf /d/rc10; try sh -c "echo z > /d/rootconf/w3"; try sh -c "echo z > /d/top/mid/conf/w3"; try sh -c "echo z > /d/own/w3"; echo "mount points after the restart: /rc/keep: $(cat /rc/keep 2>&1 | tail -1 | sed "s/.*: //"); /c/keep: $(cat /c/keep 2>&1 | tail -1 | sed "s/.*: //")"; echo tried; } > /d/out3 2>&1; sync'
+ABINDS=(--bind="${A}:/d:rw" --bind="${A}/top:/t:rw" --bind="${A}/hy/secret:/b:ro" --bind="${A}/top/mid/conf:/c:ro" --bind="${A}/ed/leaf:/e:ro" --bind="${A}/rootconf:/rc:ro" --bind="${A}/own:/o:ro")
+acase=no; [ -e "${A}/HY" ] && acase=yes; awant1=6; awant2=14; [ "${acase}" = yes ] && { awant1=7; awant2=15; }
 st="$(runb "${ABINDS[@]}" --detach binds-anchor "${ANCHOR}")"
 anch() { ctl microvm unfs-list binds-anchor | sed -n 's/^LIST [^ ]* .* a=\([0-9]*\) .*$/\1/p' | head -1; }
 atold() { ctl microvm unfs-log binds-anchor 80 | grep -a -c 'the server was told of the'; }
+asl() { ctl microvm unfs-list binds-anchor | sed -n 's/^LIST [^ ]* .* s=\([0-9]*\)$/\1/p' | head -1; }
 apid() { ctl microvm unfs-isolation binds-anchor | sed -n 's/^UNFSISO [^ ]* pid=\([0-9]*\).*/\1/p' | head -1; }
 for _ in $(seq 1 60); do grep -q tried "${A}/out1" 2>/dev/null && break; sleep 0.5; done
-aa0="$(anch)"; at0="$(atold)"
+aa0="$(anch)"; at0="$(atold)"; as0="$(asl)"
 # macOS: the leaf of one chain goes, so its directory is empty; a directory of another chain is replaced, with the
 # read-only directory in it; the directory of the read-only bind right under the root is replaced.
 rm -f "${A}/ed/leaf"; mv "${A}/top/mid" "${A}/top/mid.old"; mkdir -p "${A}/top/mid/conf"; echo new > "${A}/top/mid/conf/keep"
-mv "${A}/rootconf" "${A}/rootconf.old"; mkdir "${A}/rootconf"; echo rnew > "${A}/rootconf/keep"
-# The watcher's next walks must tell the server: its log line, and more anchor lines in the list (each telling adds
-# a line for every current anchor, so the count shows that it was told, not of what; the refused tries of part 2 on
-# the new directories show that).
-asec=0; at1="${at0}"; for _ in $(seq 1 30); do at1="$(atold)"; aa1="$(anch)"; [ "${at1}" -gt "${at0}" ] && [ "${aa1:-0}" -ge "$((aa0 + 3))" ] && break; asec=$((asec + 1)); sleep 0.5; done
+mv "${A}/rootconf" "${A}/rootconf.old"; mkdir "${A}/rootconf"; echo rnew > "${A}/rootconf/keep"; rm -r "${A}/own"
+# The watcher's next walks must tell the server: its log line, and more anchor lines and told lines in the list
+# (each telling adds a line for every current anchor and for every directory at a read-only directory bind's path,
+# so the counts show that it was told, not of what; the refused tries of part 2 on the new directories show that,
+# and the task says first which directories its names reach).
+asec=0; at1="${at0}"; for _ in $(seq 1 30); do at1="$(atold)"; aa1="$(anch)"; as1="$(asl)"; [ "${at1}" -gt "${at0}" ] && [ "${aa1:-0}" -ge "$((aa0 + 3))" ] && [ "${as1:-0}" -ge "$((as0 + 2))" ] && break; asec=$((asec + 1)); sleep 0.5; done
 araw="$(ctl microvm -- test-unfs-probe binds-anchor --remove ed | tr '\n' ';')"; adrop="$(ctl microvm test-drop-caches | head -1)"; sleep 1; touch "${A}/go1"
 for _ in $(seq 1 60); do grep -q tried "${A}/out2" 2>/dev/null && break; sleep 0.5; done
-# The file comes back, so that the next server finds its source; then the server is killed.
-echo back > "${A}/ed/leaf"; sleep 3
+# The file comes back, so that the next server finds its source. The watcher attaches it and tells the server of
+# it, and of the directories at the read-only directory binds' paths again, so that they stay the newest objects
+# (TD-081): four told lines (the file and the three directories; a file attached twice with no directory told
+# would add two), and no anchor line, which a change of a chain would add. Then the server is killed.
+as2="$(asl)"; aa3="$(anch)"; echo back > "${A}/ed/leaf"
+as3="${as2}"; for _ in $(seq 1 30); do as3="$(asl)"; [ "${as3:-0}" -ge "$((as2 + 4))" ] && break; sleep 0.5; done; aa4="$(anch)"; sleep 2
 ap0="$(apid)"; ctl microvm test-unfs-kill binds-anchor >/dev/null
 ap1=""; for _ in $(seq 1 40); do case "$(ctl microvm unfs binds-anchor | head -1)" in *"listen=yes"*) ap1="$(apid)"; [ -n "${ap1}" ] && [ "${ap1}" != "${ap0}" ] && break ;; esac; sleep 0.5; done
 aa2="$(anch)"; touch "${A}/go2"
@@ -485,15 +497,25 @@ cnt() { printf '%s\n' "$1" | grep -c "$2"; }; ro='refused:.*\[Read-only file sys
 ao1="$(cat "${A}/out1" 2>/dev/null)"; ao2="$(cat "${A}/out2" 2>/dev/null)"; ao3="$(cat "${A}/out3" 2>/dev/null)"
 ad="$(( $(cnt "${ao1}" 'DONE:') + $(cnt "${ao2}" 'DONE:') + $(cnt "${ao3}" 'DONE:') ))"; ar1="$(cnt "${ao1}" "${ro}")"; ar2="$(cnt "${ao2}" "${ro}")"; ar3="$(cnt "${ao3}" "${ro}")"
 aplace="$(cat "${A}/hy/secret" 2>/dev/null)/$(cat "${A}/top/mid.old/conf/keep" 2>/dev/null)/$(cat "${A}/top/mid/conf/keep" 2>/dev/null)/$(cat "${A}/rootconf/keep" 2>/dev/null)/$([ -d "${A}/ed" ] && echo ed)"
+# What the task left in the directories that macOS put at the read-only directory binds' paths: nothing (TD-081). In
+# the directory it made itself, where macOS had none: what it wrote before the server was told, and nothing after.
+aleft="$(cd "${A}" && find rootconf top/mid/conf -mindepth 1 2>/dev/null | sort | tr '\n' ' ')"; aown="$(printf '%s\n' "${ao2}" | sed -n 's/^own-writes: //p')"
+aownl="$([ -d "${A}/own" ] && [ ! -e "${A}/own/last" ] && [ ! -e "${A}/own/w3" ] && echo "made, $(find "${A}/own" -mindepth 1 | wc -l | tr -d ' ') files")"
+# The task's whole output is kept beside the report: a record keeps 900 characters.
+AOUT="${REPORT%.json}-anchor-out.txt"; printf -- '--- part 1\n%s\n--- part 2\n%s\n--- part 3\n%s\n' "${ao1}" "${ao2}" "${ao3}" > "${AOUT}"
+amp="$(printf '%s\n' "${ao3}" | sed -n 's/^mount points after the restart: //p')"
 # A second launch binds what is at the user's paths: the true file, and the directories that macOS put there.
 a2="$(runb --bind="${A}:/d:rw" --bind="${A}/hy/secret:/b:ro" --bind="${A}/top/mid/conf:/c:ro" --bind="${A}/rootconf:/rc:ro" binds-anchor2 'cat /b; cat /c/keep; cat /rc/keep' | tr '\n' ' ')"
 ctl ctr -- delete binds-anchor2 >/dev/null
-if [ "${st}" = "STARTED binds-anchor" ] && [ "${ad}" = 0 ] && [ "${ar1}" = "${awant1}" ] && [ "${ar2}" = 6 ] && [ "${ar3}" = 3 ] && [ "${aa0:-0}" -ge 6 ] && [ "${at1}" -gt "${at0}" ] && [ "${aa1:-0}" -ge "$((aa0 + 3))" ] \
-  && [ "${adrop}" = DROPPED ] && [ -n "${ap1}" ] && [ "${ap1}" != "${ap0}" ] && [ "${aa2:-0}" -ge 6 ] && [ "${aplace}" = "guarded/keep/new/rnew/ed" ] \
-  && case "${ao1}|${araw}|${a2}" in *inside-free*dirs-inside-free*other-dirs-free*"|REMOVE ed status=ROFS;"*"|"*"OUT guarded"*"OUT new"*"OUT rnew"*) true ;; *) false ;; esac; then
-  record path_to_a_read_only_bind_cannot_be_changed true "volume ignores case: ${acase}; ${ar1} renames of directories on the way to a read-only bind, and of read-only directory binds, refused as read-only (by name, through a second bind); files and directories inside them, and other directories, stayed free; ${aa0} anchors in the server's list; after macOS replaced two of the directories and emptied a third, the supervisor told the server within $((asec / 2)) s (${aa1} anchor lines) and 6 more tries were refused, the new directories, a rename onto the empty one and its rmdir among them; a raw REMOVE of the empty one: ${araw} after a killed server (pid ${ap0} to ${ap1}, ${aa2} anchors) 3 more refused; a second launch read: ${a2}"
+if [ "${st}" = "STARTED binds-anchor" ] && [ "${ad}" = 0 ] && [ "${ar1}" = "${awant1}" ] && [ "${ar2}" = "${awant2}" ] && [ "${ar3}" = 6 ] && [ "${aa0:-0}" -ge 7 ] && [ "${at1}" -gt "${at0}" ] && [ "${aa1:-0}" -ge "$((aa0 + 3))" ] && [ -n "${as0}" ] && [ "${as1:-0}" -ge "$((as0 + 2))" ] \
+  && [ -n "${as2}" ] && [ "${as3:-0}" -ge "$((as2 + 4))" ] && [ -n "${aa3}" ] && [ "${aa4}" = "${aa3}" ] \
+  && [ "${adrop}" = DROPPED ] && [ -n "${ap1}" ] && [ "${ap1}" != "${ap0}" ] && [ "${aa2:-0}" -ge 7 ] && [ "${aplace}" = "guarded/keep/new/rnew/ed" ] \
+  && [ "${aleft}" = "rootconf/keep top/mid/conf/keep " ] && [ -n "${aown}" ] && [ "${aown}" -lt 20 ] && [ -n "${aownl}" ] \
+  && case "${ao1}|${ao2}|${araw}|${a2}" in *inside-free*dirs-inside-free*other-dirs-free*"|"*"sees: rnew new"*chain-free*"|REMOVE ed status=ROFS;"*"|"*"OUT guarded"*"OUT new"*"OUT rnew"*) true ;; *) false ;; esac; then
+  record path_to_a_read_only_bind_cannot_be_changed true "volume ignores case: ${acase}; refused as read-only: ${ar1} renames of directories on the way to a read-only bind and of read-only directory binds (${aa0} anchors); after macOS replaced two of them, emptied a third and removed a fourth, told within $((asec / 2)) s (anchor lines ${aa1}, told lines ${as0} to ${as1}), ${ar2} more: the new directories, the empty one, and 7 or 8 changes in the two directories now at read-only directory binds' paths, which the task read as the new ones (TD-081); in the directory the task made where macOS removed one: ${aown} writes, then refused (macOS: ${aownl}); a file that came back was told with them again (told lines ${as2} to ${as3}); raw REMOVE: ${araw} after a killed server (pid ${ap0} to ${ap1}, ${aa2} anchors) 6 more; mount points then: ${amp}; second launch: ${a2}"
 else
-  record path_to_a_read_only_bind_cannot_be_changed false "${st}; volume ignores case: ${acase}; ${ad} went through: $(printf '%s\n%s\n%s\n' "${ao1}" "${ao2}" "${ao3}" | grep 'DONE:' | tr '\n' ';'); refused as read-only ${ar1}, ${ar2}, ${ar3} (want ${awant1}, 6, 3); anchors ${aa0:-?}, ${aa1:-?}, ${aa2:-?} (want 6 or more, 3 more, 6 or more); told lines ${at0} then ${at1}; raw REMOVE: ${araw:-none} caches: ${adrop:-not dropped}; pid ${ap0} -> ${ap1:-none}; macOS: ${aplace} (want guarded/keep/new/rnew/ed); second launch: ${a2}; out: $(printf '%s | %s | %s' "${ao1}" "${ao2}" "${ao3}" | grep -v 'refused:.*Read-only' | tr '\n' ' ' | cut -c1-300)"
+  echo "the task's output of step path_to_a_read_only_bind_cannot_be_changed: ${AOUT}"
+  record path_to_a_read_only_bind_cannot_be_changed false "${st}; case: ${acase}; ${ad} went through: $(printf '%s\n%s\n%s\n' "${ao1}" "${ao2}" "${ao3}" | grep 'DONE:' | sed 's/^DONE: //' | tr '\n' ';'); refused ${ar1}, ${ar2}, ${ar3} (want ${awant1}, ${awant2}, 6); anchors ${aa0:-?}, ${aa1:-?}, ${aa2:-?} (want 7+, 3 more, 7+); told lines ${as0:-?}, ${as1:-?} (want 2 more), then ${as2:-?}, ${as3:-?} with anchors ${aa3:-?}, ${aa4:-?} (want 4 more, anchors the same); log lines ${at0}, ${at1}; raw: ${araw:-none} caches: ${adrop:-no}; pid ${ap0} -> ${ap1:-none}; macOS: ${aplace} (want guarded/keep/new/rnew/ed); left: '${aleft}' (want 'rootconf/keep top/mid/conf/keep '); own: ${aown:-?} writes (want under 20), ${aownl:-not made, or written after the refusal}; second launch: ${a2}; the whole output: ${AOUT}"
 fi
 
 # --- 7. After the shim is killed, the reaper leaves no server, namespace or record ----------------------------------

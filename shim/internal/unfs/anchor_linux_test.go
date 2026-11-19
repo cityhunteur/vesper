@@ -104,6 +104,14 @@ func TestAnchors(t *testing.T) {
 	if err != nil || len(out) != 2 || len(a.chains[1]) != 2 || len(a.chains[2]) != 2 || len(a.chains[3]) != 0 || len(a.held) != 2 {
 		t.Fatalf("startAnchors = %v, %v", out, err)
 	}
+	// The directory at a read-only directory source's path is told as a read-only object too (TD-081): the leaf of
+	// its chain. A file source has none, nor has a source that no read-write source holds; one directory is told once.
+	if leaves := leafList(srcs, a.chains); len(leaves) != 1 || leaves[0] != (ProtectID{Dev: id("a/b/c").dev, Ino: id("a/b/c").ino}) {
+		t.Errorf("leafList = %v; want a/b/c alone", leaves)
+	}
+	if leaves := leafList([]Source{{Rel: "p", ReadOnly: true}, {Rel: "P", ReadOnly: true}, {Rel: "f", File: true}}, [][]fileID{{{1, 2}, {1, 3}}, {{1, 3}}, {{1, 4}}, {{1, 5}}}); len(leaves) != 1 || leaves[0].Ino != 3 {
+		t.Errorf("leafList of two sources at one directory, a file source and a chain with no source = %v; want one", leaves)
+	}
 	if !a.watched(srcs) || (*anchorState)(nil).watched(srcs) || a.watched([]Source{{Rel: "a"}}) {
 		t.Error("watched: want it for read-only sources under a read-write root only")
 	}
@@ -119,6 +127,8 @@ func TestAnchors(t *testing.T) {
 
 // The watcher tells the server of every current chain when one of them changed, tells it nothing otherwise, keeps
 // what it last told for a chain that cannot be walked, and ends the server when the list cannot be written (TD-080).
+// With the chains it tells the directory now at each read-only directory source's path, as a read-only object, and
+// before the anchors (TD-081).
 func TestCheckChains(t *testing.T) {
 	top, mfd, id := anchorTree(t)
 	srcs := []Source{{Rel: "a"}, {Rel: "a/b/c/f", ReadOnly: true, File: true}, {Rel: "a/conf", ReadOnly: true}}
@@ -162,7 +172,7 @@ func TestCheckChains(t *testing.T) {
 		t.Fatal(err)
 	}
 	w.checkChains()
-	want := fmt.Sprintf("a %d %d\na %d %d\na %d %d\n", id("a/b").dev, id("a/b").ino, id("a/b/c").dev, id("a/b/c").ino, id("a/conf").dev, id("a/conf").ino)
+	want := fmt.Sprintf("s %d %d\na %d %d\na %d %d\na %d %d\n", id("a/conf").dev, id("a/conf").ino, id("a/b").dev, id("a/b").ino, id("a/b/c").dev, id("a/b/c").ino, id("a/conf").dev, id("a/conf").ino)
 	if text() != want || w.grown != len(want) || len(a.held) != 3 || a.chains[1][0] != id("a/b") || ended != 0 {
 		t.Fatalf("after a replaced directory: list %v, want %q; grown %d, held %d, ended %d", lines(), want, w.grown, len(a.held), ended)
 	}
@@ -175,8 +185,17 @@ func TestCheckChains(t *testing.T) {
 	}
 	before := len(text())
 	w.checkChains()
-	if got := text()[before:]; !strings.HasSuffix(got, fmt.Sprintf("a %d %d\n", id("a/conf").dev, id("a/conf").ino)) || strings.Count(got, "\n") != 3 {
-		t.Fatalf("after a replaced source directory: %q", got)
+	newConf := fmt.Sprintf("%d %d\n", id("a/conf").dev, id("a/conf").ino)
+	if got := text()[before:]; !strings.HasPrefix(got, "s "+newConf) || !strings.HasSuffix(got, "a "+newConf) || strings.Count(got, "\n") != 4 || strings.Count(got, "s ") != 1 {
+		t.Fatalf("after a replaced source directory: %q; want the new directory as an object, then the three anchors", got)
+	}
+	// The directory is told again with every file that the watcher tells, so that it stays among the newest.
+	before, grown := len(text()), w.grown
+	if err := w.tellLeaves(); err != nil || text()[before:] != "s "+newConf || w.grown != grown+len("s "+newConf) {
+		t.Fatalf("tellLeaves: %v, told %q, grown by %d", err, text()[before:], w.grown-grown)
+	}
+	if err := (&fileWatch{}).tellLeaves(); err != nil {
+		t.Fatalf("tellLeaves with no anchors: %v", err)
 	}
 	// A chain that cannot be walked keeps what was last told, is logged once, and tells nothing.
 	if err := os.Rename(filepath.Join(top, "a/b"), filepath.Join(top, "a/b.gone")); err != nil {
@@ -203,7 +222,7 @@ func TestCheckChains(t *testing.T) {
 	replaceConf("a/conf.old2")
 	before = len(text())
 	w.checkChains()
-	want = fmt.Sprintf("a %d %d\na %d %d\na %d %d\n", kept[0].dev, kept[0].ino, kept[1].dev, kept[1].ino, id("a/conf").dev, id("a/conf").ino)
+	want = fmt.Sprintf("s %d %d\na %d %d\na %d %d\na %d %d\n", id("a/conf").dev, id("a/conf").ino, kept[0].dev, kept[0].ino, kept[1].dev, kept[1].ino, id("a/conf").dev, id("a/conf").ino)
 	if got := text()[before:]; got != want || !sameChain(a.chains[1], kept) || len(a.held) != 3 || ended != 0 {
 		t.Fatalf("a change beside a chain that cannot be walked: told %q, want %q; chain %v, held %d", got, want, a.chains[1], len(a.held))
 	}
@@ -243,4 +262,26 @@ func TestCheckChains(t *testing.T) {
 		t.Fatalf("a list that cannot be written: the server was ended %d times, want once", ended)
 	}
 	a.close()
+	// The same with no read-only directory source, so that the first line that fails is an anchor's.
+	fileOnly := srcs[:2]
+	a2, _, err := startAnchors([]string{top}, fileOnly, map[fileID]bool{id("a"): true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a2.close()
+	if leaves := leafList(fileOnly, a2.chains); len(leaves) != 0 {
+		t.Fatalf("leaves of a server with no read-only directory source: %v", leaves)
+	}
+	ended = 0
+	w2 := &fileWatch{srcs: fileOnly, mfds: []int{mfd}, anchors: a2, list: ro, said: map[string]bool{}, logf: func(string, ...any) {}, end: func() { ended++ }}
+	if err := os.Rename(filepath.Join(top, "a/b"), filepath.Join(top, "a/b.old5")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(top, "a/b/c"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	w2.checkChains()
+	if ended != 1 {
+		t.Fatalf("an anchor line that cannot be written: the server was ended %d times, want once", ended)
+	}
 }

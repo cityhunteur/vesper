@@ -59,7 +59,9 @@ const (
 	// maxPins is how many replaced read-only files stay held (fileWatch.pins).
 	maxPins = 256
 	// maxListGrowth is how many bytes the watcher adds to the server's list before it has the list written anew
-	// by a start of the server: about 50,000 lines, more than a week of attaches at the rate one source allows.
+	// by a start of the server: about 50,000 lines. An attach adds a line for the file and one for each directory
+	// at a read-only directory source's path (tellLeaves), so that is more than a week of attaches at the rate one
+	// source allows with no such directory, and less by that factor with some (under a day with ten).
 	maxListGrowth = 1 << 20
 )
 
@@ -429,7 +431,8 @@ func (w *fileWatch) checkOne(i int, s Source, mounted map[string]bool) {
 		trees = append(trees, t)
 	}
 	// A list that has grown past maxListGrowth is written anew: the server is ended and starts again, with the
-	// list of a start. Each attach adds a line, and the list is on the System VM's shared /run.
+	// list of a start. Each attach adds a line, and one more for each directory that tellLeaves tells again, and
+	// the list is on the System VM's shared /run.
 	tell := replaced && hasPlace(w.srcs, s)
 	if tell && w.grown > maxListGrowth {
 		w.logf("the server's list has grown by %d bytes; the server is ended and starts again with a list written anew", w.grown)
@@ -472,6 +475,10 @@ func (w *fileWatch) checkOne(i int, s Source, mounted map[string]bool) {
 					return fmt.Errorf("%w: %w", errNotTold, err)
 				}
 				w.grown += len(seenLine(line))
+				// The directories now at the read-only directory sources' paths stay the newest (TD-081).
+				if err := w.tellLeaves(); err != nil {
+					return fmt.Errorf("%w: %w", errNotTold, err)
+				}
 			}
 			var err error
 			if beneath, err = swapFile(i, tree); err != nil {

@@ -130,7 +130,7 @@ M3 proves the sandbox with an escape test. Until M3 passes, the blast-radius sta
 
 ### What is bound read-only, as built
 
-This section states the design after D-053, D-055, D-056, D-057 and D-058. `docs/SECURITY.md` gives the limits and the tests.
+This section states the design after D-053, D-055, D-056, D-057, D-058 and D-059. `docs/SECURITY.md` gives the limits and the tests.
 
 **The rule.** The server refuses (`ROFS`) a request that changes an object when the object, or a directory above
 it with symbolic links resolved, is in the server's set of protected objects. The set is known by device and inode
@@ -142,9 +142,11 @@ rename onto it and a removal of it, by any name. For a read-only directory sourc
 path is an anchor too: a directory source is attached once, so a directory that macOS puts there later is otherwise
 an ordinary one. The supervisor finds the anchors by identity, tells the server (`a` lines), holds them, and tells
 the server of all of them again when macOS replaced one (D-058). So the object at the path is the one the user, on
-macOS, put there, but in the windows that macOS opens and `docs/SECURITY.md` names. What lies in a directory that
-macOS puts at a read-only directory source's path while the server runs is not part of this: the task can write it
-through the read-write source until the server starts again (TD-081).
+macOS, put there, but in the windows that macOS opens and `docs/SECURITY.md` names. A directory that macOS puts at a
+read-only directory source's path while the server runs is not attached: the source keeps the old directory until
+the server starts again, and the guest's mount of it is stale from then until the next launch (TD-083). The supervisor tells the server of the new directory as a read-only object (an `s` line, told
+again after every other object), so the task cannot write in it through the read-write source that holds its path;
+the nest is placed again at the next start of the server (D-059).
 
 **The layers, in order.**
 
@@ -160,7 +162,7 @@ through the read-write source until the server starts again (TD-081).
 |---|---|---|---|---|---|
 | Record `unfs/ID.prot` | supervisor | numbers of what each read-only source was at a start, and of files that replaced one | first 150 of starts, newest 50 replaced | one launch of the task | launcher, at stop and at a new launch |
 | Holds `unfs/ID.prot.d/ns` | supervisor | a read-only mount of each recorded object, in a mount namespace of the holds' own | as the record | one launch | launcher, through `vesper-unfs release`; the supervisor drops a hold that the record no longer names |
-| List `unfs/ID.prot.list` | supervisor | `p` places, `i` recorded numbers, `s` numbers of objects at or about to be at a place, `a` anchors | grows by one line an attach, and by a line for each current anchor when macOS replaced one; the server is started again after 1 MiB | one run of the server | launcher; written anew at each start |
+| List `unfs/ID.prot.list` | supervisor | `p` places, `i` recorded numbers, `s` numbers of objects at or about to be at a place and of the directories now at read-only directory sources' paths, `a` anchors | grows by one line an attach and one more for each such directory, and by a line for each current anchor and each such directory when macOS replaced one; the server is started again after 1 MiB | one run of the server | launcher; written anew at each start |
 | Set in the server | server | the `i` numbers and the objects told (`s`) or found at a place, newest by when each was last told or found | 256 and 768 | one run of the server | ends with the server |
 | Anchors | supervisor, then server | the directories on the way to each read-only source inside a read-write one, and the directory at a read-only directory source's path | 1,024 current ones (a start with more fails); the server remembers 2,048, newest by when last told, and is told of all the current ones whenever one changed | one run of the server; found again at each start | end with the supervisor and the server |
 | Pins | supervisor | descriptors of replaced read-only files | newest 256 | one run of the server | end with the supervisor |

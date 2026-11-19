@@ -1,0 +1,40 @@
+--- part 1
+refused: mv /d/hy /d/t1 [Read-only file system]
+refused: mv /d/HY /d/t1b [Read-only file system]
+refused: mv /d/top /d/t2 [Read-only file system]
+refused: mv /d/top/mid /d/top/m2 [Read-only file system]
+refused: mv /t/mid /t/m3 [Read-only file system]
+refused: mv /d/top/mid/conf /d/top/mid/c2 [Read-only file system]
+refused: mv /d/rootconf /d/rc2 [Read-only file system]
+inside-free
+dirs-inside-free
+other-dirs-free
+tried
+--- part 2
+refused: mv /d/top/mid /d/top/m9 [Read-only file system]
+refused: mv /d/top/mid/conf /d/top/mid/c9 [Read-only file system]
+refused: mv /d/rootconf /d/rc9 [Read-only file system]
+refused: rmdir /d/ed [Read-only file system]
+refused: mv -T /d/e2 /d/ed [Read-only file system]
+refused: mv /d/hy /d/t9 [Read-only file system]
+sees: rnew new
+refused: sh -c echo y > /d/top/mid/conf/w1 [Read-only file system]
+refused: sh -c echo y > /t/mid/conf/w4 [Read-only file system]
+DONE: sh -c echo y >> /d/rootconf/keep
+refused: sh -c echo y > /d/rootconf/w1 [Read-only file system]
+refused: sh -c echo y > /d/ROOTCONF/w2 [Read-only file system]
+refused: rm /d/rootconf/keep [Read-only file system]
+refused: mkdir /d/rootconf/sub [Read-only file system]
+chain-free
+own-writes: 2
+refused: sh -c echo y > /d/own/last [Read-only file system]
+tried
+--- part 3
+refused: mv /d/hy /d/t10 [Read-only file system]
+refused: mv /d/top/mid /d/top/m10 [Read-only file system]
+refused: mv /d/rootconf /d/rc10 [Read-only file system]
+refused: sh -c echo z > /d/rootconf/w3 [Read-only file system]
+refused: sh -c echo z > /d/top/mid/conf/w3 [Read-only file system]
+refused: sh -c echo z > /d/own/w3 [Read-only file system]
+mount points after the restart: /rc/keep: Stale file handle; /c/keep: Stale file handle
+tried

@@ -237,8 +237,10 @@ Backend A runs stock Firecracker on Linux, so its parity depends on the System V
   be written through that bind for about a second, which a hostile task can use to keep the access (TD-074); what
   is bound read-only is read-only through every bind of the task, also where a read-write bind reaches it by another
   name, a hard link or a symbolic link (D-053), with limits that `docs/SECURITY.md` states: a file in a read-only directory that has a hard link made on
-  macOS outside it, and what lies in a directory that macOS puts at a read-only directory bind's path while the
-  task runs, which the task can write until its share server starts again (TD-081); a task cannot rename or remove
+  macOS outside it; a directory that macOS puts at a read-only directory bind's path while the task runs is
+  read-only to the task, with what lies in it, from about a second after it came there, but for a file that the
+  task hard-linked to another name before; the task's own mount point of that bind does not follow, and shows
+  the old directory or an error until the next launch (D-059, TD-083); a task cannot rename or remove
   a directory, in its own read-write bind, that has a read-only bind somewhere beneath it, so that it cannot change
   what the read-only bind's path names, but in the windows that macOS itself opens: the second after macOS changed
   it, and while macOS has nothing, a file or a symbolic link at a name on the way (D-058; Docker on Linux allows
