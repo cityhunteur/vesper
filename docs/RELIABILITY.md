@@ -163,6 +163,32 @@ the guest was still sending made the relay take SIGPIPE and the whole VM went wi
 SIGPIPE and sets `SO_NOSIGPIPE` on bridge clients; `make ports-suite` keeps a step that restarts the proxy under
 a live event stream and checks the launcher pid survives.
 
+## A directory bind when macOS replaces its directory (TD-083, D-062)
+
+A directory bind of a task in a microVM stays with the directory that was bound, as a bind mount does on Docker on
+Linux. It does not follow the path. Measured on 2026-11-21 (`run/TD-083/notes.txt`), for a read-only and a
+read-write bind, inside another bind or not:
+
+| What the user does on macOS while the task runs | What the task sees at the mount point |
+|---|---|
+| Moves the directory aside and makes a new one (`mv conf conf.old; mkdir conf`) | The first directory, as before; what it writes lands in the first directory (`conf.old`) |
+| Removes the directory and makes a new one (`rm -r conf; mkdir conf`, a checkout or a build that cleans it) | Errors: "No such file or directory" on a read, "Stale file handle" on a write |
+| Either of the two, and then the task's share server starts again (it ended, or its supervisor ended it) | "Stale file handle" on every read and write, until the task is launched again |
+
+The next launch binds the directory that is then at the path. The first row is what Docker on Linux does. In the
+second, a task there gets errors too, by the rules of Linux for a removed directory (not measured here; the error
+texts can differ). The third row is Vesper's own: the
+server opens its sources by path at each start (ADR 0009), so after a start it serves the new directory, and the
+guest's mount still holds the first one. A server starts again rarely: after a crash, or when its supervisor ends it
+on purpose (its list grew past 1 MiB, or it could not tell the server of a replaced file or directory).
+
+A bound file is different: a file that macOS replaces is bound again within seconds (D-052), because editors and
+`git checkout` replace files all the time. What a task may do to a directory that macOS put at a read-only bind's
+path is in [SECURITY.md](SECURITY.md) (D-058, D-059).
+
+Evidence: binds suite step `directory_bind_stays_with_its_directory` (the first row, both modes); the other rows
+are measurements, not suite steps.
+
 ## Share watcher (GH #150)
 
 The launcher's share watcher sends the paths of host edits on watched read-write shares to the guest's sink

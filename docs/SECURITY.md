@@ -414,8 +414,8 @@ from its own microVM's server. Docker containers do not use the shim and still g
     - The task's own mount point of the bind does not follow (measured, `run/TD-081/notes.txt` 5). While the
       server runs it shows the old directory when the user moved that aside, and "No such file or directory" when
       the user removed it. After a start of the server, which serves the new directory, it gives "Stale file
-      handle". The next launch binds the new directory. Docker on Linux keeps the old directory at the mount point
-      (TD-083).
+      handle". The next launch binds the new directory. Docker on Linux keeps the old directory at the mount point.
+      This stays so (D-062; the table is in [RELIABILITY.md](RELIABILITY.md)).
     - The cost: a task cannot write in the directory that is at a read-only directory bind's path, also one that it
       made there itself while macOS had none (it could not rename or remove that one since the rule above, and the
       next start bound it read-only). Docker on Linux lets a task write through the outer bind at all times;

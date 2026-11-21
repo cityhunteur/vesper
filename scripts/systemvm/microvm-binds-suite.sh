@@ -10,6 +10,7 @@
 # writes land when one inode is reachable read-only and read-write (TD-072); single-file binds (GH #208); a bound
 # file that macOS replaces is bound again within seconds (D-052); what is bound read-only stays read-only under
 # another letter case, after a move into a second read-write bind and after a server restart (TD-073);
+# a directory bind stays with the directory that was bound when macOS puts another at its path (TD-083, D-062);
 # after the shim is killed the reaper leaves no server,
 # namespace or record. Needs `make systemvm-up-shares`.
 # Report: run/systemvm/microvm-binds-report.json.
@@ -517,6 +518,28 @@ else
   echo "the task's output of step path_to_a_read_only_bind_cannot_be_changed: ${AOUT}"
   record path_to_a_read_only_bind_cannot_be_changed false "${st}; case: ${acase}; ${ad} went through: $(printf '%s\n%s\n%s\n' "${ao1}" "${ao2}" "${ao3}" | grep 'DONE:' | sed 's/^DONE: //' | tr '\n' ';'); refused ${ar1}, ${ar2}, ${ar3} (want ${awant1}, ${awant2}, 6); anchors ${aa0:-?}, ${aa1:-?}, ${aa2:-?} (want 7+, 3 more, 7+); told lines ${as0:-?}, ${as1:-?} (want 2 more), then ${as2:-?}, ${as3:-?} with anchors ${aa3:-?}, ${aa4:-?} (want 4 more, anchors the same); log lines ${at0}, ${at1}; raw: ${araw:-none} caches: ${adrop:-no}; pid ${ap0} -> ${ap1:-none}; macOS: ${aplace} (want guarded/keep/new/rnew/ed); left: '${aleft}' (want 'rootconf/keep top/mid/conf/keep '); own: ${aown:-?} writes (want under 20), ${aownl:-not made, or written after the refusal}; second launch: ${a2}; the whole output: ${AOUT}"
 fi
+
+# --- 6p. A directory bind stays with the directory that was bound (TD-083, D-062). macOS moves the directory of a
+# read-only bind and of a read-write bind aside and makes new ones at the paths. The task goes on reading the first
+# directories at its mount points, and what it writes lands in the first directory, as on Docker on Linux. (What
+# the task sees after a removal, and after the share server started again, is a stated limit and is not pinned.)
+T="${F}/stay"; mkdir -p "${T}/ro" "${T}/rw" "${T}/log"; echo old > "${T}/ro/keep"; echo old > "${T}/rw/keep"
+tlines() { wc -l < "${T}/log/t" 2>/dev/null | tr -d ' '; }
+st="$(runb --bind="${T}/ro:/r:ro" --bind="${T}/rw:/w:rw" --bind="${T}/log:/log:rw" --detach binds-stay 'i=0; while [ $i -lt 80 ]; do echo "$i r=$(cat /r/keep 2>&1) w=$(cat /w/keep 2>&1) $( (echo $i > /w/n$i) 2>&1 && echo wrote)" >> /log/t; i=$((i+1)); sleep 0.5; done' | tail -1)"
+for _ in $(seq 1 60); do [ "$(tlines)" -ge 4 ] 2>/dev/null && break; sleep 0.5; done
+mv "${T}/ro" "${T}/ro.old"; mkdir "${T}/ro"; echo new > "${T}/ro/keep"
+mv "${T}/rw" "${T}/rw.old"; mkdir "${T}/rw"; echo new > "${T}/rw/keep"
+tat="$(tlines)"
+for _ in $(seq 1 40); do [ "$(tlines)" -ge $((tat + 8)) ] 2>/dev/null && break; sleep 0.5; done
+tlast="$(tail -1 "${T}/log/t" 2>/dev/null)"; tn="${tlast%% *}"
+for _ in $(seq 1 10); do [ -e "${T}/rw.old/n${tn}" ] && break; sleep 0.5; done
+twhere="first:$([ -e "${T}/rw.old/n${tn}" ] && echo yes || echo no) new:$(ls "${T}/rw" 2>/dev/null | tr '\n' ' ')"
+gone binds-stay
+case "${st}|${tlast}|${twhere}" in
+  "STARTED binds-stay|"*" r=old w=old wrote|first:yes new:keep ")
+    record directory_bind_stays_with_its_directory true "macOS replaced both directories at the task's line ${tat:-?}; 4 s later the task read the first directories (${tlast}) and its write n${tn} was in the first read-write directory, none in the new one" ;;
+  *) record directory_bind_stays_with_its_directory false "${st}; replaced at line ${tat:-none}; last line: ${tlast:-none}; write n${tn:-?}: ${twhere}" ;;
+esac
 
 # --- 7. After the shim is killed, the reaper leaves no server, namespace or record ----------------------------------
 st="$(runb "${B[@]}" --detach binds-shim 'sleep 600')"
