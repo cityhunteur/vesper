@@ -539,7 +539,7 @@ or parity documents.
   or the System VM restarts (TD-057).
 - A shim microVM reaches at most 40 directories below a bind's root and no path longer than 1,024 bytes (TD-067). A
   directory bind stays with the directory that was bound when macOS replaces it, as on Docker on Linux, and gives
-  "Stale file handle" after its share server started again (TD-083).
+  "Stale file handle" after its share server started again (D-062, [RELIABILITY.md](docs/RELIABILITY.md)).
 - On the model backend error bodies carry four fields that Firecracker does not send (CE-0006); on the System VM
   backend every path in an API request names a file in the microVM's jail (CE-0009).
 

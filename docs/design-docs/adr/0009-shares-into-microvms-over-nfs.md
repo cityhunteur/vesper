@@ -144,7 +144,7 @@ an ordinary one. The supervisor finds the anchors by identity, tells the server 
 the server of all of them again when macOS replaced one (D-058). So the object at the path is the one the user, on
 macOS, put there, but in the windows that macOS opens and `docs/SECURITY.md` names. A directory that macOS puts at a
 read-only directory source's path while the server runs is not attached: the source keeps the old directory until
-the server starts again, and the guest's mount of it is stale from then until the next launch (TD-083). The supervisor tells the server of the new directory as a read-only object (an `s` line, told
+the server starts again, and the guest's mount of it is stale from then until the next launch (a stated limit: D-062). The supervisor tells the server of the new directory as a read-only object (an `s` line, told
 again after every other object), so the task cannot write in it through the read-write source that holds its path;
 the nest is placed again at the next start of the server (D-059).
 
