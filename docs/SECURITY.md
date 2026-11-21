@@ -351,13 +351,28 @@ from its own microVM's server. Docker containers do not use the shim and still g
       be an ordinary directory that a task could rename aside.
     - The supervisor finds the chains by identity, not by the text of the paths: it opens each directory on the
       way to the read-only source, and the chain starts below the first that is the root of a read-write directory
-      source. It tells the server through the list (`a DEV INO`), holds each anchor, and walks the chains again
+      source. The walk of a chain is one walk: each directory is opened by its name in the one before it, with no
+      symbolic link and no other mount on the way (TD-082). It tells the server through the list (`a DEV INO`),
+      holds each anchor, and walks the chains again
       every second. When macOS replaced a directory of a chain, the server is told of every chain as it is now:
       the new directories, and the others again, so that the current anchors are always the newest that the server
       remembers. The server remembers 2,048 and the supervisor refuses a start with more than 1,024, so no current
       anchor is among those the server drops. A start fails when a chain cannot be looked at; while the server
       runs, a chain that cannot be looked at keeps what was last told for it, and the supervisor's log says so
-      once.
+      once. A request whose name is `.` or `..` names a directory too, and is refused when that directory is an
+      anchor (unfs suite step `dot_names_do_not_move_an_anchor`).
+    - Binds that spell one directory in two ways (another letter case, another form of an accented letter, on a
+      macOS volume that takes both) are given one spelling at a start, before the start goes by the text of the
+      paths: the directories on the way to each bind are found by identity, and the part of a path that leads to
+      another directory bind's directory is written as that bind writes it, the outermost bind first (TD-082,
+      D-061). A new spelling is kept only when both spellings are shown to name one directory, with both held.
+      Before that, a read-only bind spelled in another way than the read-write bind that holds it had no read-only
+      mount on its name in that bind (the server refused a change there all the same, by the object's number); a
+      directory bound both ways was read-only in both; and a read-write bind inside a read-only directory bind
+      spelled in another way was served read-only after its server started again. Not covered: a file that is
+      bound both ways under two spellings of its own name stays read-only in both binds. A directory that is
+      bound both ways is no read-only holder of the read-write binds inside it: they are compared with the record
+      of read-only objects at each start, as binds that lie in no read-only bind are.
     - So every replacement of what the path names is made on macOS. The attaches of the limits below count the
       user's own saves.
     - The cost: a task cannot rename or remove a directory, in its own read-write bind, that has a read-only bind
@@ -374,9 +389,12 @@ from its own microVM's server. Docker containers do not use the shim and still g
       and not through a link). In
       such a window the task can put something of its own at the name. For a file bind that is one attach for each
       such event on macOS; for a directory bind it is what the next start of the server and the next launch bind.
-      A watcher that could not start (logged once at the start) leaves these windows open for the whole run. So
-      does a change that would give the server more than 1,024 current anchors: the supervisor tells nothing,
-      keeps what it last told, and logs that once.
+      A server whose watcher cannot start does not run: the start fails (TD-082, D-061), so these windows are
+      never open for a whole run. A change that would give the server more than 1,024 current anchors leaves them
+      open until the anchors are within the bound again: the supervisor tells nothing,
+      keeps what it last told, and logs that once. The supervisor holds a descriptor of each anchor; a start
+      raises its limit of open files to what the server can need, or fails (measured with 1,008 anchors: 1,149
+      open, limit 4,095).
   - **The directory that macOS puts at a read-only directory bind's path is read-only, with what lies in it**
     (TD-081, D-059). A directory source is attached once. When the user replaces the directory on macOS while the
     task runs (`mv conf conf.old; mkdir conf`, or a checkout that removes the directory and makes it again), the
@@ -413,8 +431,7 @@ from its own microVM's server. Docker containers do not use the shim and still g
         (binds suite: 1 or 2 writes). It can also put a symbolic link there: the supervisor does not walk through a
         link, so it tells the server nothing, logs once, and what the user then puts "in" that name with a command
         that follows links lands where the link points, which the task writes.
-      - A watcher that could not start, and a change that would give the server more than 1,024 anchors, of which
-        the supervisor tells nothing.
+      - A change that would give the server more than 1,024 anchors, of which the supervisor tells nothing.
     - What a task did in such a window stays, and can outlast the window:
       - What it wrote there stays, and the next launch binds it.
       - A hard link that it made, to a name outside the directory, of a file in the directory. The server knows
@@ -566,7 +583,9 @@ from its own microVM's server. Docker containers do not use the shim and still g
   to 28 s, in which that task's server answers nothing), `test-unfs-selfcheck`, `test-unfs-kill`,
   `test-unfs-giveup`, `test-unfs-pause` and `test-unfs-resume`, `test-unfs-list-break` and
   `test-unfs-list-retell` (they add lines to a server's list: the first makes the server refuse every change, the
-  second fills its memory with made-up objects, at most 4,096 on each side). Each of these acts on one task's
+  second fills its memory with made-up objects, at most 4,096 on each side), and `test-unfs-list-anchors` (it fills
+  the server's memory of anchors with made-up ones, at most 4,096 a call, so that the anchor told longest ago is
+  forgotten and can be renamed until it is told again; TD-082). Each of these acts on one task's
   server. `test-unfs-no-anchors-next ID` is one of them too: it starts the next
   server of task ID without anchors (TD-080), and so without the rule for a directory that macOS puts at a read-only
   directory bind's path (TD-081), for that task's whole life; the server's log says so at each start,
@@ -612,7 +631,8 @@ from its own microVM's server. Docker containers do not use the shim and still g
   microVM's ceiling as one entry. The log is `/var/log/vesper-unfs-ID.log` (bounded, 256 KiB). `cleanup` stops the
   supervisor, kills what is left in the cgroup and removes it; `DIRTY` names `unfs` or `unfs-cgroup` otherwise.
 - **Inspection:** `vesper-microvm unfs ID` (state, listening, memory), `unfs-isolation ID` (ids, capabilities,
-  `no_new_privs`, seccomp, namespaces and every mount in the server's root), `unfs-log ID`.
+  `no_new_privs`, seccomp, namespaces and every mount in the server's root, and for the supervisor its limit of open
+  files and how many it has open), `unfs-log ID`.
 - **A guest could end its own server by the timing of its connections** (TD-075, fixed by unfs3 patch 0005,
   D-054): unfs3 0.10.0 read freed memory when two descriptors were ready in one round of its main loop and one of
   them was a new connection. Only that guest's own shares were at stake, and the server came back, within its 30

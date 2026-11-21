@@ -16,6 +16,8 @@ const (
 	procCreate   = 8
 	procMkdir    = 9
 	procRemove   = 12
+	procRmdir    = 13
+	procRename   = 14
 	procReaddir  = 16
 	maxFH        = 64
 )
@@ -232,6 +234,32 @@ func (n NFS) Remove(dir []byte, name string) (Status, error) {
 	e.opaque(dir)
 	e.str(name)
 	d, err := n.Call(3, procRemove, e.b)
+	if err != nil {
+		return 0, err
+	}
+	return Status(d.u32()), d.err
+}
+
+// Rmdir removes a directory from dir.
+func (n NFS) Rmdir(dir []byte, name string) (Status, error) {
+	var e enc
+	e.opaque(dir)
+	e.str(name)
+	d, err := n.Call(3, procRmdir, e.b)
+	if err != nil {
+		return 0, err
+	}
+	return Status(d.u32()), d.err
+}
+
+// Rename renames name in dir to toName in toDir.
+func (n NFS) Rename(dir []byte, name string, toDir []byte, toName string) (Status, error) {
+	var e enc
+	e.opaque(dir)
+	e.str(name)
+	e.opaque(toDir)
+	e.str(toName)
+	d, err := n.Call(3, procRename, e.b)
 	if err != nil {
 		return 0, err
 	}

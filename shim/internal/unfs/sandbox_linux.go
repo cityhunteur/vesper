@@ -271,6 +271,13 @@ func Run(cfg Config) (int, error) {
 	if cfg.TestPauseNests > 0 && !cfg.Selfcheck {
 		fmt.Fprintf(os.Stderr, "vesper-unfs run: started with --test-pause-nests: the server listens %s late\n", cfg.TestPauseNests)
 	}
+	// Sources that name one directory under two spellings get one (spell_linux.go), before the start goes by the
+	// text of their paths.
+	var respelled []string
+	cfg.Sources, respelled = respell(cfg.Mounts, cfg.Sources)
+	for _, note := range respelled {
+		fmt.Fprintf(os.Stderr, "vesper-unfs run: %s\n", note)
+	}
 	// A start after the first: a task may have renamed directories since, so that a read-write source's path now
 	// lies under an object an earlier start knew as read-only. Such a source is served read-only (council SEC-3).
 	prior, err := ReadProtectIDs(cfg.ProtectFile)
@@ -299,6 +306,14 @@ func Run(cfg Config) (int, error) {
 		}
 	}
 	recorded := func(i int) bool { return cfg.Sources[i].ReadOnly && !cfg.unrecorded[i] }
+	// The supervisor holds a tree for each source and each nest, a descriptor of each anchor, and for a moment of
+	// each new one too. A limit of open files that this server could pass is raised now, before the first of them
+	// is opened, or the start fails: a watcher that ran out of descriptors could not look at the chains (TD-082).
+	if !cfg.Selfcheck {
+		if err := ensureFiles(filesNeeded(len(cfg.Sources)+len(Nests(cfg.Sources))+1, len(cfg.Sources))); err != nil {
+			return 1, err
+		}
+	}
 	// Each read-only source's object gets a mount that outlives this process, so that it keeps its inode number
 	// when a task moves it away and this server starts again (TD-076). A hold that fails is reported and the
 	// start goes on: the object is then known only while the System VM does not forget it.
@@ -441,19 +456,11 @@ func Run(cfg Config) (int, error) {
 	}
 	// File sources are watched for a replacement on the host (D-052). The escape checks have no server to watch.
 	if !cfg.Selfcheck {
-		w, err := newFileWatch(cfg, files, cmd.Process.Pid)
+		stop, err := watchServer(cfg, files, cmd, newFileWatch)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "vesper-unfs run: replaced files will not be attached again, and the directories on the way to the read-only sources are not looked at again: %v\n", err)
-		} else if w != nil {
-			// The watcher ends the server when it cannot tell it of a file: the next start writes the list anew.
-			w.end = func() {
-				lastWords.forList()
-				_ = cmd.Process.Kill()
-			}
-			stop := make(chan struct{})
-			defer close(stop)
-			go w.run(stop)
+			return 1, err
 		}
+		defer stop()
 	}
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
@@ -484,6 +491,77 @@ func Run(cfg Config) (int, error) {
 			return 0, nil
 		}
 	}
+}
+
+// filesNeeded is how many descriptors the supervisor of one server can have open at once: the trees it hands to the
+// sandbox (one for each source and each nest, and the list), a held anchor for each of maxAnchors, as many again
+// while the watcher holds the new set beside the old, the longest walk of one chain, the pins, the attached file of
+// each source, and 64 for everything else (measured with 64 sources and 1,008 anchors: 1,149 open, of which 141
+// are neither anchors nor a walk; run/TD-082b/).
+func filesNeeded(trees, sources int) uint64 {
+	return uint64(trees + 3*maxAnchors + 1 + maxPins + sources + 64)
+}
+
+// ensureFiles makes this process's limit of open files at least need, and says so when it cannot. The System VM
+// gives a hard limit of 4,096, and Go makes the soft limit one less at its start (the "was" of the log line), which
+// a server with few nests does not pass. When the limit is raised here, the sandbox and the server inherit the
+// raised one; otherwise Go gives them the soft limit that this process was started with.
+func ensureFiles(need uint64) error {
+	var lim unix.Rlimit
+	if err := unix.Getrlimit(unix.RLIMIT_NOFILE, &lim); err != nil {
+		return fmt.Errorf("the limit of open files: %w", err)
+	}
+	if lim.Cur >= need {
+		return nil
+	}
+	want := unix.Rlimit{Cur: need, Max: lim.Max}
+	if want.Max < need {
+		want.Max = need
+	}
+	if err := unix.Setrlimit(unix.RLIMIT_NOFILE, &want); err != nil {
+		return fmt.Errorf("this server can need %d open files; the limit is %d and cannot be raised: %w", need, lim.Cur, err)
+	}
+	fmt.Fprintf(os.Stderr, "vesper-unfs run: the limit of open files was %d and is now %d, which this server can need\n", lim.Cur, need)
+	return nil
+}
+
+// watchServer starts the watcher of the server that cmd runs, when the server needs one (newFileWatch), and returns
+// the function that stops it. A server that needs a watcher and cannot have one is ended, and that is the start's
+// error (TD-082, D-061): without the watcher a replaced file is not attached again, and, which is worse, the
+// server is not told of a directory that macOS puts on the way to a read-only source or at a read-only directory
+// source's path, so a task could rename it or write in it for as long as the server runs. A start that fails is
+// seen (the launch fails, or the server starts again and the fault is in its log); a server without its watcher
+// was only a line in a log.
+func watchServer(cfg Config, files []*os.File, cmd *exec.Cmd, newWatch func(Config, []*os.File, int) (*fileWatch, error)) (stop func(), err error) {
+	w, err := newWatch(cfg, files, cmd.Process.Pid)
+	if err != nil {
+		_ = cmd.Process.Kill()
+		// A sandbox that had ended by itself is the likelier cause (its process and namespace are then gone), and
+		// its own end is said too, so that this error does not hide it.
+		own := ""
+		switch werr := cmd.Wait(); e := werr.(type) {
+		case nil:
+			own = "; the sandbox had ended by itself with code 0"
+		case *exec.ExitError:
+			if ws, ok := e.Sys().(syscall.WaitStatus); !ok || !ws.Signaled() || ws.Signal() != syscall.SIGKILL {
+				own = fmt.Sprintf("; the sandbox had ended by itself: %v", werr)
+			}
+		default:
+			own = fmt.Sprintf("; the sandbox's end could not be read: %v", werr)
+		}
+		return nil, fmt.Errorf("the watcher of the sources cannot start, and the server is not left to run without it: %w%s", err, own)
+	}
+	if w == nil {
+		return func() {}, nil
+	}
+	// The watcher ends the server when it cannot tell it of a file: the next start writes the list anew.
+	w.end = func() {
+		lastWords.forList()
+		_ = cmd.Process.Kill()
+	}
+	ch := make(chan struct{})
+	go w.run(ch)
+	return func() { close(ch) }, nil
 }
 
 // checkRootDir accepts an existing directory owned by root and not a symbolic link, or makes one (mode 0700).
