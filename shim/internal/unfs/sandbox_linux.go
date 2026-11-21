@@ -265,6 +265,12 @@ func Run(cfg Config) (int, error) {
 	// attaching a replaced file ends threads on purpose (inMountNamespace). So this goroutine keeps its thread, and
 	// no other goroutine can run on it or end it (council REL-1).
 	runtime.LockOSThread()
+	// Test hook (vesper-microvm's test-unfs-slow-next). The line begins as this supervisor's warnings do, on
+	// purpose: the suite shows with it that such a line, in the log before the server listens, does not fail the
+	// launch (TD-082).
+	if cfg.TestPauseNests > 0 && !cfg.Selfcheck {
+		fmt.Fprintf(os.Stderr, "vesper-unfs run: started with --test-pause-nests: the server listens %s late\n", cfg.TestPauseNests)
+	}
 	// A start after the first: a task may have renamed directories since, so that a read-write source's path now
 	// lies under an object an earlier start knew as read-only. Such a source is served read-only (council SEC-3).
 	prior, err := ReadProtectIDs(cfg.ProtectFile)

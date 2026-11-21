@@ -134,6 +134,15 @@ shows it): whether it ended `as told` or `by itself`, its exit code, how long it
 it wrote; `segmentation fault` there is unfsd's own report (TD-075, D-054). A supervisor that is killed writes no
 line. A mount that fails in the guest names the state of the server's two ports.
 
+A share server's supervisor that ends with an error (a bad argument, a refused source, a step of its sandbox that
+fails) writes a line that begins `vesper-unfs fatal:` to its log. While the launch waits for the server to listen
+it looks for that prefix only. It takes such a line as final and fails at once, with the last three lines of the
+server's log in its error; it does not wait for the respawn a second later, though a few of these errors can pass
+(macOS replaced a source at that moment). The supervisor's other lines begin `vesper-unfs run:` (one test hook's
+line begins `vesper-unfs test:`): warnings of a start that goes on (a source served read-only, a hold not made, a
+watcher not started) and the watcher's lines while the server runs. They do not fail a launch (TD-082). A server that neither listens nor writes a fatal line
+fails the launch after 10 s.
+
 A task that dies of memory exits 137 in three cases that look the same to its client: the workload's cgroup in the
 guest killed its first process; the System VM killed Firecracker at the microVM's ceiling; someone sent `SIGKILL`.
 No OOM event is published. For the second case `vesper-microvm cleanup` writes a `VESPER-MICROVM-OOM` line to the

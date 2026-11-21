@@ -570,7 +570,9 @@ from its own microVM's server. Docker containers do not use the shim and still g
   server. `test-unfs-no-anchors-next ID` is one of them too: it starts the next
   server of task ID without anchors (TD-080), and so without the rule for a directory that macOS puts at a read-only
   directory bind's path (TD-081), for that task's whole life; the server's log says so at each start,
-  and `test-unfs-no-anchors-next none` takes the order back. Three act more widely: `test-unfs-stall-next` stops
+  and `test-unfs-no-anchors-next none` takes the order back. `test-unfs-slow-next ID` makes the next server of task
+  ID listen 1.5 s late, at each of its starts, and say so in its log (TD-082); it takes nothing away from the
+  sandbox or the rules, and `test-unfs-slow-next none` takes the order back. Three act more widely: `test-unfs-stall-next` stops
   the next server that starts, of any task, `test-share-rate` sets the rate limit of the share network for later launches, and `test-drop-caches` makes the
   whole System VM forget the files it does not hold. They all need root in the System VM.
 - **Evidence:** `make systemvm-sharenet-suite` (12 steps, `run/GH-160/m2-sharenet-suite.json`).

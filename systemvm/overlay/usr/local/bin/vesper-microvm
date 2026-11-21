@@ -451,6 +451,9 @@ unfs_start() { # ID SPEC SQUASH -> a reason on failure (lock held, namespace up)
   : > "/var/log/vesper-unfs-$us_id.log"   # a retried id must not read the last launch's error as its own
   # Test hook (test-unfs-no-anchors-next): this server starts without anchors, at every respawn too.
   us_na=""; [ "$(cat "$UNFS/no-anchors-next" 2>/dev/null)" = "$us_id" ] && { rm -f "$UNFS/no-anchors-next"; us_na="--test-no-anchors"; }
+  # Test hook (test-unfs-slow-next): this server listens 1.5 s late, and its log says so in a line that begins as a
+  # warning does. The wait below must not take that line for a failed start (TD-082).
+  us_slow=""; [ "$(cat "$UNFS/slow-next" 2>/dev/null)" = "$us_id" ] && { rm -f "$UNFS/slow-next"; us_slow="--test-pause-nests 1500ms"; }
   # The record (unfs.ParseArgs, version 2): what the server starts from on every respawn, what the selfcheck starts
   # from, and what the fanout maps host paths with. Parsed in Go only (council SEC-6).
   { echo "#vesper-unfs-args 2"; echo "squash $us_sq"; printf '%s\n' "$us_spec"; } > "$UNFS/$us_id.args"
@@ -465,7 +468,7 @@ unfs_start() { # ID SPEC SQUASH -> a reason on failure (lock held, namespace up)
     --stderr-logger "/usr/local/bin/vesper-boundlog /var/log/vesper-unfs-$us_id.log 262144" \
     "$(command -v nsenter)" -- "--net=$NETNS/$us_id" /usr/bin/vesper-unfs run --unfsd "$UNFSD" --args "$UNFS/$us_id.args" \
     --root "$UNFS_ROOT" --cgroup "$UNFS_CG/$us_id" --guest-sock "$JAIL/firecracker/$us_id/root/v.sock" \
-    --protect "$UNFS/$us_id.prot" $us_na < /dev/null > /dev/null 2> "$UNFS/$us_id.err" \
+    --protect "$UNFS/$us_id.prot" $us_na $us_slow < /dev/null > /dev/null 2> "$UNFS/$us_id.err" \
     || { echo "supervise-daemon: $(head -n 2 "$UNFS/$us_id.err" | tr '\n' ' ')"; return 1; }
   rm -f "$UNFS/$us_id.err"
   for _ in $(seq 1 40); do
@@ -479,8 +482,11 @@ unfs_start() { # ID SPEC SQUASH -> a reason on failure (lock held, namespace up)
       fi
       return 0
     fi
-    # A refused source or a sandbox step that failed will fail the same way on every respawn.
-    grep -q "^vesper-unfs \(run\|init\):" "/var/log/vesper-unfs-$us_id.log" 2>/dev/null && break
+    # A run of the supervisor that ends with an error (a refused source, a sandbox step that failed) says so in a
+    # line that begins so (unfs.FatalPrefix; a Go test compares the two). That line is taken as final: most such
+    # errors come again at every respawn, and the launch does not wait to see. The supervisor's other lines,
+    # which begin "vesper-unfs run:", are warnings of a start that goes on, and do not end the wait (TD-082).
+    grep -q "^vesper-unfs fatal:" "/var/log/vesper-unfs-$us_id.log" 2>/dev/null && break
     sleep 0.25
   done
   echo "server not listening: log: $(tail -n 3 "/var/log/vesper-unfs-$us_id.log" 2>/dev/null | tr '\n' ' ') netstat: $(nsenter --net="$NETNS/$us_id" netstat -ltn 2>&1 | tr '\n' ';') pidfile: $(cat "$UNFS/$us_id.pid" 2>/dev/null) cgroup: $(cat "$UNFS_CG/$us_id/cgroup.procs" 2>/dev/null | tr '\n' ' ') ps: $(ps -o pid,ppid,args 2>/dev/null | grep -e "vesper-unfs" -e unfsd -e nsenter | grep -v grep | tr '\n' ';')"
@@ -942,6 +948,14 @@ case "$cmd" in
       none) rm -f "$UNFS/no-anchors-next"; echo "NOANCHORS none" ;;
       *) valid_id "${1:-}" || { echo "ERR usage: test-unfs-no-anchors-next ID|none"; exit 2; }
          mkdir -p "$UNFS" && printf '%s\n' "$1" > "$UNFS/no-anchors-next" && echo "NOANCHORS next $1" ;;
+    esac ;;
+  # The next server of task ID listens 1.5 s late and logs a line that begins as a warning does: a suite's test
+  # that such a line does not fail a launch (TD-082). "none" takes the order back.
+  test-unfs-slow-next)
+    case "${1:-}" in
+      none) rm -f "$UNFS/slow-next"; echo "SLOW none" ;;
+      *) valid_id "${1:-}" || { echo "ERR usage: test-unfs-slow-next ID|none"; exit 2; }
+         mkdir -p "$UNFS" && printf '%s\n' "$1" > "$UNFS/slow-next" && echo "SLOW next $1" ;;
     esac ;;
   # Stops and continues the server process itself (not its supervisor), as a task can do to its own server with a
   # request it does not finish: a test of what the server must know without having looked (TD-078).

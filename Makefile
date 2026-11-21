@@ -95,7 +95,7 @@ shim-build:
 	bash scripts/systemvm/build-shim.sh
 
 shim-test:
-	cd shim && go vet ./... && go test ./...
+	cd shim && go vet ./... && go test -count=1 ./...
 
 systemvm-exec-suite:
 	$(CARGO) run --bin systemvmctl -- control exec-suite

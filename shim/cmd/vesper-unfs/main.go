@@ -67,7 +67,7 @@ func main() {
 		os.Exit(run(os.Args[2:]))
 	case "init":
 		err := unfs.Init() // returns only on failure: on success it is unfsd
-		fmt.Fprintf(os.Stderr, "vesper-unfs init: %v\n", err)
+		fmt.Fprintf(os.Stderr, "%s init: %v\n", unfs.FatalPrefix, err)
 		os.Exit(1)
 	case "probe":
 		os.Exit(probe(os.Args[2:]))
@@ -165,12 +165,12 @@ func run(args []string) int {
 	fs.StringVar(&guestSock, "guest-sock", "", "the microVM's vsock socket: the guest is told there when a file source was replaced (D-052)")
 	fs.SetOutput(io.Discard)
 	if err := fs.Parse(args); err != nil {
-		fmt.Fprintf(os.Stderr, "vesper-unfs run: %v\n", err) // one line, which vesper-microvm looks for
+		fmt.Fprintf(os.Stderr, "%s run: %v\n", unfs.FatalPrefix, err) // one line, which vesper-microvm looks for
 		return 2
 	}
 	if argsFile != "" {
 		if len(a.Mounts) != 0 || a.Squash {
-			fmt.Fprintln(os.Stderr, "vesper-unfs run: --args excludes --mount, --src and --squash")
+			fmt.Fprintf(os.Stderr, "%s run: --args excludes --mount, --src and --squash\n", unfs.FatalPrefix)
 			return 2
 		}
 		raw, err := os.ReadFile(argsFile)
@@ -178,12 +178,12 @@ func run(args []string) int {
 			a, err = unfs.ParseArgs(string(raw))
 		}
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "vesper-unfs run: --args: %v\n", err)
+			fmt.Fprintf(os.Stderr, "%s run: --args: %v\n", unfs.FatalPrefix, err)
 			return 2
 		}
 	}
 	if err := a.Check(); err != nil || fs.NArg() != 0 || !strings.HasPrefix(cfg.Unfsd, "/usr/") || !strings.HasPrefix(cfg.SelfcheckBin, "/usr/") {
-		fmt.Fprintf(os.Stderr, "vesper-unfs run: need --args or --mount with --src, and --unfsd under /usr (%v)\n", err)
+		fmt.Fprintf(os.Stderr, "%s run: need --args or --mount with --src, and --unfsd under /usr (%v)\n", unfs.FatalPrefix, err)
 		return 2
 	}
 	cfg.Mounts, cfg.Sources, cfg.Squash = a.Mounts, a.Sources, a.Squash
@@ -193,7 +193,7 @@ func run(args []string) int {
 	started := time.Now()
 	code, err := unfs.Run(cfg)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "vesper-unfs run: %v\n", err)
+		fmt.Fprintf(os.Stderr, "%s run: %v\n", unfs.FatalPrefix, err)
 	}
 	// Why and when a server ended, where it outlives the server's own log (which goes with the microVM): the System
 	// VM's log, under the name vesper-microvm's unfs-log looks for. unfsd reports a segmentation fault on its
