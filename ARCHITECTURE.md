@@ -303,7 +303,8 @@ is blank, load routes and version from the swagger, load the surface stub matrix
 validates the matrix against `documented_route_semantics`), choose the socket path (without `--socket`:
 `vesperd.sock` in an owner-only runtime directory), then `proxy::claim_socket` (create the socket's parent
 directory with mode 0700, refuse one writable by group or others, take `<socket>.lock`, refuse a live socket and a
-path that is not a socket, remove a stale one), bind, then chmod the socket to `0o600`. With `--backend systemvm`
+path that is not a socket, remove a stale one), then bind the socket under another name in the same directory,
+chmod it to `0o600` and rename it into place, so that it is owner-only from the moment it has its name. With `--backend systemvm`
 the start branches after the entitlement check and loads no lock, route list or matrix (next section); the
 `vesperd stage` and `vesperd store` subcommands do none of this.
 

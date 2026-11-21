@@ -176,7 +176,7 @@ Subdirectories: none.
 ## Side Effects
 
 - `vesperd.rs:run` creates the parent directory of `--socket` (mode 0700), takes `<socket>.lock`, removes a stale
-  socket (never a live one or a non-socket), binds a `tokio::net::UnixListener`, chmods the socket to `0o600`,
+  socket (never a live one or a non-socket), binds a `tokio::net::UnixListener` under another name in the same directory (`.v<pid>`), chmods that socket to `0o600` and renames it into place (so the socket is owner-only as soon as it has its name; a path too long for the other name is bound in place and then changed),
   prints `vesperd listening on <socket>`, and serves the router until shutdown.
 - `vesperd.rs:run` with `--backend systemvm` starts one microVM in the System VM (`LAUNCHAPI`), holds its lease,
   opens one bridge connection per client connection (`FCAPI`), and prints `vesperd listening on <socket> (backend

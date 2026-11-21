@@ -200,13 +200,35 @@ fn default_socket() -> Result<PathBuf, String> {
     Ok(base.join("vesperd.sock"))
 }
 
-/// Binds `socket` (after `claim_socket`) and makes it owner-only.
+/// Binds `socket` (after `claim_socket`) owner-only. The socket is bound under a name of its own in the same
+/// directory, made owner-only there and then renamed to `socket`, so that no client finds at `socket` a socket
+/// whose mode is still the one the umask gave it. (Bound in place and then changed, the socket had that mode for a
+/// moment: a test that read the mode as soon as a connect worked saw 0755 once in CI.) A path so long that the
+/// other name does not fit a socket address is bound in place and changed, as before.
 fn bind_owner_only(socket: &Path) -> Result<tokio::net::UnixListener, String> {
     use std::os::unix::fs::PermissionsExt;
+    let owner_only = |path: &Path| {
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+            .map_err(|err| format!("set socket permissions {}: {err}", path.display()))
+    };
+    let parent = socket.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    let staged = parent.join(format!(".v{}", std::process::id()));
+    // The name is this process's own, in a directory that only the owner writes: what is there is a leftover.
+    let _ = std::fs::remove_file(&staged);
+    if let Ok(listener) = tokio::net::UnixListener::bind(&staged) {
+        let placed = owner_only(&staged).and_then(|()| {
+            std::fs::rename(&staged, socket)
+                .map_err(|err| format!("place unix socket {}: {err}", socket.display()))
+        });
+        if let Err(err) = placed {
+            let _ = std::fs::remove_file(&staged);
+            return Err(err);
+        }
+        return Ok(listener);
+    }
     let listener = tokio::net::UnixListener::bind(socket)
         .map_err(|err| format!("bind unix socket {}: {err}", socket.display()))?;
-    std::fs::set_permissions(socket, std::fs::Permissions::from_mode(0o600))
-        .map_err(|err| format!("set socket permissions {}: {err}", socket.display()))?;
+    owner_only(socket)?;
     Ok(listener)
 }
 
