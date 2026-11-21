@@ -186,7 +186,7 @@ Still unknown: whether BuildKit builds stay mapped, and so whether `/session` an
 
 ## Implementation and migration impact
 
-The ExecPlan is `docs/exec-plans/active/2026-11-14-GH194-no-container-is-systemvm-root.md`. In order:
+The ExecPlan is `docs/exec-plans/completed/2026-11-14-GH194-no-container-is-systemvm-root.md`. In order:
 
 1. The plugin, with unit tests for the body rules and path handling, and the route inventory.
 2. Overlay: remapping, the plugin service and its ordering, the disk mode record, `HEALTH` fields.

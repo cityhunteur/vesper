@@ -39,7 +39,7 @@ volumes that must be pulled or imported once.
   replay runs as container root with `CAP_FOWNER` only. `make binds-suite` 25 of 25 with no waits; plain runc and a
   root replay fail the same checks (`run/GH-194/td062/control.txt`). Confine 14 of 14 and 23 other suites pass on
   that overlay (`run/GH-194/td062/battery/summary.txt`; the snapshot suite on a rerun in its own boot config)
-- [ ] M6 `legacy import-volume`; a short upstream-suite run in its unmapped boot on its own disk; deviations
+- [x] M6 (2026-11-16) `legacy import-volume`; a short upstream-suite run in its unmapped boot on its own disk; deviations
   recorded in the conformance notes; council review of the code
   - [x] (2026-11-16) `vesper-data legacy status|import-volume NAME`; the confinement suite's 15th step imports a
     planted volume and checks the owners in the store and in a container (`run/GH-194/m6/`). The real old store
@@ -185,7 +185,21 @@ it, and that a chunked create reaches the plugin without a body.
 
 ## Outcomes & Retrospective
 
-Not yet.
+Written on 2026-11-21 from this plan's own record; the plan had stayed in `active/` after its last part was done on
+2026-11-16.
+
+- Outcome: a container started with any flags that Docker accepts is not root on the System VM. dockerd remaps
+  container users, a default-deny authorisation plugin refuses `--privileged`, `--pid=host`, `--network=host`,
+  `--ipc=host` and `--userns=host`, and Vesper's state is owner-only. `make systemvm-confine-suite` passes 15 of 15,
+  and the 21 probes of its third step are refused again through `docker exec --privileged`. GH #194 is closed and
+  TD-061 is resolved.
+- Cost: the Docker deviations in `design-v0.md` Phase 4 (D-035), among them refused BuildKit builds, and old images
+  and volumes that must be pulled or imported once.
+- Not covered: the gaps of `vesper-data legacy import-volume` (TD-064). The vesperd suite's one unexplained failure
+  of 2026-11-14 (Surprises & Discoveries) did not get a cause.
+- What to keep: the council review of the import code found four defects that the suite had not, one of them high
+  (a container could swap a path while its owners were shifted). Runtime-sensitive code gets a review before merge
+  (D-004).
 
 ## Context and Orientation
 
