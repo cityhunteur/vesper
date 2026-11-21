@@ -5,16 +5,12 @@ use serde::{Deserialize, Serialize};
 use std::fs::OpenOptions;
 use std::sync::Arc;
 
-use super::{AppState, RateLimiterConfig, RouteMatch, error_response, reject_runtime_hotplug};
-
-pub(super) const PMEM_ID_PATH_MISMATCH_MESSAGE: &str =
-    "The id from the path does not match the id from the body!";
-pub(super) const PMEM_ROOT_BLOCK_CONFLICT_MESSAGE: &str = "Pmem config error: Attempt to add pmem as a root device while the root device defined as a block device";
-pub(super) const PMEM_ROOT_ALREADY_EXISTS_MESSAGE: &str =
-    "Pmem config error: A root pmem device already exist";
-pub(super) const PMEM_UPDATE_NOT_FOUND_MESSAGE: &str = "Pmem config error: Unable to patch the pmem device: Failed perform action on device: Device not found Please verify the request arguments.";
-pub(super) const PMEM_BACKING_FILE_ZERO_SIZE_MESSAGE: &str =
-    "Start microvm error: Cannot create pmem device: Error backing file size is 0";
+use super::{
+    AppState, PMEM_BACKING_FILE_ZERO_SIZE_MESSAGE, PMEM_ID_PATH_MISMATCH_MESSAGE,
+    PMEM_ROOT_ALREADY_EXISTS_MESSAGE, PMEM_ROOT_BLOCK_CONFLICT_MESSAGE,
+    PMEM_UPDATE_NOT_FOUND_MESSAGE, RateLimiterConfig, RouteMatch, error_response,
+    reject_runtime_hotplug,
+};
 
 /// Body of `PUT /pmem/{id}` (Firecracker `PmemConfig`).
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]

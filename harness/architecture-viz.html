@@ -2274,7 +2274,7 @@ mark { border-radius:2px; background:var(--mark-bg); color:var(--ink); padding:0
         "`api` holds the state machine, the dispatch table and the deterministic errors.",
         "It may reference the leaf modules, `platform` and `api_matrix`.",
         "It must not import a runtime adapter such as `proxy` or `systemvm`.",
-        "`src/api.rs` is over its 2,500-line warning budget. See TD-001."
+        "`src/api.rs` is under its 2,500-line warning budget since TD-001; eight families are in `src/api/`."
       ]
     },
     api_matrix: {

@@ -33,7 +33,7 @@ Public symbols by file:
   the private children `systemvm/boot_check.rs` (the boot smoke check, TD-043), `systemvm/bridge.rs`, `systemvm/data_disk.rs`, `systemvm/image_lock.rs` and
   `systemvm/packages.rs` and re-exports them, so every symbol below is reachable as
   `vesper::systemvm::*`.
-- `api.rs:ErrorEnvelope` `{ fault_message, code, path, method,
+- `api/errors.rs:ErrorEnvelope` (re-exported as `api::ErrorEnvelope`) `{ fault_message, code, path, method,
   baseline_firecracker_revision }`; `api.rs:OperationStatus`
   `{ status_code: StatusCode, code, message }`; `api.rs:RouteSpec`
   `{ method, path }`.
@@ -229,7 +229,7 @@ Public symbols by file:
 - `api.rs:AppState::new_with_matrix` rejects empty routes, blank revision,
   blank version, and any matrix that fails `validate_surface_stub_matrix`.
   Routes are deduplicated by `operation_key` (`"{METHOD} {clean_path}"`).
-- `api.rs:error_response` always emits `ErrorEnvelope` with `path` set to the
+- `api/errors.rs:error_response` always emits `ErrorEnvelope` with `path` set to the
   route template (for example `/drives/{drive_id}`) and
   `baseline_firecracker_revision` set to `AppState.firecracker_revision`.
   Unmatched method or path returns `404 NotFound "route not found"` with the
@@ -241,7 +241,7 @@ Public symbols by file:
   `ACTION_NOT_SUPPORTED_POSTBOOT_MESSAGE`; `PostBoot` semantics while
   `PreBoot` returns `ACTION_NOT_SUPPORTED_PREBOOT_MESSAGE`; both as
   `400 InvalidState`. The guard does not distinguish `Running` from `Paused`.
-- `api.rs:handle_patch_vm`: `Paused` while `Running` and `Resumed` while
+- `api/vm_config.rs:handle_patch_vm`: `Paused` while `Running` and `Resumed` while
   `Paused` succeed; `PreBoot` returns `ACTION_NOT_SUPPORTED_PREBOOT_MESSAGE`;
   other combinations return `state_invalid_message`
   (`"operation PATCH /vm is not allowed while instance state is {state}"`).
@@ -258,9 +258,9 @@ Public symbols by file:
   reaches it.
 - `api.rs:handle_put_vsock` rejects `guest_cid < 3` with
   `INVALID_VSOCK_GUEST_CID_MESSAGE`.
-- `api.rs:full_vm_config_response` (`GET /vm/config`) always reports
+- `api/vm_config.rs:full_vm_config_response` (`GET /vm/config`) always reports
   `cpu-config` as absent, even after a successful `PUT /cpu-config`.
-- `api.rs` MMDS: data store and patch payloads are capped at
+- `api/mmds.rs` (MMDS): data store and patch payloads are capped at
   `MMDS_DATA_STORE_LIMIT_BYTES` (51200) with `413 PayloadTooLarge`;
   `PATCH /mmds` applies RFC 7396 merge semantics (`apply_json_merge_patch`);
   `PUT /mmds/config` requires a non-empty interface list, every id present in
@@ -278,7 +278,7 @@ Public symbols by file:
   MiB multiple of block, total >= slot and a multiple of slot); `PATCH
   /hotplug/memory` requires `requested_size_mib <= total` and a multiple of
   `block_size_mib`.
-- `api.rs` balloon: `amount_mib` must not exceed `machine_config.mem_size_mib`;
+- `api/balloon.rs` (balloon): `amount_mib` must not exceed `machine_config.mem_size_mib`;
   statistics cannot be toggled between enabled and disabled after
   activation; hinting routes require `free_page_hinting`.
 - `api_matrix.rs:route_uses_matrix_backed_placeholder` always returns

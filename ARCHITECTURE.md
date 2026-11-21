@@ -124,9 +124,9 @@ the System VM's initramfs.
 
 ## Domain boundaries and dependency rules
 
-**Verified** for single-path `crate::x` and `vesper::x` references in the 39 files enumerated in the `RULES`
+**Verified** for single-path `crate::x` and `vesper::x` references in the 43 files enumerated in the `RULES`
 allowlist of [scripts/harness/check_structure.py](scripts/harness/check_structure.py), which CI checks: the 14
-top-level `src/*.rs` modules, the five route-family modules under `src/api/`, `src/baseline/upstream.rs`,
+top-level `src/*.rs` modules, the nine modules under `src/api/` (eight route families and the error surface), `src/baseline/upstream.rs`,
 `src/control/launchapi.rs`, `src/control/stage.rs`, `src/control/suites.rs` and its ten children,
 `src/proxy/relay.rs` and the five `src/systemvm/` children. That is every library file but `src/api/tests.rs`. The
 allowlist is a fixed list, not a glob: a new module is unchecked, and has no line budget, until a `RULES` row is
@@ -184,7 +184,9 @@ runtime or control-plane modules.
 **Verified.**
 
 - `src/`: the `vesper` library crate. Public modules and their contracts are listed in [src/README.md](src/README.md).
-  `src/api.rs` holds `AppState`, the dispatch table and most handlers; `src/api/` holds the extracted route families.
+  `src/api.rs` holds `AppState`, the dispatch table and the handlers of the families not moved yet (drives, network
+  interfaces, memory hotplug, snapshots, the serial, entropy and vsock devices); `src/api/` holds the extracted
+  route families and the error surface ([src/api/README.md](src/api/README.md)).
 - `src/bin/`: the six binaries ([src/bin/README.md](src/bin/README.md)).
 - `tests/`: integration suites: `api_contract.rs`, `contract_golden.rs`, `api_replay.rs` (the behaviour replay on
   the model backend), `upstream_compare.rs` (starts `baselinectl`), `vesperd_socket.rs` and `vesperd_systemvm.rs`
@@ -503,13 +505,13 @@ or parity documents.
 |---|---|---|---|---|---|
 | 1a | `vesperd` is the only binary that serves the control-plane API. The other listeners on macOS are `vesper-proxy`'s socket, which only relays bytes (plus the vsock `CONNECT` preface); the launcher's owner-only bridge socket; and, with `--publish-ports`, loopback TCP listeners for containers' published ports, for which the proxy also reads the Docker API | Verified | Review only; no mechanical check (TD-008) | `grep -n 'UnixListener::bind' src/bin/vesperd.rs src/proxy.rs` (expect 1 hit in `vesperd.rs`, shared by both backends, and 6 in `proxy.rs`, of which the five inside the `#[cfg(test)]` module are test fixtures) | [src/bin/vesperd.rs](src/bin/vesperd.rs), [src/proxy.rs](src/proxy.rs) |
 | 1b | Raw Firecracker and containerd sockets stay private to the System VM | Partly verified | The guest listens on vsock 1024 (agent), 2375 (Docker relay), 2400 (port relay) and 2401 (share notification sink), none of which is a raw Firecracker or containerd socket; the agent on 1024 does reach jailed Firecracker API sockets through `FCPARITY api` and `FCAPI`, and starts `vesperd` microVMs with `LAUNCHAPI` (ADR 0007 slice 3), so 1024 is a control surface that the bridge allow-list (1024, 2375, 2400, 2401; TD-027) keeps reachable; each guest listener turns away a peer that is not the Mac, and no process in the System VM can connect to its own vsock listeners; `make docker-smoke` enumerates host sockets and expects a refused `CONNECT`, and `make docker-conformance` proves the allow-list | `make systemvm-up && make docker-up && make docker-smoke` (steps `no_raw_host_sockets`, `raw_guest_port_denied`); `make docker-conformance` (steps `bridge_allow_list_enforced`, `no_containerd_relay`) | [design-v0](docs/specs/design-v0.md#security-model), [docs/SECURITY.md](docs/SECURITY.md) |
-| 2 | Intra-crate single-path references in the 39 `RULES` files follow the layer table | Verified | `RULES` in `check_structure.py`, run by `harness-structure.yml` on `src/**` changes; a new module needs a `RULES` row (TD-018) | `python3 scripts/harness/check_structure.py --root .` | [scripts/harness/check_structure.py](scripts/harness/check_structure.py) |
+| 2 | Intra-crate single-path references in the 43 `RULES` files follow the layer table | Verified | `RULES` in `check_structure.py`, run by `harness-structure.yml` on `src/**` changes; a new module needs a `RULES` row (TD-018) | `python3 scripts/harness/check_structure.py --root .` | [scripts/harness/check_structure.py](scripts/harness/check_structure.py) |
 | 3 | On the model backend, every error response produced by `handle_all` is an `ErrorEnvelope` with the pinned baseline revision; on the System VM backend (ADR 0007 slice 4; `tests/vesperd_systemvm.rs`, `make systemvm-vesperd-suite` step `firecracker_error_byte_for_byte`) HTTP errors are Firecracker's own, `vesperd`'s own failures are refused or closed connections, and its startup and command-line errors are deterministic. Exceptions before extraction: a body over axum's default 2 MiB limit gets a plain `413`, a body-read failure gets a plain `400`, and a poisoned `RwLock` panics the task (TD-019) | Verified | `AppState::new_with_matrix` rejects a blank revision; `tests/api_contract.rs` asserts envelopes; `rust-tests.yml` runs `cargo test` for every `src/**` change | `make contract-test` | [tests/api_contract.rs](tests/api_contract.rs) |
 | 4 | The golden route list equals `contractgen`'s serialisation of the pinned swagger | Verified | `contractgen --mode check` and `tests/contract_golden.rs` in `contract-tests.yml`; `tests/**` changes are covered by `rust-tests.yml` | `make contract-check` | [tests/contract_golden.rs](tests/contract_golden.rs) |
 | 5 | Generated surface stub and behavior matrices are complete and fresh | Verified | `baselinectl --mode validate-api-matrix` and `validate-api-behavior-matrix` in `rust-tests.yml`; the `validates_repo_generated_*` unit tests also fail under `cargo test` | `make surface-matrix-check`, `make behavior-matrix-check` | [docs/process/baseline-governance.md](docs/process/baseline-governance.md) |
 | 6 | Compat exceptions carry required fields, and none is open past expiry | Verified | On change only: `compatexctl` in `compat-exceptions.yml` when the registry or its code changes; no scheduled run (TD-016) | `cargo run --bin compatexctl -- --registry docs/specs/compat-exceptions.yaml` | [docs/process/compat-exceptions.md](docs/process/compat-exceptions.md) |
 | 7 | Inputs are parsed into typed structs once where they enter the crate (request bodies, registries, lock file, proxy targets, launch config); internal code never re-probes raw JSON or YAML. Exceptions: the MMDS data store is schemaless JSON by contract and is handled as `serde_json::Value`; `spec` probes the swagger as untyped `serde_yaml::Value` at load ([src/README.md](src/README.md)) | Verified | Per module: unit tests in each module; no cross-cutting lint (TD-008) | `cargo test --lib` | [src/README.md](src/README.md), [core beliefs](docs/design-docs/core-beliefs.md) |
-| 8 | Library modules stay under their error budgets; warn budgets are advisory and three are currently exceeded (`src/api.rs`, TD-001; `src/api_behavior_matrix.rs`, TD-023; `src/baseline/upstream.rs`, 889 lines) | Verified | Budgets in `check_structure.py` for the files with a `RULES` row (`src/api.rs` warn 2500 / error 3200; others warn 800 / error 1200; `src/api/tests.rs` unbudgeted, TD-015) and `janitor_scan.py` (top-level `src/*.rs` only, no 800 tier: `api.rs` over 2500 warns, any other file over 1200 errors) | `python3 scripts/harness/check_structure.py --root .` | [Hotspots](#hotspots-and-decomposition-queue) |
+| 8 | Library modules stay under their error budgets; warn budgets are advisory and two are currently exceeded (`src/api_behavior_matrix.rs`, TD-023; `src/baseline/upstream.rs`, 889 lines) | Verified | Budgets in `check_structure.py` for the files with a `RULES` row (`src/api.rs` warn 2500 / error 3200; others warn 800 / error 1200; `src/api/tests.rs` unbudgeted, TD-015) and `janitor_scan.py` (top-level `src/*.rs` only, no 800 tier: `api.rs` over 2500 warns, any other file over 1200 errors) | `python3 scripts/harness/check_structure.py --root .` | [Hotspots](#hotspots-and-decomposition-queue) |
 | 9 | When started with `--entitlements-file`, `vesperd` refuses to start unless the plist contains `com.apple.security.virtualization`; without the flag no check runs | Verified | `platform::validate_entitlements_file` (substring match on the key, value not checked); `make validate-entitlements` lints the plists in `rust-tests.yml` | `make validate-entitlements` | [src/platform.rs](src/platform.rs) |
 | 10 | Having a dispatch arm in `src/api.rs`, or answering `501`, does not count as parity with upstream Firecracker at the pinned revision | Proposed | Review against the parity matrix; `scripts/harness/janitor_scan.py` only warns on routes with no arm | n/a | [docs/specs/firecracker-feature-parity.md](docs/specs/firecracker-feature-parity.md), TD-003 |
 | 11 | No container is root on the System VM: dockerd remaps users, and the authorisation plugin refuses the Docker API requests that would undo it | Verified | `vesper-authz` (allow-list), `userns-remap`, `vesper-containers prepare`; `go test ./internal/authz` in `shim-tests.yml` | `make systemvm-confine-suite` | [ADR 0010](docs/design-docs/adr/0010-no-container-is-systemvm-root.md), [docs/SECURITY.md](docs/SECURITY.md) |
@@ -555,13 +557,15 @@ or parity documents.
 
 ## Hotspots and decomposition queue
 
-**Verified.** As counted by `check_structure.py` on 2026-11-21, `src/api.rs` is 3073 lines: above the 2500-line
-warning budget and 127 lines under the 3200-line error budget, so extracting the remaining `errors` and `vm_config`
-route families (TD-001) is a prerequisite for further growth. Five families are extracted: `actions`,
-`machine_config`, `boot_source` and `logger_metrics` (the WOR-105 slice) and `pmem`. `src/api_behavior_matrix.rs`
-(1066 lines by the same count; TD-023) and `src/baseline/upstream.rs` (889) trip the 800-line warning. Each extraction must preserve behavior and move its tests with it, and
+**Verified.** As counted by `check_structure.py` on 2026-11-21, `src/api.rs` is 1958 lines, under its 2500-line
+warning budget (it was 3073 before TD-001). Eight route families and the error surface are in `src/api/`: `actions`,
+`machine_config`, `boot_source` and `logger_metrics` (the WOR-105 slice), `pmem`, and, since TD-001, `vm_config`,
+`balloon`, `mmds` and `errors`. Still in `src/api.rs`: drives, network interfaces, memory hotplug, snapshots and
+the serial, entropy and vsock devices, with the types they share; move one of them when the file nears the budget
+again. `src/api_behavior_matrix.rs` (1066 lines by the same count; TD-023) and `src/baseline/upstream.rs` (889)
+trip the 800-line warning. Each extraction must preserve behavior, and
 must leave the `("METHOD", "/path") =>` dispatch arms in `src/api.rs`, because both route-coverage sensors scan
-only that file (TD-003).
+only that file (TD-003). The tests of every family are in `src/api/tests.rs` (TD-015).
 
 ## See also
 
