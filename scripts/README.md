@@ -5,10 +5,10 @@
 Operational helper scripts for the `vesper` crate. The directory holds one
 direct script, `update-issue-checklists.sh`, which appends a fixed
 `## Parity Eval Checklist` section to the bodies of GitHub issues #1 through
-#40 via the `gh` CLI, plus four subdirectories wrapped by Makefile targets:
+#40 via the `gh` CLI, plus five subdirectories wrapped by Makefile targets:
 CI entitlement linting (`ci`), harness sensors and issue-run bundles
-(`harness`), the macOS local dev loop (`macos`), and System VM image, launch
-config, and boot smoke wrappers (`systemvm`). None of these scripts are part
+(`harness`), the third-party notices (`licenses`), the macOS local dev loop
+(`macos`), and the System VM scripts (`systemvm`: image, launch config, builds and suites). None of these scripts are part
 of the GA API surface; they support development, CI, and tracker hygiene.
 
 ## Interface
@@ -26,7 +26,7 @@ of the GA API surface; they support development, CI, and tracker hygiene.
 
 ### Subdirectories
 
-- [ci](./ci/README.md): `validate-entitlements.sh` lints the two macOS entitlement plists (`make validate-entitlements`).
+- [ci](./ci/README.md): `validate-entitlements.sh` lints the three macOS entitlement plists (`make validate-entitlements`).
 - [licenses](./licenses/README.md): `third_party_notices.py` writes and checks `THIRD_PARTY_NOTICES.md` (`make third-party-notices`, `make third-party-notices-check`).
 - [harness](./harness/README.md): four Python sensors (`check_docs.py`, `check_structure.py`, `compute_quality_score.py`, `janitor_scan.py`) and two Bash bundle helpers (`init_issue_run.sh`, `collect_verification_bundle.sh`).
 - [macos](./macos/README.md): `dev-up.sh` / `dev-down.sh` build and run `vesperd` and `vesper-proxy` under `run/` (`make dev-up`, `make dev-down`); `build-vmlauncher.sh` builds and signs the Swift launcher (`make vmlauncher-build`).

@@ -2,7 +2,7 @@
 
 ## Overview
 
-The `vesper` library crate (edition 2024). `lib.rs` exposes ten public
+The `vesper` library crate (edition 2024). `lib.rs` exposes thirteen public
 modules. `api` is the Firecracker-compatible HTTP surface and in-memory VM
 state machine served by `vesperd`. `api_matrix` and `api_behavior_matrix`
 generate and validate the pinned route matrices under `docs/generated/`.
@@ -29,7 +29,7 @@ Child contracts:
 Public symbols by file:
 
 - `lib.rs`: `pub mod api, api_behavior_matrix, api_matrix, api_replay, baseline,
-  buildinfo, compat, control, platform, proxy, spec, systemvm`. `systemvm.rs` declares
+  buildinfo, compat, control, platform, ports, proxy, spec, systemvm`. `systemvm.rs` declares
   the private children `systemvm/boot_check.rs` (the boot smoke check, TD-043), `systemvm/bridge.rs`, `systemvm/data_disk.rs`, `systemvm/image_lock.rs` and
   `systemvm/packages.rs` and re-exports them, so every symbol below is reachable as
   `vesper::systemvm::*`.
