@@ -26,6 +26,16 @@ const (
 	maxRel = 4096
 )
 
+// FatalPrefix begins each line with which `vesper-unfs run` or `vesper-unfs init` reports that it ends with an
+// error: a bad argument, a refused source, a step of the sandbox that failed, and also a server whose end could
+// not be read. vesper-microvm's launch looks for it in the server's log while it waits for the server to listen,
+// and takes such a line as final: it does not wait for a respawn, though a few of these errors can pass (macOS
+// replaced a source at that moment). Only the command's main writes the prefix. The supervisor's other lines (a
+// warning of a start that goes on, the watcher's lines while the server runs) begin "vesper-unfs run:", and one
+// test hook's line begins "vesper-unfs test:". The launch looks for neither (TD-082): a line that the launch
+// does not know costs a failed launch its 10 s wait, and never fails a good launch.
+const FatalPrefix = "vesper-unfs fatal:"
+
 // Source is one directory a server exports, as a path relative to one of its trusted share mounts (Mount is that
 // mount's index; GH #207). A File source is one regular file, exported as the only entry, FileName, of a read-only
 // directory /s/N (GH #208).

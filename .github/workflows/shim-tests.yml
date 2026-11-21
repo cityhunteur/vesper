@@ -5,12 +5,14 @@ on:
     paths:
       - shim/**
       - scripts/systemvm/build-shim.sh
+      - systemvm/overlay/usr/local/bin/vesper-microvm
       - .github/workflows/shim-tests.yml
   push:
     branches: [main]
     paths:
       - shim/**
       - scripts/systemvm/build-shim.sh
+      - systemvm/overlay/usr/local/bin/vesper-microvm
       - .github/workflows/shim-tests.yml
 
 jobs:
@@ -30,7 +32,8 @@ jobs:
         run: cd shim && go vet ./...
 
       - name: Test
-        run: cd shim && go test ./...
+        # -count=1: one test reads vesper-microvm, outside the Go module, which the test cache does not look at.
+        run: cd shim && go test -count=1 ./...
 
       - name: Cross-build the static linux/arm64 shim
         run: bash scripts/systemvm/build-shim.sh

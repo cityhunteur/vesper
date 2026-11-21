@@ -370,3 +370,64 @@ func TestMovedUnder(t *testing.T) {
 		t.Errorf("sources to compare with the record: %v, want [2 3 5 7]", got)
 	}
 }
+
+// The launch and the server are written in two languages, and the launch knows a failed start by FatalPrefix
+// alone (TD-082). This test holds the two together. The script looks for the prefix and for no other beginning
+// of a line of the server. Only the command's main writes the prefix, through the constant; no file of this
+// package does, by the text or by the constant, because a warning that began so would fail a good launch.
+func TestLaunchKnowsAFailedStartByTheFatalPrefix(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "systemvm", "overlay", "usr", "local", "bin", "vesper-microvm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(raw)
+	var looks []string
+	for _, line := range strings.Split(script, "\n") {
+		if strings.Contains(line, "grep -q ") && strings.Contains(line, `"/var/log/vesper-unfs-$us_id.log"`) {
+			looks = append(looks, strings.TrimSpace(line))
+		}
+	}
+	want := `grep -q "^` + FatalPrefix + `" "/var/log/vesper-unfs-$us_id.log" 2>/dev/null && break`
+	if len(looks) != 1 || looks[0] != want {
+		t.Errorf("vesper-microvm looks in the server's log with %q, want only %q", looks, want)
+	}
+	// A second look written as another anchored pattern (grep -E, awk with a regular expression) names the
+	// beginning of a server's line too. A look without an anchor (case, an unanchored grep) is not caught here;
+	// the suite's step warning_line_does_not_fail_a_launch catches it, on a System VM.
+	if n := strings.Count(script, "^vesper-unfs"); n != 1 {
+		t.Errorf("vesper-microvm has %d patterns that begin ^vesper-unfs, want the one above", n)
+	}
+	if strings.ContainsAny(FatalPrefix, `.*[]\^$`) {
+		t.Errorf("FatalPrefix %q holds a character that grep reads as a pattern", FatalPrefix)
+	}
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range files {
+		if f == "config.go" || strings.HasSuffix(f, "_test.go") { // the constant, and this test
+			continue
+		}
+		src, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n := strings.Count(string(src), FatalPrefix) + strings.Count(string(src), "FatalPrefix"); n != 0 {
+			t.Errorf("%s writes the fatal prefix %d times; only the command's main reports a run that ends with an error", f, n)
+		}
+	}
+	// The command's main: every line it writes for a failed run goes through the constant, and none begins as a
+	// warning does (that would cost a failed launch its 10 s wait).
+	mainSrc, err := os.ReadFile(filepath.Join("..", "..", "cmd", "vesper-unfs", "main.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, lit := range []string{FatalPrefix, `"vesper-unfs run:`, `"vesper-unfs init:`} {
+		if n := strings.Count(string(mainSrc), lit); n != 0 {
+			t.Errorf("cmd/vesper-unfs/main.go holds %q %d times; a failed run is reported with unfs.FatalPrefix", lit, n)
+		}
+	}
+	if n := strings.Count(string(mainSrc), "unfs.FatalPrefix"); n != 6 {
+		t.Errorf("cmd/vesper-unfs/main.go uses unfs.FatalPrefix %d times, want 6 (one init line and five run lines); count again, and say in the suite which of them a launch shows", n)
+	}
+}

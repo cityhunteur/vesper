@@ -7,6 +7,7 @@
 # read-only, "..", symbolic links and forged handles, runs the escape checks inside a copy of the sandbox, checks
 # that a container and another microVM cannot reach the server, kills the server and measures what old handles do
 # after supervise-daemon restarts it, refuses a symlinked source, a ".." source and a mount that is not virtio-fs,
+# checks that a launch fails at once on the server's fatal line and that no other line of the server fails it (TD-082),
 # repeats the probe and the escape checks with the non-root (all_squash) server, and checks that cleanup leaves
 # nothing. Needs `make systemvm-up-shares docker-up`. Report: run/systemvm/unfs-report.json.
 set -uo pipefail
@@ -27,7 +28,7 @@ upid() { mvm unfs-isolation "$1" | head -1 | sed -n 's/.* pid=\([0-9]*\).*/\1/p'
 # A forged handle can make unfs3 abort (TD-065); supervise-daemon starts it again within about a second.
 wait_listen() { for _ in $(seq 1 40); do case "$(mvm unfs "$1")" in *listen=yes*) return 0 ;; esac; sleep 0.5; done; return 1; }
 errline() { grep -m1 '^ERR' || echo "no ERR line"; }
-cleanup() { for i in "${ID}" "${OTHER}" "${SQ}" unfs-x unfs-h; do mvm cleanup "$i" --logs >/dev/null; done; }
+cleanup() { for i in "${ID}" "${OTHER}" "${SQ}" unfs-x unfs-h; do mvm cleanup "$i" --logs >/dev/null; done; mvm test-unfs-slow-next none >/dev/null; }
 trap cleanup EXIT
 ctl share list | grep -q " ${SHARE} virtiofs\| ${SHARE} mode=" || { echo "unfs-suite: ${SHARE} is not a share; run 'make systemvm-up-shares'" >&2; exit 2; }
 cleanup
@@ -99,7 +100,7 @@ mv "${F}/proj/conf" "${F}/proj/conf-old" && mkdir "${F}/proj/conf" && echo decoy
 wait "${rp}"
 race="$(tr '\n' ' ' < "${race_out}")"; rm -f "${race_out}"
 rm -rf "${F}/proj/conf"; mv "${F}/proj/conf-old" "${F}/proj/conf"
-case "${race}" in *"not the source that was opened"*) record nested_source_swap_refused true "${race}" ;;
+case "${race}" in *"vesper-unfs fatal: init: "*"not the source that was opened"*) record nested_source_swap_refused true "${race}" ;;
   *) record nested_source_swap_refused false "${race}" ;; esac
 
 # --- 5. Nothing outside the microVM reaches the server ---------------------------------------------------------
@@ -135,6 +136,31 @@ r3="$(mvm launch unfs-x --share-net --unfs-mount /run --unfs-src .:rw | errline)
 case "${r1}|${r2}|${r3}" in *"m3/swap"*"symbolic links"*"|ERR"*"|"*"not a virtio-fs mount"*) record bad_sources_refused true "symlink: ${r1}; dotdot: ${r2}; not virtio-fs: ${r3}" ;;
   *) record bad_sources_refused false "symlink: ${r1}; dotdot: ${r2}; not virtio-fs: ${r3}" ;; esac
 
+# --- 8a. What a launch takes for a failed start (TD-082) --------------------------------------------------------
+# A run of the supervisor that ends with an error says so in a line that begins "vesper-unfs fatal:", and the launch
+# gives up when it reads that line; it waits 10 s for a server that says nothing. 8 s is less than that wait, which a
+# fatal line under another prefix would cost. The time is taken around the whole command, in whole seconds.
+f0="$(date +%s)"; fr="$(mvm launch unfs-x --share-net --unfs-mount "${SHARE}" --unfs-src m3/swap:rw | errline)"; fsec=$(( $(date +%s) - f0 ))
+mvm cleanup unfs-x --logs >/dev/null
+case "${fr}" in
+  *'log: vesper-unfs fatal: run: source "m3/swap"'*)
+    if [ "${fsec}" -lt 8 ]; then record failed_start_fails_the_launch_at_once true "refused in ${fsec} s: $(printf '%s' "${fr}" | cut -c1-160)"
+    else record failed_start_fails_the_launch_at_once false "the refusal took ${fsec} s (want less than 8): $(printf '%s' "${fr}" | cut -c1-300)"; fi ;;
+  *) record failed_start_fails_the_launch_at_once false "refused (${fsec} s) without the fatal line: $(printf '%s' "${fr}" | cut -c1-300)" ;;
+esac
+# No other line fails a launch: the hook makes the next server listen 1.5 s late and say so in a line that begins as
+# the supervisor's warnings do ("vesper-unfs run:"). Before TD-082 that line ended the wait.
+slow="$(mvm test-unfs-slow-next unfs-x | tail -1)"
+s0="$(date +%s)"; sout="$(mvm launch unfs-x --share-net --unfs-mount "${SHARE}" --unfs-src m3/ro:ro)"; ssec=$(( $(date +%s) - s0 ))
+sl="$(printf '%s\n' "${sout}" | grep -m1 '^LAUNCHED' || printf '%s\n' "${sout}" | errline)"
+sst="$(mvm unfs unfs-x)"; sfull="$(mvm unfs-log unfs-x 20 | grep -a '^vesper-unfs' | tr '\n' ';')"
+mvm cleanup unfs-x --logs >/dev/null; mvm test-unfs-slow-next none >/dev/null
+case "${slow}|${sl}|${sst}|${sfull}" in
+  "SLOW next unfs-x|LAUNCHED unfs-x "*"|"*"listen=yes"*"|"*"vesper-unfs run: started with --test-pause-nests"*)
+    record warning_line_does_not_fail_a_launch true "${sl} after ${ssec} s; ${sst}; the supervisor's lines: ${sfull}" ;;
+  *) record warning_line_does_not_fail_a_launch false "hook: ${slow}; launch (${ssec} s): $(printf '%s' "${sl}" | cut -c1-330); ${sst}; the supervisor's lines: ${sfull}" ;;
+esac
+
 # --- 8b. One server for two shares (GH #207): the same relative path in each is two exports; the escape checks pass
 # in the two-mount sandbox, started from the same record; malformed requests are refused --------------------------
 SHARE2="${UNFS_SHARE2:-$(dirname "${SHARE}")/share-nowatch}"
@@ -147,7 +173,7 @@ tself="$(mvm test-unfs-selfcheck unfs-x | grep '^SELF-SUMMARY')"
 mvm cleanup unfs-x --logs >/dev/null
 t2="$(mvm launch unfs-x --share-net --unfs-src m3/proj:rw --unfs-mount "${SHARE}" | errline)"; mvm cleanup unfs-x --logs >/dev/null
 t3="$(mvm launch unfs-x --share-net --unfs-mount "${SHARE}" --unfs-src m3/proj:rw --unfs-mount "${SHARE}" --unfs-src m3/ro:ro | errline)"; mvm cleanup unfs-x --logs >/dev/null
-case "${t1}|${tst}|${tself}|${t2}|${t3}" in "LAUNCHED unfs-x "*"|"*"listen=yes"*"|"*"failed=0"*"|ERR --unfs-src before any --unfs-mount|ERR"*"twice"*)
+case "${t1}|${tst}|${tself}|${t2}|${t3}" in "LAUNCHED unfs-x "*"|"*"listen=yes"*"|"*"failed=0"*"|ERR --unfs-src before any --unfs-mount|ERR"*"log: vesper-unfs fatal: run: --args: "*"twice"*)
   record two_shares_one_server true "${t1}; ${tst}; mounts under /s: ${tiso}; selfcheck ${tself}; src first: ${t2}; same mount twice: ${t3}" ;;
   *) record two_shares_one_server false "${t1}; ${tst}; selfcheck ${tself}; src first: ${t2}; same mount twice: ${t3}" ;; esac
 
