@@ -276,7 +276,9 @@ func OpenList(file string) (*os.File, error) {
 
 // MovedUnder lists the read-write sources that the configured paths do not put inside a read-only source of the
 // same share, for the caller to compare their place with the record (GuardSources): a read-write bind that the user
-// put inside a read-only one stays writable through its own export.
+// put inside a read-only one stays writable through its own export. A read-only source whose directory is also a
+// read-write source is no such holder: it has no protected place and is not recorded, so a task can rename what
+// lies in it, and what lies in it is compared with the record (council SEC-1 of TD-082).
 func MovedUnder(srcs []Source) []int {
 	var out []int
 	for i, s := range srcs {
@@ -285,7 +287,7 @@ func MovedUnder(srcs []Source) []int {
 		}
 		inside := false
 		for _, r := range srcs {
-			if r.ReadOnly && !r.File && r.Mount == s.Mount {
+			if r.ReadOnly && !r.File && r.Mount == s.Mount && !alsoReadWrite(srcs, r) {
 				if _, ok := within(r.Rel, s.Rel); ok {
 					inside = true
 				}

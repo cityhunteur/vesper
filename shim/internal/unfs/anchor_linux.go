@@ -79,21 +79,38 @@ func (a *anchorState) watched(srcs []Source) bool {
 // opened by its name in the directory before it, with no symbolic link and no other mount on the way, so every
 // directory of the chain was found in the one before it, also when macOS renames directories meanwhile (TD-082).
 // The walk costs what a walk of every prefix from the mount's root cost: about 0.4 ms for each directory when the
-// kernel must ask macOS again, which it must about once a second (measured: run/TD-082b/measure-chain-walk.txt).
-// It returns their identities and a descriptor of each, which the caller closes.
+// kernel must ask macOS again (measured: run/TD-082b/measure-chain-walk.txt), and about 0.1 s for 1,008 held
+// anchors (measure-check-time.txt). It returns their identities and a descriptor of each, which the caller closes.
 func chainOf(mfd int, rel string, leaf bool) ([]fileID, []int, error) {
+	return chainWith(mfd, rel, leaf, openDirIn)
+}
+
+// openDirIn opens the directory name in the directory at: one step of a chain's walk.
+func openDirIn(at int, name string) (int, error) {
+	return unix.Openat2(at, name, &unix.OpenHow{
+		Flags:   unix.O_PATH | unix.O_DIRECTORY | unix.O_CLOEXEC,
+		Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_MAGICLINKS | unix.RESOLVE_NO_XDEV,
+	})
+}
+
+// chainWith is chainOf with the step given, so that a test can change the tree between two steps.
+func chainWith(mfd int, rel string, leaf bool, open func(at int, name string) (int, error)) ([]fileID, []int, error) {
 	var ids []fileID
 	var fds []int
-	fail := func(err error) ([]fileID, []int, error) {
+	parts := strings.Split(rel, "/")
+	fail := func(n int, err error) ([]fileID, []int, error) {
 		for _, fd := range fds {
 			unix.Close(fd)
 		}
-		return nil, nil, err
+		sub := "."
+		if n > 0 {
+			sub = strings.Join(parts[:n], "/")
+		}
+		return nil, nil, fmt.Errorf("%s: %w", sub, err)
 	}
 	if rel == "." || rel == "" {
 		return nil, nil, nil
 	}
-	parts := strings.Split(rel, "/")
 	last := len(parts) - 1
 	if leaf {
 		last = len(parts)
@@ -103,24 +120,20 @@ func chainOf(mfd int, rel string, leaf bool) ([]fileID, []int, error) {
 	if last > maxAnchors {
 		return nil, nil, fmt.Errorf("%d directories lie on the way; at most %d", last, maxAnchors)
 	}
-	how := &unix.OpenHow{
-		Flags:   unix.O_PATH | unix.O_DIRECTORY | unix.O_CLOEXEC,
-		Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_MAGICLINKS | unix.RESOLVE_NO_XDEV,
-	}
 	at := mfd
 	for n := 0; n <= last; n++ {
-		name, sub := ".", "."
+		name := "."
 		if n > 0 {
-			name, sub = parts[n-1], strings.Join(parts[:n], "/")
+			name = parts[n-1]
 		}
-		fd, err := unix.Openat2(at, name, how)
+		fd, err := open(at, name)
 		if err != nil {
-			return fail(fmt.Errorf("%s: %w", sub, err))
+			return fail(n, err)
 		}
 		fds = append(fds, fd)
 		id, err := idOf(fd)
 		if err != nil {
-			return fail(fmt.Errorf("%s: %w", sub, err))
+			return fail(n, err)
 		}
 		ids = append(ids, id)
 		at = fd
@@ -309,9 +322,15 @@ func (w *fileWatch) checkChains() {
 			for _, id := range chains[i] { // what was last told stays held
 				if _, have := held[id]; !have {
 					if fd, ok := a.held[id]; ok {
-						if dup, err := unix.FcntlInt(uintptr(fd), unix.F_DUPFD_CLOEXEC, 0); err == nil {
-							held[id] = dup
+						dup, err := unix.FcntlInt(uintptr(fd), unix.F_DUPFD_CLOEXEC, 0)
+						if err != nil {
+							// An anchor that cannot be held again would be told and not held: the set that is
+							// held now stays, and the next check tries again.
+							w.once("dup", "an anchor that was told cannot be held again (%v); the server keeps what it was last told", err)
+							closeAll(held)
+							return
 						}
+						held[id] = dup
 					}
 				}
 			}
@@ -323,6 +342,8 @@ func (w *fileWatch) checkChains() {
 		}
 	}
 	if !changed {
+		// The chains are what was last told: a later passing of the bound is news again.
+		delete(w.said, "anchors")
 		closeAll(held)
 		return
 	}

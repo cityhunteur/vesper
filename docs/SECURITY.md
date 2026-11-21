@@ -362,12 +362,17 @@ from its own microVM's server. Docker containers do not use the shim and still g
       once. A request whose name is `.` or `..` names a directory too, and is refused when that directory is an
       anchor (unfs suite step `dot_names_do_not_move_an_anchor`).
     - Binds that spell one directory in two ways (another letter case, another form of an accented letter, on a
-      macOS volume that takes both) are given one spelling at a start, the read-write bind's, before anything goes
-      by the text of the paths: the chain is found by identity, and the part of a path that leads to a read-write
-      bind's root is written as that bind writes it (TD-082, D-061). Before that, a read-only bind spelled in
-      another way than the read-write bind that holds it had no read-only mount on its name in that bind (the
-      server refused a change there all the same, by the object's number), and a directory bound both ways was
-      read-only in both.
+      macOS volume that takes both) are given one spelling at a start, before the start goes by the text of the
+      paths: the directories on the way to each bind are found by identity, and the part of a path that leads to
+      another directory bind's directory is written as that bind writes it, the outermost bind first (TD-082,
+      D-061). A new spelling is kept only when both spellings are shown to name one directory, with both held.
+      Before that, a read-only bind spelled in another way than the read-write bind that holds it had no read-only
+      mount on its name in that bind (the server refused a change there all the same, by the object's number); a
+      directory bound both ways was read-only in both; and a read-write bind inside a read-only directory bind
+      spelled in another way was served read-only after its server started again. Not covered: a file that is
+      bound both ways under two spellings of its own name stays read-only in both binds. A directory that is
+      bound both ways is no read-only holder of the read-write binds inside it: they are compared with the record
+      of read-only objects at each start, as binds that lie in no read-only bind are.
     - So every replacement of what the path names is made on macOS. The attaches of the limits below count the
       user's own saves.
     - The cost: a task cannot rename or remove a directory, in its own read-write bind, that has a read-only bind

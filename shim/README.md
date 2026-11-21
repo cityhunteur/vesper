@@ -62,9 +62,10 @@ The Go module pins containerd 2.1.5 and builds static Linux arm64 binaries with 
   cannot rename them. A chain is one walk, each directory opened in the one before it; a server has at most 1,024
   anchors, and a start raises the supervisor's limit of open files to what it can need (`filesNeeded`,
   `ensureFiles`) or fails; a server that needs a watcher and cannot have one does not run (`watchServer`; TD-082,
-  D-061). `spell_linux.go` (TD-082, D-061): sources that spell one directory in two ways get the read-write
-  source's spelling at a start (`respell`, by identity), so that the nests, the holders and a directory bound both
-  ways are found by the text as before. The directory now at a read-only directory source's path is told as a read-only object too
+  D-061). `spell_linux.go` (TD-082, D-061): sources that spell one directory in two ways get one spelling at a
+  start, that of the outermost directory source that holds them (`respell` walks and checks by identity, `spellAll`
+  is the rule), so that the nests, the holders, a directory bound both ways and a read-write source inside a
+  read-only one are found by the text as before. The directory now at a read-only directory source's path is told as a read-only object too
   (`leafList`, an `s` line; `tellLeaves` tells it again after every file), so that a task cannot write in a
   directory that macOS put there (TD-081, D-059). `hold_linux.go` (TD-076, D-055):
   each recorded object gets a read-only mount of its own that outlives the supervisor, in a mount namespace that only

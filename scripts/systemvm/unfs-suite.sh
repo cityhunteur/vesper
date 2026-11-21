@@ -48,7 +48,7 @@ ln -s /nowhere/at/all "${F}/proj/link-nowhere"; ln -s made-through-link "${F}/pr
 SRCS=(--unfs-mount "${SHARE}" --unfs-src m3/proj:rw --unfs-src m3/proj/conf:ro --unfs-src m3/ro:ro)
 # TD-082: a read-only source three directories deep in a read-write one (three anchors), and directories beside it.
 X="${SHARE}/m3x"; rm -rf "${SHARE:?}/m3x"
-mkdir -p "${X}/proj/an/in/conf" "${X}/proj/free/sub" "${X}/proj/other"; echo c > "${X}/proj/an/in/conf/c.txt"; echo w > "${X}/proj/w.txt"
+mkdir -p "${X}/proj/an/in/conf" "${X}/proj/free/sub" "${X}/proj/other" "${X}/proj/gone1" "${X}/proj/gone2"; echo c > "${X}/proj/an/in/conf/c.txt"; echo w > "${X}/proj/w.txt"
 # TD-082: 63 read-only sources, each 16 directories deep in one read-write source: 1,008 anchors, of the 1,024 that
 # one server can have.
 D="${SHARE}/m3d"; rm -rf "${SHARE:?}/m3d"; DEEP=1/2/3/4/5/6/7/8/9/10/11/12/13/14/conf
@@ -240,24 +240,26 @@ mvm cleanup unfs-h --logs >/dev/null
 
 # --- 9c. Follow-ups of the anchors (TD-082) ---------------------------------------------------------------------
 # A request whose name is "." or ".." names a directory too: the server refuses it when that directory is an anchor,
-# and carries it out when it is not (the control), so the refusals are the anchor rule's.
+# and carries it out when it is not (the three controls: a REMOVE and an RMDIR of an empty directory by ".", and a
+# RENAME by ".."), so the refusals are the anchor rule's.
 probe1() { mvm test-unfs-probe unfs-x "$@" | tail -1; }
 al="$(mvm launch unfs-x --share-net --unfs-mount "${SHARE}" --unfs-src m3x/proj:rw --unfs-src m3x/proj/an/in/conf:ro | tail -1)"
 alist="$(mvm unfs-list unfs-x)"
 d1="$(probe1 --remove an/.)"; d2="$(probe1 --rmdir an/.)"; d3="$(probe1 --rmdir an/in/..)"
 d4="$(probe1 --rename an/. --to moved)"; d5="$(probe1 --rename an/in/.. --to moved)"; d6="$(probe1 --rename other --to an/in/..)"
-dc="$(probe1 --rename free/sub/.. --to free2)"
-for _ in $(seq 1 10); do [ -d "${X}/proj/free2/sub" ] && break; sleep 0.5; done
-dstate="an:$([ -f "${X}/proj/an/in/conf/c.txt" ] && echo kept || echo GONE) moved:$([ -e "${X}/proj/moved" ] && echo MADE || echo absent) other:$([ -d "${X}/proj/other" ] && echo kept || echo GONE) free2:$([ -d "${X}/proj/free2/sub" ] && echo made || echo absent)"
-case "${al}|${alist}|${d1}|${d2}|${d3}|${d4}|${d5}|${d6}|${dc}|${dstate}" in
-  "LAUNCHED unfs-x "*"|"*" a=3 "*"|REMOVE an/. status=ROFS|RMDIR an/. status=ROFS|RMDIR an/in/.. status=ROFS|RENAME an/. moved status=ROFS|RENAME an/in/.. moved status=ROFS|RENAME other an/in/.. status=ROFS|RENAME free/sub/.. free2 status=OK|an:kept moved:absent other:kept free2:made")
-    record dot_names_do_not_move_an_anchor true "${alist}; ${d1}; ${d2}; ${d3}; ${d4}; ${d5}; ${d6}; control: ${dc}; macOS: ${dstate}" ;;
-  *) record dot_names_do_not_move_an_anchor false "${al}; ${alist}; ${d1}; ${d2}; ${d3}; ${d4}; ${d5}; ${d6}; control: ${dc}; macOS: ${dstate}; log: $(mvm unfs-log unfs-x 6)" ;;
+dc="$(probe1 --rename free/sub/.. --to free2)"; dc1="$(probe1 --remove gone1/.)"; dc2="$(probe1 --rmdir gone2/.)"
+for _ in $(seq 1 10); do [ -d "${X}/proj/free2/sub" ] && [ ! -e "${X}/proj/gone1" ] && [ ! -e "${X}/proj/gone2" ] && break; sleep 0.5; done
+dstate="an:$([ -f "${X}/proj/an/in/conf/c.txt" ] && echo kept || echo GONE) moved:$([ -e "${X}/proj/moved" ] && echo MADE || echo absent) other:$([ -d "${X}/proj/other" ] && echo kept || echo GONE) free2:$([ -d "${X}/proj/free2/sub" ] && echo made || echo absent) gone1:$([ -e "${X}/proj/gone1" ] && echo STILL || echo removed) gone2:$([ -e "${X}/proj/gone2" ] && echo STILL || echo removed)"
+case "${al}|${alist}|${d1}|${d2}|${d3}|${d4}|${d5}|${d6}|${dc}|${dc1}|${dc2}|${dstate}" in
+  "LAUNCHED unfs-x "*"|"*" a=3 "*"|REMOVE an/. status=ROFS|RMDIR an/. status=ROFS|RMDIR an/in/.. status=ROFS|RENAME an/. moved status=ROFS|RENAME an/in/.. moved status=ROFS|RENAME other an/in/.. status=ROFS|RENAME free/sub/.. free2 status=OK|REMOVE gone1/. status=OK|RMDIR gone2/. status=OK|an:kept moved:absent other:kept free2:made gone1:removed gone2:removed")
+    record dot_names_do_not_move_an_anchor true "${alist}; ${d1}; ${d2}; ${d3}; ${d4}; ${d5}; ${d6}; controls: ${dc}; ${dc1}; ${dc2}; macOS: ${dstate}" ;;
+  *) record dot_names_do_not_move_an_anchor false "${al}; ${alist}; ${d1}; ${d2}; ${d3}; ${d4}; ${d5}; ${d6}; controls: ${dc}; ${dc1}; ${dc2}; macOS: ${dstate}; log: $(mvm unfs-log unfs-x 6)" ;;
 esac
 
 # macOS puts a symbolic link where a directory of the chain was. The chain cannot be walked: the supervisor says so
 # once, and the server keeps what it was last told, so the directory that was on the chain stays an anchor under its
-# new name, and so does the one below it. The link itself is no anchor (a stated limit of D-058).
+# new name, and so does the one below it (the server's list still holds them from the start; that the supervisor
+# keeps and holds the chain is the unit test's part). The link itself is no anchor (a stated limit of D-058).
 mv "${X}/proj/an" "${X}/proj/an.real"; ln -s an.real "${X}/proj/an"
 lk=no; for _ in $(seq 1 20); do mvm unfs-log unfs-x 40 | grep -q 'm3x/proj/an/in/conf.*cannot be looked at now' && { lk=yes; break; }; sleep 0.5; done
 l1="$(probe1 --rename an.real --to zz)"; l2="$(probe1 --rename an.real/in --to zz)"
@@ -285,13 +287,15 @@ esac
 mvm cleanup unfs-x --logs >/dev/null
 
 # The supervisor's open files, with 63 read-only sources that are each 16 directories deep in a read-write one. It
-# holds a descriptor of each anchor, and for a moment two sets of them when macOS replaced a directory: twice what
-# it has open must fit its limit, and after the change it has as many open as before.
+# holds a descriptor of each anchor, and during each check (about 0.1 s of each second, measured) a second set of
+# them: twice what it has open between two checks must fit its limit, and after macOS replaced a directory it has as
+# many open as before. The count between two checks is the least of five samples.
+supline() { local best="" l n; for _ in 1 2 3 4 5; do l="$(mvm unfs-isolation "$1" | grep '^UNFSSUP')"; n="$(printf '%s' "${l}" | sed -n 's/.* fds=\([0-9]*\).*/\1/p')"; [ -n "${n}" ] && { [ -z "${best}" ] || [ "${n}" -lt "${best##* fds=}" ]; } && best="${l}"; sleep 0.3; done; printf '%s' "${best}"; }
 fl="$(mvm launch unfs-d --share-net "${DSRC[@]}" | tail -1)"
-flist="$(mvm unfs-list unfs-d)"; fsup="$(mvm unfs-isolation unfs-d | grep '^UNFSSUP')"
+flist="$(mvm unfs-list unfs-d)"; fsup="$(supline unfs-d)"
 mv "${D}/proj/c01/1" "${D}/proj/c01/1.old"; mkdir -p "${D}/proj/c01/${DEEP}"
 ftold=no; for _ in $(seq 1 30); do mvm unfs-log unfs-d 40 | grep -q 'the server was told of the 1008 directories now on the way' && { ftold=yes; break; }; sleep 0.5; done
-fsup2="$(mvm unfs-isolation unfs-d | grep '^UNFSSUP')"; ferr="$(mvm unfs-log unfs-d 120 | grep -c 'too many open files')"
+fsup2="$(supline unfs-d)"; ferr="$(mvm unfs-log unfs-d 120 | grep -c 'too many open files')"
 soft="$(printf '%s' "${fsup}" | sed -n 's/.* nofile=\([0-9]*\)\/.*/\1/p')"; fds="$(printf '%s' "${fsup}" | sed -n 's/.* fds=\([0-9]*\).*/\1/p')"; fds2="$(printf '%s' "${fsup2}" | sed -n 's/.* fds=\([0-9]*\).*/\1/p')"
 case "${fl}|${flist}" in "LAUNCHED unfs-d "*"|"*" a=1008 "*) fok=true ;; *) fok=false ;; esac
 [ "${fok}" = true ] && [ "${ftold}" = yes ] && [ "${ferr}" = 0 ] && [ -n "${soft}" ] && [ -n "${fds}" ] && [ "${fds}" -ge 1008 ] && [ $((fds * 2)) -lt "${soft}" ] && [ "${fds2}" = "${fds}" ] \

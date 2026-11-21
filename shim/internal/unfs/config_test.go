@@ -369,6 +369,19 @@ func TestMovedUnder(t *testing.T) {
 	if got := MovedUnder(srcs); !reflect.DeepEqual(got, []int{2, 3, 5, 7}) {
 		t.Errorf("sources to compare with the record: %v, want [2 3 5 7]", got)
 	}
+	// A directory bound both ways is no read-only holder: what lies in it is compared with the record. A read-only
+	// directory beside it still holds what lies in that one.
+	both := []Source{
+		{Rel: "proj"},                    // 0
+		{Rel: "proj", ReadOnly: true},    // 1 the same directory, read-only
+		{Rel: "proj/out"},                // 2 in the directory that is bound both ways
+		{Rel: "proj/key", File: true},    // 3 the same for a file
+		{Rel: "proj/ro", ReadOnly: true}, // 4 read-only alone
+		{Rel: "proj/ro/out"},             // 5 in a directory that is read-only alone
+	}
+	if got := MovedUnder(both); !reflect.DeepEqual(got, []int{0, 2, 3}) {
+		t.Errorf("with a directory bound both ways: %v, want [0 2 3]", got)
+	}
 }
 
 // The launch and the server are written in two languages, and the launch knows a failed start by FatalPrefix

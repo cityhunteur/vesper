@@ -24,6 +24,8 @@ func openFDs(t *testing.T) int {
 	return len(ents)
 }
 
+// lowerMaxAnchors changes a variable of the package for one test: a test that uses it must not run in parallel
+// with another (no test of this package calls t.Parallel).
 func lowerMaxAnchors(t *testing.T, n int) {
 	t.Helper()
 	was := maxAnchors
@@ -73,8 +75,47 @@ func TestChainWalk(t *testing.T) {
 	if _, _, err := chainOf(mfd, "a/b/c/f", false); err == nil || !strings.Contains(err.Error(), "at most 2") {
 		t.Errorf("a chain of 3 directories with a bound of 2 = %v; want it refused", err)
 	}
-	if _, _, err := chainOf(mfd, "a/b/f", false); err != nil {
+	_, fds, err = chainOf(mfd, "a/b/f", false)
+	if err != nil {
 		t.Errorf("a chain of 2 directories with a bound of 2: %v", err)
+	}
+	for _, fd := range fds {
+		unix.Close(fd)
+	}
+}
+
+// One walk: a directory is looked up in the directory that the step before opened, not from the mount's root. The
+// host renames "a" aside after the walk has opened it and puts another tree at the name; the walk goes on in the
+// directory it holds and finds the first tree's "b" and "c". (A walk of every prefix from the root would find the
+// second tree's.)
+func TestChainIsOneWalk(t *testing.T) {
+	top, mfd, id := anchorTree(t)
+	oldA, oldB, oldC := id("a"), id("a/b"), id("a/b/c")
+	step := 0
+	ids, fds, err := chainWith(mfd, "a/b/c/f", false, func(at int, name string) (int, error) {
+		if step++; step == 3 { // the mount's root and "a" are open; "b" is next
+			if err := os.Rename(filepath.Join(top, "a"), filepath.Join(top, "a.aside")); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(filepath.Join(top, "a/b/c"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return openDirIn(at, name)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		for _, fd := range fds {
+			unix.Close(fd)
+		}
+	}()
+	if len(ids) != 4 || ids[1] != oldA || ids[2] != oldB || ids[3] != oldC {
+		t.Fatalf("the walk = %v; want the first tree's a, b and c (%v %v %v)", ids, oldA, oldB, oldC)
+	}
+	if id("a/b") == oldB || id("a.aside/b") != oldB {
+		t.Fatal("the test did not put another tree at the name")
 	}
 }
 
@@ -96,6 +137,17 @@ func TestAnchorBound(t *testing.T) {
 	if after := openFDs(t); after != before {
 		t.Fatalf("the refused start left %d descriptors open", after-before)
 	}
+	// The walk stops when it has more than the bound: with a bound of 2 the fourth source gives the third anchor,
+	// and a fifth source is not walked.
+	if err := os.Mkdir(filepath.Join(top, "a/extra"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	five := append(append([]Source(nil), srcs...), Source{Rel: "a/extra", ReadOnly: true})
+	chains, held, failed := findAnchors([]int{mfd}, five, roots)
+	if len(held) != 3 || len(failed) != 0 || chains[3] == nil || chains[4] != nil {
+		t.Fatalf("findAnchors with a bound of 2: %d held, failed %v, chains %v; want 3 held and the fifth source not walked", len(held), failed, chains)
+	}
+	closeAll(held)
 	maxAnchors = 3
 	a, told, err := startAnchors([]string{top}, srcs, roots)
 	if err != nil || len(told) != 3 {
@@ -133,8 +185,26 @@ func TestAnchorBound(t *testing.T) {
 	if after := openFDs(t); after != open {
 		t.Fatalf("the checks past the bound left %d descriptors open", after-open)
 	}
-	// Within the bound again: the change is told, and a later passing of the bound is news again.
+	// The host undoes its change, and the anchors are within the bound again (the bound is put back here in place
+	// of fewer directories): nothing is told, and a later passing of the bound is news again.
+	if err := os.Remove(filepath.Join(top, "a/conf")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(top, "a/conf.old"), filepath.Join(top, "a/conf")); err != nil {
+		t.Fatal(err)
+	}
 	maxAnchors = 3
+	w.checkChains()
+	if text() != "" || w.said["anchors"] || len(logged) != 1 {
+		t.Fatalf("back at what was last told: told %q, logged %v, the once-only key still set: %v", text(), logged, w.said["anchors"])
+	}
+	// The host replaces the directory again, within the bound: the change is told.
+	if err := os.Rename(filepath.Join(top, "a/conf"), filepath.Join(top, "a/conf.old")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(top, "a/conf"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	w.checkChains()
 	if !strings.Contains(text(), fmt.Sprintf("a %d %d\n", id("a/conf").dev, id("a/conf").ino)) || a.chains[3][0] != id("a/conf") || w.said["anchors"] {
 		t.Fatalf("within the bound again: told %q, chain %v", text(), a.chains[3])
@@ -213,18 +283,25 @@ func TestCheckChainsWithALinkOrAFileOnTheWay(t *testing.T) {
 	}
 }
 
-// A server that needs a watcher and cannot have one is ended, and the start fails; a server that needs none goes
-// on with nothing to stop.
+// A server that needs a watcher and cannot have one is ended, and the start fails, with the server's own end in the
+// error when it had ended by itself. A server that needs none goes on with nothing to stop. A server with a watcher
+// is ended when the watcher says so, and the watcher stops with the returned function.
 func TestWatchServer(t *testing.T) {
-	start := func() *exec.Cmd {
+	start := func(name string, arg ...string) *exec.Cmd {
 		t.Helper()
-		cmd := exec.Command("sleep", "60")
+		cmd := exec.Command(name, arg...)
 		if err := cmd.Start(); err != nil {
-			t.Skipf("no sleep command to stand for the server: %v", err)
+			t.Skipf("no %s command to stand for the server: %v", name, err)
 		}
+		t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
 		return cmd
 	}
-	cmd := start()
+	running := func(cmd *exec.Cmd) bool { // not ended, as wait4 with WNOHANG sees it
+		var ws unix.WaitStatus
+		pid, err := unix.Wait4(cmd.Process.Pid, &ws, unix.WNOHANG, nil)
+		return err == nil && pid == 0
+	}
+	cmd := start("sleep", "60")
 	cannot := errors.New("the sandbox's process: gone")
 	var gotPid int
 	stop, err := watchServer(Config{}, nil, cmd, func(_ Config, _ []*os.File, pid int) (*fileWatch, error) {
@@ -234,19 +311,48 @@ func TestWatchServer(t *testing.T) {
 	if stop != nil || !errors.Is(err, cannot) || !strings.Contains(err.Error(), "the watcher of the sources cannot start") || gotPid != cmd.Process.Pid {
 		t.Fatalf("watchServer with a watcher that cannot start = %v (pid %d); want the start's error", err, gotPid)
 	}
+	if strings.Contains(err.Error(), "ended by itself") {
+		t.Fatalf("a server that was running is said to have ended by itself: %v", err)
+	}
 	if cmd.ProcessState == nil || cmd.ProcessState.Success() {
 		t.Fatalf("the server was not ended: %v", cmd.ProcessState)
 	}
-	cmd = start()
-	defer func() { _ = cmd.Process.Kill(); _ = cmd.Wait() }()
+	// The server had ended by itself, with code 3: the error says so.
+	cmd = start("sh", "-c", "exit 3")
+	for i := 0; i < 200 && unix.Kill(cmd.Process.Pid, 0) == nil; i++ {
+		var info unix.Siginfo
+		if unix.Waitid(unix.P_PID, cmd.Process.Pid, &info, unix.WEXITED|unix.WNOWAIT, nil) == nil {
+			break // ended, and left for watchServer to reap
+		}
+	}
+	_, err = watchServer(Config{}, nil, cmd, func(Config, []*os.File, int) (*fileWatch, error) { return nil, cannot })
+	if !errors.Is(err, cannot) || !strings.Contains(err.Error(), "the sandbox had ended by itself: exit status 3") {
+		t.Fatalf("watchServer after the server ended by itself = %v; want its exit status in the error", err)
+	}
+	cmd = start("sleep", "60")
 	stop, err = watchServer(Config{}, nil, cmd, func(Config, []*os.File, int) (*fileWatch, error) { return nil, nil })
 	if err != nil || stop == nil {
 		t.Fatalf("watchServer with no watcher needed = %v", err)
 	}
 	stop()
-	if err := cmd.Process.Signal(unix.Signal(0)); err != nil {
-		t.Fatalf("a server that needs no watcher was ended: %v", err)
+	if !running(cmd) {
+		t.Fatal("a server that needs no watcher was ended")
 	}
+	// With a watcher: its end function ends the server, and stop ends the watcher's loop.
+	cmd = start("sleep", "60")
+	w := &fileWatch{procfd: -1, nsfd: -1, said: map[string]bool{}, logf: func(string, ...any) {}}
+	stop, err = watchServer(Config{}, nil, cmd, func(Config, []*os.File, int) (*fileWatch, error) { return w, nil })
+	if err != nil || stop == nil || w.end == nil {
+		t.Fatalf("watchServer with a watcher = %v, end set: %v", err, w.end != nil)
+	}
+	if !running(cmd) {
+		t.Fatal("a server with a watcher was ended at once")
+	}
+	w.end()
+	if err := cmd.Wait(); err == nil {
+		t.Fatal("the watcher's end did not end the server")
+	}
+	stop()
 }
 
 // The part of a path that leads to the root of a read-write directory source is written as that source writes it.
@@ -309,27 +415,39 @@ func TestRespell(t *testing.T) {
 		t.Skip("this volume keeps letter case apart: the two spellings are two names")
 	}
 	two := []Source{
-		{Rel: "M6/Proj/Conf/Deep"},                                // read-write, inside the next one: it takes that one's spelling
-		{Rel: "m6/proj"},                                          // the outermost read-write source keeps its own
+		{Rel: "M6/Proj/Conf/Deep"},                                // read-write, inside the next one and inside source 2
+		{Rel: "m6/proj"},                                          // the outermost directory source keeps its own
 		{Rel: "M6/PROJ/conf", ReadOnly: true},                     // a read-only directory inside it
-		{Rel: "M6/PROJ/CONF/app.env", ReadOnly: true, File: true}, // a read-only file inside it
-		{Rel: "M6/PROJ", ReadOnly: true},                          // the same directory, read-only
-		{Rel: "M6/PROJ/CONF/DEEP/x", File: true},                  // inside the inner read-write source
-		{Rel: "M6/other", ReadOnly: true},                         // inside no read-write source: as given
+		{Rel: "M6/PROJ/CONF/app.env", ReadOnly: true, File: true}, // a read-only file inside both
+		{Rel: "M6/PROJ", ReadOnly: true},                          // the same directory as source 1, read-only
+		{Rel: "M6/PROJ/CONF/DEEP/x", File: true},                  // a read-write file inside source 0
+		{Rel: "M6/other", ReadOnly: true},                         // inside no other source: as given
 		{Rel: "m6/PROJ", Mount: 1, ReadOnly: true},                // on a share mount that is not there
 	}
-	want := []string{"m6/proj/Conf/Deep", "m6/proj", "m6/proj/conf", "m6/proj/CONF/app.env", "m6/proj", "m6/proj/Conf/Deep/x", "M6/other", "m6/PROJ"}
 	got, notes = respell([]string{top}, two)
 	for i, s := range got {
-		if s.Rel != want[i] || s.ReadOnly != two[i].ReadOnly || s.File != two[i].File || s.Mount != two[i].Mount {
-			t.Errorf("source %d %q: taken as %+v; want %q and nothing else changed", i, two[i].Rel, s, want[i])
+		if s.Rel != twoWant[i] || s.ReadOnly != two[i].ReadOnly || s.File != two[i].File || s.Mount != two[i].Mount {
+			t.Errorf("source %d %q: taken as %+v; want %q and nothing else changed", i, two[i].Rel, s, twoWant[i])
 		}
 	}
 	if len(notes) != 5 {
 		t.Errorf("notes = %q; want one for each of the 5 sources written anew", notes)
 	}
-	// By the text, as the rest of the start goes: the read-only directory nests in the read-write one, the file has
-	// a holder, and the directory bound both ways has no protected place.
+	checkTwoSpellings(t, got)
+	if after := openFDs(t); after != before {
+		t.Fatalf("respell left %d descriptors open", after-before)
+	}
+}
+
+// twoWant is what the sources of the two-spellings tests are taken as: each has the spelling of the directory
+// sources that hold it, the shallowest first.
+var twoWant = []string{"m6/proj/conf/Deep", "m6/proj", "m6/proj/conf", "m6/proj/conf/app.env", "m6/proj", "m6/proj/conf/Deep/x", "M6/other", "m6/PROJ"}
+
+// checkTwoSpellings: by the text, as the rest of the start goes, the read-only directory nests in the read-write
+// one, the file has a holder, the directory bound both ways has no protected place, and the read-write sources
+// inside the read-only directory are known as such (they are not compared with the record of read-only objects).
+func checkTwoSpellings(t *testing.T, got []Source) {
+	t.Helper()
 	if n := Nests(got); len(n) == 0 || n[0].Outer != 1 || n[0].Inner != 2 || n[0].Sub != "conf" {
 		t.Errorf("Nests after the respelling = %+v; want the read-only directory in the read-write one", n)
 	}
@@ -339,8 +457,53 @@ func TestRespell(t *testing.T) {
 	if hasPlace(got, got[4]) || !hasPlace(got, got[2]) {
 		t.Error("hasPlace after the respelling: want none for the directory bound both ways, one for the read-only directory")
 	}
-	if after := openFDs(t); after != before {
-		t.Fatalf("respell left %d descriptors open", after-before)
+	if m := MovedUnder(got); len(m) != 1 || m[0] != 1 {
+		t.Errorf("MovedUnder after the respelling = %v; want the outermost read-write source alone", m)
+	}
+}
+
+// The rule of the respelling with made-up identities, so that it is tested where a volume keeps letter case apart:
+// the same sources as TestRespell's, a source that is the share itself, and ways that could not be walked.
+func TestSpellAll(t *testing.T) {
+	r, m6, proj, conf, deep, other := fileID{1, 1}, fileID{1, 2}, fileID{1, 3}, fileID{1, 4}, fileID{1, 5}, fileID{1, 6}
+	two := []Source{
+		{Rel: "M6/Proj/Conf/Deep"},
+		{Rel: "m6/proj"},
+		{Rel: "M6/PROJ/conf", ReadOnly: true},
+		{Rel: "M6/PROJ/CONF/app.env", ReadOnly: true, File: true},
+		{Rel: "M6/PROJ", ReadOnly: true},
+		{Rel: "M6/PROJ/CONF/DEEP/x", File: true},
+		{Rel: "M6/other", ReadOnly: true},
+		{Rel: "m6/PROJ", Mount: 1, ReadOnly: true},
+	}
+	ways := [][]fileID{{r, m6, proj, conf, deep}, {r, m6, proj}, {r, m6, proj, conf}, {r, m6, proj, conf}, {r, m6, proj}, {r, m6, proj, conf, deep}, {r, m6, other}, nil}
+	got := spellAll(two, ways)
+	for i, s := range got {
+		if s.Rel != twoWant[i] || s.ReadOnly != two[i].ReadOnly || s.File != two[i].File || s.Mount != two[i].Mount {
+			t.Errorf("source %d %q: taken as %+v; want %q and nothing else changed", i, two[i].Rel, s, twoWant[i])
+		}
+	}
+	checkTwoSpellings(t, got)
+	if two[0].Rel != "M6/Proj/Conf/Deep" {
+		t.Error("spellAll changed the sources it was given")
+	}
+	// A read-write bind inside a read-only directory bind spelled in another way takes that bind's spelling, so
+	// that it is known as inside it (council SEC-2).
+	in := spellAll([]Source{{Rel: "Vol/data", ReadOnly: true}, {Rel: "vol/data/out"}}, [][]fileID{{r, m6, proj}, {r, m6, proj, conf}})
+	if in[1].Rel != "Vol/data/out" || len(MovedUnder(in)) != 0 {
+		t.Errorf("a read-write source inside a read-only one: %+v, MovedUnder %v", in, MovedUnder(in))
+	}
+	// The share itself as a source gives the others no other spelling; a way that was not walked changes nothing;
+	// the same identity on another share mount is another directory.
+	same := []Source{{Rel: "."}, {Rel: "A/b", ReadOnly: true}, {Rel: "a/B/c", ReadOnly: true}, {Rel: "A/B/c/d", Mount: 1}}
+	got = spellAll(same, [][]fileID{{r}, {r, m6, proj}, nil, {r, m6, proj, conf, deep}})
+	if got[1].Rel != "A/b" || got[2].Rel != "a/B/c" || got[3].Rel != "A/B/c/d" {
+		t.Errorf("sources that must stay as given: %+v", got)
+	}
+	// Two directory sources of one depth that are the same directory: the first given keeps its spelling.
+	first := spellAll([]Source{{Rel: "Proj", ReadOnly: true}, {Rel: "proj"}}, [][]fileID{{r, proj}, {r, proj}})
+	if first[0].Rel != "Proj" || first[1].Rel != "Proj" {
+		t.Errorf("two sources at one directory: %+v; want the first's spelling for both", first)
 	}
 }
 
@@ -363,6 +526,20 @@ func TestEnsureFiles(t *testing.T) {
 	}
 	if err := unix.Getrlimit(unix.RLIMIT_NOFILE, &after); err != nil || after != before {
 		t.Fatalf("the limit changed from %+v to %+v (%v)", before, after, err)
+	}
+	// A limit that is too low and can be raised is raised, to the need and no further; the hard limit stays.
+	if before.Cur > 64 && before.Cur <= before.Max {
+		low := unix.Rlimit{Cur: before.Cur - 32, Max: before.Max}
+		if err := unix.Setrlimit(unix.RLIMIT_NOFILE, &low); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = unix.Setrlimit(unix.RLIMIT_NOFILE, &before) })
+		if err := ensureFiles(before.Cur - 16); err != nil {
+			t.Fatalf("a need above the soft limit and under the hard one: %v", err)
+		}
+		if err := unix.Getrlimit(unix.RLIMIT_NOFILE, &after); err != nil || after.Cur != before.Cur-16 || after.Max != before.Max {
+			t.Fatalf("after the raise the limit is %+v (%v); want %d and the hard limit %d", after, err, before.Cur-16, before.Max)
+		}
 	}
 	if got, want := filesNeeded(128, 64), uint64(128+3*1024+1+256+64+64); got != want {
 		t.Errorf("filesNeeded(128, 64) = %d; want %d", got, want)
