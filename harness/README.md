@@ -2,11 +2,11 @@
 
 This directory holds the tooling that keeps the knowledge base (`AGENTS.md`, `ARCHITECTURE.md`, `docs/`) honest.
 The checker and installer use Python 3.11+ standard library only; `architecture-viz.html` is a standalone interactive
-HTML visualization of the architecture and data flows.
+HTML page on the architecture and data flows; open it in a browser.
 
 | File | Purpose |
 |---|---|
-| `architecture-viz.html` | Interactive Bauhaus monospace HTML visualization of Vesper's architecture and data flows |
+| `architecture-viz.html` | Offline interactive page on Vesper's architecture and data flows: system context, request simulator, package layers and component index (fonts embedded, no network) |
 | `check_docs.py` | Knowledge-base linter, run locally and in CI |
 | `config.toml` | Checker configuration: scope, required files, front matter, ExecPlan sections |
 | `install.py` | Copies the template into another repository without overwriting anything |
