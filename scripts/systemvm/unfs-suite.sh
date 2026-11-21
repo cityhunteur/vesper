@@ -28,7 +28,7 @@ upid() { mvm unfs-isolation "$1" | head -1 | sed -n 's/.* pid=\([0-9]*\).*/\1/p'
 # A forged handle can make unfs3 abort (TD-065); supervise-daemon starts it again within about a second.
 wait_listen() { for _ in $(seq 1 40); do case "$(mvm unfs "$1")" in *listen=yes*) return 0 ;; esac; sleep 0.5; done; return 1; }
 errline() { grep -m1 '^ERR' || echo "no ERR line"; }
-cleanup() { for i in "${ID}" "${OTHER}" "${SQ}" unfs-x unfs-h; do mvm cleanup "$i" --logs >/dev/null; done; mvm test-unfs-slow-next none >/dev/null; }
+cleanup() { for i in "${ID}" "${OTHER}" "${SQ}" unfs-x unfs-h unfs-d; do mvm cleanup "$i" --logs >/dev/null; done; mvm test-unfs-slow-next none >/dev/null; }
 trap cleanup EXIT
 ctl share list | grep -q " ${SHARE} virtiofs\| ${SHARE} mode=" || { echo "unfs-suite: ${SHARE} is not a share; run 'make systemvm-up-shares'" >&2; exit 2; }
 cleanup
@@ -46,6 +46,14 @@ ln -s CONF "${F}/proj/link-CONF"; ln -s CONF/APP.CONF "${F}/proj/link-FILE"
 # Links that reach nothing protected: they must stay usable (a link to nowhere, and one to a name not made yet).
 ln -s /nowhere/at/all "${F}/proj/link-nowhere"; ln -s made-through-link "${F}/proj/link-new"
 SRCS=(--unfs-mount "${SHARE}" --unfs-src m3/proj:rw --unfs-src m3/proj/conf:ro --unfs-src m3/ro:ro)
+# TD-082: a read-only source three directories deep in a read-write one (three anchors), and directories beside it.
+X="${SHARE}/m3x"; rm -rf "${SHARE:?}/m3x"
+mkdir -p "${X}/proj/an/in/conf" "${X}/proj/free/sub" "${X}/proj/other"; echo c > "${X}/proj/an/in/conf/c.txt"; echo w > "${X}/proj/w.txt"
+# TD-082: 63 read-only sources, each 16 directories deep in one read-write source: 1,008 anchors, of the 1,024 that
+# one server can have.
+D="${SHARE}/m3d"; rm -rf "${SHARE:?}/m3d"; DEEP=1/2/3/4/5/6/7/8/9/10/11/12/13/14/conf
+DSRC=(--unfs-mount "${SHARE}" --unfs-src m3d/proj:rw)
+for i in $(seq -w 1 63); do mkdir -p "${D}/proj/c${i}/${DEEP}"; DSRC+=(--unfs-src "m3d/proj/c${i}/${DEEP}:ro"); done
 
 # --- 1. A microVM with a server ---------------------------------------------------------------------------------
 launched="$(mvm launch "${ID}" --share-net "${SRCS[@]}" | tail -1)"
@@ -229,6 +237,90 @@ case "${hl}|${h1}|${hout1}|${h2}|${hout2}" in
   *) record held_request_judged_with_the_list_as_it_is_then false "${hl}; remove: ${h1}: ${hout1} create: ${h2}: ${hout2} ${hlist}; macOS hz/secret~ '${hback1}' then '${hback2}'" ;;
 esac
 mvm cleanup unfs-h --logs >/dev/null
+
+# --- 9c. Follow-ups of the anchors (TD-082) ---------------------------------------------------------------------
+# A request whose name is "." or ".." names a directory too: the server refuses it when that directory is an anchor,
+# and carries it out when it is not (the control), so the refusals are the anchor rule's.
+probe1() { mvm test-unfs-probe unfs-x "$@" | tail -1; }
+al="$(mvm launch unfs-x --share-net --unfs-mount "${SHARE}" --unfs-src m3x/proj:rw --unfs-src m3x/proj/an/in/conf:ro | tail -1)"
+alist="$(mvm unfs-list unfs-x)"
+d1="$(probe1 --remove an/.)"; d2="$(probe1 --rmdir an/.)"; d3="$(probe1 --rmdir an/in/..)"
+d4="$(probe1 --rename an/. --to moved)"; d5="$(probe1 --rename an/in/.. --to moved)"; d6="$(probe1 --rename other --to an/in/..)"
+dc="$(probe1 --rename free/sub/.. --to free2)"
+for _ in $(seq 1 10); do [ -d "${X}/proj/free2/sub" ] && break; sleep 0.5; done
+dstate="an:$([ -f "${X}/proj/an/in/conf/c.txt" ] && echo kept || echo GONE) moved:$([ -e "${X}/proj/moved" ] && echo MADE || echo absent) other:$([ -d "${X}/proj/other" ] && echo kept || echo GONE) free2:$([ -d "${X}/proj/free2/sub" ] && echo made || echo absent)"
+case "${al}|${alist}|${d1}|${d2}|${d3}|${d4}|${d5}|${d6}|${dc}|${dstate}" in
+  "LAUNCHED unfs-x "*"|"*" a=3 "*"|REMOVE an/. status=ROFS|RMDIR an/. status=ROFS|RMDIR an/in/.. status=ROFS|RENAME an/. moved status=ROFS|RENAME an/in/.. moved status=ROFS|RENAME other an/in/.. status=ROFS|RENAME free/sub/.. free2 status=OK|an:kept moved:absent other:kept free2:made")
+    record dot_names_do_not_move_an_anchor true "${alist}; ${d1}; ${d2}; ${d3}; ${d4}; ${d5}; ${d6}; control: ${dc}; macOS: ${dstate}" ;;
+  *) record dot_names_do_not_move_an_anchor false "${al}; ${alist}; ${d1}; ${d2}; ${d3}; ${d4}; ${d5}; ${d6}; control: ${dc}; macOS: ${dstate}; log: $(mvm unfs-log unfs-x 6)" ;;
+esac
+
+# macOS puts a symbolic link where a directory of the chain was. The chain cannot be walked: the supervisor says so
+# once, and the server keeps what it was last told, so the directory that was on the chain stays an anchor under its
+# new name, and so does the one below it. The link itself is no anchor (a stated limit of D-058).
+mv "${X}/proj/an" "${X}/proj/an.real"; ln -s an.real "${X}/proj/an"
+lk=no; for _ in $(seq 1 20); do mvm unfs-log unfs-x 40 | grep -q 'm3x/proj/an/in/conf.*cannot be looked at now' && { lk=yes; break; }; sleep 0.5; done
+l1="$(probe1 --rename an.real --to zz)"; l2="$(probe1 --rename an.real/in --to zz)"
+sleep 3; lcount="$(mvm unfs-log unfs-x 80 | grep -c 'cannot be looked at now')"
+rm "${X}/proj/an"; mv "${X}/proj/an.real" "${X}/proj/an"; sleep 2
+ltold="$(mvm unfs-log unfs-x 80 | grep -c 'was replaced; the server was told')"
+case "${lk}|${l1}|${l2}|${lcount}|${ltold}" in
+  "yes|RENAME an.real zz status=ROFS|RENAME an.real/in zz status=ROFS|1|0")
+    record link_on_the_way_keeps_the_last_chain true "the supervisor said once that the chain cannot be looked at; ${l1}; ${l2}; nothing was told for the link, nor when the directory was back" ;;
+  *) record link_on_the_way_keeps_the_last_chain false "said: ${lk}, ${lcount} times; ${l1}; ${l2}; told ${ltold} times; log: $(mvm unfs-log unfs-x 8)" ;;
+esac
+
+# The server remembers its newest 2,048 anchors. With the 3 of this server and 2,045 made-up ones all are known; one
+# more, and the one told longest ago goes: the first directory of the chain can then be renamed (the stated limit;
+# the supervisor never tells more than 1,024, and tells all of them again whenever one changed). Told again, an
+# anchor is the newest.
+m1="$(mvm test-unfs-list-anchors unfs-x 2045 | tail -1)"; a1="$(probe1 --rename an --to an-x)"
+m2="$(mvm test-unfs-list-anchors unfs-x 1 | tail -1)"; a2="$(probe1 --rename an --to an-x)"; a2b="$(probe1 --rename an-x --to an)"
+m3="$(mvm test-unfs-list-anchors unfs-x 0 again | tail -1)"; a3="$(probe1 --rename an --to an-x)"
+case "${m1}|${a1}|${m2}|${a2}|${a2b}|${m3}|${a3}" in
+  "ANCHORS unfs-x made-up=2045 real=3 again=no|RENAME an an-x status=ROFS|ANCHORS unfs-x made-up=2046 real=3 again=no|RENAME an an-x status=OK|RENAME an-x an status=OK|ANCHORS unfs-x made-up=2046 real=3 again=again|RENAME an an-x status=ROFS")
+    record server_keeps_its_newest_2048_anchors true "2,048 told: ${a1}; 2,049 told: ${a2} (and back: ${a2b}); the 3 told again: ${a3}" ;;
+  *) record server_keeps_its_newest_2048_anchors false "${m1}; ${a1}; ${m2}; ${a2}; ${a2b}; ${m3}; ${a3}" ;;
+esac
+mvm cleanup unfs-x --logs >/dev/null
+
+# The supervisor's open files, with 63 read-only sources that are each 16 directories deep in a read-write one. It
+# holds a descriptor of each anchor, and for a moment two sets of them when macOS replaced a directory: twice what
+# it has open must fit its limit, and after the change it has as many open as before.
+fl="$(mvm launch unfs-d --share-net "${DSRC[@]}" | tail -1)"
+flist="$(mvm unfs-list unfs-d)"; fsup="$(mvm unfs-isolation unfs-d | grep '^UNFSSUP')"
+mv "${D}/proj/c01/1" "${D}/proj/c01/1.old"; mkdir -p "${D}/proj/c01/${DEEP}"
+ftold=no; for _ in $(seq 1 30); do mvm unfs-log unfs-d 40 | grep -q 'the server was told of the 1008 directories now on the way' && { ftold=yes; break; }; sleep 0.5; done
+fsup2="$(mvm unfs-isolation unfs-d | grep '^UNFSSUP')"; ferr="$(mvm unfs-log unfs-d 120 | grep -c 'too many open files')"
+soft="$(printf '%s' "${fsup}" | sed -n 's/.* nofile=\([0-9]*\)\/.*/\1/p')"; fds="$(printf '%s' "${fsup}" | sed -n 's/.* fds=\([0-9]*\).*/\1/p')"; fds2="$(printf '%s' "${fsup2}" | sed -n 's/.* fds=\([0-9]*\).*/\1/p')"
+case "${fl}|${flist}" in "LAUNCHED unfs-d "*"|"*" a=1008 "*) fok=true ;; *) fok=false ;; esac
+[ "${fok}" = true ] && [ "${ftold}" = yes ] && [ "${ferr}" = 0 ] && [ -n "${soft}" ] && [ -n "${fds}" ] && [ "${fds}" -ge 1008 ] && [ $((fds * 2)) -lt "${soft}" ] && [ "${fds2}" = "${fds}" ] \
+  && record supervisor_open_files_fit_its_limit true "64 sources, ${flist}; ${fsup}; after macOS replaced a directory the server was told of all 1,008 again and the supervisor has ${fds2} open; twice ${fds} is under the limit of ${soft}" \
+  || record supervisor_open_files_fit_its_limit false "${fl}; ${flist}; ${fsup}; told again: ${ftold}; then ${fsup2}; 'too many open files' in the log: ${ferr}; log: $(mvm unfs-log unfs-d 6)"
+mvm cleanup unfs-d --logs >/dev/null
+
+# Two binds that spell one directory in two ways (a macOS volume that ignores letter case): the read-only one gets
+# its mount on its name inside the read-write one, as with one spelling, and a directory bound both ways stays
+# writable through its read-write bind.
+if [ ! -d "${SHARE}/M3X/PROJ" ]; then
+  record two_spellings_of_one_directory true "not run: this volume keeps letter case apart, so the two spellings are two names"
+else
+  sp1="$(mvm launch unfs-x --share-net --unfs-mount "${SHARE}" --unfs-src m3x/proj:rw --unfs-src M3X/PROJ/an/in/conf:ro | tail -1)"
+  spn="$(mvm unfs-isolation unfs-x | grep -c '^UNFSMOUNT /s/0/an/in/conf .* ro,')"
+  splog="$(mvm unfs-log unfs-x 30 | grep -c 'under another spelling of the path; it is taken as "m3x/proj/an/in/conf"')"
+  spro="$(probe1 --remove an/in/conf/c.txt)"
+  mvm cleanup unfs-x --logs >/dev/null
+  sp2="$(mvm launch unfs-x --share-net --unfs-mount "${SHARE}" --unfs-src m3x/proj:rw --unfs-src M3X/PROJ:ro | tail -1)"
+  spl="$(mvm unfs-list unfs-x)"; spw="$(probe1 --remove w.txt)"
+  for _ in $(seq 1 10); do [ ! -e "${X}/proj/w.txt" ] && break; sleep 0.5; done
+  spgone="$([ -e "${X}/proj/w.txt" ] && echo still-there || echo removed)"
+  mvm cleanup unfs-x --logs >/dev/null
+  case "${sp1}|${spn}|${splog}|${spro}|${sp2}|${spl}|${spw}|${spgone}" in
+    "LAUNCHED unfs-x "*"|1|1|REMOVE an/in/conf/c.txt status=ROFS|LAUNCHED unfs-x "*"|"*" p=0 i=0 a=0 s=0|REMOVE w.txt status=OK|removed")
+      record two_spellings_of_one_directory true "read-only bind under another letter case: its mount is on its name in the read-write export, the supervisor's log names the spelling taken, ${spro}; the same directory both ways: ${spl}, ${spw}" ;;
+    *) record two_spellings_of_one_directory false "${sp1}; nests ${spn}; log lines ${splog}; ${spro}; ${sp2}; ${spl}; ${spw}; w.txt ${spgone}" ;;
+  esac
+fi
 
 # --- 10. Cleanup leaves nothing ----------------------------------------------------------------------------------
 c="$(mvm cleanup "${SQ}" --logs)"; u="$(mvm unfs "${SQ}")"

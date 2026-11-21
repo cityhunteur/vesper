@@ -38,9 +38,10 @@ import (
 // too. Every replacement of what the path names is then made on macOS, by the user. The watcher walks the chains
 // again at every check; when one is not what it was, the server is told of every chain as it is now.
 
-// maxAnchors bounds the different anchors of one server. The server remembers twice as many, newest first, and the
-// watcher tells it of all the current ones whenever one changed, so the current ones are never among those it drops.
-const maxAnchors = 1024
+// maxAnchors bounds the different anchors of one server, and the directories on the way to one source. The server
+// remembers twice as many anchors, newest first, and the watcher tells it of all the current ones whenever one
+// changed, so the current ones are never among those it drops. It is a variable so that a test can lower it.
+var maxAnchors = 1024
 
 // anchorState is what Run finds at a start and the watcher keeps current. After the watcher has started, only the
 // watcher uses it: its own goroutine, and the goroutine of inMountNamespace that checkOne waits for (tellLeaves
@@ -74,8 +75,12 @@ func (a *anchorState) watched(srcs []Source) bool {
 }
 
 // chainOf opens the directories on the way to rel beneath the share mount mfd, from the mount's root down to the
-// directory that holds the source, and, with leaf, the directory at rel itself. Each is opened beneath the mount
-// with no symbolic link on the way. It returns their identities and a descriptor of each, which the caller closes.
+// directory that holds the source, and, with leaf, the directory at rel itself. It is one walk: each directory is
+// opened by its name in the directory before it, with no symbolic link and no other mount on the way, so every
+// directory of the chain was found in the one before it, also when macOS renames directories meanwhile (TD-082).
+// The walk costs what a walk of every prefix from the mount's root cost: about 0.4 ms for each directory when the
+// kernel must ask macOS again, which it must about once a second (measured: run/TD-082b/measure-chain-walk.txt).
+// It returns their identities and a descriptor of each, which the caller closes.
 func chainOf(mfd int, rel string, leaf bool) ([]fileID, []int, error) {
 	var ids []fileID
 	var fds []int
@@ -93,15 +98,22 @@ func chainOf(mfd int, rel string, leaf bool) ([]fileID, []int, error) {
 	if leaf {
 		last = len(parts)
 	}
+	// A walk holds a descriptor of each directory, so its length has a bound: the bound of the anchors, which no
+	// chain that is of use can pass.
+	if last > maxAnchors {
+		return nil, nil, fmt.Errorf("%d directories lie on the way; at most %d", last, maxAnchors)
+	}
+	how := &unix.OpenHow{
+		Flags:   unix.O_PATH | unix.O_DIRECTORY | unix.O_CLOEXEC,
+		Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_MAGICLINKS | unix.RESOLVE_NO_XDEV,
+	}
+	at := mfd
 	for n := 0; n <= last; n++ {
-		sub := "."
+		name, sub := ".", "."
 		if n > 0 {
-			sub = strings.Join(parts[:n], "/")
+			name, sub = parts[n-1], strings.Join(parts[:n], "/")
 		}
-		fd, err := unix.Openat2(mfd, sub, &unix.OpenHow{
-			Flags:   unix.O_PATH | unix.O_DIRECTORY | unix.O_CLOEXEC,
-			Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_MAGICLINKS | unix.RESOLVE_NO_XDEV,
-		})
+		fd, err := unix.Openat2(at, name, how)
 		if err != nil {
 			return fail(fmt.Errorf("%s: %w", sub, err))
 		}
@@ -111,6 +123,7 @@ func chainOf(mfd int, rel string, leaf bool) ([]fileID, []int, error) {
 			return fail(fmt.Errorf("%s: %w", sub, err))
 		}
 		ids = append(ids, id)
+		at = fd
 	}
 	return ids, fds, nil
 }
@@ -136,13 +149,17 @@ func anchorsOf(ids []fileID, fds []int, roots map[fileID]bool) ([]fileID, []int)
 
 // findAnchors walks the chain of every source that has a protected place. It returns the anchors by source, one
 // descriptor of each different anchor (the caller closes them), and, by source, the error of a chain that could not
-// be walked now.
+// be walked now. It stops when it has found more than maxAnchors different anchors: the caller then has more of
+// them than it can use, and the later sources are not walked.
 func findAnchors(mfds []int, srcs []Source, roots map[fileID]bool) ([][]fileID, map[fileID]int, map[int]error) {
 	chains, held, failed := make([][]fileID, len(srcs)), map[fileID]int{}, map[int]error{}
 	if len(roots) == 0 {
 		return chains, held, failed
 	}
 	for i, s := range srcs {
+		if len(held) > maxAnchors {
+			break
+		}
 		if !hasPlace(srcs, s) || s.Mount < 0 || s.Mount >= len(mfds) {
 			continue
 		}
@@ -202,14 +219,15 @@ func startAnchors(mounts []string, srcs []Source, roots map[fileID]bool) (*ancho
 	}
 	var failed map[int]error
 	a.chains, a.held, failed = findAnchors(mfds, srcs, roots)
-	for i, err := range failed {
-		a.close()
-		return nil, nil, fmt.Errorf("source %q: the directories on the way to it: %w", srcs[i].Rel, err)
-	}
 	if len(a.held) > maxAnchors {
-		n := len(a.held)
 		a.close()
-		return nil, nil, fmt.Errorf("%d directories lie on the way to the read-only sources inside read-write ones; at most %d", n, maxAnchors)
+		return nil, nil, fmt.Errorf("more than %d directories lie on the way to the read-only sources inside read-write ones", maxAnchors)
+	}
+	for i := range srcs { // in the order of the sources, so that the same start names the same source
+		if err, bad := failed[i]; bad {
+			a.close()
+			return nil, nil, fmt.Errorf("source %q: the directories on the way to it: %w", srcs[i].Rel, err)
+		}
 	}
 	return a, anchorList(a.chains), nil
 }
@@ -276,6 +294,12 @@ func (w *fileWatch) checkChains() {
 		return
 	}
 	chains, held, failed := findAnchors(w.mfds, w.srcs, a.roots)
+	// More than the server is told of: the walk stopped there, and what it found is not all the chains.
+	if len(held) > maxAnchors {
+		w.once("anchors", "more than %d directories lie on the way to the read-only sources now, more than the server is told of; it keeps what it was last told", maxAnchors)
+		closeAll(held)
+		return
+	}
 	changed := false
 	for i := range w.srcs {
 		key := fmt.Sprintf("chain %d", i)
@@ -302,11 +326,12 @@ func (w *fileWatch) checkChains() {
 		closeAll(held)
 		return
 	}
-	if len(held) > maxAnchors {
-		w.once("anchors", "%d directories lie on the way to the read-only sources now, more than the %d the server is told of; it keeps what it was last told", len(held), maxAnchors)
+	if len(held) > maxAnchors { // with what was kept for the chains that cannot be walked now
+		w.once("anchors", "more than %d directories lie on the way to the read-only sources now, more than the server is told of; it keeps what it was last told", maxAnchors)
 		closeAll(held)
 		return
 	}
+	delete(w.said, "anchors")
 	notTold := func(err error) {
 		closeAll(held)
 		if errors.Is(err, os.ErrClosed) {

@@ -236,6 +236,10 @@ func probe(args []string) int {
 	fs.StringVar(&until, "until", "", "with --hold-remove or --hold-create: the file to wait for")
 	var rawRemove string
 	fs.StringVar(&rawRemove, "remove", "", "send one REMOVE of this path below /s/0, a directory too, and report the status (TD-080)")
+	var rawRmdir, rawRename, renameTo string
+	fs.StringVar(&rawRmdir, "rmdir", "", "send one RMDIR of this path below /s/0, its last name as it is (. and .. too), and report the status (TD-082)")
+	fs.StringVar(&rawRename, "rename", "", "with --to: send one RENAME of this path below /s/0 to that one, the last names as they are, and report the status (TD-082)")
+	fs.StringVar(&renameTo, "to", "", "with --rename: the new path below /s/0")
 	fs.StringVar(&heldMarker, "held-marker", "", "with --hold-remove or --hold-create: a file to make when the request is held")
 	fs.StringVar(&out, "handles-out", "", "save handles of /s/0 and /s/0/file.txt to this file, and stop")
 	fs.StringVar(&in, "handles-in", "", "use handles saved by --handles-out (after a restart), and stop")
@@ -245,6 +249,22 @@ func probe(args []string) int {
 	b.Cred = nfsprobe.Cred{UID: uint32(uid), GID: uint32(gid)}
 	if rawRemove != "" {
 		if !b.RawRemove(rawRemove) {
+			return 1
+		}
+		return 0
+	}
+	if rawRmdir != "" {
+		if !b.RawRmdir(rawRmdir) {
+			return 1
+		}
+		return 0
+	}
+	if rawRename != "" || renameTo != "" {
+		if rawRename == "" || renameTo == "" {
+			fmt.Fprintln(os.Stderr, "vesper-unfs probe: --rename PATH and --to PATH go together")
+			return 2
+		}
+		if !b.RawRename(rawRename, renameTo) {
 			return 1
 		}
 		return 0

@@ -135,7 +135,8 @@ it wrote; `segmentation fault` there is unfsd's own report (TD-075, D-054). A su
 line. A mount that fails in the guest names the state of the server's two ports.
 
 A share server's supervisor that ends with an error (a bad argument, a refused source, a step of its sandbox that
-fails) writes a line that begins `vesper-unfs fatal:` to its log. While the launch waits for the server to listen
+fails, a watcher of its sources that cannot start, a limit of open files that is too low and cannot be raised)
+writes a line that begins `vesper-unfs fatal:` to its log. While the launch waits for the server to listen
 it looks for that prefix only. It takes such a line as final and fails at once, with the last three lines of the
 server's log in its error; it does not wait for the respawn a second later, though a few of these errors can pass
 (macOS replaced a source at that moment). The supervisor's other lines begin `vesper-unfs run:` (one test hook's

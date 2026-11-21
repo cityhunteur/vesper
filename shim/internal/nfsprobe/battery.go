@@ -137,9 +137,21 @@ func (b *Battery) Held(kind, path, until, marker string, limit time.Duration) bo
 // RawRemove sends one REMOVE of the object at path (below /s/0) and prints "REMOVE PATH status=…". A REMOVE of a
 // directory is something a kernel client never sends (its unlink of a directory fails before it asks the server),
 // and unfs3 answers it with a removal of the directory when it is empty. It reports whether the call was answered.
-func (b *Battery) RawRemove(path string) bool {
+func (b *Battery) RawRemove(path string) bool { return b.raw("REMOVE", path, "") }
+
+// RawRmdir sends one RMDIR of the object at path (below /s/0) and prints "RMDIR PATH status=…". The last name of
+// the path is sent as it is, "." and ".." too, which a kernel client never sends (TD-082).
+func (b *Battery) RawRmdir(path string) bool { return b.raw("RMDIR", path, "") }
+
+// RawRename sends one RENAME of the object at path to the name at to (both below /s/0) and prints
+// "RENAME PATH TO status=…". The last name of each is sent as it is, "." and ".." too.
+func (b *Battery) RawRename(path, to string) bool { return b.raw("RENAME", path, to) }
+
+// raw sends one call that takes a name away. The directory part of a path is walked with LOOKUPs; the last name is
+// not looked up, and goes to the server in the call.
+func (b *Battery) raw(op, path, to string) bool {
 	fail := func(format string, a ...any) bool {
-		fmt.Fprintf(b.Out, "REMOVE failed: "+format+"\n", a...)
+		fmt.Fprintf(b.Out, op+" failed: "+format+"\n", a...)
 		return false
 	}
 	m, err := b.dial(2050, ProgMount)
@@ -157,17 +169,41 @@ func (b *Battery) RawRemove(path string) bool {
 	}
 	defer c.Close()
 	n := NFS{c}
-	dir, name := root, path
-	if i := strings.LastIndex(path, "/"); i >= 0 {
-		if dir, _, st, err = n.Walk(root, path[:i]); err != nil || st != 0 {
-			return fail("walk %s: status=%v err=%v", path[:i], st, err)
+	split := func(path string) (dir []byte, name string, ok bool) {
+		dir, name = root, path
+		if i := strings.LastIndex(path, "/"); i >= 0 {
+			var st Status
+			var err error
+			if dir, _, st, err = n.Walk(root, path[:i]); err != nil || st != 0 {
+				return nil, "", fail("walk %s: status=%v err=%v", path[:i], st, err)
+			}
+			name = path[i+1:]
 		}
-		name = path[i+1:]
+		return dir, name, true
 	}
-	if st, err = n.Remove(dir, name); err != nil {
-		return fail("remove %s: %v", path, err)
+	dir, name, ok := split(path)
+	if !ok {
+		return false
 	}
-	fmt.Fprintf(b.Out, "REMOVE %s status=%v\n", path, st)
+	switch op {
+	case "REMOVE":
+		st, err = n.Remove(dir, name)
+	case "RMDIR":
+		st, err = n.Rmdir(dir, name)
+	case "RENAME":
+		toDir, toName, ok := split(to)
+		if !ok {
+			return false
+		}
+		st, err = n.Rename(dir, name, toDir, toName)
+		path += " " + to
+	default:
+		return fail("no such call")
+	}
+	if err != nil {
+		return fail("%s: %v", path, err)
+	}
+	fmt.Fprintf(b.Out, "%s %s status=%v\n", op, path, st)
 	return true
 }
 

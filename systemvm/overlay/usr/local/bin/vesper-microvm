@@ -540,6 +540,11 @@ unfs_isolation() { # ID
   mounts=$(awk '{print $5}' "/proc/$up/mountinfo" | sort | tr '\n' ',')
   echo "UNFSISO $id pid=$up uid=$(f Uid | cut -f1) gid=$(f Gid | cut -f1) capbnd=$(f CapBnd) capeff=$(f CapEff) capamb=$(f CapAmb) nonewprivs=$(f NoNewPrivs) seccomp=$(f Seccomp) mnt=$(ns mnt) pid_ns=$(ns pid) ipc=$(ns ipc) uts=$(ns uts) net=$netns mounts=$mounts"
   awk '{print "UNFSMOUNT", $5, $4, $6, $9, $10}' "/proc/$up/mountinfo"
+  # The supervisor: its limit of open files and how many it has open now (TD-082).
+  for p in $(cat "$UNFS_CG/$id/cgroup.procs" 2>/dev/null); do
+    [ "$(cat "/proc/$p/comm" 2>/dev/null)" = vesper-unfs ] || continue
+    echo "UNFSSUP $id pid=$p nofile=$(awk '/^Max open files/ {print $4 "/" $5}' "/proc/$p/limits") fds=$(ls "/proc/$p/fd" 2>/dev/null | wc -l)"
+  done
 }
 # Test hooks (make systemvm-unfs-suite). test-unfs-selfcheck builds ID's sandbox again, from the arguments its
 # server was started with, and runs the escape checks in it in place of unfsd. test-unfs-kill kills ID's unfsd, so
@@ -930,6 +935,17 @@ case "$cmd" in
     { i=1; while [ "$i" -le "$before" ]; do echo "s 0 $i"; i=$((i + 1)); done
       echo "$line"
       i=1; while [ "$i" -le "$after" ]; do echo "s 0 $((before + i))"; i=$((i + 1)); done; } >> "$f" && echo "RETOLD $line" ;;
+  test-unfs-list-anchors)   # ID N [again]: tell the server of N made-up anchors, to fill its memory of anchors; with
+    # "again", tell it afterwards once more of the anchors that its list had before any made-up one (TD-082)
+    id=${1:-}; valid_id "$id" || { echo "ERR bad id"; exit 2; }
+    n=${2:-}; digits "$n" && [ "$n" -le 4096 ] && { [ -z "${3:-}" ] || [ "$3" = again ]; } \
+      || { echo "ERR usage: test-unfs-list-anchors ID N [again] (N at most 4096)"; exit 2; }
+    f="$UNFS/$id.prot.list"; [ -f "$f" ] || { echo "ERR no list of $id"; exit 1; }
+    have=$(awk '$1 == "a" && $2 == "0"' "$f" | wc -l)
+    real=$(awk '$1 == "a" && $2 != "0" && !seen[$0]++' "$f")
+    { i=1; while [ "$i" -le "$n" ]; do echo "a 0 $((have + i))"; i=$((i + 1)); done
+      [ -z "${3:-}" ] || printf '%s\n' "$real"; } >> "$f" \
+      && echo "ANCHORS $id made-up=$((have + n)) real=$(printf '%s\n' "$real" | grep -c .) again=${3:-no}" ;;
   unfs-list)   # ID: how many lines of each kind the server's list holds (TD-078)
     id=${1:-}; valid_id "$id" || { echo "ERR bad id"; exit 2; }
     [ -f "$UNFS/$id.prot.list" ] || { echo "LIST $id absent"; exit 1; }
