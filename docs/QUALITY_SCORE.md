@@ -1,7 +1,7 @@
 ---
 status: verified
 owner: cityhunteur
-last_reviewed: 2026-11-06
+last_reviewed: 2026-11-21
 ---
 
 # Vesper Quality Score
@@ -25,16 +25,16 @@ then copy the stable numbers here, summarise the deltas, and link the artifact f
 | Architectural coherence | 15 | Boundaries stay clear and hotspots shrink over time | `src/api.rs` line count against the 1200 / 2500 / 3200 budgets |
 | Truthful delivery process | 15 | Tracker state and milestones match the real code and evidence | Absence of the retired optimistic promotion workflows |
 
-## Current signals (sensor run on 2026-11-06)
+## Current signals (sensor run on 2026-11-21)
 
 | Dimension | Score | Signal |
 |---|---:|---|
 | Knowledge base and docs map | 20 / 20 | 9 / 9 core docs present |
 | Harness sensors | 25 / 25 | 14 / 14 workflows, scripts and templates present |
-| Parity surface coverage | 25 / 25 | 37 / 37 golden routes dispatched explicitly (behaviour-level parity is still unproven against a real VM; the parity matrix has no ticked rows) |
-| Architectural coherence | 8 / 15 | `src/api.rs` is 3153 lines, above the 2500 warning budget and below the 3200 error budget |
+| Parity surface coverage | 25 / 25 | 38 / 38 golden routes dispatched explicitly (behaviour-level parity is still unproven against a real VM; the parity matrix has no ticked rows) |
+| Architectural coherence | 11 / 15 | `src/api.rs` is 1958 lines, under the 2500 warning budget and above the 1200 mark of the full score |
 | Truthful delivery process | 15 / 15 | no optimistic promotion workflows remain |
-| **Total** | **93 / 100 (A)** | |
+| **Total** | **96 / 100 (A)** | |
 
 The sensor measures route dispatch presence and file presence; it does not measure behaviour parity, runtime evidence
 or CI coverage. Read it together with the [parity matrix](specs/firecracker-feature-parity.md) and the
@@ -50,7 +50,8 @@ or CI coverage. Read it together with the [parity matrix](specs/firecracker-feat
 
 ## Current debt anchors
 
-- Finish splitting `src/api.rs`: `errors` and `vm_config` families remain inline (TD-001).
+- `src/api.rs` is under its warning budget since TD-001 (2026-11-21); the families still inline are listed in
+  [ARCHITECTURE.md](../ARCHITECTURE.md#hotspots-and-decomposition-queue), and their tests are in one file (TD-015).
 - Expand behaviour-level parity tests beyond dispatch presence and make a regression to a stub fail CI (TD-003).
 - Add runtime evidence paths for System VM and proxy work (TD-004, TD-005).
 - Add structured logging and request logging so bundles carry API and proxy evidence (TD-007, TD-011).

@@ -1,3 +1,4 @@
+use axum::Json;
 use axum::body::Bytes;
 use axum::http::{Method, StatusCode};
 use axum::response::{IntoResponse, Response};
@@ -186,4 +187,13 @@ fn validate_machine_config_against_balloon(
     }
 
     Ok(())
+}
+
+pub(super) fn machine_config_response(state: &Arc<AppState>) -> Response {
+    let config = state
+        .machine_config
+        .read()
+        .expect("machine config lock poisoned while reading")
+        .clone();
+    (StatusCode::OK, Json(config)).into_response()
 }

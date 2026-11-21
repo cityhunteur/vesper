@@ -12,11 +12,33 @@ validate it against the Firecracker-compatible rules, mutate `AppState`
 
 `tests.rs` in this directory is test code only and is not part of the contract.
 
+`../api.rs` keeps `AppState`, the route matching, the dispatch table of `handle_all` (every
+`("METHOD", "/path") =>` arm stays there, because the route-coverage sensors read only that file), the state guard,
+and the families that are not moved yet: drives, network interfaces, memory hotplug, snapshots, and the serial,
+entropy and vsock devices, with the request and response types they share.
+
 ## Interface
 
-All handlers share the signature
-`fn(state: &Arc<AppState>, method: &Method, template: &str, body: Bytes) -> Response`.
+The handlers of a body-carrying route share the signature
+`fn(state: &Arc<AppState>, method: &Method, template: &str, body: Bytes) -> Response`; a `GET` handler takes no body.
 
+- `errors.rs` is the error surface, not a route family: `ErrorEnvelope` (re-exported as `api::ErrorEnvelope`),
+  `error_response` (the only builder of an error body), `state_invalid_message`, and every error message of the
+  model backend as a constant or a small formatting function, those of `pmem.rs` too. A message lives here, not
+  beside its handler, so that the texts a client can match on are in one file.
+- `vm_config.rs` serves the routes about the machine as a whole: `instance_info_response` (`GET /`),
+  `firecracker_version_response` (`GET /version`), `full_vm_config_response` (`GET /vm/config`, with
+  `FullVmConfigurationResponse` in Firecracker's key order) and `handle_patch_vm` (`PATCH /vm`: `Paused` and
+  `Resumed`, with its own `VmState` rules).
+- `balloon.rs` serves `/balloon`, `/balloon/statistics` and `/balloon/hinting/{start,status,stop}`:
+  `handle_get_balloon`, `handle_put_balloon`, `handle_patch_balloon`, `handle_get_balloon_statistics`,
+  `handle_patch_balloon_statistics`, `handle_get_balloon_hinting_status`, `handle_patch_balloon_hinting_start`,
+  `handle_patch_balloon_hinting_stop`, with the balloon's types (`BalloonDeviceConfig` is also the type of
+  `AppState::balloon_config`) and validators.
+- `mmds.rs` serves `/mmds` and `/mmds/config`: `handle_get_mmds`, `handle_put_mmds`, `handle_patch_mmds`,
+  `handle_put_mmds_config`, with `MmdsConfig`, the 51,200-byte limit of the data store, the link-local address
+  rule and the JSON merge patch.
+- `machine_config.rs:machine_config_response` serves `GET /machine-config`.
 - `actions.rs:handle_actions` serves `PUT /actions`. Matches `ActionType`
   (`FlushMetrics`, `InstanceStart`, `SendCtrlAltDel`); `InstanceStart` moves
   `vm_state` from `PreBoot` to `Running`.
