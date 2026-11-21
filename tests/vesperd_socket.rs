@@ -114,31 +114,29 @@ fn a_stale_socket_is_replaced() {
     assert_eq!(mode(&socket), 0o600);
 }
 
-/// The socket has its owner-only mode from the moment it has its name: it is bound under another name, changed
-/// and renamed (a socket bound in place had the umask's mode for a moment). The other name does not stay.
+/// A socket that takes a connect is owner-only already: `vesperd` binds it, sets the mode, and listens only then
+/// (a socket that listened from its bind took connects for a moment with the umask's mode). The test connects as
+/// fast as it can and reads the mode at the first connect that works.
 #[test]
-fn the_socket_is_owner_only_as_soon_as_it_is_there() {
+fn a_socket_that_takes_a_connect_is_owner_only() {
     let tmp = tempfile::tempdir().expect("tempdir");
     std::fs::set_permissions(tmp.path(), std::fs::Permissions::from_mode(0o700)).expect("chmod");
     let socket = tmp.path().join("early.sock");
-    let server = {
+    let mut server = {
         let _spawning = spawn_lock();
         Running(vesperd(Some(&socket), tmp.path()).spawn().expect("spawn vesperd"))
     };
     let started = Instant::now();
     let mut seen = None;
     while started.elapsed() < Duration::from_secs(20) && seen.is_none() {
-        // No sleep: the first look that finds the socket is the earliest this test can make.
-        seen = std::fs::metadata(&socket).ok().map(|m| m.permissions().mode() & 0o777);
+        // No sleep: the first connect that works is the earliest look this test can take.
+        if std::os::unix::net::UnixStream::connect(&socket).is_ok() {
+            seen = Some(mode(&socket));
+        } else if let Ok(Some(status)) = server.0.try_wait() {
+            panic!("vesperd ended before it listened: {status}");
+        }
     }
-    assert_eq!(seen, Some(0o600), "the mode of the socket when it was first seen");
-    drop(server);
-    let mut names: Vec<_> = std::fs::read_dir(tmp.path())
-        .expect("read_dir")
-        .map(|e| e.expect("entry").file_name().to_string_lossy().into_owned())
-        .collect();
-    names.sort();
-    assert!(names.iter().all(|n| n == "early.sock" || n == "early.sock.lock"), "left in the directory: {names:?}");
+    assert_eq!(seen, Some(0o600), "the mode of the socket at the first connect that worked");
 }
 
 #[test]
