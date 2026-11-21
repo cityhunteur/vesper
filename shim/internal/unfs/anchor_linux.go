@@ -342,8 +342,10 @@ func (w *fileWatch) checkChains() {
 		}
 	}
 	if !changed {
-		// The chains are what was last told: a later passing of the bound is news again.
+		// The chains are what was last told: a later passing of the bound, or a later anchor that cannot be
+		// held again, is news again.
 		delete(w.said, "anchors")
+		delete(w.said, "dup")
 		closeAll(held)
 		return
 	}
@@ -353,6 +355,7 @@ func (w *fileWatch) checkChains() {
 		return
 	}
 	delete(w.said, "anchors")
+	delete(w.said, "dup")
 	notTold := func(err error) {
 		closeAll(held)
 		if errors.Is(err, os.ErrClosed) {

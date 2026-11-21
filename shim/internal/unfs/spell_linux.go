@@ -110,10 +110,10 @@ func spellAll(srcs []Source, ways [][]fileID) []Source {
 
 // respell returns srcs with one spelling for the sources that name one directory tree (see above), and a line for
 // each source it wrote anew. It walks the way of each source, in the order of spellOrder, and holds the directory
-// of each directory source until the spellings are settled. A new spelling is kept only when it is shown to name
-// the same directory as the given one: both ways are walked again and held together, and their last directories
-// (the source's own, or the one that holds a file source) must be one. So a number that the System VM gave to two
-// directories one after the other can never make a source name another place than the user gave.
+// of each directory source until the spellings are settled. As a second check, the new spellings are kept only
+// when each is shown to name the same directory as the given one: both ways are walked again and held together,
+// and their last directories (the source's own, or the one that holds a file source) must be one. When one is not,
+// every source is taken as it was given. So no source can name another place than the user gave.
 func respell(mounts []string, srcs []Source) ([]Source, []string) {
 	var mfds, held []int
 	defer func() {
@@ -188,8 +188,10 @@ func respell(mounts []string, srcs []Source) ([]Source, []string) {
 		closeFds(gfds)
 		closeFds(tfds)
 		if !same {
-			out[i].Rel = srcs[i].Rel
-			continue
+			// One spelling that is not shown to be right, and every source is taken as it was given: sources
+			// that took their spelling from this one would otherwise keep it, and a pair that agreed as given
+			// would not agree any more (council J-1).
+			return append([]Source(nil), srcs...), []string{fmt.Sprintf("source %q could not be shown to name the same directory as %q; every source is taken as it was given", srcs[i].Rel, out[i].Rel)}
 		}
 		notes = append(notes, fmt.Sprintf("source %q names a place in another source's directory under another spelling of the path; it is taken as %q", srcs[i].Rel, out[i].Rel))
 	}
