@@ -20,6 +20,17 @@ fn vesperd(socket: Option<&Path>, runtime_dir: &Path) -> Command {
     cmd
 }
 
+/// Held while a test starts a `vesperd`, and while a test has a listening socket that must be gone before the
+/// next start. On macOS a new socket is marked close-on-exec a moment after it is made, so a `vesperd` that
+/// another test starts in that moment inherits it: the "stale" socket of `a_stale_socket_is_replaced` then had a
+/// listener in another process, a connect to it worked, and its own `vesperd` refused to start (about one run in
+/// six on a Mac when the tests ran together).
+static SPAWN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn spawn_lock() -> std::sync::MutexGuard<'static, ()> {
+    SPAWN.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 struct Running(Child);
 impl Drop for Running {
     fn drop(&mut self) {
@@ -29,7 +40,10 @@ impl Drop for Running {
 }
 
 fn start(socket: Option<&Path>, runtime_dir: &Path, expect: &Path) -> Running {
-    let child = vesperd(socket, runtime_dir).spawn().expect("spawn vesperd");
+    let child = {
+        let _spawning = spawn_lock();
+        vesperd(socket, runtime_dir).spawn().expect("spawn vesperd")
+    };
     let started = Instant::now();
     while started.elapsed() < Duration::from_secs(20) {
         if std::os::unix::net::UnixStream::connect(expect).is_ok() {
@@ -42,7 +56,11 @@ fn start(socket: Option<&Path>, runtime_dir: &Path, expect: &Path) -> Running {
 
 /// Runs vesperd expecting it to fail; returns its stderr.
 fn refused(socket: Option<&Path>, runtime_dir: &Path) -> String {
-    let out = vesperd(socket, runtime_dir).output().expect("run vesperd");
+    let child = {
+        let _spawning = spawn_lock();
+        vesperd(socket, runtime_dir).spawn().expect("spawn vesperd")
+    };
+    let out = child.wait_with_output().expect("run vesperd");
     assert!(!out.status.success(), "vesperd should have refused to start");
     String::from_utf8_lossy(&out.stderr).into_owned()
 }
@@ -87,10 +105,38 @@ fn a_stale_socket_is_replaced() {
     let tmp = tempfile::tempdir().expect("tempdir");
     std::fs::set_permissions(tmp.path(), std::fs::Permissions::from_mode(0o700)).expect("chmod");
     let socket = tmp.path().join("stale.sock");
-    drop(std::os::unix::net::UnixListener::bind(&socket).expect("bind"));
+    {
+        let _no_spawn_meanwhile = spawn_lock();
+        drop(std::os::unix::net::UnixListener::bind(&socket).expect("bind"));
+    }
     assert!(socket.exists(), "a dropped listener leaves its socket file");
     let _server = start(Some(&socket), tmp.path(), &socket);
     assert_eq!(mode(&socket), 0o600);
+}
+
+/// A socket that takes a connect is owner-only already: `vesperd` binds it, sets the mode, and listens only then
+/// (a socket that listened from its bind took connects for a moment with the umask's mode). The test connects as
+/// fast as it can and reads the mode at the first connect that works.
+#[test]
+fn a_socket_that_takes_a_connect_is_owner_only() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    std::fs::set_permissions(tmp.path(), std::fs::Permissions::from_mode(0o700)).expect("chmod");
+    let socket = tmp.path().join("early.sock");
+    let mut server = {
+        let _spawning = spawn_lock();
+        Running(vesperd(Some(&socket), tmp.path()).spawn().expect("spawn vesperd"))
+    };
+    let started = Instant::now();
+    let mut seen = None;
+    while started.elapsed() < Duration::from_secs(20) && seen.is_none() {
+        // No sleep: the first connect that works is the earliest look this test can take.
+        if std::os::unix::net::UnixStream::connect(&socket).is_ok() {
+            seen = Some(mode(&socket));
+        } else if let Ok(Some(status)) = server.0.try_wait() {
+            panic!("vesperd ended before it listened: {status}");
+        }
+    }
+    assert_eq!(seen, Some(0o600), "the mode of the socket at the first connect that worked");
 }
 
 #[test]

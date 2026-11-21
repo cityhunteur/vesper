@@ -200,14 +200,19 @@ fn default_socket() -> Result<PathBuf, String> {
     Ok(base.join("vesperd.sock"))
 }
 
-/// Binds `socket` (after `claim_socket`) and makes it owner-only.
+/// Binds `socket` (after `claim_socket`) and makes it owner-only before it listens. A socket that does not listen
+/// yet refuses every connect, so no client reaches the server through a socket whose mode is still the one the
+/// umask gave it. (Bound and listening at once and then changed, the socket took connects for a moment with that
+/// mode: with a umask that leaves the socket writable by others, another user could connect then, and a test that
+/// read the mode as soon as a connect worked saw 0755 once in CI.)
 fn bind_owner_only(socket: &Path) -> Result<tokio::net::UnixListener, String> {
     use std::os::unix::fs::PermissionsExt;
-    let listener = tokio::net::UnixListener::bind(socket)
-        .map_err(|err| format!("bind unix socket {}: {err}", socket.display()))?;
+    let unbound = tokio::net::UnixSocket::new_stream()
+        .map_err(|err| format!("make a unix socket for {}: {err}", socket.display()))?;
+    unbound.bind(socket).map_err(|err| format!("bind unix socket {}: {err}", socket.display()))?;
     std::fs::set_permissions(socket, std::fs::Permissions::from_mode(0o600))
         .map_err(|err| format!("set socket permissions {}: {err}", socket.display()))?;
-    Ok(listener)
+    unbound.listen(1024).map_err(|err| format!("listen on unix socket {}: {err}", socket.display()))
 }
 
 async fn shutdown_signal() {
