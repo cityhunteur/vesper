@@ -262,3 +262,70 @@ func TestStartPassesTheSizeToTheLaunch(t *testing.T) {
 		t.Fatalf("the share arguments changed: %q", task.LaunchArgs)
 	}
 }
+
+type releaseBackend struct {
+	backend.Backend
+	refuse   bool
+	released []uint32
+}
+
+func (b *releaseBackend) Release(_ context.Context, _ string, port uint32) error {
+	if b.refuse {
+		return errors.New("session-still-running")
+	}
+	b.released = append(b.released, port)
+	return nil
+}
+
+// TD-041: a deleted exec's port serves the next exec; the guest must release it first when it knew of it, and a
+// port it does not release is not reused.
+func TestDeletedExecPortsAreReused(t *testing.T) {
+	ctx := context.Background()
+	fake := &releaseBackend{}
+	s, err := NewService(ctx, nil, nil, fake)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent := newTask("init", t.TempDir())
+	if err := parent.MarkRunning(42); err != nil {
+		t.Fatal(err)
+	}
+	s.task = parent
+	raw, _ := json.Marshal(&specs.Process{Args: []string{"/app"}, Cwd: "/"})
+	exec := func(id string) *Task {
+		t.Helper()
+		if _, err := s.Exec(ctx, &taskAPI.ExecProcessRequest{ID: "init", ExecID: id, Spec: &anypb.Any{Value: raw}}); err != nil {
+			t.Fatal(err)
+		}
+		p, err := s.getProcess("init", id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	del := func(p *Task) {
+		t.Helper()
+		p.MarkExited(0, time.Now())
+		if _, err := s.Delete(ctx, &taskAPI.DeleteRequest{ID: "init", ExecID: p.ID}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a := exec("a")
+	del(a) // never started: the guest has no session for it
+	if b := exec("b"); b.Port != a.Port || len(fake.released) != 0 {
+		t.Fatalf("an exec the guest never knew: port %d, want %d; released %v", b.Port, a.Port, fake.released)
+	}
+	c := exec("c")
+	c.guestKnows = true
+	del(c)
+	if d := exec("d"); d.Port != c.Port || len(fake.released) != 1 || fake.released[0] != c.Port {
+		t.Fatalf("a released exec: port %d, want %d; released %v", d.Port, c.Port, fake.released)
+	}
+	fake.refuse = true
+	e := exec("e")
+	e.guestKnows = true
+	del(e)
+	if f := exec("f"); f.Port == e.Port {
+		t.Fatalf("a port the guest did not release was reused: %d", f.Port)
+	}
+}

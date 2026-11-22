@@ -108,9 +108,12 @@ stdout and stderr on `base-port`, `base-port+1` and `base-port+2`. A terminal me
 The guest returns `STARTED <guest-pid>` and later `EXIT <status>`, or `ERROR <JSON>` on runtime failure.
 The shim bounds control replies. Requests validate numeric fields; configs may contain at most 1 MiB.
 
-`SIGNAL <base-port> <signal> <all>`, `RESIZE <base-port> <rows> <cols>` and
-`ABORT <base-port> 0 0` use separate control connections. Signal numbers are 0..64.
-Terminal dimensions are 1..65535. Init uses port 1028; execs reserve consecutive groups of four ports.
+`SIGNAL <base-port> <signal> <all>`, `RESIZE <base-port> <rows> <cols>`, `ABORT <base-port> 0 0` and
+`RELEASE <base-port> 0 0` use separate control connections. Signal numbers are 0..64.
+Terminal dimensions are 1..65535. Init uses port 1028; execs reserve consecutive groups of four ports. When an exec is
+deleted its group goes back to the shim's free list: at once if the guest never heard of it, else after `RELEASE`
+removed the ended session's directory (`OK`; refused for 1028 or a session that has not ended). A group the guest does
+not release is never reused (TD-041).
 The session key `p<base-port>` also names its guest directory and console breadcrumbs.
 The task id names its VMM, jail, shim record and console log.
 
