@@ -93,8 +93,81 @@ def line_count(path: Path) -> int:
     return read_text(path).count("\n") + 1
 
 
-def local_refs(text: str) -> Set[str]:
-    return set(LOCAL_REF_RE.findall(text))
+GROUP_RE = re.compile(r"(?:crate|vesper)::\{")
+SUPER_RE = re.compile(r"\b((?:super::)+)(\{|[a-z_][a-z0-9_]*)")
+IDENT_RE = re.compile(r"[a-z_][a-z0-9_]*")
+
+
+def group_items(text: str, start: int) -> List[str]:
+    """The first identifier of each top-level item of the `{...}` group that opens at text[start] (TD-018)."""
+    depth, item, items = 0, "", []
+    for ch in text[start:]:
+        if ch == "{":
+            depth += 1
+            if depth == 1:
+                continue
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                items.append(item)
+                break
+        if depth == 1 and ch == ",":
+            items.append(item)
+            item = ""
+        elif depth >= 1:
+            item += ch
+    out = []
+    for raw in items:
+        m = IDENT_RE.match(raw.strip())
+        if m and m.group(0) not in ("self", "super", "crate"):
+            out.append(m.group(0))
+    return out
+
+
+def module_path(rel: str) -> List[str]:
+    """`src/api/tests/mod.rs` -> ["api", "tests"]; `src/api.rs` -> ["api"]; `src/lib.rs` -> []."""
+    parts = rel[len("src/"):-len(".rs")].split("/")
+    if parts[-1] in ("mod", "lib"):
+        parts = parts[:-1]
+    return parts
+
+
+INLINE_MOD_RE = re.compile(r"^\s*(?:pub(?:\([a-z]+\))? )?mod [a-z_][a-z0-9_]* \{", re.M)
+
+
+def inline_depth(text: str, pos: int) -> int:
+    """How many inline `mod name { ... }` blocks are open at pos (a `super::` there climbs out of them first)."""
+    depth = 0
+    for m in INLINE_MOD_RE.finditer(text, 0, pos):
+        opened, i = 0, m.end() - 1
+        while i < pos:
+            if text[i] == "{":
+                opened += 1
+            elif text[i] == "}":
+                opened -= 1
+                if opened == 0:
+                    break
+            i += 1
+        if opened > 0:
+            depth += 1
+    return depth
+
+
+def local_refs(text: str, rel: str = "") -> Set[str]:
+    refs = set(LOCAL_REF_RE.findall(text))
+    for m in GROUP_RE.finditer(text):
+        refs.update(group_items(text, m.end() - 1))
+    if rel:
+        mod = module_path(rel)
+        for m in SUPER_RE.finditer(text):
+            up = m.group(1).count("super::")
+            if len(mod) + inline_depth(text, m.start()) - up != 0:
+                continue  # stays inside this file's own top-level module
+            if m.group(2) == "{":
+                refs.update(group_items(text, m.end() - 1))
+            else:
+                refs.add(m.group(2))
+    return refs
 
 
 def main() -> int:
@@ -109,6 +182,13 @@ def main() -> int:
     warnings: List[str] = []
     line_sizes: Dict[str, int] = {}
 
+    # Every library file has a RULES row; a new one is an error until it gets one (TD-018). Binaries may use any
+    # library layer (ARCHITECTURE.md, layer 4), so src/bin/ is not listed.
+    for path in sorted((root / "src").rglob("*.rs")):
+        rel = path.relative_to(root).as_posix()
+        if not rel.startswith("src/bin/") and rel not in RULES:
+            errors.append(f"{rel} has no RULES row (add one with its allowed local references)")
+
     for rel, allowed in RULES.items():
         path = root / rel
         if not path.exists():
@@ -116,7 +196,7 @@ def main() -> int:
             continue
 
         text = read_text(path)
-        refs = local_refs(text)
+        refs = local_refs(text, rel)
         disallowed = sorted(ref for ref in refs if ref not in allowed)
         if rel == "src/lib.rs":
             # lib.rs is just module declarations in the current repo

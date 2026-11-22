@@ -58,7 +58,7 @@ the broader suite. `cargo test` was run successfully on 2026-11-05.
 | ctr conformance | Yes | `make ctr-conformance` (shim 22 + bundle 15 + restart 18 + exec 19 steps, as recorded in `docs/specs/ctr-conformance-baseline.json` through `ctr`, incl. `task metrics`, assembled with the baseline revisions and the GH #26 checklist); `make ctr-conformance-check` validates the committed capture | Rust + guest shell + Python | `make systemvm-up && make ctr-conformance` | macOS on an M3 or later; the check runs anywhere |
 | Reliability | Yes | `make systemvm-reliability` runs N probed boots (default 50) under the threshold, then the control, services and Docker suites on a kept-up VM, checks for leaked processes, sockets and pid files and for boot-time drift, and writes `run/systemvm/reliability-report.json` with actionable `failures[]` | bash, Python | `make systemvm-reliability` (`CYCLES=200 …`); `python3 -I scripts/systemvm/reliability_report.py --self-test` (CI) | macOS on Apple silicon for the run |
 | Image reproducibility | Yes | `systemvmctl verify-image` checks the unpacked kernel, initramfs and ISO digests and the `expected_image_id` against `docs/specs/systemvm-image.lock.yaml`; `verify-packages` checks every guest package against `systemvm-packages.lock.yaml`; the derived initramfs must start with the pinned one | Rust, bash, Python | `make systemvm-fetch`, `make systemvm-overlay` (CI: `systemvm-image.yml`, Linux) | network on first run (ISO and packages cached afterwards); `bsdtar` |
-| Documentation | Yes | `harness/tests/`, `harness/check_docs.py`, `scripts/harness/check_docs.py` | unittest | `python3 harness/check_docs.py --strict`, `python3 -m unittest discover -s harness/tests`, `python3 scripts/harness/check_docs.py --root .` | Python 3.11+ |
+| Documentation | Yes | `harness/tests/`, `harness/check_docs.py` | unittest | `python3 harness/check_docs.py --strict`, `python3 -m unittest discover -s harness/tests`, `python3 scripts/harness/check_docs.py --root .` | Python 3.11+ |
 
 Suite sizes on 2026-11-05: `tests/api_contract.rs` 115 tests, `tests/contract_golden.rs` 1, `src/api/tests.rs` 67 (now `src/api/tests/`, 80 on 2026-11-22),
 plus smaller unit modules in `api_matrix`, `api_behavior_matrix`, `proxy`, `baseline`, `compat`, `spec`, `platform`
@@ -104,7 +104,7 @@ runs on `macos-15`; all are reproducible locally:
 - `baseline-governance.yml` (lock file, `src/baseline.rs`, `baselinectl`): `cargo test`, metadata generate and validate.
 - `compat-exceptions.yml` (registry, `src/compat.rs`, `compatexctl`): `cargo test`, `compatexctl`; a `workflow_dispatch`
   input enables the zero-open gate. There is no schedule, so a calendar expiry is caught only on the next run.
-- `harness-docs.yml`, `harness-structure.yml`, `harness-quality-score.yml`: the Python sensors on docs and script changes.
+- `harness-structure.yml`, `harness-quality-score.yml`: the Python sensors on docs and script changes.
 - `harness-garbage-collection.yml`: weekly janitor scan with `--fail-on never` (non-blocking).
 - `docs.yml` (every PR and push): `harness/check_docs.py --strict` and its unit tests.
 
@@ -136,7 +136,7 @@ A change is complete when:
    for governance changes, `baselinectl --mode generate` then `--mode validate` and `compatexctl` pass.
 4. Behaviour you cannot see in tests is shown with evidence: a command transcript, proxy log, boot report or
    verification bundle.
-5. `python3 harness/check_docs.py` and `python3 scripts/harness/check_docs.py --root .` pass, and the owning docs are
+5. `python3 harness/check_docs.py` passes, and the owning docs are
    updated.
 6. The linked GitHub issue records the commit SHA, local verification, CI result and remaining gaps
    ([CLAUDE.md](../CLAUDE.md), [harness-engineering.md](process/harness-engineering.md)).

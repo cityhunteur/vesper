@@ -171,7 +171,6 @@ All generated files are committed and checked in CI.
 python3 harness/check_docs.py            # structural checks
 python3 harness/check_docs.py --strict   # also fails on unfilled template content; this is what docs.yml runs in CI
 python3 -m unittest discover -s harness/tests
-python3 scripts/harness/check_docs.py --root .   # older required-files and link checker (CI: harness-docs.yml)
 ```
 
 These need Python 3.11 or later, and nothing outside the standard library. See [harness/README.md](../harness/README.md).

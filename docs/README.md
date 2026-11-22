@@ -104,7 +104,7 @@ fails while any marker remains outside a `TEMPLATE.md` file.
 ## Keeping docs current
 
 - **In every change:** update the owning document. Two checkers run in CI: `harness/check_docs.py`
-  (`.github/workflows/docs.yml`) and the older `scripts/harness/check_docs.py` (`.github/workflows/harness-docs.yml`).
+  (`.github/workflows/docs.yml`), the one docs checker since TD-012.
 - **Recurring:** an agent runs [doc-gardening](../harness/prompts/doc-gardening.md) to find documents that no longer match
   the code, and [entropy sweep](../harness/prompts/entropy-sweep.md) to find code that no longer matches the documented
   principles. `scripts/harness/janitor_scan.py` covers broken links, missing route handlers and oversized files.

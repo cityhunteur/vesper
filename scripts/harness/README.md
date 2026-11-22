@@ -4,8 +4,7 @@
 
 Harness "sensor" scripts for the Vesper engineering workflow. Four Python
 checkers read the repository under `--root` and emit JSON and Markdown
-reports plus exit codes: `check_docs.py` (required docs and link integrity),
-`check_structure.py` (module dependency allowlists, line budgets, route
+reports plus exit codes: `check_structure.py` (module dependency allowlists, line budgets, route
 coverage), `compute_quality_score.py` (a 100-point score across five
 dimensions), and `janitor_scan.py` (drift scan with configurable failure
 threshold). Two Bash helpers, `init_issue_run.sh` and
@@ -22,13 +21,10 @@ spawn no subprocesses and make no network calls.
 - `--markdown-out` (default empty): optional Markdown report path.
 - Each prints `ERROR: ...` and `WARNING: ...` lines (or raw `error:`/`warning:` messages for `janitor_scan.py`) to stdout.
 
-### `check_docs.py`
+### `check_docs.py` (retired)
 
-- `REQUIRED_FILES`: 17 repo-relative files that must exist (`AGENTS.md`, `WORKFLOW.md`, `docs/index.md`, `docs/ARCHITECTURE.md`, `docs/PLANS.md`, `docs/QUALITY_SCORE.md`, `docs/RELIABILITY.md`, `docs/SECURITY.md`, `docs/design/index.md`, `docs/design/core-beliefs.md`, `docs/plans/active/README.md`, `docs/plans/completed/README.md`, `docs/plans/tech-debt-tracker.md`, `docs/generated/README.md`, `docs/process/harness-engineering.md`, `docs/progress/symphony-milestones.md`, `docs/references/README.md`).
-- `MARKDOWN_GLOBS`: `AGENTS.md`, `WORKFLOW.md`, `docs/**/*.md`.
-- `resolve_link(base, target, root)`: accepts empty, `#` anchor, `://`, and `mailto:` links; resolves `/`-prefixed links as repo-absolute and relative links against the file's parent; rejects links that escape `root` or do not exist.
-- `find_markdown_files(root)`: expands `MARKDOWN_GLOBS`, deduplicates, returns sorted paths.
-- `main`: exit `1` if any errors, else `0`. JSON keys: `root`, `status` (`pass`|`fail`), `errors`, `warnings`, `checked_files`. Markdown headed `# Harness Docs Report`.
+Retired on 2026-11-22 (TD-012): its required files, its required mentions in `AGENTS.md` and `docs/README.md`, and its
+absolute-path warning are rules of `harness/check_docs.py` (`harness/config.toml`), run by `docs.yml`.
 
 ### `check_structure.py`
 
@@ -40,7 +36,7 @@ spawn no subprocesses and make no network calls.
 
 ### `compute_quality_score.py`
 
-- `CORE_DOCS` (9 files), `HARNESS_WORKFLOWS` (`.github/workflows/harness-docs.yml`, `harness-structure.yml`, `harness-quality-score.yml`, `harness-garbage-collection.yml`), `HARNESS_SCRIPTS` (the six scripts in this directory), `TEMPLATES` (four files under `.symphony/templates/`).
+- `CORE_DOCS` (9 files), `HARNESS_WORKFLOWS` (`.github/workflows/docs.yml`, `harness-structure.yml`, `harness-quality-score.yml`, `harness-garbage-collection.yml`), `HARNESS_SCRIPTS` (`harness/check_docs.py` and five scripts in this directory), `TEMPLATES` (four files under `.symphony/templates/`).
 - `score_fraction(present, total, weight)` -> `(round(weight * present / max(total, 1)), "present/total")`.
 - `compute_route_coverage(root)` -> `(handled, total, missing)`; recognises only the `route.method` literal for `PUT /actions`, not the `route_match` variant that `check_structure.py` accepts.
 - `grade(score)`: `A` >= 90, `B` >= 80, `C` >= 70, `D` >= 60, else `F`.
@@ -86,7 +82,7 @@ spawn no subprocesses and make no network calls.
 
 ## Verification
 
-- Run: `python3 scripts/harness/check_docs.py --root .`
+- Run: `python3 harness/check_docs.py`
 - Run: `python3 scripts/harness/check_structure.py --root .`
 - Run: `python3 scripts/harness/compute_quality_score.py --root .`
 - Run: `python3 scripts/harness/janitor_scan.py --root . --fail-on errors`

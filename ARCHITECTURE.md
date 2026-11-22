@@ -130,10 +130,11 @@ allowlist of [scripts/harness/check_structure.py](scripts/harness/check_structur
 top-level `src/*.rs` modules, the nine modules under `src/api/` (eight route families and the error surface), `src/baseline/upstream.rs`,
 `src/control/launchapi.rs`, `src/control/stage.rs`, `src/control/suites.rs` and its thirteen children,
 `src/proxy/relay.rs`, the five `src/systemvm/` children, `src/api_behavior_matrix/validate.rs`, `src/baseline/upstream/tests.rs`,
-`src/api_replay/tests.rs` and the twelve files of the API handler tests under `src/api/tests/` (TD-015, TD-023). That is every library file. The
-allowlist is a fixed list, not a glob: a new module is unchecked, and has no line budget, until a `RULES` row is
-added. Grouped `use crate::{..}` imports, `super::super` paths, the binaries and `tests/` are not checked, and
-`src/lib.rs` has a row for its line budget only (TD-018). The Go module in `shim/` and the Swift launcher are outside this check.
+`src/api_replay/tests.rs` and the twelve files of the API handler tests under `src/api/tests/` (TD-015, TD-023). That is every library file, and a
+library file with no `RULES` row is an error. References are read from single paths, grouped `use crate::{..}`
+imports, and `super::` paths that climb to the crate root (counting inline `mod … {}` blocks). The binaries and
+`tests/` are not checked: a binary may use any library layer; `src/lib.rs` has a row for its line budget only
+(TD-018). The Go module in `shim/` and the Swift launcher are outside this check.
 
 | Layer | Purpose | Modules | May reference | Enforced |
 |---|---|---|---|---|
@@ -224,7 +225,6 @@ runtime or control-plane modules.
     self-test and `baselinectl --mode upstream-pins` (lock file, `src/baseline.rs`, `src/baseline/**`, `baselinectl`,
     the upstream-suite classes, artifact digests and scripts).
   - `compat-exceptions.yml`: `cargo test`, `compatexctl` (registry, `src/compat.rs`, `compatexctl`).
-  - `harness-docs.yml`: `scripts/harness/check_docs.py` (docs, `AGENTS.md`, `ARCHITECTURE.md`, `WORKFLOW.md`).
   - `harness-structure.yml`: `check_structure.py` (`src/**`, the script, `ARCHITECTURE.md`).
   - `harness-quality-score.yml`: `compute_quality_score.py` (docs, `scripts/harness/**`, `src/**`, `tests/**`,
     `third_party/**`, `.symphony/templates/**`).
@@ -504,7 +504,7 @@ or parity documents.
 
 | # | Invariant | Status | Enforced by | Verify with | See |
 |---|---|---|---|---|---|
-| 1a | `vesperd` is the only binary that serves the control-plane API. The other listeners on macOS are `vesper-proxy`'s socket, which only relays bytes (plus the vsock `CONNECT` preface); the launcher's owner-only bridge socket; and, with `--publish-ports`, loopback TCP listeners for containers' published ports, for which the proxy also reads the Docker API | Verified | Review only; no mechanical check (TD-008) | `grep -n 'UnixListener::bind' src/bin/vesperd.rs src/proxy.rs` (expect 1 hit in `vesperd.rs`, shared by both backends, and 6 in `proxy.rs`, of which the five inside the `#[cfg(test)]` module are test fixtures) | [src/bin/vesperd.rs](src/bin/vesperd.rs), [src/proxy.rs](src/proxy.rs) |
+| 1a | `vesperd` is the only binary that serves the control-plane API. The other listeners on macOS are `vesper-proxy`'s socket, which only relays bytes (plus the vsock `CONNECT` preface); the launcher's owner-only bridge socket; and, with `--publish-ports`, loopback TCP listeners for containers' published ports, for which the proxy also reads the Docker API | Verified | `tests/listeners.rs` (TD-008): only `src/bin/vesperd.rs` serves the API router, and every listener outside test code is on its list with a reason; a new one fails the test | `cargo test --test listeners` | [src/bin/vesperd.rs](src/bin/vesperd.rs), [src/proxy.rs](src/proxy.rs) |
 | 1b | Raw Firecracker and containerd sockets stay private to the System VM | Partly verified | The guest listens on vsock 1024 (agent), 2375 (Docker relay), 2400 (port relay) and 2401 (share notification sink), none of which is a raw Firecracker or containerd socket; the agent on 1024 does reach jailed Firecracker API sockets through `FCPARITY api` and `FCAPI`, and starts `vesperd` microVMs with `LAUNCHAPI` (ADR 0007 slice 3), so 1024 is a control surface that the bridge allow-list (1024, 2375, 2400, 2401; TD-027) keeps reachable; each guest listener turns away a peer that is not the Mac, and no process in the System VM can connect to its own vsock listeners; `make docker-smoke` enumerates host sockets and expects a refused `CONNECT`, and `make docker-conformance` proves the allow-list | `make systemvm-up && make docker-up && make docker-smoke` (steps `no_raw_host_sockets`, `raw_guest_port_denied`); `make docker-conformance` (steps `bridge_allow_list_enforced`, `no_containerd_relay`) | [design-v0](docs/specs/design-v0.md#security-model), [docs/SECURITY.md](docs/SECURITY.md) |
 | 2 | Intra-crate single-path references in the 43 `RULES` files follow the layer table | Verified | `RULES` in `check_structure.py`, run by `harness-structure.yml` on `src/**` changes; a new module needs a `RULES` row (TD-018) | `python3 scripts/harness/check_structure.py --root .` | [scripts/harness/check_structure.py](scripts/harness/check_structure.py) |
 | 3 | On the model backend, every error response produced by `handle_all` is an `ErrorEnvelope` with the pinned baseline revision; on the System VM backend (ADR 0007 slice 4; `tests/vesperd_systemvm.rs`, `make systemvm-vesperd-suite` step `firecracker_error_byte_for_byte`) HTTP errors are Firecracker's own, `vesperd`'s own failures are refused or closed connections, and its startup and command-line errors are deterministic. Exceptions before extraction: a body over axum's default 2 MiB limit gets a plain `413`, a body-read failure gets a plain `400`, and a poisoned `RwLock` panics the task (TD-019) | Verified | `AppState::new_with_matrix` rejects a blank revision; `tests/api_contract.rs` asserts envelopes; `rust-tests.yml` runs `cargo test` for every `src/**` change | `make contract-test` | [tests/api_contract.rs](tests/api_contract.rs) |
