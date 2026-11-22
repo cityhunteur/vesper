@@ -2,7 +2,7 @@
 """Turn pytest-json-report files into the results file `baselinectl --mode upstream-compare` reads (GH #172).
 
 Usage: python3 -I collect.py OUT.json --collected COLLECTED.txt [--meta META.json] [--exitcode N] [--log PYTEST.log]
-           [--alone ALONE.json] [REPORT.json ...]
+           [--junit JUNIT.xml] [--alone ALONE.json] [--alone-junit ALONE-JUNIT.xml] [REPORT.json ...]
        python3 -I collect.py --self-test
 
 OUT.json is {nodeid: {"outcome": ..., "message": ...}}. The outcome is the worst phase: a failure in setup or teardown
@@ -14,8 +14,11 @@ never wrote its file, so `--log` recovers each finished test from pytest-xdist's
 
 Upstream marks some tests `@pytest.mark.flaky(reruns=N)` (pytest-rerunfailures). pytest-json-report then keeps one
 entry with outcome "rerun", an attempt that was retried, and not the final attempt; `--log` gives that attempt: the
-worst outcome logged after the test's last RERUN line, with a message saying it was rerun. Without a log, or with no
-line after the last RERUN, a rerun test is an "error".
+worst outcome logged after the test's last RERUN line. pytest's JUnit file writes no failure for an attempt that
+pytest-rerunfailures retried (its outcome is "rerun"), so a failure in a test's testcase is the final attempt's, with its
+whole text (one testcase per test in the runs on record, 2026-11-17); `--junit` gives a rerun test that failed in the
+end that attempt's message, so an exception class can match it (TD-059). Without a log, or with no line after the last RERUN, a rerun
+test is an "error". `--alone-junit` does the same for the isolated rerun, where it also gives the final outcome.
 
 `--alone` is the report of the runner's isolated rerun (decision D-031): the tests that matched no exception class
 in the full run, run again one at a time with nothing else loading the host. A test that passes there becomes
@@ -84,13 +87,16 @@ def alone_usable(report):
     return m["exitcode"] in (0, 1) and not m["collection_errors"]
 
 
-def merge_alone(results, alone_tests):
+def merge_alone(results, alone_tests, alone_junit=None):
     for test in alone_tests:
         nodeid = test["nodeid"]
         if nodeid not in results or results[nodeid]["outcome"] in ("passed", "xfailed", "xpassed"):
             continue
-        again = {"outcome": "error", "message": "rerun (pytest-rerunfailures) in the isolated rerun"} \
-            if test["outcome"] == "rerun" else result(test)
+        if test["outcome"] == "rerun":
+            # The final attempt from the isolated session's JUnit file; without it the rerun stays an error.
+            again = final_attempt(nodeid, alone_junit) or {"outcome": "error", "message": "rerun (pytest-rerunfailures) in the isolated rerun"}
+        else:
+            again = result(test)
         first = results[nodeid]
         if again["outcome"] == "passed":
             results[nodeid] = {"outcome": "passed", "message": "", "under_load": {"outcome": first["outcome"], "message": first["message"]}}
@@ -132,11 +138,49 @@ def from_log(path):
             for n, (o, _) in found.items() if o is not None}
 
 
-def resolve_rerun(nodeid, logged):
+def resolve_rerun(nodeid, logged, junit=None):
     outcome, reruns = logged.get(nodeid, (None, 0))
     if outcome is None:
         return {"outcome": "error", "message": "rerun (pytest-rerunfailures) with no final result in the progress log"}
+    final = final_attempt(nodeid, junit)
+    # The final attempt's own message, so a class can match it; the log's outcome stands (TD-059).
+    if outcome in ("failed", "error") and final and final["outcome"] in ("failed", "error") and final["message"]:
+        return {"outcome": outcome, "message": final["message"]}
     return {"outcome": outcome, "message": f"{outcome} after {reruns} rerun(s) (pytest-rerunfailures), from the progress log"}
+
+
+def junit_key(nodeid):
+    """The (classname, name) pytest's JUnit file gives a node id: `a/b.py::C::t[x]` is ("a.b.C", "t[x]"), as pytest's
+    `mangle_test_address` makes them (the parameters are split off first, so a `::` inside them stays)."""
+    path, bracket, params = nodeid.partition("[")
+    names = path.split("::")
+    if len(names) < 2:
+        return None
+    names[0] = re.sub(r"\.py$", "", names[0].replace("/", "."))
+    names[-1] += bracket + params
+    return (".".join(names[:-1]), names[-1])
+
+
+def junit_results(path):
+    """{(classname, name): {outcome, message}}, the last testcase of each name. A retried attempt writes no failure,
+    so a failure here is the final attempt's."""
+    import xml.etree.ElementTree as ET
+    found = {}
+    for case in ET.parse(path).getroot().iter("testcase"):
+        key = (case.get("classname") or "", case.get("name") or "")
+        outcome, message = "passed", ""
+        for tag, out in (("error", "error"), ("failure", "failed"), ("skipped", "skipped")):
+            el = case.find(tag)
+            if el is not None:
+                outcome = out
+                message = phase_message({"crash": {"message": el.get("message") or ""}, "longrepr": el.text or ""})
+                break
+        found[key] = {"outcome": outcome, "message": message}
+    return found
+
+
+def final_attempt(nodeid, junit):
+    return (junit or {}).get(junit_key(nodeid))
 
 
 def self_test():
@@ -180,7 +224,47 @@ def self_test():
     assert res["c"] == {"outcome": "passed", "message": ""} and "d" not in res, res
     assert alone_usable({"exitcode": 1, "collectors": []}) and not alone_usable({"exitcode": 3}) and not alone_usable({})
     assert not alone_usable({"exitcode": 0, "collectors": [{"nodeid": "a.py", "outcome": "failed"}]})
+    # TD-059: the JUnit file's last testcase of a name is the final attempt; its whole message, primary exception only.
+    import os, tempfile
+    xml = ('<testsuites><testsuite>'
+           '<testcase classname="t.a.C" name="f[1]"/>'
+           '<testcase classname="t.a.C" name="f[1]"><failure message="RuntimeError: late">E   TimeoutError: boot\n'
+           'During handling of the above exception, another exception occurred:\nE   RuntimeError: late</failure></testcase>'
+           '<testcase classname="t.a" name="g"/><testcase classname="t.a" name="g"><error message="X: y">E   X: y</error></testcase>'
+           '</testsuite></testsuites>')
+    fd, path = tempfile.mkstemp(suffix=".xml")
+    with os.fdopen(fd, "w") as f:
+        f.write(xml)
+    try:
+        junit = junit_results(path)
+    finally:
+        os.unlink(path)
+    assert junit_key("t/a.py::C::f[1]") == ("t.a.C", "f[1]") and junit_key("t/a.py::g") == ("t.a", "g"), junit
+    assert junit_key("t/a.py::f[x::y]") == ("t.a", "f[x::y]") and junit_key("t/a.py") is None
+    assert junit[("t.a.C", "f[1]")] == {"outcome": "failed", "message": "TimeoutError: boot"}, junit
+    logged = log_outcomes(["[gw0] [ 5%] RERUN t/a.py::C::f[1] ", "[gw0] [ 9%] FAILED t/a.py::C::f[1] "])
+    assert resolve_rerun("t/a.py::C::f[1]", logged, junit) == {"outcome": "failed", "message": "TimeoutError: boot"}
+    assert resolve_rerun("t/a.py::C::f[1]", logged)["message"].startswith("failed after 1 rerun(s)")
+    # The isolated rerun: a rerun test takes its final attempt from the JUnit file, else stays an error.
+    res = {"t/a.py::g": {"outcome": "failed", "message": "m"}, "t/a.py::h": {"outcome": "failed", "message": "m"}}
+    merge_alone(res, [{"nodeid": "t/a.py::g", "outcome": "rerun"}, {"nodeid": "t/a.py::h", "outcome": "rerun"}], junit)
+    assert res["t/a.py::g"]["alone"] == {"outcome": "error", "message": "X: y"}, res
+    assert res["t/a.py::h"]["alone"]["outcome"] == "error" and "isolated rerun" in res["t/a.py::h"]["alone"]["message"], res
+    passed = {"t/a.py::C::f[1]": {"outcome": "failed", "message": "m"}}
+    merge_alone(passed, [{"nodeid": "t/a.py::C::f[1]", "outcome": "rerun"}], {("t.a.C", "f[1]"): {"outcome": "passed", "message": ""}})
+    assert passed["t/a.py::C::f[1]"]["outcome"] == "passed" and "under_load" in passed["t/a.py::C::f[1]"], passed
     print("collect.py self-test: ok")
+
+
+def _readable(path):
+    """A JUnit file that is missing or not XML is left out, with a line: the run's other results stand."""
+    import xml.etree.ElementTree as ET
+    try:
+        ET.parse(path)
+        return True
+    except (OSError, ET.ParseError) as err:
+        print(f"collect: JUnit file {path} not used: {err}")
+        return False
 
 
 def main(argv):
@@ -197,9 +281,15 @@ def main(argv):
         exitcode, rest = int(rest[1]), rest[2:]
     if rest[:1] == ["--log"]:
         log, rest = rest[1], rest[2:]
+    junit = None
+    if rest[:1] == ["--junit"]:
+        junit, rest = (junit_results(rest[1]) if _readable(rest[1]) else None), rest[2:]
     alone = None
     if rest[:1] == ["--alone"]:
         alone, rest = rest[1], rest[2:]
+    alone_junit = None
+    if rest[:1] == ["--alone-junit"]:
+        alone_junit, rest = (junit_results(rest[1]) if _readable(rest[1]) else None), rest[2:]
     reports = rest
     results = {}
     run_meta = {"exitcode": None, "collection_errors": []}
@@ -215,7 +305,7 @@ def main(argv):
             report = json.load(f)
         run_meta = meta(report)
         for test in report.get("tests", []):
-            results[test["nodeid"]] = resolve_rerun(test["nodeid"], logged) if test["outcome"] == "rerun" else result(test)
+            results[test["nodeid"]] = resolve_rerun(test["nodeid"], logged, junit) if test["outcome"] == "rerun" else result(test)
     # The report's exit status is pytest's own; without a report (a stopped run) the container's status stands in,
     # so the comparator never sees an unknown status from a run that did end.
     if run_meta["exitcode"] is None and exitcode is not None:
@@ -228,7 +318,7 @@ def main(argv):
         with open(alone) as f:
             alone_report = json.load(f)
         if alone_usable(alone_report):
-            merge_alone(results, alone_report.get("tests", []))
+            merge_alone(results, alone_report.get("tests", []), alone_junit)
         else:
             print(f"collect: the isolated rerun did not end normally ({meta(alone_report)}); its results are not used")
     with open(collected_path) as f:
