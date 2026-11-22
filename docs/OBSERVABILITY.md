@@ -99,9 +99,7 @@ The durable signals this project relies on are artifacts rather than live teleme
 
 - No structured logging or log levels in any binary (TD-007).
 - `PUT /metrics` and `PUT /logger` create the target file and store its path; nothing is ever emitted to it (TD-007).
-- `make dev-up` writes `run/vesper-proxy.log`, but the bundle collector only picks up `run/<ISSUE-ID>/proxy/proxy.log`
-  or `run/proxy/proxy.log`; copy it by hand (TD-011).
 - No per-connection logging in `vesper-proxy`, so forwarding failures are invisible without a packet capture (TD-007).
 - No request or trace identifiers (TD-007).
-- `collect_verification_bundle.sh` expects `run/<ISSUE-ID>/api/requests.log` and `responses.log`, but no code writes
-  them; they must be produced by hand (TD-011).
+- `collect_verification_bundle.sh` copies the logs that exist: `run/vesperd.log` and `run/vesper-proxy.log` (dev loop),
+  `run/vesper/vesper-proxy.log` (Docker path) and `run/<ISSUE-ID>/proxy/proxy.log`. There is no request log (TD-007).

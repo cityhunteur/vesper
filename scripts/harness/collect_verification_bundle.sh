@@ -41,12 +41,11 @@ copy_if_exists "run/${ISSUE_ID}/systemvm/boot.log" "${BUNDLE_DIR}/systemvm/boot.
 copy_if_exists "run/${ISSUE_ID}/systemvm/boot-report.json" "${BUNDLE_DIR}/systemvm/boot-report.issue.json"
 
 # Proxy artifacts
+# The logs the dev loop (make dev-up) and the Docker path (make docker-up) write, then an issue's own (TD-011).
+copy_if_exists "run/vesper-proxy.log" "${BUNDLE_DIR}/proxy/dev-proxy.log"
+copy_if_exists "run/vesperd.log" "${BUNDLE_DIR}/api/vesperd.log"
+copy_if_exists "run/vesper/vesper-proxy.log" "${BUNDLE_DIR}/proxy/docker-proxy.log"
 copy_if_exists "run/${ISSUE_ID}/proxy/proxy.log" "${BUNDLE_DIR}/proxy/proxy.log"
-copy_if_exists "run/proxy/proxy.log" "${BUNDLE_DIR}/proxy/proxy.log"
-
-# API artifacts
-copy_if_exists "run/${ISSUE_ID}/api/requests.log" "${BUNDLE_DIR}/api/requests.log"
-copy_if_exists "run/${ISSUE_ID}/api/responses.log" "${BUNDLE_DIR}/api/responses.log"
 
 if [ ! -f "${BUNDLE_DIR}/verification.yaml" ] && [ -f ".symphony/templates/verification-manifest-template.yaml" ]; then
   cp ".symphony/templates/verification-manifest-template.yaml" "${BUNDLE_DIR}/verification.yaml"

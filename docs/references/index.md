@@ -22,15 +22,16 @@ No condensed library docs are kept yet; add one here when an agent repeatedly ge
 ## Historical bundle notes
 
 These describe the 2026-03 harness-engineering overlay and use the pre-2026-11 docs layout (`docs/index.md`,
-`docs/design/`, `docs/plans/`). They are kept for migration history and are marked `deprecated`.
+`docs/design/`, `docs/plans/`). They are kept, unedited, for migration history in [archive/](archive/), marked `deprecated` (TD-014, 2026-11-22).
+Nothing current links to them, and no check keeps them true.
 
 | Note | Covers |
 |---|---|
-| [harness-engineering-adaptation.md](harness-engineering-adaptation.md) | How the bundle mapped OpenAI's harness-engineering ideas onto Vesper |
-| [vesper-review.md](vesper-review.md) | Repository review framed around agent-first delivery and parity truth |
-| [testing.md](testing.md) | Smoke-test plan for the installed harness overlay |
-| [milestones.md](milestones.md) | Suggested milestone sequence after adoption |
-| [install.md](install.md) | Original overlay installation notes |
+| [harness-engineering-adaptation.md](archive/harness-engineering-adaptation.md) | How the bundle mapped OpenAI's harness-engineering ideas onto Vesper |
+| [vesper-review.md](archive/vesper-review.md) | Repository review framed around agent-first delivery and parity truth |
+| [testing.md](archive/testing.md) | Smoke-test plan for the installed harness overlay |
+| [milestones.md](archive/milestones.md) | Suggested milestone sequence after adoption |
+| [install.md](archive/install.md) | Original overlay installation notes |
 
 To add a reference, save it as `docs/references/<name>.md` (or `<name>-llms.txt`), add a row above, and link it from
 any design doc or spec that relies on it.
