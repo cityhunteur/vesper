@@ -37,6 +37,7 @@ RULES: Dict[str, Set[str]] = {
     "src/api/pmem.rs": set(),
     "src/api/vm_config.rs": set(),
     "src/api/tests/mod.rs": set(),
+    "src/api/tests/envelopes.rs": set(),
     "src/api/tests/lifecycle.rs": set(),
     "src/api/tests/balloon.rs": set(),
     "src/api/tests/balloon_reporting.rs": set(),

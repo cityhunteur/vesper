@@ -37,7 +37,7 @@ obligations of each component's licence, including offering the corresponding so
 | ca-certificates | MPL-2.0 (certificate data) |
 | Upstream Firecracker CI images and test artefacts (only for parity runs) | Apache-2.0 and the licences of each guest image |
 
-## Rust crates linked into the Vesper binaries (112)
+## Rust crates linked into the Vesper binaries (116)
 
 | Crate | Version | Licence |
 |---|---|---|
@@ -93,6 +93,7 @@ obligations of each component's licence, including offering the corresponding so
 | indexmap | 2.13.0 | Apache-2.0 OR MIT |
 | is_terminal_polyfill | 1.70.2 | MIT OR Apache-2.0 |
 | itoa | 1.0.17 | MIT OR Apache-2.0 |
+| lazy_static | 1.5.1 | MIT OR Apache-2.0 |
 | libc | 0.2.182 | MIT OR Apache-2.0 |
 | litemap | 0.8.1 | Unicode-3.0 |
 | lock_api | 0.4.14 | MIT OR Apache-2.0 |
@@ -121,6 +122,7 @@ obligations of each component's licence, including offering the corresponding so
 | serde_urlencoded | 0.7.1 | MIT/Apache-2.0 |
 | serde_yaml | 0.9.34+deprecated | MIT OR Apache-2.0 |
 | sha2 | 0.10.9 | MIT OR Apache-2.0 |
+| sharded-slab | 0.1.7 | MIT |
 | signal-hook-registry | 1.4.8 | MIT OR Apache-2.0 |
 | slab | 0.4.12 | MIT |
 | smallvec | 1.15.1 | MIT OR Apache-2.0 |
@@ -130,6 +132,7 @@ obligations of each component's licence, including offering the corresponding so
 | syn | 2.0.117 | MIT OR Apache-2.0 |
 | sync_wrapper | 1.0.2 | Apache-2.0 |
 | synstructure | 0.13.2 | MIT |
+| thread_local | 1.1.10 | MIT OR Apache-2.0 |
 | tinystr | 0.8.2 | Unicode-3.0 |
 | tokio | 1.49.0 | MIT |
 | tokio-macros | 2.6.0 | MIT |
@@ -138,6 +141,7 @@ obligations of each component's licence, including offering the corresponding so
 | tower-service | 0.3.3 | MIT |
 | tracing | 0.1.44 | MIT |
 | tracing-core | 0.1.36 | MIT |
+| tracing-subscriber | 0.3.23 | MIT |
 | typenum | 1.19.0 | MIT OR Apache-2.0 |
 | unicode-ident | 1.0.24 | (MIT OR Apache-2.0) AND Unicode-3.0 |
 | unsafe-libyaml | 0.2.11 | MIT |

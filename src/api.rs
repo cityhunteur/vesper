@@ -877,12 +877,93 @@ impl RouteTemplate {
     }
 }
 
+/// The largest request body, as axum's default limit was (TD-019).
+const BODY_LIMIT: usize = 2 * 1024 * 1024;
+
+/// The router's one handler. It reads the body itself, so a body over the limit or one that cannot be read gets an
+/// error envelope rather than axum's plain response (TD-019). The dispatch runs on tokio's blocking pool: handlers
+/// open caller-given host files, and a path that blocks (a FIFO, a stalled mount) must not stall other connections
+/// or the shutdown signal (TD-024); a panic there (a poisoned lock among them) answers with a `500` envelope rather
+/// than a dropped connection (TD-019).
 async fn handle_all(
     State(state): State<Arc<AppState>>,
-    method: Method,
-    uri: Uri,
-    body: Bytes,
+    request: axum::extract::Request,
 ) -> Response {
+    let (parts, body) = request.into_parts();
+    let (method, uri) = (parts.method, parts.uri);
+    let path = clean_path(uri.path());
+    let envelope = |status: StatusCode, code: &str, message: &str| {
+        error_response(
+            &state.firecracker_revision,
+            status,
+            code,
+            message,
+            &path,
+            method.as_str(),
+        )
+    };
+    let declared = parts
+        .headers
+        .get(axum::http::header::CONTENT_LENGTH)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<u64>().ok());
+    if declared.is_some_and(|n| n > BODY_LIMIT as u64) {
+        return envelope(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "PayloadTooLarge",
+            "the request body is larger than 2 MiB",
+        );
+    }
+    let body = match axum::body::to_bytes(body, BODY_LIMIT).await {
+        Ok(body) => body,
+        Err(err) => {
+            // A body that passes the limit while it streams (no Content-Length) is the same refusal.
+            let mut source: Option<&dyn std::error::Error> = Some(&err);
+            while let Some(e) = source {
+                if e.to_string().contains("length limit exceeded") {
+                    return envelope(
+                        StatusCode::PAYLOAD_TOO_LARGE,
+                        "PayloadTooLarge",
+                        "the request body is larger than 2 MiB",
+                    );
+                }
+                source = e.source();
+            }
+            return envelope(
+                StatusCode::BAD_REQUEST,
+                "BadRequest",
+                &format!("the request body could not be read: {err}"),
+            );
+        }
+    };
+    let task_state = state.clone();
+    let task_method = method.clone();
+    let id = NEXT_REQUEST.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let started = std::time::Instant::now();
+    let response =
+        match tokio::task::spawn_blocking(move || dispatch(task_state, task_method, uri, body))
+            .await
+        {
+            Ok(response) => response,
+            Err(err) => {
+                // A panic, a poisoned lock among them; the lock stays poisoned until vesperd restarts (TD-019).
+                tracing::error!(error = %err, path = %path, "request handler panicked");
+                envelope(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "InternalError",
+                    "the request handler failed",
+                )
+            }
+        };
+    // One line for each request, with an id (TD-007).
+    tracing::info!(id, method = %method, path = %path, status = response.status().as_u16(), ms = started.elapsed().as_millis() as u64, "request");
+    response
+}
+
+/// The id of the next request in the log (TD-007).
+static NEXT_REQUEST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+fn dispatch(state: Arc<AppState>, method: Method, uri: Uri, body: Bytes) -> Response {
     let path = clean_path(uri.path());
 
     let route = state
