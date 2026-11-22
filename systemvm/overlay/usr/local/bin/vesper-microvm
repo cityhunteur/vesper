@@ -2,7 +2,7 @@
 # Vesper microVM manager (GH #18): stock Firecracker under the jailer inside the System VM.
 # usage: vesper-microvm prepare
 #        vesper-microvm launch ID [--exit] [--rootfs PATH] [--cmd BASE64] [--vsock] [--share-net]
-#                                      [--mem-mib N] [--vcpus N] [--cpu-quota QUOTA:PERIOD]
+#                                      [--mem-mib N] [--vcpus N] [--cpu-quota QUOTA:PERIOD] [--snapshot-room]
 #                                             boot a microVM (kernel + busybox initramfs); --exit powers off after the
 #                                             marker; --rootfs attaches an ext4 image as /dev/vda, mounts it, prints
 #                                             VESPER-ROOTFS-OK <source digest> from its provenance and switches root;
@@ -25,6 +25,12 @@
 #                                             the System VM has CPUs (and Firecracker's 32); --cpu-quota is the
 #                                             task's CFS quota in µs for each period, and the microVM's own cgroup
 #                                             gets cpu.max of that quota plus a quarter of a CPU for Firecracker
+#                                             --snapshot-room adds the guest's memory size to the ceiling and to
+#                                             what is admitted, for one full snapshot's memory file in the jail
+#                                             (TD-085): the jail is on tmpfs, and the file's pages are charged to
+#                                             the microVM's cgroup. A test option: the parity conformance check
+#                                             uses it, the shim never does, and it is refused with --rootfs, so a
+#                                             workload never runs under the larger ceiling
 #        vesper-microvm unfs-stop ID         stop ID's share server (the shim, when the task stops); UNFS ID stopped
 #        vesper-microvm unfs-holds ID        HOLDS ID N: how many recorded read-only objects are held, in a mount
 #                                             namespace of their own (TD-076); 0 after the task stopped
@@ -602,7 +608,7 @@ test_unfs_probe() { # ID [probe flags]
 launch() {
   id=$1; shift
   mode=""; rootfs=""; cmd64=""; vsock=0; runc_smoke=0; guestexec=0; sharenet=0; probe=""
-  unfs_spec=""; unfs_srcs=""; unfs_mounts=""; unfs_squash=0; mem=$MEM_MIB; vcpus=$VCPUS; cpumax=""
+  unfs_spec=""; unfs_srcs=""; unfs_mounts=""; unfs_squash=0; mem=$MEM_MIB; vcpus=$VCPUS; cpumax=""; snaproom=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --exit) mode=--exit ;;
@@ -619,6 +625,7 @@ launch() {
         [ -n "$unfs_mounts" ] || { echo "ERR --unfs-src before any --unfs-mount"; return 2; }
         unfs_srcs="$unfs_srcs${unfs_srcs:+$NL}$2"; unfs_spec="$unfs_spec${unfs_spec:+$NL}src $2"; shift ;;
       --unfs-squash) unfs_squash=1 ;;
+      --snapshot-room) snaproom=1 ;;
       --rootfs) rootfs=$2; shift ;;
       --cmd) cmd64=$2; shift ;;
       --mem-mib)   # at most 7 digits keeps the byte arithmetic in range; the memory budget decides what fits
@@ -640,6 +647,8 @@ launch() {
     esac
     shift
   done
+  # The room loosens the ceiling that holds a hostile workload, so it is for the busybox guest only (council SEC-2).
+  if [ "$snaproom" = 1 ] && [ -n "$rootfs" ]; then echo "ERR --snapshot-room is for the parity conformance check and excludes --rootfs"; return 2; fi
   prep=$(prepare) || { echo "$prep"; return 1; }
   if [ -n "$rootfs" ] && [ ! -f "$rootfs" ]; then echo "ERR rootfs $rootfs missing"; return 1; fi
   # Every check that can refuse the request comes before the memory admission, so a bad request takes nothing.
@@ -670,6 +679,10 @@ launch() {
   have=$(nproc 2>/dev/null); digits "$have" || have=1
   [ "$vcpus" -le "$have" ] || { echo "ERR cpus: the task asks for $vcpus CPUs and the System VM has $have; lower the task's CPU limit or start the System VM with more CPUs"; return 1; }
   ceiling=$(ceiling_of "$mem"); digits "$ceiling" || { echo "ERR ceiling for $mem MiB"; return 1; }
+  # A full snapshot writes a memory file of the guest's size into the jail. The jail is on tmpfs, and Firecracker
+  # writes the file, so its pages are charged to the microVM's cgroup and are not reclaimable: without this room
+  # the System VM kills Firecracker during the snapshot (TD-085). The room is in memory.max and in the admission.
+  [ "$snaproom" = 1 ] && ceiling=$((ceiling + mem * 1048576))
   # The jail lives on the tmpfs root, so the kernel, initrd and rootfs copied into it use System VM memory outside
   # the cgroup: book them with the ceiling.
   copies=0
