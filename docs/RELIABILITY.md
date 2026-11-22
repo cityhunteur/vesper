@@ -167,6 +167,14 @@ the guest was still sending made the relay take SIGPIPE and the whole VM went wi
 SIGPIPE and sets `SO_NOSIGPIPE` on bridge clients; `make ports-suite` keeps a step that restarts the proxy under
 a live event stream and checks the launcher pid survives.
 
+## Bridge connections past 32 (fixed 2026-11-22, D-075)
+
+The launcher relayed each bridge connection with two blocking reads on GCD's global queue, which has at most 64
+worker threads, so at most 32 connections were open at a time across every port (control, `LAUNCHAPI` leases,
+`FCAPI` relays, Docker clients through `vesper-proxy`); the 33rd waited, with no message, until one closed. Each
+blocking loop now has a thread of its own. `systemvmctl control suite` step `control_slots_reserved` holds 57
+connections and checks that a 58th is answered.
+
 ## A directory bind when macOS replaces its directory (TD-083, D-062)
 
 A directory bind of a task in a microVM stays with the directory that was bound, as a bind mount does on Docker on

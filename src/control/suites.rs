@@ -123,12 +123,12 @@ pub fn run_suite(
             ))
         })
     });
-    session.and_then(|mut session| {
+    let session = session.and_then(|mut session| {
         step(&mut steps, "large_payload", || {
             let payload: Vec<u8> = (0..payload_bytes).map(|i| (i % 251) as u8).collect();
             let elapsed = session.echo(&payload)?;
             Ok((
-                (),
+                session,
                 format!(
                     "{payload_bytes} bytes echoed intact in {} ms",
                     elapsed.as_millis()
@@ -136,13 +136,59 @@ pub fn run_suite(
             ))
         })
     });
-    let passed = steps.len() == 4 && steps.iter().all(|s| s.ok);
+    session.and_then(|mut session| {
+        step(&mut steps, "control_slots_reserved", || {
+            control_slots_reserved(endpoint, &mut session)
+        })
+    });
+    let passed = steps.len() == 5 && steps.iter().all(|s| s.ok);
     SuiteReport {
         bridge_path: endpoint.bridge_path.display().to_string(),
         port: endpoint.port,
         steps,
         passed,
     }
+}
+
+/// TD-026: with the agent's handlers filled to the lease cap by idle connections, `LAUNCHAPI` is refused as busy and
+/// a control command on one more connection is still answered. The probe's id is not valid, so an accepted request
+/// fails at once instead of starting a microVM.
+fn control_slots_reserved(
+    endpoint: &ControlEndpoint,
+    session: &mut Session,
+) -> Result<((), String), String> {
+    let health = session.health()?;
+    let open = health["handlers"]
+        .as_u64()
+        .ok_or("HEALTH has no handlers count")? as usize;
+    let max = health["handlers_max"]
+        .as_u64()
+        .ok_or("HEALTH has no handlers_max")? as usize;
+    let cap = max
+        .checked_sub(8)
+        .ok_or("handlers_max is under the reserve")?;
+    let mut held = Vec::new();
+    while open + held.len() < cap {
+        held.push(connect(endpoint)?);
+    }
+    let mut lease = connect(endpoint)?;
+    let refused = lease.request_line("LAUNCHAPI bad/id")?;
+    let mut control = connect(endpoint)?;
+    let answered = control.health()?;
+    let seen = answered["handlers"].as_u64().unwrap_or(0);
+    drop(held);
+    if !refused.starts_with("ERR busy:") {
+        return Err(format!(
+            "LAUNCHAPI at the cap ({cap} of {max}) was not refused as busy: {refused:?}"
+        ));
+    }
+    Ok((
+        (),
+        format!(
+            "{open} open, {} more held: LAUNCHAPI refused ({refused}); HEALTH answered with {seen} handlers open",
+            cap - open
+        ),
+    ))
 }
 
 /// Runs the GH #14 checklist per service: healthy at boot, SIGKILL, supervised restart within

@@ -10,7 +10,8 @@
 #                             "containerd_ok":bool,"docker_ok":bool,"docker_version":"...","kvm":bool,"tun":bool,
 #                             "ip":"...","containers":"mapped|unmapped|refused <reason>","authz":"<state>",
 #                             "legacy_store":"absent|present volumes=N containers=M",  (ADR 0010)
-#                             "share_servers_down":"<id>,..."}  (TD-070: shim microVMs whose share server stopped)
+#                             "share_servers_down":"<id>,...",  (TD-070: shim microVMs whose share server stopped)
+#                             "handlers":N,"handlers_max":N}  (TD-026: connections open on the agent port)
 #   KILL <containerd|docker> -> KILL <name> <pid> after SIGKILL to the daemon (crash simulation)
 #   LOGS <messages|containerd|docker> <n> -> LOGS <count> then <count> log lines
 #   MICROVM <args...>     -> MICROVM <rc> <count> then <count> output lines of `vesper-microvm <args>`
@@ -36,8 +37,34 @@
 #   SHUTDOWN              -> BYE then poweroff
 #   QUIT                  -> BYE then the connection is closed
 #   anything else         -> ERR unknown command
+# Bounds (TD-026): a connection that sends no command for AGENT_IDLE_S is closed (a LAUNCHAPI lease or an FCAPI relay
+# is no longer this loop's); LAUNCHAPI and FCAPI, which hold a handler for their life, are refused with
+# "ERR busy: ..." when more than HANDLERS_MAX - CONTROL_RESERVE handlers are open, so control commands keep a slot.
 . "$(dirname "$0")/../lib/vesper/vsock-peer.sh"
 vsock_host_only
+AGENT_IDLE_S=900     # seconds a connection may wait between commands
+HANDLERS_MAX=64      # socat's max-children in etc/init.d/vesper-agent (tests/agent_protocol.rs checks they agree)
+CONTROL_RESERVE=8    # handlers that LAUNCHAPI and FCAPI never take
+# The open connections: socat forks one relay per connection (this script's parent) from the listener (its parent).
+handlers() {
+  hl=$(awk '{print $4}' "/proc/$PPID/stat" 2>/dev/null)
+  case "$hl" in ''|*[!0-9]*) echo 0; return ;; esac
+  hn=0
+  for hs in /proc/[0-9]*/stat; do
+    hs=$(cat "$hs" 2>/dev/null) || continue
+    hs=${hs##*) }
+    # shellcheck disable=SC2086
+    set -- $hs
+    [ "${2:-}" = "$hl" ] && hn=$((hn + 1))
+  done
+  echo "$hn"
+}
+lease_room() { # -> 0 when a LAUNCHAPI or FCAPI may take a handler; else prints the refusal
+  lr=$(handlers)
+  [ "$lr" -le $((HANDLERS_MAX - CONTROL_RESERVE)) ] && return 0
+  echo "ERR busy: $lr of $HANDLERS_MAX handlers open; $CONTROL_RESERVE are kept for control commands"
+  return 1
+}
 printf 'VESPER-AGENT 1 %s\n' "$(hostname)"
 service_state() {
   if [ -x "/etc/init.d/$1" ]; then
@@ -46,7 +73,7 @@ service_state() {
     echo missing
   fi
 }
-while IFS= read -r line; do
+while IFS= read -r -t "$AGENT_IDLE_S" line; do
   set -- $line
   case "$1" in
     PING) echo PONG ;;
@@ -73,8 +100,8 @@ while IFS= read -r line; do
       cmode=${cst%% authz=*}; rest=${cst#* authz=}; authz=${rest%% legacy=*}; legacy=${rest#* legacy=}
       # TD-070: the shim microVMs whose share server has stopped for good (ids are [A-Za-z0-9_.-]).
       sdown=$(/usr/local/bin/vesper-microvm unfs-down 2>/dev/null | tr -cd 'A-Za-z0-9_.\n-' | paste -sd, -)
-      printf 'HEALTH {"packages_ready":%s,"services_ready":%s,"services":{"containerd":"%s","docker":"%s","vesper-agent":"%s"},"containerd_ok":%s,"docker_ok":%s,"docker_version":"%s","kvm":%s,"tun":%s,"ip":"%s","containers":"%s","authz":"%s","legacy_store":"%s","share_servers_down":"%s"}\n' \
-        "$ready" "$sready" "$(service_state containerd)" "$(service_state docker)" "$(service_state vesper-agent)" "$cok" "$dok" "$dver" "$kvm" "$tun" "$ip" "${cmode:-unknown}" "${authz:-unknown}" "${legacy:-unknown}" "$sdown"
+      printf 'HEALTH {"packages_ready":%s,"services_ready":%s,"services":{"containerd":"%s","docker":"%s","vesper-agent":"%s"},"containerd_ok":%s,"docker_ok":%s,"docker_version":"%s","kvm":%s,"tun":%s,"ip":"%s","containers":"%s","authz":"%s","legacy_store":"%s","share_servers_down":"%s","handlers":%s,"handlers_max":%s}\n' \
+        "$ready" "$sready" "$(service_state containerd)" "$(service_state docker)" "$(service_state vesper-agent)" "$cok" "$dok" "$dver" "$kvm" "$tun" "$ip" "${cmode:-unknown}" "${authz:-unknown}" "${legacy:-unknown}" "$sdown" "$(handlers)" "$HANDLERS_MAX"
       ;;
     KILL)
       case "$2" in
@@ -106,8 +133,8 @@ while IFS= read -r line; do
         echo "LOGS 0"
       fi
       ;;
-    LAUNCHAPI) shift; exec /usr/local/bin/vesper-vesperd launch "$@" ;;
-    FCAPI) shift; exec /usr/local/bin/vesper-vesperd connect "$@" ;;
+    LAUNCHAPI) lease_room || exit 0; shift; exec /usr/local/bin/vesper-vesperd launch "$@" ;;
+    FCAPI) lease_room || exit 0; shift; exec /usr/local/bin/vesper-vesperd connect "$@" ;;
     MICROVM|ROOTFS|WORKLOAD|FCPARITY|CTR|SHARE|ARCH|DATA|VESPERD|CONTAINERS)
       tool=$1; shift
       case "$tool" in CONTAINERS) bin=/usr/local/bin/vesper-containers ;; MICROVM) bin=/usr/local/bin/vesper-microvm ;; ROOTFS) bin=/usr/local/bin/vesper-rootfs ;; WORKLOAD) bin=/usr/local/bin/vesper-workload ;; FCPARITY) bin=/usr/local/bin/vesper-fcparity ;; CTR) bin=/usr/local/bin/vesper-ctr ;; SHARE) bin=/usr/local/bin/vesper-share ;; DATA) bin=/usr/local/bin/vesper-data ;; VESPERD) bin=/usr/local/bin/vesper-vesperd ;; *) bin=/usr/local/bin/vesper-arch ;; esac
