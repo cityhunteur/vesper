@@ -26,5 +26,7 @@ socket2 = "0.6"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "std"] }
 
 [dev-dependencies]
+# Property tests of the request path (TD-047; dev only, owner-approved in D-066).
+proptest = { version = "1", default-features = false, features = ["std"] }
 tempfile = "3.23"
 tower = "0.5"
