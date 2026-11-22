@@ -122,6 +122,10 @@ IPv6 address) fails the start with a message naming it.
   the answers leave from `127.0.0.11`, which `route_localnet` lets out of `vn0`. To be shown in slice 3 with the
   `DROP` policies in place; if it fails, a forwarder (socat with `max-children`) as an unprivileged user in a cgroup
   with `pids.max` and `memory.max`, like the share server's.
+- **Drivers**: the data link is shown on dockerd's `bridge` driver only. On macvlan, ipvlan or overlay networks frames
+  are delivered by dockerd's MAC, not the guest's, so traffic can fail without a message (a recorded residual,
+  TD-086). A network named by its id rather than `host` passes the plugin's check, which is harmless: the task always
+  has its own namespace.
 - **Rate limits**: `vn0` gets a Firecracker rate limiter (as the share tap has, `vesper-microvm:726-729`); `vd0`
   gets none, as Docker sets none.
 - **The share namespace** keeps ADR 0009's server, sandbox, `INPUT` rules and rate limiter. It now holds `lo`, `vh0`
