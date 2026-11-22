@@ -46,9 +46,25 @@ if [ -n "$net" ]; then
   [ -n "$mtu" ] && ip link set dev eth0 mtu "$mtu"
   case "$net" in
     *,*) ip link set dev eth0 up && ip addr add "${net%,*}" dev eth0 && ip route add default via "${net#*,}" \
-           && mkdir -p /etc && echo "nameserver ${net#*,}" > /etc/resolv.conf && echo "VESPER-NET-OK ${net}" || echo "VESPER-NET-FAILED" ;;
+           && mkdir -p /etc && echo "nameserver ${net#*,}" > /etc/resolv.conf && echo "VESPER-NET-OK ${net}" || echo "VESPER-NET-FAILED"
+         # Peers that knew another MAC for this address learn the guest's at once (council COR-5).
+         arping -U -c 1 -I eth0 "${net%%/*}" >/dev/null 2>&1 & ;;
     *) ip link set dev eth0 up && ip addr add "$net" dev eth0 && echo "VESPER-NET-OK ${net}" || echo "VESPER-NET-FAILED" ;;   # no gateway (council COR-7)
   esac
+fi
+# A Docker task's DNS link (ADR 0011 §3): eth1 reaches dockerd's resolver at 169.254.78.1; the container keeps
+# dockerd's resolv.conf, which names 127.0.0.11, so that address is on the guest's lo with forwarders to the link.
+dns=$(/bin/busybox sed -n 's/.*vesper_dns=\([0-9./]*\).*/\1/p' /proc/cmdline)
+if [ -n "$dns" ] && [ -n "$net" ]; then
+  for i in 1 2 3 4 5 6 7 8 9 10; do [ -e /sys/class/net/eth1 ] && break; sleep 0.2; done
+  if ip link set dev eth1 up && ip addr add "$dns" dev eth1 && ip addr add 127.0.0.11/32 dev lo; then
+    # -t 5: an answer may take longer than socat's default half-close wait of 0.5 s (council COR-3).
+    socat -t 5 UDP4-RECVFROM:53,bind=127.0.0.11,fork UDP4-SENDTO:169.254.78.1:53 </dev/null >/dev/null 2>&1 &
+    socat TCP4-LISTEN:53,bind=127.0.0.11,fork,reuseaddr TCP4:169.254.78.1:53 </dev/null >/dev/null 2>&1 &
+    echo "VESPER-DNS-OK ${dns}"
+  else
+    echo "VESPER-DNS-FAILED"
+  fi
 fi
 if [ -n "$net" ] || [ -n "$sharenet" ]; then
   # vesper_probe_delay=N waits first, so a test can start its listeners after the launch returns.
