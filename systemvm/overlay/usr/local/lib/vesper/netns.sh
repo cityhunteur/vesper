@@ -33,3 +33,10 @@ vnetns_up() {
     vn_out=$(nsenter --net="$vn_f" ip link set dev "$vn_t" up 2>&1) || { echo "tap $vn_t up: $(printf '%s' "$vn_out" | vnetns_oneline)"; return 1; }
   done
 }
+
+# vnetns_tap FILE OWNER TAP: a tap owned by OWNER in the namespace bound at FILE, which someone else made (a Docker
+# task's, bound by the shim, ADR 0011); its link is set up. A reason on failure.
+vnetns_tap() {
+  vt_out=$(nsenter --net="$1" tunctl -t "$3" -u "$2" 2>&1) || { echo "tap $3: $(printf '%s' "$vt_out" | vnetns_oneline)"; return 1; }
+  vt_out=$(nsenter --net="$1" ip link set dev "$3" up 2>&1) || { echo "tap $3 up: $(printf '%s' "$vt_out" | vnetns_oneline)"; return 1; }
+}
