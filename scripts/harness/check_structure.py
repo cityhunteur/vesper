@@ -70,6 +70,7 @@ RULES: Dict[str, Set[str]] = {
     "src/proxy.rs": {"buildinfo", "platform"},
     "src/proxy/relay.rs": set(),
     "src/ports.rs": set(),
+    "src/ports/udp.rs": set(),
     "src/systemvm.rs": {"buildinfo", "platform"},
     "src/systemvm/boot_check.rs": set(),
     # The two below name their parent as `crate::systemvm` in their tests.

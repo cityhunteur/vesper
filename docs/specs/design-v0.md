@@ -547,7 +547,8 @@ Inside the microVM the requirement is to mount the rootfs, set up the containerâ
 * The forwarding contract for published ports ([ADR 0005](../design-docs/adr/0005-published-ports-via-vsock-gateway.md)):
 
   * A TCP bind on `127.0.0.1`, and on `::1` when IPv6 is enabled, terminates in `vesper-proxy`. **Meets the requirement** (`make ports-suite`); IPv6 is not enabled.
-  * UDP ports and non-loopback addresses on macOS. **Not met** (TD-037).
+  * UDP ports and non-loopback addresses on macOS. **Not met** (TD-037): UDP on loopback is published since
+    2026-11-22 (`make ports-suite`, D-077); non-loopback addresses are not.
   * `vesper-proxy` forwards to the System VM gateway over vsock. **Meets the requirement** (`make ports-suite`).
   * The System VM gateway forwards to the interface and port of the target microVM. **Not met** (TD-032, GH #53): the gateway reaches Docker-path containers only.
   * A port collision produces the same recorded error every time. **Meets the requirement** (`make ports-suite`).
