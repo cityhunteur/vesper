@@ -244,7 +244,7 @@ Before ending a run, parking an issue in `In Review`, or marking an issue
      - `bash scripts/systemvm/generate-launch-config.sh`
      - `bash scripts/systemvm/boot-smoke.sh` when the environment supports it
    - docs or harness changes:
-     - `python3 scripts/harness/check_docs.py --root .`
+     - `python3 harness/check_docs.py`
      - `python3 scripts/harness/check_structure.py --root .`
      - `python3 scripts/harness/compute_quality_score.py --root .`
 6. Do not mark the slice ready for checkpoint or review until the narrow sensor

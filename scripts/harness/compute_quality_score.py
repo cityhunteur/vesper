@@ -22,14 +22,14 @@ CORE_DOCS = [
 ]
 
 HARNESS_WORKFLOWS = [
-    ".github/workflows/harness-docs.yml",
+    ".github/workflows/docs.yml",
     ".github/workflows/harness-structure.yml",
     ".github/workflows/harness-quality-score.yml",
     ".github/workflows/harness-garbage-collection.yml",
 ]
 
 HARNESS_SCRIPTS = [
-    "scripts/harness/check_docs.py",
+    "harness/check_docs.py",
     "scripts/harness/check_structure.py",
     "scripts/harness/compute_quality_score.py",
     "scripts/harness/janitor_scan.py",

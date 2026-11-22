@@ -19,12 +19,12 @@ and repeatably. *Enforced by:* the human-review and council stages in [WORKFLOW.
 ### The repository is the system of record
 
 **Verified.** If an agent cannot find it in the repo, it effectively does not exist. *Enforced by:*
-`harness/check_docs.py` and `scripts/harness/check_docs.py` in CI; verification bundles under `.symphony/runs/`.
+`harness/check_docs.py` in CI; verification bundles under `.symphony/runs/`.
 
 ### `AGENTS.md` is a table of contents
 
 **Verified.** Keep it short; put deep context in linked docs. *Enforced by:* the 100/150-line budget in
-`harness/config.toml` and the 160-line warning in `scripts/harness/check_docs.py`.
+`harness/config.toml`.
 
 ### A small proven slice beats a large optimistic claim
 

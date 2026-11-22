@@ -46,7 +46,6 @@ These are deterministic or mostly deterministic checks:
 - `cargo test`
 - `cargo run --bin baselinectl -- --mode generate ...` then `--mode validate` (`artifacts/` is gitignored, so validate alone fails on a fresh clone)
 - `cargo run --bin compatexctl -- --registry docs/specs/compat-exceptions.yaml`
-- `python3 scripts/harness/check_docs.py --root .`
 - `python3 scripts/harness/check_structure.py --root .`
 - `python3 scripts/harness/compute_quality_score.py --root .`
 - `python3 scripts/harness/janitor_scan.py --root .`

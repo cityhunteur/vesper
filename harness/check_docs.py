@@ -192,10 +192,12 @@ class Checker:
     def run(self) -> list[Finding]:
         self.check_required()
         self.check_agents_md()
+        self.check_mentions()
         for doc in self.docs.values():
             self.links[doc.path] = self.check_links(doc)
             self.check_front_matter(doc)
             self.check_template_content(doc)
+            self.check_local_paths(doc)
         self.check_reachability()
         self.check_indexes()
         self.check_exec_plans()
@@ -220,6 +222,26 @@ class Checker:
         elif count > target:
             self.report(doc.rel, count, "warning", f"{count} lines exceeds the {target}-line target",
                         "AGENTS.md is a map; move detail into docs/")
+
+    def check_mentions(self) -> None:
+        # Folded in from scripts/harness/check_docs.py (TD-012): a document that must name others.
+        for rel, needles in self.config.get("mentions", {}).items():
+            path = self.root / rel
+            if not path.is_file():
+                continue
+            text = path.read_text(encoding="utf-8")
+            for needle in needles:
+                if needle not in text:
+                    self.report(rel, 0, "error", f"does not mention {needle}", f"link {needle} from {rel}")
+
+    def check_local_paths(self, doc: Doc) -> None:
+        # A path of one machine's filesystem is wrong for every other reader (folded in, TD-012).
+        for prefix in self.config.get("local_path_prefixes", []):
+            for n, line in enumerate(doc.lines, 1):
+                if prefix in line:
+                    self.report(doc.rel, n, "warning", f"contains the local path prefix {prefix}",
+                                "use a path relative to the repository root")
+                    break
 
     def check_links(self, doc: Doc) -> list[Link]:
         links = []

@@ -3,7 +3,10 @@
 # so `*` also matches `/`.
 
 # Markdown files that form the knowledge base. Only these are checked.
-scope = ["AGENTS.md", "ARCHITECTURE.md", "docs/*.md"]
+scope = ["AGENTS.md", "ARCHITECTURE.md", "WORKFLOW.md", "docs/*.md"]
+
+# A line that contains one of these is a path on one machine (warning; TD-012).
+local_path_prefixes = ["/Volumes/"]
 
 # AGENTS.md is a map, not a manual.
 [agents_md]
@@ -33,7 +36,18 @@ files = [
   "docs/product-specs/index.md",
   "docs/references/index.md",
   "docs/generated/README.md",
+  "WORKFLOW.md",
+  "docs/process/index.md",
+  "docs/process/harness-engineering.md",
+  "docs/progress/symphony-milestones.md",
+  "docs/specs/index.md",
 ]
+
+# Documents that must name others (folded in from scripts/harness/check_docs.py, TD-012).
+[mentions]
+"AGENTS.md" = ["docs/README.md"]
+"docs/README.md" = ["ARCHITECTURE.md", "QUALITY_SCORE.md", "RELIABILITY.md", "SECURITY.md", "PLANS.md"]
+
 
 [front_matter]
 required_keys = ["status", "owner", "last_reviewed"]
@@ -47,6 +61,7 @@ stale_after_days = 90
 # (see docs/PLANS.md); generated files are owned by their generator.
 exempt = [
   "AGENTS.md",
+  "WORKFLOW.md",
   "docs/generated/*",
   "docs/exec-plans/active/*",
   "docs/exec-plans/completed/*",
