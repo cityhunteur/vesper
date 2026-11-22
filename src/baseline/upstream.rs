@@ -328,7 +328,7 @@ pub fn glob(pattern: &str, text: &str) -> bool {
 
 impl Class {
     pub fn matches(&self, nodeid: &str, r: &TestResult) -> bool {
-        self.outcomes.iter().any(|o| *o == r.outcome)
+        self.outcomes.contains(&r.outcome)
             && (self.any_test || self.nodeid.iter().any(|p| glob(p, nodeid)))
             && (self.message.iter().any(|m| r.message.contains(m.as_str()))
                 || self.message_glob.iter().any(|g| glob(g, &r.message)))

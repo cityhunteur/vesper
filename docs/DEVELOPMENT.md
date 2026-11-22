@@ -138,7 +138,11 @@ cargo run --bin vesperd -- --backend model --socket run/vesperd.sock \
 
 ## Format, lint and type-check
 
-**Unknown / gap:** no `cargo fmt --check` or `cargo clippy` step exists in the Makefile or CI (tech debt TD-006).
+`make lint` runs `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` with the pinned toolchain; CI runs
+it in `rust-tests.yml` on Linux, so Linux-only code is linted there (`cargo clippy --target x86_64-unknown-linux-gnu`
+checks it from a Mac). A lint that a reason justifies is allowed at its site with that reason, not crate-wide (TD-006).
+Formatting-only commits are listed in `.git-blame-ignore-revs`; run `git config blame.ignoreRevsFile
+.git-blame-ignore-revs` once so `git blame` skips them.
 Type checking happens through `cargo build` and `cargo test`. Repository-level structure and docs lints:
 
 ```sh

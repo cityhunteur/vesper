@@ -239,6 +239,7 @@ pub(super) fn validate_mmds_data_store_limit(value: &Value) -> Result<(), &'stat
     Ok(())
 }
 
+#[allow(clippy::result_large_err)] // the error is the early HTTP response, as in every handler
 pub(super) fn ensure_mmds_runtime_access(
     state: &Arc<AppState>,
     method: &Method,

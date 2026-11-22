@@ -453,6 +453,7 @@ pub(super) fn balloon_stats_response_for(amount_mib: u32) -> BalloonStatsRespons
     }
 }
 
+#[allow(clippy::result_large_err)] // the error is the early HTTP response, as in every handler
 pub(super) fn ensure_balloon_hinting_enabled(
     state: &Arc<AppState>,
     method: &Method,
@@ -488,6 +489,7 @@ pub(super) fn ensure_balloon_hinting_enabled(
     Ok(())
 }
 
+#[allow(clippy::result_large_err)] // the error is the early HTTP response, as in every handler
 pub(super) fn validated_balloon_hinting_state(
     state: &Arc<AppState>,
     method: &Method,

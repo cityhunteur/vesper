@@ -56,9 +56,7 @@ pub fn load(path: impl AsRef<Path>) -> Result<Lock, String> {
                 .next()
                 .unwrap_or_default();
             if !matches!(arch, "aarch64" | "x86_64") {
-                return Err(format!(
-                    "baselines.firecracker.upstream_suite.artifacts_prefix must end in /aarch64 or /x86_64"
-                ));
+                return Err("baselines.firecracker.upstream_suite.artifacts_prefix must end in /aarch64 or /x86_64".to_string());
             }
             if baseline.revision.len() != 40
                 || !baseline

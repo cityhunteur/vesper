@@ -3,11 +3,12 @@ use axum::http::{Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 use std::sync::Arc;
 
+#[cfg(target_arch = "aarch64")]
+use super::SEND_CTRL_ALT_DEL_AARCH64_MESSAGE;
 use super::pmem::validate_pmem_backing_files;
 use super::{
     ACTION_NOT_SUPPORTED_POSTBOOT_MESSAGE, ACTION_NOT_SUPPORTED_PREBOOT_MESSAGE, ActionRequest,
-    ActionType, AppState, MISSING_KERNEL_CONFIG_MESSAGE, SEND_CTRL_ALT_DEL_AARCH64_MESSAGE,
-    VmState, error_response,
+    ActionType, AppState, MISSING_KERNEL_CONFIG_MESSAGE, VmState, error_response,
 };
 
 pub(super) fn handle_actions(

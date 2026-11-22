@@ -14,6 +14,7 @@ pub(super) const ACTION_NOT_SUPPORTED_POSTBOOT_MESSAGE: &str =
 pub(super) const ACTION_NOT_SUPPORTED_PREBOOT_MESSAGE: &str =
     "The requested operation is not supported before starting the microVM.";
 
+#[cfg(target_arch = "aarch64")] // the action is refused only on aarch64, as upstream
 pub(super) const SEND_CTRL_ALT_DEL_AARCH64_MESSAGE: &str =
     "SendCtrlAltDel does not supported on aarch64.";
 

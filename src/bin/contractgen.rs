@@ -39,20 +39,20 @@ fn run() -> Result<(), String> {
                 })?;
             }
             fs::write(&args.out, content)
-                .map_err(|err| format!("write golden file {}: {err}", &args.out))?;
-            println!("generated {}", &args.out);
+                .map_err(|err| format!("write golden file {}: {err}", args.out))?;
+            println!("generated {}", args.out);
             Ok(())
         }
         "check" => {
             let current = fs::read_to_string(&args.out)
-                .map_err(|err| format!("read golden file {}: {err}", &args.out))?;
+                .map_err(|err| format!("read golden file {}: {err}", args.out))?;
             if current != content {
                 return Err(
                     "golden contract is out of date; run: cargo run --bin contractgen -- --mode generate"
                         .to_string(),
                 );
             }
-            println!("golden contract is up to date: {}", &args.out);
+            println!("golden contract is up to date: {}", args.out);
             Ok(())
         }
         other => Err(format!("invalid mode {other:?} (expected generate|check)")),

@@ -114,10 +114,12 @@ fn the_bounder_rotates_and_splits() {
     );
 }
 
+#[cfg(target_os = "linux")] // only the Linux ledger test uses it
 struct Ledger {
     root: PathBuf,
 }
 
+#[cfg(target_os = "linux")] // only the Linux ledger test uses it
 impl Ledger {
     fn new(name: &str, mem_total_kib: u64) -> Ledger {
         let root = scratch(name);
@@ -171,6 +173,7 @@ impl Ledger {
     }
 }
 
+#[cfg(target_os = "linux")] // only the Linux ledger test uses it
 const MIB: u64 = 1 << 20;
 
 /// Acquire, refuse, release and stale expiry, a refused acquire that leaves the live entry alone, and a launch in

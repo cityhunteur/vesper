@@ -1,0 +1,3 @@
+# Formatting-only commits, hidden from git blame: git config blame.ignoreRevsFile .git-blame-ignore-revs
+# cargo fmt with the pinned rustfmt, and the file moves that kept the budgets (TD-006, #237)
+1f30bd0342bfbda93e1c58341693d9e03a2f02ad

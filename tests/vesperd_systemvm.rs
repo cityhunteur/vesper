@@ -733,8 +733,7 @@ fn a_bad_stage_flag_launches_nothing() {
         let (status, err) = wait_exit(&mut v, Duration::from_secs(10));
         assert!(!status.success() && err.contains(why), "{flag}: {err}");
     }
-    let many: Vec<&str> = std::iter::repeat(["--stage", "store:a.mem:/a.mem"])
-        .take(17)
+    let many: Vec<&str> = std::iter::repeat_n(["--stage", "store:a.mem:/a.mem"], 17)
         .flatten()
         .collect();
     let mut v = spawn(tmp.path(), &bridge, &many);

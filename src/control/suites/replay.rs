@@ -56,6 +56,9 @@ pub fn fixture_names(prefix: &str) -> (String, String) {
     (format!("{prefix}.vmstate"), format!("{prefix}.mem"))
 }
 
+/// Checks a finished run of one case: the run, and the responses it gave.
+type AfterRun<'a> = dyn FnMut(&VesperdRun, &[ReplayResponse]) -> Result<(), String> + 'a;
+
 impl ReplayRun {
     /// Writes each `(jail path, bytes)` file once into a new `share_dir/replay-<time>/` and opens the control session.
     /// Files are zero-filled; the jail path's components become the file name, so `/tmp/a.img` is `tmp_a.img`. The
@@ -125,11 +128,11 @@ impl ReplayRun {
         let mut failed = None;
         let _ = self.run_case(session, id, steps, false, &mut |v, responses| {
             for (step, r) in steps.iter().zip(responses) {
-                if let ReplayStep::Http { method, path, .. } = step {
-                    if !(200..300).contains(&r.status) {
-                        failed = Some(format!("fixture {method} {path}: {} {}", r.status, r.body));
-                        return Ok(());
-                    }
+                if let ReplayStep::Http { method, path, .. } = step
+                    && !(200..300).contains(&r.status)
+                {
+                    failed = Some(format!("fixture {method} {path}: {} {}", r.status, r.body));
+                    return Ok(());
                 }
             }
             for (src, name) in [(made.0, &state), (made.1, &mem)] {
@@ -174,7 +177,7 @@ impl ReplayRun {
         id: &str,
         steps: &[ReplayStep],
         snapshot: bool,
-        after: &mut dyn FnMut(&VesperdRun, &[ReplayResponse]) -> Result<(), String>,
+        after: &mut AfterRun<'_>,
     ) -> Result<Vec<ReplayResponse>, String> {
         if snapshot && session.snapshot_stages.is_empty() {
             return Err("the case needs the snapshot fixture, which was not made".to_string());
