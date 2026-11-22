@@ -213,3 +213,82 @@ fn each_request_writes_a_log_line() {
         assert!(line.contains(want), "{want} missing from {line}");
     }
 }
+
+/// TD-019: a chunked body (no Content-Length) that passes 2 MiB while it streams gets a 413 envelope. This also
+/// catches a change in the wording of the body library's limit error, which `handle_all` matches.
+#[test]
+fn a_chunked_body_over_the_limit_gets_a_413_envelope() {
+    use std::io::{Read, Write};
+    let dir = tempfile::tempdir().unwrap();
+    let runtime = dir.path().join("rt");
+    std::fs::create_dir_all(&runtime).unwrap();
+    let socket = dir.path().join("api.sock");
+    let _running = start(Some(&socket), &runtime, &socket);
+    let mut conn = std::os::unix::net::UnixStream::connect(&socket).unwrap();
+    conn.set_read_timeout(Some(Duration::from_secs(20)))
+        .unwrap();
+    conn.write_all(b"PUT /mmds HTTP/1.1\r\nHost: v\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n").unwrap();
+    let chunk = vec![b' '; 64 * 1024];
+    for _ in 0..40 {
+        // 40 x 64 KiB = 2.5 MiB; the server may answer and close before the last chunk.
+        if conn
+            .write_all(format!("{:x}\r\n", chunk.len()).as_bytes())
+            .is_err()
+            || conn.write_all(&chunk).is_err()
+            || conn.write_all(b"\r\n").is_err()
+        {
+            break;
+        }
+    }
+    let _ = conn.write_all(b"0\r\n\r\n");
+    let mut reply = String::new();
+    let _ = conn.read_to_string(&mut reply);
+    assert!(reply.starts_with("HTTP/1.1 413"), "{reply}");
+    assert!(reply.contains("\"PayloadTooLarge\""), "{reply}");
+}
+
+/// TD-024: a request blocked on a host path (a FIFO with no writer) does not keep vesperd from stopping: after
+/// SIGTERM it exits within its 5 s grace.
+#[test]
+fn a_blocked_request_does_not_stop_the_shutdown() {
+    use std::io::Write;
+    let dir = tempfile::tempdir().unwrap();
+    let runtime = dir.path().join("rt");
+    std::fs::create_dir_all(&runtime).unwrap();
+    let socket = dir.path().join("api.sock");
+    let fifo = dir.path().join("kernel.fifo");
+    assert!(
+        Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .unwrap()
+            .success()
+    );
+    let mut running = start(Some(&socket), &runtime, &socket);
+    let mut conn = std::os::unix::net::UnixStream::connect(&socket).unwrap();
+    let body = format!("{{\"kernel_image_path\":\"{}\"}}", fifo.display());
+    conn.write_all(format!("PUT /boot-source HTTP/1.1\r\nHost: v\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}", body.len()).as_bytes()).unwrap();
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(
+        Command::new("kill")
+            .args(["-TERM", &running.0.id().to_string()])
+            .status()
+            .unwrap()
+            .success()
+    );
+    let stopped = Instant::now();
+    let exited = loop {
+        if let Some(status) = running.0.try_wait().unwrap() {
+            break Some(status);
+        }
+        if stopped.elapsed() > Duration::from_secs(15) {
+            break None;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    };
+    // A vesperd that did not exit is killed when `running` is dropped.
+    assert!(
+        exited.is_some(),
+        "vesperd did not exit within 15 s of SIGTERM with a blocked request"
+    );
+}

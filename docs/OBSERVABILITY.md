@@ -98,9 +98,11 @@ The durable signals this project relies on are artifacts rather than live teleme
 ## Gaps
 
 - `vesperd` and `vesper-proxy` write structured lines to stderr (`tracing`, level from `VESPER_LOG`, default `info`;
-  TD-007): one line for each API request (`id=`, `method=`, `path=`, `status=`, `ms=`) and one when a relayed
-  connection is accepted and when it ends (`conn=`, `ms=`). Other binaries print plain lines.
+  TD-007). With `--backend model`, `vesperd` writes one line for each API request (`id=`, `method=`, `path=`,
+  `status=`, `ms=`). On the System VM backend (the default) and in `vesper-proxy`, the relay writes one line when a
+  connection is accepted and one when it ends (`conn=`, `ms=`), not one per request. Other binaries print plain
+  lines.
 - `PUT /metrics` and `PUT /logger` create the target file and store its path; nothing is ever emitted to it (TD-007).
 - No trace propagation across the bridge: a request id is local to the process that logs it.
 - `collect_verification_bundle.sh` copies the logs that exist: `run/vesperd.log` and `run/vesper-proxy.log` (dev loop),
-  `run/vesper/vesper-proxy.log` (Docker path) and `run/<ISSUE-ID>/proxy/proxy.log`. `run/vesperd.log` now holds the request lines.
+  `run/vesper/vesper-proxy.log` (Docker path) and `run/<ISSUE-ID>/proxy/proxy.log`. With `--backend model`, `run/vesperd.log` holds the request lines; on the System VM backend it holds connection lines.

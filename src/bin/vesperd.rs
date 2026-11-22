@@ -125,6 +125,9 @@ async fn main() {
     }
 }
 
+/// How long requests in flight may run after the stop signal (TD-024).
+const SHUTDOWN_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
+
 async fn run(args: Args) -> Result<(), String> {
     vesper::platform::validate_entitlements_file(
         args.entitlements_file.as_deref().map(Path::new),
@@ -175,10 +178,26 @@ async fn run(args: Args) -> Result<(), String> {
 
     println!("vesperd listening on {}", socket.display());
 
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await
-        .map_err(|err| format!("serve: {err}"))?;
+    // A request that blocks (a host path that is a FIFO, TD-024) would keep the graceful shutdown waiting for ever:
+    // after the signal, requests in flight get SHUTDOWN_GRACE, then the process exits.
+    let (stopped_tx, stopped_rx) = tokio::sync::oneshot::channel::<()>();
+    let serve = axum::serve(listener, app).with_graceful_shutdown(async move {
+        shutdown_signal().await;
+        let _ = stopped_tx.send(());
+    });
+    tokio::select! {
+        result = serve => result.map_err(|err| format!("serve: {err}"))?,
+        _ = async {
+            if stopped_rx.await.is_ok() {
+                tokio::time::sleep(SHUTDOWN_GRACE).await;
+            } else {
+                std::future::pending::<()>().await;
+            }
+        } => {
+            tracing::warn!(grace_s = SHUTDOWN_GRACE.as_secs(), "requests still in flight after the stop signal; exiting");
+            std::process::exit(0);
+        }
+    }
 
     Ok(())
 }

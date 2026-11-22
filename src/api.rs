@@ -945,11 +945,15 @@ async fn handle_all(
             .await
         {
             Ok(response) => response,
-            Err(_) => envelope(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "InternalError",
-                "the request handler failed",
-            ),
+            Err(err) => {
+                // A panic, a poisoned lock among them; the lock stays poisoned until vesperd restarts (TD-019).
+                tracing::error!(error = %err, path = %path, "request handler panicked");
+                envelope(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "InternalError",
+                    "the request handler failed",
+                )
+            }
         };
     // One line for each request, with an id (TD-007).
     tracing::info!(id, method = %method, path = %path, status = response.status().as_u16(), ms = started.elapsed().as_millis() as u64, "request");
