@@ -691,7 +691,7 @@ ctrns_links() {
       iptables -w -C INPUT -i vn0 -j VESPER_DNS_IN 2>/dev/null || iptables -w -A INPUT -i vn0 -j VESPER_DNS_IN
       iptables -w -t nat -A VESPER_DNS -s 169.254.78.2 -d 169.254.78.1 -p udp --dport 53 -j DNAT --to-destination "127.0.0.11:$1"
       iptables -w -t nat -A VESPER_DNS -s 169.254.78.2 -d 169.254.78.1 -p tcp --dport 53 -j DNAT --to-destination "127.0.0.11:$2"
-      iptables -w -A VESPER_DNS_IN -s 169.254.78.2 -p tcp -m conntrack --ctstate DNAT -m connlimit --connlimit-above 16 -j DROP
+      iptables -w -A VESPER_DNS_IN -s 169.254.78.2 -p tcp --syn -m conntrack --ctstate DNAT -m connlimit --connlimit-above 16 -j DROP
       iptables -w -A VESPER_DNS_IN -s 169.254.78.2 -p udp -m conntrack --ctstate DNAT --ctorigdst 169.254.78.1 --ctorigdstport 53 -j ACCEPT
       iptables -w -A VESPER_DNS_IN -s 169.254.78.2 -p tcp -m conntrack --ctstate DNAT --ctorigdst 169.254.78.1 --ctorigdstport 53 -j ACCEPT' \
       sh "$cl_udp" "$cl_tcp" 2>&1 || { echo "DNS link: rules failed"; return 1; }

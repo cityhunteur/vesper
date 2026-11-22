@@ -119,15 +119,17 @@ IPv6 address) fails the start with a message naming it.
   `169.254.78.1:53` to dockerd's resolver ports (read from dockerd's own `DOCKER_OUTPUT` rules), with
   `route_localnet` on `vn0`; no process. `INPUT` filters after DNAT, so its accept rule matches the original
   destination: `-i vn0 -m conntrack --ctstate DNAT --ctorigdst 169.254.78.1 --ctorigdstport 53`, for UDP and TCP;
-  the answers leave from `127.0.0.11`, which `route_localnet` lets out of `vn0`. To be shown in slice 3 with the
-  `DROP` policies in place; if it fails, a forwarder (socat with `max-children`) as an unprivileged user in a cgroup
-  with `pids.max` and `memory.max`, like the share server's.
+  the answers leave from `127.0.0.11`, which `route_localnet` lets out of `vn0`. Built in slice 3 (D-073): the rules
+  are in chains of their own (`VESPER_DNS` in `nat`, `VESPER_DNS_IN` in `filter`), flushed when the links go down;
+  each names the guest's address; new TCP connections above 16 are dropped (`--syn`, `connlimit`); a launch fails
+  with a reason when dockerd's `DOCKER_OUTPUT` chain names no ports. In the guest, socat forwarders (UDP with a 5 s
+  answer wait) serve `127.0.0.11`.
 - **Drivers**: the data link is shown on dockerd's `bridge` driver only. On macvlan, ipvlan or overlay networks frames
   are delivered by dockerd's MAC, not the guest's, so traffic can fail without a message (a recorded residual,
   TD-086). A network named by its id rather than `host` passes the plugin's check, which is harmless: the task always
   has its own namespace.
-- **Rate limits**: `vn0` gets a Firecracker rate limiter (as the share tap has, `vesper-microvm:726-729`); `vd0`
-  gets none, as Docker sets none.
+- **Rate limits**: `vn0` gets a Firecracker rate limiter of 1 MiB/s and 200 operations a second each way (the share
+  tap has one too); `vd0` gets none, as Docker sets none.
 - **The share namespace** keeps ADR 0009's server, sandbox, `INPUT` rules and rate limiter. It now holds `lo`, `vh0`
   with `169.254.77.1/30` and the server; Firecracker no longer runs in it. The veth pair is made inside the share
   namespace, where BusyBox's default peer name cannot collide, then the peer is renamed and moved with `ip link set`
