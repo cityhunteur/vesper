@@ -283,6 +283,28 @@ func (m *MicroVM) Resize(ctx context.Context, id string, port, rows, cols uint32
 	return nil
 }
 
+func (m *MicroVM) Release(ctx context.Context, id string, port uint32) error {
+	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+	c, err := dialPort(ctx, m.socket(id), 1025)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	_ = c.SetDeadline(time.Now().Add(8 * time.Second))
+	if _, err = fmt.Fprintf(c, "RELEASE %d 0 0\n", port); err != nil {
+		return fmt.Errorf("release session: %w", err)
+	}
+	line, err := bufio.NewReader(c).ReadSlice('\n')
+	if err != nil {
+		return fmt.Errorf("release reply: %w", err)
+	}
+	if strings.TrimSpace(string(line)) != "OK" {
+		return fmt.Errorf("release p%d: %s", port, strings.TrimSpace(string(line)))
+	}
+	return nil
+}
+
 func (m *MicroVM) Abort(ctx context.Context, id string, port uint32) error {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()

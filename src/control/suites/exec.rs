@@ -91,6 +91,46 @@ pub fn run_exec_suite(endpoint: &ControlEndpoint) -> SuiteReport {
             }
             Ok(((), lines.join(" | ")))
         });
+        // TD-041: an exec that ended and was deleted gives its guest port to the next one, so three execs in turn
+        // run on one port (the console log names each session's port).
+        step(&mut steps, "exec_ports_reused", || {
+            for n in 0..3 {
+                let id = format!("reuse-{n}");
+                let (_, lines) = session.ctr(&[
+                    "try",
+                    "task",
+                    "exec",
+                    "--exec-id",
+                    &id,
+                    "ex-host",
+                    "/bin/busybox",
+                    "true",
+                ])?;
+                if rc_out(&lines).0 != 0 {
+                    return Err(format!("{id}: {}", lines.join(" | ")));
+                }
+            }
+            let (_, log) = session.microvm(&["log", "ex-host", "400"])?;
+            let ports: Vec<&str> = log
+                .iter()
+                .filter_map(|l| l.split("VESPER-RUNC-INVOKE ").nth(1))
+                .filter(|rest| rest.ends_with(" EXEC"))
+                .filter_map(|rest| rest.split_whitespace().next())
+                .collect();
+            let last: Vec<&str> = ports.iter().rev().take(3).copied().collect();
+            if last.len() != 3 || last.iter().any(|p| *p != last[0]) {
+                return Err(format!(
+                    "the last three exec sessions ran on {last:?}; all exec sessions: {ports:?}"
+                ));
+            }
+            Ok((
+                (),
+                format!(
+                    "three execs in turn on {}; all exec sessions: {ports:?}",
+                    last[0]
+                ),
+            ))
+        });
         step(&mut steps, "exec_runtime_error_is_structured", || {
             let (_, lines) = session.ctr(&[
                 "try",

@@ -55,17 +55,20 @@ type Task struct {
 	Port        uint32
 	Session     *backend.Session
 	stdinClosed bool
-	exiting     bool
-	watchDone   chan struct{}
-	Stdout      string
-	Stderr      string
-	Stdin       string
-	Terminal    bool
-	phase       Phase
-	pid         int
-	exitStatus  uint32
-	exitedAt    time.Time
-	exited      chan struct{}
+	// guestKnows is set once the guest may hold a session directory for Port (Start asked for one); its port is
+	// then reused only after the guest released it (TD-041).
+	guestKnows bool
+	exiting    bool
+	watchDone  chan struct{}
+	Stdout     string
+	Stderr     string
+	Stdin      string
+	Terminal   bool
+	phase      Phase
+	pid        int
+	exitStatus uint32
+	exitedAt   time.Time
+	exited     chan struct{}
 }
 
 func newTask(id, bundle string) *Task {

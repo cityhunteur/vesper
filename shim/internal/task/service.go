@@ -49,6 +49,8 @@ type Service struct {
 	task      *Task
 	execs     map[string]*Task
 	nextPort  uint32
+	// freePorts are exec session ports given back by deleted execs, used before nextPort (TD-041).
+	freePorts []uint32
 }
 
 // NewService wires the service; `b` is the production microVM backend unless a test injects a fake.
@@ -296,6 +298,7 @@ func (s *Service) Start(ctx context.Context, r *taskAPI.StartRequest) (*taskAPI.
 		}
 		pid = parent.Pid()
 	}
+	t.guestKnows = true
 	session, err := s.backend.OpenSession(ctx, r.ID, t.Port, t.Config, r.ExecID != "", backend.IO{Stdin: t.Stdin, Stdout: t.Stdout, Stderr: t.Stderr, Terminal: t.Terminal})
 	if err != nil {
 		if r.ExecID == "" {
@@ -486,6 +489,7 @@ func (s *Service) Delete(ctx context.Context, r *taskAPI.DeleteRequest) (*taskAP
 		s.mu.Lock()
 		delete(s.execs, r.ExecID)
 		s.mu.Unlock()
+		s.releasePort(ctx, r.ID, t)
 		status, at := t.Exit()
 		return &taskAPI.DeleteResponse{Pid: uint32(t.Pid()), ExitStatus: status, ExitedAt: protobuf.ToTimestamp(at)}, nil
 	}
@@ -505,6 +509,27 @@ func (s *Service) Delete(ctx context.Context, r *taskAPI.DeleteRequest) (*taskAP
 	status, at := t.Exit()
 	s.publish(ctx, runtime.TaskDeleteEventTopic, &eventstypes.TaskDelete{ContainerID: t.ID, ID: t.ID, Pid: uint32(t.Pid()), ExitStatus: status, ExitedAt: protobuf.ToTimestamp(at)})
 	return &taskAPI.DeleteResponse{Pid: uint32(t.Pid()), ExitStatus: status, ExitedAt: protobuf.ToTimestamp(at)}, nil
+}
+
+// releasePort gives a deleted exec's session port back (TD-041). An exec the guest never heard of frees its port at
+// once; any other needs the guest to remove the ended session's directory first (RELEASE), so a new session on the
+// port is not refused as a duplicate. A port the guest does not release stays used, as before.
+func (s *Service) releasePort(ctx context.Context, id string, t *Task) {
+	if t.Port == 0 {
+		return
+	}
+	if t.guestKnows {
+		if s.backend == nil {
+			return
+		}
+		if err := s.backend.Release(ctx, id, t.Port); err != nil {
+			log.G(ctx).WithError(err).WithField("port", t.Port).Warn("exec session not released; its port is not reused")
+			return
+		}
+	}
+	s.mu.Lock()
+	s.freePorts = append(s.freePorts, t.Port)
+	s.mu.Unlock()
 }
 
 // State reports the task.
@@ -636,13 +661,17 @@ func (s *Service) Exec(ctx context.Context, r *taskAPI.ExecProcessRequest) (*emp
 	if s.execs[r.ExecID] != nil {
 		return nil, errgrpc.ToGRPCf(errdefs.ErrAlreadyExists, "exec %s exists", r.ExecID)
 	}
-	// shortcut: ports are not reused; add guest session reclamation if tasks need over 16,125 execs.
-	if s.nextPort > 65528 {
-		return nil, errgrpc.ToGRPCf(errdefs.ErrResourceExhausted, "guest session ports exhausted")
+	// A deleted exec's port first (TD-041); then the next unused one. 16,125 execs can be open at once.
+	var port uint32
+	if n := len(s.freePorts); n > 0 {
+		port, s.freePorts = s.freePorts[n-1], s.freePorts[:n-1]
+	} else if s.nextPort > 65528 {
+		return nil, errgrpc.ToGRPCf(errdefs.ErrResourceExhausted, "guest session ports exhausted: 16,125 execs are open")
+	} else {
+		port, s.nextPort = s.nextPort, s.nextPort+4
 	}
 	t := newTask(r.ExecID, parent.Bundle)
-	t.Config, t.Port = config, s.nextPort
-	s.nextPort += 4
+	t.Config, t.Port = config, port
 	t.Stdin, t.Stdout, t.Stderr, t.Terminal = r.Stdin, r.Stdout, r.Stderr, r.Terminal
 	s.execs[r.ExecID] = t
 	s.publish(ctx, runtime.TaskExecAddedEventTopic, &eventstypes.TaskExecAdded{ContainerID: r.ID, ExecID: r.ExecID})

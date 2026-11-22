@@ -45,6 +45,8 @@ type Backend interface {
 	Launch(ctx context.Context, id, image string, extra []string) (pid int, err error)
 	OpenSession(ctx context.Context, id string, port uint32, config []byte, isExec bool, paths IO) (*Session, error)
 	Abort(ctx context.Context, id string, port uint32) error
+	// Release removes an ended session's directory in the guest, so its port can serve a new session (TD-041).
+	Release(ctx context.Context, id string, port uint32) error
 	Resize(ctx context.Context, id string, port, rows, cols uint32) error
 	Signal(ctx context.Context, id string, port, signal uint32, all bool) error
 	// StopShares stops the microVM's share server once its task has stopped (GH #160 M5); Cleanup does it again.

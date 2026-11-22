@@ -49,6 +49,20 @@ case "$op" in
     /usr/bin/vesper-console resize "$dir" "$size" "$tty" 2>/dev/ttyS0 || fail resize resize-failed
     echo OK
     exit ;;
+  RELEASE)
+    # An ended exec session's directory goes, so the shim can give its ports to a new exec (TD-041). The workload's
+    # own session is never released; a session that has not ended is refused.
+    [ "$port" != 1028 ] || fail release workload-session
+    [ -d "$dir" ] || { echo OK; exit; }
+    [ -f "$dir/status" ] || fail release session-running
+    # The session's own process ends right after its EXIT line, killing its relays; give it 3 s.
+    if [ -f "$dir/session" ]; then
+      for _ in $(seq 1 30); do kill -0 "$(cat "$dir/session")" 2>/dev/null || break; sleep 0.1; done
+      ! kill -0 "$(cat "$dir/session")" 2>/dev/null || fail release session-still-running
+    fi
+    rm -rf "$dir" || fail release remove-failed
+    echo OK
+    exit ;;
   RUN|EXEC) ;;
   *) fail request unknown-operation ;;
 esac
@@ -56,6 +70,7 @@ case "$size" in ''|*[!0-9]*) fail request invalid-size ;; esac
 [ "$size" -gt 0 ] && [ "$size" -le 1048576 ] || fail request invalid-size
 case "$tty" in 0|1) ;; *) fail request invalid-terminal ;; esac
 mkdir "$dir" || fail start duplicate-session
+echo $$ > "$dir/session"
 relays=''; runner=''
 trap '[ -f "$dir/status" ] || { touch "$dir/abort"; terminate; [ -n "$runner" ] || echo 137 > "$dir/status"; }; kill $relays 2>/dev/null || true; [ "$op" != RUN ] || /usr/bin/vesper-console shares unmount "$dir" > /dev/ttyS0 2>&1 || true' EXIT
 head -c "$size" > "$dir/config.json"
