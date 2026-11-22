@@ -107,11 +107,11 @@ pub(super) fn full_vm_config_response(state: &Arc<AppState>) -> Response {
         .values()
         .cloned()
         .collect();
-    if let Some(root_index) = drives.iter().position(|drive| drive.is_root_device) {
-        if root_index != 0 {
-            let root_drive = drives.remove(root_index);
-            drives.insert(0, root_drive);
-        }
+    if let Some(root_index) = drives.iter().position(|drive| drive.is_root_device)
+        && root_index != 0
+    {
+        let root_drive = drives.remove(root_index);
+        drives.insert(0, root_drive);
     }
     let network_interfaces = state
         .network_interfaces

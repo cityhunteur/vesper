@@ -2,13 +2,18 @@ CARGO ?= cargo
 RUN_DIR ?= run
 CYCLES ?= 50
 
-.PHONY: build systemvm-upstream-suite third-party-notices third-party-notices-check test contract-generate contract-check contract-test surface-matrix-generate \
+.PHONY: lint build systemvm-upstream-suite third-party-notices third-party-notices-check test contract-generate contract-check contract-test surface-matrix-generate \
 	surface-matrix-check behavior-matrix-generate behavior-matrix-check \
 	validate-entitlements dev-up dev-down vmlauncher-build systemvm-fetch systemvm-overlay systemvm-prepare systemvm-build systemvm-launch-config \
 	systemvm-boot-smoke systemvm-up systemvm-down systemvm-control-suite systemvm-services-suite systemvm-trivial-image docker-up docker-down docker-smoke docker-conformance ports-suite binds-suite data-disk-suite share-notify-selftest share-watch-selftest systemvm-up-shares dns-suite workflow-suite crossarch-suite ctr-conformance ctr-conformance-check ctr-conformance-loop systemvm-reliability systemvm-microvm-suite systemvm-rootfs-suite systemvm-workload-suite systemvm-parity-baseline parity-baseline-check shim-build shim-test systemvm-exec-suite systemvm-shim-suite systemvm-bundle-suite systemvm-restart-suite systemvm-launchapi-suite systemvm-vesperd-suite systemvm-up-snapshot systemvm-snapshot-suite systemvm-replay-suite systemvm-replay-publish behavior-replay-check systemvm-egress-suite systemvm-bounds-suite systemvm-sharenet-suite systemvm-confine-suite systemvm-unfs-suite systemvm-microvm-shares-suite systemvm-microvm-binds-suite systemvm-microvm-size-suite
 
 build:
 	$(CARGO) build --bins
+
+# TD-006: formatting and clippy with the pinned toolchain; CI runs it in rust-tests.yml.
+lint:
+	$(CARGO) fmt --check
+	$(CARGO) clippy --all-targets -- -D warnings
 
 test:
 	$(CARGO) test

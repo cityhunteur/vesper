@@ -377,11 +377,11 @@ impl Publisher {
                         self.publish(&id, &name).await;
                         self.write_status();
                     }
-                    "die" | "stop" | "kill" | "destroy" | "pause" => {
-                        if self.live.contains_key(&id) {
-                            self.unpublish(&id);
-                            self.write_status();
-                        }
+                    "die" | "stop" | "kill" | "destroy" | "pause"
+                        if self.live.contains_key(&id) =>
+                    {
+                        self.unpublish(&id);
+                        self.write_status();
                     }
                     _ => {}
                 }
@@ -500,10 +500,10 @@ impl Publisher {
             let _ = std::fs::create_dir_all(parent);
         }
         let tmp = self.config.status_path.with_extension("json.tmp");
-        if let Ok(raw) = serde_json::to_vec_pretty(&status) {
-            if std::fs::write(&tmp, raw).is_ok() {
-                let _ = std::fs::rename(&tmp, &self.config.status_path);
-            }
+        if let Ok(raw) = serde_json::to_vec_pretty(&status)
+            && std::fs::write(&tmp, raw).is_ok()
+        {
+            let _ = std::fs::rename(&tmp, &self.config.status_path);
         }
     }
 }

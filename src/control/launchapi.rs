@@ -248,13 +248,13 @@ pub fn read_http_response<R: BufRead>(reader: &mut R) -> Result<Vec<u8>, String>
         if header.is_empty() {
             break;
         }
-        if let Some((name, value)) = header.split_once(':') {
-            if name.eq_ignore_ascii_case("content-length") {
-                length = value
-                    .trim()
-                    .parse()
-                    .map_err(|_| format!("bad {header:?}"))?;
-            }
+        if let Some((name, value)) = header.split_once(':')
+            && name.eq_ignore_ascii_case("content-length")
+        {
+            length = value
+                .trim()
+                .parse()
+                .map_err(|_| format!("bad {header:?}"))?;
         }
     }
     if length > MAX_BODY {
@@ -498,7 +498,7 @@ mod tests {
                 .contains("overlaps")
         );
         assert!(
-            check_network(false, &[a.clone()])
+            check_network(false, std::slice::from_ref(&a))
                 .unwrap_err()
                 .contains("needs --network nat")
         );

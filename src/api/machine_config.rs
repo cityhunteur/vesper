@@ -160,7 +160,7 @@ fn validate_machine_config(config: &MachineConfig) -> Result<(), &'static str> {
     }
 
     if config.mem_size_mib == 0
-        || matches!(config.huge_pages, HugePages::Huge2M) && config.mem_size_mib % 2 != 0
+        || matches!(config.huge_pages, HugePages::Huge2M) && !config.mem_size_mib.is_multiple_of(2)
     {
         return Err(
             "The memory size (MiB) is either 0, or not a multiple of the configured page size.",

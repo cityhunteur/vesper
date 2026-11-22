@@ -117,7 +117,7 @@ fn generate(lock: &vesper::baseline::Lock, args: &Args) -> Result<(), String> {
         .map_err(|err| format!("serialize metadata: {err}"))?;
     content.push('\n');
     fs::write(&args.metadata, content)
-        .map_err(|err| format!("write metadata file {}: {err}", &args.metadata))?;
+        .map_err(|err| format!("write metadata file {}: {err}", args.metadata))?;
 
     println!("generated metadata at {}", args.metadata);
     Ok(())

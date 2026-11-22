@@ -9,7 +9,7 @@ fn meta_field<'a>(line: &'a str, key: &str) -> Option<&'a str> {
     if let Some(s) = rest.strip_prefix('"') {
         s.split('"').next()
     } else {
-        rest.split(|c| c == ',' || c == '}').next().map(str::trim)
+        rest.split([',', '}']).next().map(str::trim)
     }
 }
 
@@ -196,7 +196,7 @@ pub fn run_bundle_suite(endpoint: &ControlEndpoint) -> SuiteReport {
             .replace('"', "");
         let base_lower = base_lower
             .split(',')
-            .last()
+            .next_back()
             .unwrap_or("")
             .trim()
             .to_string();

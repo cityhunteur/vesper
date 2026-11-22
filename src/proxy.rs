@@ -127,13 +127,13 @@ pub async fn run_server(
     }
 
     let target = parse_target(&config.upstream_raw)?;
-    if config.validate_upstream {
-        if let Some(path) = upstream_socket_path(&target, &config.vsock_socket_dir)? {
-            let meta = std::fs::metadata(&path)
+    if config.validate_upstream
+        && let Some(path) = upstream_socket_path(&target, &config.vsock_socket_dir)?
+    {
+        let meta = std::fs::metadata(&path)
                 .map_err(|err| format!("upstream socket {path} is not available: {err} (is the System VM up? `make systemvm-up`)"))?;
-            if !std::os::unix::fs::FileTypeExt::is_socket(&meta.file_type()) {
-                return Err(format!("upstream path {path} is not a socket"));
-            }
+        if !std::os::unix::fs::FileTypeExt::is_socket(&meta.file_type()) {
+            return Err(format!("upstream path {path} is not a socket"));
         }
     }
 

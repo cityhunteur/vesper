@@ -61,6 +61,9 @@ jobs:
           go-version-file: shim/go.mod
           cache-dependency-path: shim/go.sum
 
+      - name: Format and clippy (TD-006)
+        run: make lint
+
       - name: Build all binaries
         run: make build
 

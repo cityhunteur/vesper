@@ -47,7 +47,7 @@ and `systemvmctl` keep governance honest. Backend A runs Firecracker microVMs in
 All verified on 2026-11-05; detail in [DEVELOPMENT.md](docs/DEVELOPMENT.md) and [TESTING.md](docs/TESTING.md).
 
 ```sh
-make build                                  # cargo build --bins
+make build && make lint                     # cargo build --bins; rustfmt and clippy -D warnings (CI)
 cargo test --test api_contract              # one suite; cargo test <name> for one test
 cargo test                                  # full suite
 make contract-check && make contract-test   # golden route contract + contract suites
@@ -59,7 +59,7 @@ python3 harness/check_docs.py               # knowledge-base checks
 python3 scripts/harness/check_structure.py --root .
 ```
 
-No formatter or linter runs in CI; see tech debt TD-006.
+CI runs `make lint` (rustfmt and clippy with the pinned toolchain); see [DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
 ## Invariants
 

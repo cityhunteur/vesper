@@ -257,10 +257,9 @@ fn host_dev_names(steps: &[Step]) -> Vec<String> {
         if let Step::Http {
             body: Some(body), ..
         } = step
+            && let Ok(value) = serde_json::from_str::<serde_json::Value>(body)
         {
-            if let Ok(value) = serde_json::from_str::<serde_json::Value>(body) {
-                walk(&value, &mut out);
-            }
+            walk(&value, &mut out);
         }
     }
     out
@@ -611,6 +610,9 @@ fn clip(s: &str) -> String {
     format!("{}…", &s[..end])
 }
 
+/// Runs one case's steps on a backend: (case id, steps, whether a snapshot fixture is needed) -> responses.
+pub type RunCase<'a> = dyn FnMut(&str, &[Step], bool) -> Result<Vec<Response>, String> + 'a;
+
 /// Replays every case of `matrix` that `filter` accepts. `run(key, steps, snapshot)` runs one case on a fresh
 /// microVM and returns one response per step, or an error if the backend could not run it.
 pub fn replay(
@@ -620,7 +622,7 @@ pub fn replay(
     arch: &str,
     check_code: bool,
     filter: &dyn Fn(&str) -> bool,
-    run: &mut dyn FnMut(&str, &[Step], bool) -> Result<Vec<Response>, String>,
+    run: &mut RunCase<'_>,
 ) -> Vec<CaseResult> {
     let mut results = Vec::new();
     for op in &matrix.operations {

@@ -8,12 +8,11 @@ use std::time::{Duration, Instant};
 fn wait_containerd(session: &mut super::Session, timeout: Duration) -> Result<String, String> {
     let deadline = Instant::now() + timeout;
     loop {
-        if let Ok(h) = session.health() {
-            if h["containerd_ok"] == serde_json::Value::Bool(true)
-                && h["services"]["containerd"] == "started"
-            {
-                return Ok("containerd respawned and healthy".to_string());
-            }
+        if let Ok(h) = session.health()
+            && h["containerd_ok"] == serde_json::Value::Bool(true)
+            && h["services"]["containerd"] == "started"
+        {
+            return Ok("containerd respawned and healthy".to_string());
         }
         if Instant::now() >= deadline {
             return Err("containerd did not come back within the timeout".to_string());

@@ -1756,22 +1756,20 @@ fn snapshot_load_has_blocking_config(state: &Arc<AppState>) -> bool {
         return true;
     }
 
-    if state
+    if !state
         .drives
         .read()
         .expect("drive config lock poisoned while reading")
         .is_empty()
-        == false
     {
         return true;
     }
 
-    if state
+    if !state
         .network_interfaces
         .read()
         .expect("network interface config lock poisoned while reading")
         .is_empty()
-        == false
     {
         return true;
     }
@@ -1794,12 +1792,11 @@ fn snapshot_load_has_blocking_config(state: &Arc<AppState>) -> bool {
         return true;
     }
 
-    if state
+    if !state
         .pmem_devices
         .read()
         .expect("pmem config lock poisoned while reading")
         .is_empty()
-        == false
     {
         return true;
     }
@@ -1887,7 +1884,7 @@ fn validate_memory_hotplug_config(config: &MemoryHotplugConfig) -> Result<(), St
         "Block size must be a power of 2".to_string()
     } else if config.slot_size_mib < DEFAULT_MEMORY_HOTPLUG_SLOT_SIZE_MIB {
         format!("Slot size must not be lower than {DEFAULT_MEMORY_HOTPLUG_SLOT_SIZE_MIB} MiB")
-    } else if config.slot_size_mib % config.block_size_mib != 0 {
+    } else if !config.slot_size_mib.is_multiple_of(config.block_size_mib) {
         format!(
             "Slot size must be a multiple of block size ({} MiB)",
             config.block_size_mib
@@ -1897,7 +1894,7 @@ fn validate_memory_hotplug_config(config: &MemoryHotplugConfig) -> Result<(), St
             "Total size must not be lower than slot size ({} MiB)",
             config.slot_size_mib
         )
-    } else if config.total_size_mib % config.slot_size_mib != 0 {
+    } else if !config.total_size_mib.is_multiple_of(config.slot_size_mib) {
         format!(
             "Total size must be a multiple of slot size ({} MiB)",
             config.slot_size_mib
@@ -1914,7 +1911,9 @@ fn validate_memory_hotplug_size_update(
     config: &MemoryHotplugConfig,
     payload: &MemoryHotplugSizeUpdate,
 ) -> Result<(), String> {
-    if payload.requested_size_mib % config.block_size_mib != 0
+    if !payload
+        .requested_size_mib
+        .is_multiple_of(config.block_size_mib)
         || payload.requested_size_mib > config.total_size_mib
     {
         let bytes = (payload.requested_size_mib as u64) << 20;

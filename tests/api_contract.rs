@@ -39,7 +39,7 @@ fn concrete_path(template: &str) -> String {
     let mut chars = template.chars().peekable();
     while let Some(ch) = chars.next() {
         if ch == '{' {
-            while let Some(next) = chars.next() {
+            for next in chars.by_ref() {
                 if next == '}' {
                     break;
                 }
