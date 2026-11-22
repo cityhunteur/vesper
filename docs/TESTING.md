@@ -93,7 +93,7 @@ runs on `macos-15`; all are reproducible locally:
   `make behavior-matrix-check`, `make validate-entitlements`, `make third-party-notices-check`.
 - `contract-tests.yml` (swagger, `src/spec.rs`, `src/api.rs`, `contractgen`, golden file): golden check, `make contract-test`.
 - `systemvm-image.yml` (image and packages locks, `systemvm/**`, `scripts/systemvm/**`, `launcher/**`,
-  `scripts/macos/build-vmlauncher.sh`, `scripts/macos/share-watch-selftest.sh`, the launcher entitlements,
+  `scripts/macos/build-vmlauncher.sh`, `scripts/macos/share-watch-selftest.sh`, `scripts/macos/launcher-config-contract.sh`, the launcher entitlements,
   `src/systemvm.rs`, `src/bin/systemvmctl.rs`, `Makefile`): job `reproducible-image` on Linux runs the systemvm unit
   tests, `make share-notify-selftest`, the pinned image fetch and the deterministic overlay build; job
   `launcher-build` on `macos-15` builds and signs the launcher and runs `make share-watch-selftest`. No job boots

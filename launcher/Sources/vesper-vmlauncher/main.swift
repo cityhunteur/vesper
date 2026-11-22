@@ -20,7 +20,7 @@
 import Foundation
 import Virtualization
 
-struct ProbeSettings: Decodable {
+struct ProbeSettings: Codable {
     let login_user: String
     let shell_prompt: String
     let commands: [String]
@@ -29,7 +29,7 @@ struct ProbeSettings: Decodable {
 }
 
 /// A host directory shared into the guest over virtio-fs (GH #29); the guest mounts it by `tag`.
-struct SharedDirectory: Decodable {
+struct SharedDirectory: Codable {
     let tag: String
     let host_path: String
     let read_only: Bool?
@@ -37,7 +37,7 @@ struct SharedDirectory: Decodable {
     let watch: Bool?
 }
 
-struct LaunchConfig: Decodable {
+struct LaunchConfig: Codable {
     let kernel_path: String
     let rootfs_path: String?
     let initrd_path: String?
@@ -70,6 +70,7 @@ struct Options {
     var hostCapabilities = false
     var watchDryRun: [String] = []
     var watchSinkSocket: String? = nil
+    var printConfig = false
 }
 
 /// Host facts for backend selection (GH #17): nested virtualisation needs macOS 15 and an M3 or later.
@@ -98,6 +99,7 @@ func usage() -> String {
     """
     usage: vesper-vmlauncher [--config PATH] [--ready-pattern TEXT] [--timeout-seconds N] [--keep-running] [--skip-probe]
            vesper-vmlauncher --host-capabilities
+           vesper-vmlauncher --config PATH --print-config
            vesper-vmlauncher --watch-dry-run DIR [--watch-dry-run DIR ...] [--watch-sink-socket PATH]
       --config PATH          launch config JSON (default build/systemvm/launch-config.json)
       --ready-pattern TEXT   console text that marks a healthy boot (default: ready_pattern from the config, else "login:")
@@ -105,6 +107,8 @@ func usage() -> String {
       --keep-running         do not stop the VM after the ready pattern; wait for guest shutdown
       --skip-probe           ignore the config's probe: stop right after the ready pattern
       --host-capabilities    print host facts (nested virtualization support, macOS, chip) as JSON and exit
+      --print-config         no VM: print the launch config as this launcher decoded it, as JSON, and exit
+                             (the contract test of TD-044)
       --watch-dry-run DIR    no VM: watch DIR as a share and print the paths the guest would be asked to
                              replay, one per line after "WATCHING <n>", until terminated; SIGTERM
                              prints "SUMMARY <counters>" and exits
@@ -143,6 +147,8 @@ func parseOptions() -> Options {
             options.skipProbe = true
         case "--host-capabilities":
             options.hostCapabilities = true
+        case "--print-config":
+            options.printConfig = true
         case "--watch-dry-run":
             guard !args.isEmpty else { fail(3, "--watch-dry-run needs a directory") }
             options.watchDryRun.append(args.removeFirst())
@@ -715,6 +721,15 @@ if !options.watchDryRun.isEmpty {
     dispatchMain()
 }
 let config = loadConfig(options.configPath)
+if options.printConfig {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys]
+    guard let data = try? encoder.encode(config), let text = String(data: data, encoding: .utf8) else {
+        fail(3, "cannot encode the launch config")
+    }
+    print(text)
+    exit(0)
+}
 // A config written before the bridge allow-list (TD-027) would refuse every port; say so instead.
 if let bridge = config.vsock_bridge_path, !bridge.isEmpty, (config.bridge_allowed_ports ?? []).isEmpty {
     fail(3, "launch config serves a vsock bridge but lists no bridge_allowed_ports; regenerate it with 'make systemvm-launch-config'")
