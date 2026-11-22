@@ -166,5 +166,17 @@ jobs:
             echo "require policy refused with diagnostics (expected on M1/M2 runners)"
           fi
 
-      - name: Entitlement plists are valid
+      - name: Entitlement plists are valid and hold exactly the approved keys (TD-010)
         run: make validate-entitlements
+
+      - name: The launcher's signature verifies and carries exactly its plist's entitlements (TD-010)
+        run: |
+          codesign --verify --strict --verbose=2 build/vmlauncher/vesper-vmlauncher
+          codesign --display --entitlements :- build/vmlauncher/vesper-vmlauncher > /tmp/signed.plist
+          python3 -I - /tmp/signed.plist packaging/macos/vesper-vmlauncher.entitlements <<'PY'
+          import plistlib, sys
+          signed, want = (plistlib.load(open(p, "rb")) for p in sys.argv[1:3])
+          if signed != want:
+              sys.exit(f"signed entitlements {signed} differ from the plist {want}")
+          print(f"signed entitlements match the plist: {sorted(signed)}")
+          PY
