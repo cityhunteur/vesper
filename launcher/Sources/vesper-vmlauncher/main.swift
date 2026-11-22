@@ -461,8 +461,18 @@ final class Launcher: NSObject, VZVirtualMachineDelegate {
         report(status: "bridge-listening", extra: "\"bridge\":\"\(path)\"")
     }
 
+    /// Runs a blocking loop on a thread of its own. GCD's global queue has at most 64 worker threads, and each relayed
+    /// connection blocks two of them in read(2), so with the global queue the 33rd connection waited, with no message,
+    /// until another closed (found by the TD-026 control-slots step).
+    static func blocking(_ name: String, _ body: @escaping () -> Void) {
+        let thread = Thread(block: body)
+        thread.name = name
+        thread.stackSize = 256 * 1024
+        thread.start()
+    }
+
     func handleBridgeClient(_ client: Int32, _ device: VZVirtioSocketDevice) {
-        DispatchQueue.global().async {
+        Launcher.blocking("bridge-preface") {
             var line = [UInt8]()
             var byte: UInt8 = 0
             while line.count < 64 {
@@ -506,7 +516,7 @@ final class Launcher: NSObject, VZVirtualMachineDelegate {
         let group = DispatchGroup()
         for (source, sink) in [(client, guest), (guest, client)] {
             group.enter()
-            DispatchQueue.global().async {
+            Launcher.blocking("bridge-relay") {
                 var buffer = [UInt8](repeating: 0, count: 65536)
                 outer: while true {
                     let n = read(source, &buffer, buffer.count)
