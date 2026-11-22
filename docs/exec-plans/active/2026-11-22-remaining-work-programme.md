@@ -24,10 +24,10 @@ harness (GH #87) and a design of the shim boundary (D-017), are not met.
 ## Progress
 
 - [x] P0 EGM review, council, judge and owner sign-off (2026-11-22; D-065, D-066, D-067)
-- [ ] A Foundation: A1 toolchain pin (#234), A2 notices check in CI (#234), A3 file splits (#235) done; A4 formatting and lint, A5 checks open
-- [ ] B Docker containers in microVMs: B1 spike done (`run/B1/findings.md`), B2 ADR 0011 accepted (D-068); B3 its ExecPlan and slices open
-- [ ] C API and proxy fixes
-- [ ] D Runtime fixes and smaller decisions
+- [x] A Foundation: A1 toolchain pin (#234), A2 notices check in CI (#234), A3 file splits (#235), A4 formatting and lint (#237, #238), A5 checks (#239, #240, #241)
+- [ ] B Docker containers in microVMs: B1 spike done (`run/B1/findings.md`), B2 ADR 0011 accepted (D-068); B3 slices 1 to 3 merged (#242, #244, #245; D-071, D-073), slices 4 to 6 open
+- [x] C API and proxy fixes (#246, 2026-11-22; D-072): TD-019, TD-024, TD-017 and TD-021 done, TD-007 narrowed
+- [ ] D Runtime fixes and smaller decisions: TD-060 done (#247); the rest open
 - [ ] E Sandbox and signing (ADR 0012)
 - [ ] F Evidence: nightly run, parser fuzzing, measurements
 - [ ] G Deviations and compat exceptions recorded
@@ -44,6 +44,13 @@ harness (GH #87) and a design of the shim boundary (D-017), are not met.
   container's namespace (council ARC-1, SEC-2).
 - P0: each shim microVM copies its whole root drive into the tmpfs jail and books it (`vesper-microvm:750`), so a
   2 GiB System VM holds very few containers of ordinary image size (judge, REL-1).
+- C: the plan asked for an idle timeout on the `vesper-proxy` relay (TD-021). Docker's attach, logs and events
+  streams stay quiet for hours while healthy, so the relay got a connection cap and a preface bound instead (D-072).
+- C: the first FIFO test of TD-024 passed with the bug in place: the request ran on the test's own thread, and a
+  blocked runtime worker also stops tokio's timers. The test now spawns the request on the worker and waits on a
+  std channel; it fails in 5 s with the bug.
+- C: the per-request log line exists on the model backend only; the System VM backend relays bytes and logs per
+  connection (review F1).
 - P0: TD-004 is out of date: the launcher already uses Virtualization.framework's virtio-vsock device
   (`launcher/Sources/vesper-vmlauncher/main.swift:238`).
 
@@ -60,6 +67,8 @@ harness (GH #87) and a design of the shim boundary (D-017), are not met.
   allow-list; sandbox and ad-hoc signing approved; UDP published ports on loopback approved; compat exceptions for
   UFFD snapshot load and for microVMs ending with their `vesperd` approved.
 - 2026-11-22 (D-067): Backend B deferred.
+- 2026-11-22 (D-072): `vesper-proxy` has a 256-connection cap and a 5 s preface bound, and no idle timeout.
+- 2026-11-22 (D-073): ADR 0011 slice 3, user-defined networks: DNS over its own DNATed link; id-derived guest MACs.
 - The council's acceptance is never the owner's consent: every further ask-first item that appears during the
   work is asked by name.
 
