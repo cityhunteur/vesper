@@ -38,7 +38,7 @@ def run(cmd: list[str], cwd: Path, env: dict[str, str] | None = None) -> str:
 
 
 def rust_crates() -> list[tuple[str, str, str]]:
-    out = run(["cargo", "tree", "-e", "normal", "--target", "aarch64-apple-darwin", "--prefix", "none", "--format", "{p}\t{l}", "--locked"], ROOT)
+    out = run(["cargo", "tree", "--color", "never", "-e", "normal", "--target", "aarch64-apple-darwin", "--prefix", "none", "--format", "{p}\t{l}", "--locked"], ROOT)
     rows = set()
     for line in out.splitlines():
         if "\t" not in line:
