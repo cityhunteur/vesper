@@ -108,22 +108,28 @@ IPv6 address) fails the start with a message naming it.
 
 | Link | In the container's namespace | Guest | Carries |
 | --- | --- | --- | --- |
-| data | tap `vd0`, mirred both ways with `eth0` (ingress `matchall`, redirect); an allow-list on `vd0` ingress | `eth0` with `eth0`'s address, prefix, MAC, MTU and routes | what a runc container's `eth0` carries |
+| data | tap `vd0`, mirred both ways with `eth0` (ingress `matchall`, redirect); an allow-list on `vd0` ingress | `eth0` with `eth0`'s address, prefix, MTU and routes, and a MAC of its own derived from the container id (dockerd sets `eth0`'s final MAC only after the task starts) | what a runc container's `eth0` carries |
 | DNS (only when dockerd's `resolv.conf` names `127.0.0.11`) | tap `vn0` with `169.254.78.1/30`; `INPUT` accepts DNS to that address on `vn0` (the conntrack rule below); DNS to it is passed to dockerd's resolver (below) | `eth1` with `169.254.78.2/30`; `127.0.0.11/32` on the guest's `lo` and a forwarder in the guest from there to `169.254.78.1:53`, so the container's `resolv.conf` is dockerd's, unchanged | DNS only |
 | share (only with share binds) | tap `vs0`, mirred both ways with the end `vh1` of a veth pair whose other end `vh0` is in the share namespace | the next `ethN` with `169.254.77.2/30` | NFS to the task's own server |
 
-- **Allow-list on `vd0`** (`tc` flower, `cls_flower` is built in): pass frames whose source MAC is `eth0`'s and that
+- **Allow-list on `vd0`** (`tc` flower, `cls_flower` is built in): pass frames whose source MAC is the guest's and that
   are IPv4 from the container's address, or ARP whose sender MAC and sender address are the container's; drop
   everything else, including VLAN-tagged frames, other ethertypes, IPv6 and link-local multicast.
 - **DNS to dockerd's resolver**: first choice, a DNAT rule in the namespace's `PREROUTING` on `vn0` from
   `169.254.78.1:53` to dockerd's resolver ports (read from dockerd's own `DOCKER_OUTPUT` rules), with
   `route_localnet` on `vn0`; no process. `INPUT` filters after DNAT, so its accept rule matches the original
   destination: `-i vn0 -m conntrack --ctstate DNAT --ctorigdst 169.254.78.1 --ctorigdstport 53`, for UDP and TCP;
-  the answers leave from `127.0.0.11`, which `route_localnet` lets out of `vn0`. To be shown in slice 3 with the
-  `DROP` policies in place; if it fails, a forwarder (socat with `max-children`) as an unprivileged user in a cgroup
-  with `pids.max` and `memory.max`, like the share server's.
-- **Rate limits**: `vn0` gets a Firecracker rate limiter (as the share tap has, `vesper-microvm:726-729`); `vd0`
-  gets none, as Docker sets none.
+  the answers leave from `127.0.0.11`, which `route_localnet` lets out of `vn0`. Built in slice 3 (D-073): the rules
+  are in chains of their own (`VESPER_DNS` in `nat`, `VESPER_DNS_IN` in `filter`), flushed when the links go down;
+  each names the guest's address; new TCP connections above 16 are dropped (`--syn`, `connlimit`); a launch fails
+  with a reason when dockerd's `DOCKER_OUTPUT` chain names no ports. In the guest, socat forwarders (UDP with a 5 s
+  answer wait) serve `127.0.0.11`.
+- **Drivers**: the data link is shown on dockerd's `bridge` driver only. On macvlan, ipvlan or overlay networks frames
+  are delivered by dockerd's MAC, not the guest's, so traffic can fail without a message (a recorded residual,
+  TD-086). A network named by its id rather than `host` passes the plugin's check, which is harmless: the task always
+  has its own namespace.
+- **Rate limits**: `vn0` gets a Firecracker rate limiter of 1 MiB/s and 200 operations a second each way (the share
+  tap has one too); `vd0` gets none, as Docker sets none.
 - **The share namespace** keeps ADR 0009's server, sandbox, `INPUT` rules and rate limiter. It now holds `lo`, `vh0`
   with `169.254.77.1/30` and the server; Firecracker no longer runs in it. The veth pair is made inside the share
   namespace, where BusyBox's default peer name cannot collide, then the peer is renamed and moved with `ip link set`

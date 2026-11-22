@@ -33,6 +33,7 @@ func TestVesperRuntimeAllowedAlone(t *testing.T) {
 		`{"Image":"alpine","HostConfig":{"Runtime":"vesper","NetworkMode":"bridge","PortBindings":{"80/tcp":[{"HostIp":"127.0.0.1","HostPort":"8080"}]}}}`,
 		`{"Image":"alpine","HostConfig":{"Runtime":"vesper","NetworkMode":"none","PidMode":"private"}}`,
 		`{"Image":"alpine","HostConfig":{"Runtime":"vesper"},"NetworkingConfig":{"EndpointsConfig":{"bridge":{}}}}`,
+		`{"Image":"alpine","HostConfig":{"Runtime":"vesper","NetworkMode":"mynet"},"NetworkingConfig":{"EndpointsConfig":{"mynet":{}}}}`,
 	} {
 		if d := decide("POST", create, b); !d.Allow {
 			t.Errorf("%s refused: %s", b, d.Reason)
@@ -52,12 +53,12 @@ func TestVesperRefusals(t *testing.T) {
 		"named volume":   `{"HostConfig":{"Runtime":"vesper","Binds":["data:/x"]}}`,
 		"mount":          `{"HostConfig":{"Runtime":"vesper","Mounts":[{"Type":"tmpfs","Target":"/t"}]}}`,
 		"host network":   `{"HostConfig":{"Runtime":"vesper","NetworkMode":"host"}}`,
-		"user network":   `{"HostConfig":{"Runtime":"vesper","NetworkMode":"mynet"}}`,
+		"container net":  `{"HostConfig":{"Runtime":"vesper","NetworkMode":"container:abc"}}`,
 		"host pid":       `{"HostConfig":{"Runtime":"vesper","PidMode":"host"}}`,
 		"host ipc":       `{"HostConfig":{"Runtime":"vesper","IpcMode":"host"}}`,
 		"host uts":       `{"HostConfig":{"Runtime":"vesper","UTSMode":"host"}}`,
 		"two networks":   `{"HostConfig":{"Runtime":"vesper"},"NetworkingConfig":{"EndpointsConfig":{"a":{},"b":{}}}}`,
-		"user endpoint":  `{"HostConfig":{"Runtime":"vesper"},"NetworkingConfig":{"EndpointsConfig":{"mynet":{}}}}`,
+		"host endpoint":  `{"HostConfig":{"Runtime":"vesper"},"NetworkingConfig":{"EndpointsConfig":{"host":{}}}}`,
 		"lower-case key": `{"hostconfig":{"runtime":"vesper","privileged":true}}`,
 	} {
 		d := decide("POST", create, b)

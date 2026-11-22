@@ -17,7 +17,8 @@ macOS. Each Docker command that cannot be honest about a microVM is refused with
   checks `tc` (2026-11-22, `run/B3/s1-*.log`)
 - [x] Slice 2: the default bridge (2026-11-22; `make systemvm-docker-microvm-suite` 9 of 9, eleven regression suites
   pass, `run/B3/s2-*`; council and judge `run/B3/s2-council.md`; D-071)
-- [ ] Slice 3: user-defined networks (the DNS link); `dns-suite` and compose steps with `VESPER_DOCKER_RUNTIME=vesper`
+- [x] Slice 3: user-defined networks (the DNS link, DNAT to dockerd's resolver, no host-side process); `dns-suite` 12 of
+  12 with `VESPER_DOCKER_RUNTIME=vesper` and with the default (2026-11-22, `run/B3/s3-*`)
 - [ ] Slice 4: shares for `vesper` containers and `ctr` tasks; the Phase 4 suites with the runtime forced; latency,
   density and restart measurements
 - [ ] Slice 5: honesty refusals (`cp`, `diff`, `export`, `commit`, `connect`) and Pause and Resume
@@ -25,6 +26,11 @@ macOS. Each Docker command that cannot be honest about a microVM is refused with
 - [ ] Outcomes & Retrospective written; plan moved to completed
 
 ## Surprises & Discoveries
+
+- Slice 3: dockerd sets a container's final MAC on `eth0` after the task starts, and until then `eth0` can carry a
+  placeholder shared by several containers: two microVMs in one compose project got the same MAC and could not reach
+  each other. The guest's MAC is now derived from the container id. `docker compose exec` waits for its stdin to
+  close, as `docker exec -i` does with either runtime, so the suites give it `/dev/null`.
 
 - Slice 2: containerd takes a task's pid from the shim's `Connect`, not from `Create`'s reply; `mke2fs` resolves its
   device path, so a `/proc/self/fd` path does not serve; the process that creates a user namespace keeps its host uid

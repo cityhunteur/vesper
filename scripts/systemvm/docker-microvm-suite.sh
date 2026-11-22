@@ -4,7 +4,8 @@
 # microVM; the image's owners are the container's own; dockerd's hostname, hosts and resolv.conf reach it; it reaches
 # a runc peer by address and the internet and serves a published port; its writes survive stop and start; frames
 # from a spoofed address or MAC go nowhere; every option ADR 0011 refuses is refused, and a runc container cannot
-# join a vesper container's namespaces; after `docker rm` nothing is left and the sweep removes the drive.
+# join a vesper container's namespaces; on a user-defined network it reaches a peer by name and external names
+# through dockerd's resolver (slice 3); after `docker rm` nothing is left and the sweep removes the drive.
 # Needs `make systemvm-up && make docker-up` and outbound network for the image. Writes
 # run/systemvm/docker-microvm-report.json.
 set -uo pipefail
@@ -19,8 +20,9 @@ cd "${ROOT_DIR}"; mkdir -p "$(dirname "${REPORT}")"
 steps=()
 record() { local d; d="$(printf '%s' "$3" | tr '\n' ' ' | cut -c1-600 | sed 's/\\/\\\\/g; s/"/\\"/g')"; steps+=("{\"name\":\"$1\",\"ok\":$2,\"detail\":\"${d}\"}"); if [ "$2" = true ]; then echo "ok   $1"; else echo "FAIL $1: ${d:0:300}"; fi; }
 ctl() { "${CTL[@]}" "$@" 2>&1; }
-NAMES="vm-a vm-b vm-p peer-a joiner"
-cleanup() { docker rm -f ${NAMES} >/dev/null 2>&1; }
+NAMES="vm-a vm-b vm-p vm-n peer-a peer-n joiner"
+NET="${DOCKER_MICROVM_NET:-vesper-microvm-net}"
+cleanup() { docker rm -f ${NAMES} >/dev/null 2>&1; docker network rm "${NET}" >/dev/null 2>&1; }
 trap cleanup EXIT
 [ -S "${SOCKET}" ] || { echo "docker-microvm-suite: ${SOCKET} missing; run 'make docker-up'" >&2; exit 2; }
 docker image inspect "${IMAGE}" >/dev/null 2>&1 || docker pull -q "${IMAGE}" >/dev/null 2>&1 || { echo "docker-microvm-suite: cannot pull ${IMAGE}" >&2; exit 2; }
@@ -60,6 +62,22 @@ pub=""; for _ in $(seq 1 10); do pub="$(nc -w 3 127.0.0.1 "${PORT}" < /dev/null 
 if [ "${p}" = peer-ok ] && [ "${i}" = open ] && [ "${pub}" = vm-ok ]; then record network_peer_internet_published_port true "peer ${peer}: ${p}; 1.1.1.1:443 ${i}; 127.0.0.1:${PORT}: ${pub}"
 else record network_peer_internet_published_port false "peer ${peer}: ${p}; internet: ${i}; published: ${pub}"; fi
 
+# --- 5b. A user-defined network: a peer by name through dockerd's resolver, external names, dockerd's resolv.conf --
+docker network create "${NET}" >/dev/null 2>&1
+docker run -d --name peer-n --network "${NET}" "${IMAGE}" sh -c 'while true; do echo named-ok | nc -l -p 9000; done' >/dev/null 2>&1
+docker run -d --name vm-n --runtime vesper --network "${NET}" "${IMAGE}" sleep 600 >/dev/null 2>&1
+up vm-n
+n="$(docker exec vm-n sh -c 'grep ^nameserver /etc/resolv.conf; nc -w 3 peer-n 9000; nslookup example.com >/dev/null 2>&1 && echo external-ok' 2>&1 | tr '\n' ' ')"
+closed="$(docker exec vm-n sh -c 'nc -z -w 2 169.254.78.1 22 && echo open || echo closed' 2>&1)"
+# Two vesper containers on one network reach each other (each guest has a MAC of its own).
+docker run -d --name vm-b --runtime vesper --network "${NET}" "${IMAGE}" sh -c 'while true; do echo vm-b-ok | nc -l -p 9100; done' >/dev/null 2>&1
+up vm-b
+vv="$(docker exec vm-n sh -c 'nc -w 3 vm-b 9100' 2>&1)"
+n="${n}${vv} "
+case "${n}|${closed}" in "nameserver 127.0.0.11 named-ok external-ok vm-b-ok |closed") record user_network_names_and_dns true "${n}; other ports on the DNS link: ${closed}" ;;
+  *) record user_network_names_and_dns false "${n}; other ports on the DNS link: ${closed}" ;; esac
+docker rm -f vm-n vm-b peer-n >/dev/null 2>&1
+
 # --- 6. A spoofed source address and a spoofed MAC go nowhere; the real ones still work ----------------------------
 sp="$(docker exec vm-p sh -c "ip addr add 172.17.250.250/16 dev eth0 && (nc -w 3 -s 172.17.250.250 ${peer} 9000 || echo no-reply); ip addr del 172.17.250.250/16 dev eth0" 2>&1 | tr '\n' ' ')"
 mac="$(docker exec vm-p sh -c "m=\$(cat /sys/class/net/eth0/address); ifconfig eth0 hw ether 02:00:00:00:00:99 && (nc -w 3 ${peer} 9000 || echo no-reply); ifconfig eth0 hw ether \$m" 2>&1 | tr '\n' ' ')"
@@ -78,7 +96,7 @@ case "${stopped}|${k}" in "ABSENT ${id}|kept-across-starts") record writes_survi
 
 # --- 8. Every option ADR 0011 refuses is refused by name ----------------------------------------------------------
 bad=""
-for opt in "--privileged" "--network host" "--network vesper-nonexistent" "-v /tmp:/x" "--read-only" "--device /dev/null" "--pid host" "--ipc host"; do
+for opt in "--privileged" "--network host" "--network container:peer-a" "-v /tmp:/x" "--read-only" "--device /dev/null" "--pid host" "--ipc host"; do
   # shellcheck disable=SC2086
   out="$(docker create --runtime vesper ${opt} "${IMAGE}" true 2>&1)"
   case "${out}" in *"(ADR 0011)"*) ;; *) bad="${bad} [${opt}: ${out:0:120}]"; docker rm -f "${out}" >/dev/null 2>&1 ;; esac

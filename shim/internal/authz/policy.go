@@ -174,8 +174,7 @@ func denyVesper(format string, a ...any) Decision {
 	return Decision{Reason: "vesper: " + fmt.Sprintf(format, a...) + " (ADR 0011)"}
 }
 
-// checkVesperCreate refuses what a vesper container cannot honour (ADR 0011 §1). Until slice 3 only the default
-// bridge and no network are made, and until slice 4 no bind or mount at all.
+// checkVesperCreate refuses what a vesper container cannot honour (ADR 0011 §1). Until slice 4 no bind or mount.
 func checkVesperCreate(c *createBody) Decision {
 	h := c.HostConfig
 	switch {
@@ -190,10 +189,8 @@ func checkVesperCreate(c *createBody) Decision {
 	case len(h.Binds) > 0 || len(h.Mounts) > 0:
 		return denyVesper("-v and --mount are refused for the vesper runtime until shares reach its microVMs (ADR 0011 slice 4)")
 	}
-	switch h.NetworkMode {
-	case "", "default", "bridge", "none":
-	default:
-		return denyVesper("--network=%s is refused for the vesper runtime: only the default bridge and none, until user-defined networks (ADR 0011 slice 3)", h.NetworkMode)
+	if h.NetworkMode == "host" || strings.HasPrefix(h.NetworkMode, "container:") {
+		return denyVesper("--network=%s is refused for the vesper runtime: its network namespace is its own", h.NetworkMode)
 	}
 	for _, m := range []struct{ name, value string }{{"--pid", h.PidMode}, {"--ipc", h.IpcMode}, {"--uts", h.UTSMode}} {
 		if m.value != "" && m.value != "private" {
@@ -205,10 +202,8 @@ func checkVesperCreate(c *createBody) Decision {
 			return denyVesper("a vesper container gets one network at create")
 		}
 		for name := range c.NetworkingConfig.EndpointsConfig {
-			switch name {
-			case "bridge", "default", "none":
-			default:
-				return denyVesper("network %q is refused for the vesper runtime: only the default bridge and none, until user-defined networks (ADR 0011 slice 3)", name)
+			if name == "host" {
+				return denyVesper("network %q is refused for the vesper runtime: its network namespace is its own", name)
 			}
 		}
 	}
