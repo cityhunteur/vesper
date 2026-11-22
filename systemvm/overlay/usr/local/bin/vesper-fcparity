@@ -78,8 +78,14 @@ conformance() {
   id=${1:?}
   valid_id "$id" || { echo "CONFORMANCE passed=0 failed=1 firecracker_version=unknown"; echo "ERR bad id"; return 2; }
   "$MV" cleanup "$id" >/dev/null 2>&1
+  # A run stopped part way still removes its microVM, whose jail holds the snapshot and whose booking holds the
+  # budget until the jail is gone (council REL-2). The checklist's own cleanup step runs first; this one then
+  # finds nothing.
+  trap '"$MV" cleanup "$id" >/dev/null 2>&1' EXIT
+  trap '"$MV" cleanup "$id" >/dev/null 2>&1; exit 130' INT TERM HUP
   binver=$("$FC" --version 2>/dev/null | head -1 | sed -n 's/^Firecracker v\([0-9.]*\).*/\1/p')
-  out=$("$MV" launch "$id" 2>&1) || { echo "CONFORMANCE passed=0 failed=1 firecracker_version=${binver:-unknown}"; echo "ERR launch: $(printf '%s' "$out" | head -1)"; return 1; }
+  # The checklist takes a full snapshot of the paused guest, so the ceiling holds its memory file (TD-085).
+  out=$("$MV" launch "$id" --snapshot-room 2>&1) || { echo "CONFORMANCE passed=0 failed=1 firecracker_version=${binver:-unknown}"; echo "ERR launch: $(printf '%s' "$out" | head -1)"; return 1; }
   check launch ok "$(printf '%s' "$out" | head -1)"
   expect version "$id" GET /version "" 3 200 "\"firecracker_version\":\"$binver\""
   expect instance_running "$id" GET / "" 3 200 '"state":"Running"'

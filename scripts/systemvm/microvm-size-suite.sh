@@ -7,7 +7,8 @@
 # and one over it that is killed; a CPU quota gives that many vCPUs and the quota in the cgroup; a CPU set gives its
 # count; a workload that lifts its own quota inside the guest is still held by the microVM's cgroup in the System VM;
 # a quota of more CPUs than the System VM has runs on the CPUs there are, while a CPU set of more, and more memory
-# than the shared budget holds, are refused by name with nothing left behind.
+# than the shared budget holds, are refused by name with nothing left behind. `vesper-microvm launch --snapshot-room`
+# (TD-085) gives a ceiling and a booking one guest-size larger, and is refused with a rootfs.
 # Needs `make systemvm-up` with at least 2 CPUs and 1.5 GiB of free memory budget (the default System VM has them).
 # Report: run/systemvm/microvm-size-report.json.
 set -uo pipefail
@@ -24,7 +25,7 @@ runb() { ctl ctr -- run-binds "$@"; }
 budget() { ctl vesperd mem-budget | sed -n "s/.* $1=\([0-9]*\).*/\1/p" | head -1; }
 field() { printf '%s' "$1" | tr ' ' '\n' | sed -n "s/^$2=//p" | head -1; }
 # Whatever ends the suite, its tasks go: a detached one would hold its microVM and its share of the memory budget.
-sweep() { local n; for n in ${NAMES}; do case "$(ctl ctr -- state "${n}")" in STATE*) ctl ctr -- kill "${n}" 20 >/dev/null; ctl ctr -- delete "${n}" >/dev/null ;; esac; done; }
+sweep() { local n; ctl microvm cleanup size-s >/dev/null; for n in ${NAMES}; do case "$(ctl ctr -- state "${n}")" in STATE*) ctl ctr -- kill "${n}" 20 >/dev/null; ctl ctr -- delete "${n}" >/dev/null ;; esac; done; }
 trap sweep EXIT
 # What the workload sees: its CPUs, the guest's memory and what of it is available (MiB), and its cgroup's limits.
 VIEW='echo "cpus=$(nproc) mem=$(awk "/^MemTotal:/{print int(\$2/1024)}" /proc/meminfo) avail=$(awk "/^MemAvailable:/{print int(\$2/1024)}" /proc/meminfo) max=$(cat /sys/fs/cgroup/workload/memory.max) cpu=$(cat /sys/fs/cgroup/workload/cpu.max | tr " " /)"'
@@ -150,6 +151,22 @@ case "${r}" in
       || record memory_over_the_budget_refused false "committed ${base} before and ${after} after; ${r}" ;;
   *) record memory_over_the_budget_refused false "${r}" ;;
 esac
+
+# --- 5b. --snapshot-room: the ceiling and the booking hold one more guest-size; never with a rootfs (TD-085) ------
+# The default guest's ceiling is 352 MiB; with the room, 352 + 256. The booking is that ceiling and the jail's copies
+# (the kernel and initramfs, about 44 MB), so it is at least 608 MiB and less than 672.
+b0="$(budget committed)"
+l="$(ctl microvm -- launch size-s --snapshot-room | head -1)"
+b1="$(budget committed)"; m="$(ctl microvm machine size-s | head -1)"; c="$(ctl microvm cleanup size-s | head -1)"
+r="$(ctl microvm -- launch size-s --snapshot-room --rootfs /nonexistent | head -1)"
+booked=$(( (${b1:-0} - ${b0:-0}) / MIB ))
+if case "${l}" in "LAUNCHED size-s "*) true ;; *) false ;; esac && case "${m}" in *"MACHINE size-s vcpus=1 mem_max=$((608 * MIB)) "*) true ;; *) false ;; esac \
+  && between "${booked}" 608 671 && [ "${c}" = "CLEAN size-s" ] \
+  && [ "${r}" = "ERR --snapshot-room is for the parity conformance check and excludes --rootfs" ]; then
+  record snapshot_room_in_the_ceiling_and_the_booking true "${l}; ${m}; booked ${booked} MiB; ${c}; with a rootfs: ${r}"
+else
+  record snapshot_room_in_the_ceiling_and_the_booking false "${l}; ${m}; booked ${booked} MiB; ${c}; with a rootfs: ${r}"
+fi
 
 # --- 6. Nothing is left -------------------------------------------------------------------------------------------
 left="$(ctl ctr -- leftovers)"; after="$(budget committed)"

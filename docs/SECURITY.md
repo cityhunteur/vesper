@@ -1,7 +1,7 @@
 ---
 status: verified
 owner: cityhunteur
-last_reviewed: 2026-11-14
+last_reviewed: 2026-11-22
 ---
 
 # Vesper Security Review Map
@@ -837,7 +837,9 @@ guest:
 
 - the guest's memory and vCPUs, which Firecracker fixes at boot;
 - the `memory.max` of the Firecracker process's cgroup in the System VM (the guest plus 96 MiB, plus 1 MiB for each
-  128 MiB of guest above 256), which the jailer sets before Firecracker runs;
+  128 MiB of guest above 256), which the jailer sets before Firecracker runs. `vesper-microvm launch --snapshot-room`
+  adds the guest's size, for a snapshot's memory file in the jail (TD-085); it is booked the same way, only the parity
+  conformance check passes it, and it is refused with a rootfs, so no workload runs under the larger ceiling;
 - for a task with a CPU quota, the `cpu.max` of that cgroup: the quota plus a quarter of a CPU, which is for
   Firecracker's own threads. `make systemvm-microvm-size-suite` lifts the quota inside the guest and spins on both
   vCPUs of a 1.5 CPU task; the microVM used 1.75 CPUs (council SEC-1). A task with a CPU set and no quota is

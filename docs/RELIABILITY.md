@@ -1,7 +1,7 @@
 ---
 status: verified
 owner: cityhunteur
-last_reviewed: 2026-11-11
+last_reviewed: 2026-11-22
 ---
 
 # Vesper Reliability and Legibility
@@ -128,6 +128,10 @@ launch, whatever the task uses, and stays booked until the task is deleted, not 
 reservation. A 2,048 MiB System VM therefore holds one task with a limit of about 1.3 GiB and a small image (the
 root drive's copy is booked too), or two with 512 MiB limits. `VESPER_SYSTEMVM_MEMORY_MIB` and
 `VESPER_SYSTEMVM_CPUS` size the System VM. `make systemvm-microvm-size-suite` checks the sizing and the refusals.
+The parity conformance check (`make systemvm-parity-baseline`) launches its microVM with `--snapshot-room` (TD-085):
+its ceiling is 608 MiB, not 352, because the snapshot's memory file lies in the jail on tmpfs and is charged to the
+microVM's cgroup. With the jail's copies it books about 650 MiB, so it fails with `ERR launch: ERR memory: …` while
+tasks hold most of the budget.
 
 When a share server ends, its supervisor writes one line to the System VM's log (`vesper-microvm unfs-log ID`
 shows it): whether it ended `as told` or `by itself`, its exit code, how long it ran and the last 80 bytes of what
