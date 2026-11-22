@@ -9,7 +9,8 @@ stops them via those pid files. Both are wrapped by the Makefile targets
 `dev-up` and `dev-down`. `build-vmlauncher.sh` builds the Swift
 Virtualization.framework helper in `launcher/` and ad-hoc signs it with the
 virtualization entitlement (`make vmlauncher-build`). `share-watch-selftest.sh` checks the launcher's share
-watcher without a VM (`make share-watch-selftest`).
+watcher without a VM (`make share-watch-selftest`). `launcher-config-contract.sh` checks that the launcher decodes every
+launch-config field as `systemvmctl` writes it (`make launcher-config-contract`, TD-044).
 
 ## Interface
 
@@ -22,6 +23,7 @@ watcher without a VM (`make share-watch-selftest`).
 - Exit codes: `dev-up.sh` returns `0` on success and propagates failures from `cargo build`, `mkdir`, `pushd`, or `cat` via `set -e`; backgrounded binaries (`&`) do not affect its exit status even if they exit immediately. `dev-down.sh` returns `0` in practice because `kill` failures are suppressed with `|| true`; an unreadable pid file aborts under `set -e` because `cat` is unguarded.
 - `build-vmlauncher.sh` accepts no arguments. It exits 2 on a non-Darwin host; runs `swift build -c release --package-path ${ROOT_DIR}/launcher`; copies the product from `swift build --show-bin-path` to `${ROOT_DIR}/build/vmlauncher/vesper-vmlauncher`; runs `codesign --force --sign - --entitlements ${ROOT_DIR}/packaging/macos/vesper-vmlauncher.entitlements` on it; exits 1 unless `codesign --display --entitlements -` then lists `com.apple.security.virtualization`; prints `built and signed <path>`.
 - `share-watch-selftest.sh` accepts no arguments (`VMLAUNCHER` overrides the binary, default `build/vmlauncher/vesper-vmlauncher`; exits 2 when it is missing). It needs `python3` for a stand-in sink and runs 20 checks in two halves. First it starts `vesper-vmlauncher --watch-dry-run <temp dir>`, edits files and compares the printed paths: 11 checks (greeting, append, replay echo dropped, create, atomic save, delete sends the parent, create in the share root sent, delete in the share root not sent, path outside the share not sent, new directory and its file sent, configured path prefix used although FSEvents reports the resolved one). Then it adds `--watch-sink-socket <socket under /tmp>`: 9 checks (`sink_burst_delivered` for 3,000 files, `sink_lines_whole`, `sink_reconnects`, `sink_delivers_after_reconnect`, `sink_resends_unsent_edit`, `sigterm_exits_with_summary`; then, with a sink that accepts and never reads and `VESPER_SHARE_WATCH_PENDING_LIMIT=2000`, `stalled_sink_sigterm_exits` within 3 s, `stalled_sink_reported`, `queue_limit_drops_oldest`). Prints `ok`/`FAIL` lines; exits 1 on any failure. Also a step of the System VM Image workflow's macOS job (`launcher-build`, `macos-15`).
+- `launcher-config-contract.sh` accepts no arguments (`LAUNCHER` overrides the binary; `GOLDEN` the config, default `testdata/contracts/launch-config.full.json`, which `tests/launch_config_contract.rs` holds equal to a Rust config with every field set). It runs `vesper-vmlauncher --config GOLDEN --print-config` and compares the printed JSON with GOLDEN key by key; it prints the fields the launcher dropped, added or read differently and exits 1, else one `launcher-config-contract:` line. Also a step of the `launcher-build` job.
 - Makefile entry points: `make dev-up`, `make dev-down`, `make vmlauncher-build`, `make share-watch-selftest`.
 
 ## Invariants

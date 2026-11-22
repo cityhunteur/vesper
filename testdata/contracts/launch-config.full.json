@@ -1,0 +1,52 @@
+{
+  "agent_port": 1024,
+  "boot_media_path": "/k/boot.iso",
+  "bridge_allowed_ports": [
+    1024,
+    2375,
+    2400
+  ],
+  "console_log_path": "/run/console.log",
+  "cpu_count": 3,
+  "data_disk_path": "/Users/a/data.img",
+  "initrd_path": "/k/initramfs",
+  "kernel_cmdline": "console=hvc0 quiet",
+  "kernel_path": "/k/vmlinuz",
+  "max_boot_ms": 9000,
+  "memory_mib": 3072,
+  "nested_virtualization": "auto",
+  "network_mode": "nat",
+  "probe": {
+    "commands": [
+      "uname -a",
+      "echo ok"
+    ],
+    "login_user": "root",
+    "shell_prompt": "~# ",
+    "shutdown_command": "poweroff",
+    "success_pattern": "ok"
+  },
+  "ready_pattern": "login:",
+  "rootfs_path": "/k/rootfs.img",
+  "shared_directories": [
+    {
+      "host_path": "/Users/a",
+      "read_only": false,
+      "tag": "share0",
+      "watch": true
+    },
+    {
+      "host_path": "/Users/b",
+      "read_only": true,
+      "tag": "share1",
+      "watch": false
+    },
+    {
+      "host_path": "/Users/c",
+      "read_only": false,
+      "tag": "share2",
+      "watch": false
+    }
+  ],
+  "vsock_bridge_path": "/run/vsock/3.sock"
+}

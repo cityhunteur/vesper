@@ -147,6 +147,9 @@ jobs:
       - name: Share watcher self-test (FSEvents dry run, no VM)
         run: make share-watch-selftest
 
+      - name: The launcher decodes every launch-config field as written (TD-044)
+        run: make launcher-config-contract
+
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@master
         with:
