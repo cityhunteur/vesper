@@ -210,12 +210,12 @@ packages:
     sha256: 1e1806646613f8d6fcd2a5ac4e664a4f758a05ea2039e8eb2ddbfe085093e642
     size_bytes: 39169
   - name: runc
-    version: "1.3.4-r1"
+    version: "1.3.7-r0"
     repo: community
-    file: runc-1.3.4-r1.apk
-    url: https://dl-cdn.alpinelinux.org/alpine/v3.22/community/aarch64/runc-1.3.4-r1.apk
-    sha256: 4a6a59757e4559796492417e7cd10c8719b4dd00684e7ce7ea6197d18f1db52a
-    size_bytes: 3987035
+    file: runc-1.3.7-r0.apk
+    url: https://dl-cdn.alpinelinux.org/alpine/v3.22/community/aarch64/runc-1.3.7-r0.apk
+    sha256: 0a8419371b6280df5336a37bca9952439cb1618a62431f0ecbfaadf8db206c13
+    size_bytes: 3989234
   - name: setpriv
     version: "2.41.6-r1"
     repo: main
