@@ -4,7 +4,7 @@
 schema_version: 2
 branch: v3.22
 arch: aarch64
-requested: [socat, containerd, containerd-ctr, containerd-openrc, docker-engine, docker-cli, docker-openrc, e2fsprogs, e2fsprogs-extra, qemu-x86_64, unfs3, setpriv]
+requested: [socat, containerd, containerd-ctr, containerd-openrc, docker-engine, docker-cli, docker-openrc, e2fsprogs, e2fsprogs-extra, qemu-x86_64, unfs3, setpriv, iproute2-tc]
 packages:
   - name: ca-certificates
     version: "20261020-r0"
@@ -76,6 +76,13 @@ packages:
     url: https://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/glib-2.84.4-r0.apk
     sha256: 339817d41dc00fd898e8a24dc4a36b8e04608c3fd8642ecc97b00b6f5581e8bc
     size_bytes: 1989367
+  - name: iproute2-tc
+    version: "6.15.0-r0"
+    repo: main
+    file: iproute2-tc-6.15.0-r0.apk
+    url: https://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/iproute2-tc-6.15.0-r0.apk
+    sha256: 6fa1d6416fd3878547c67001f3e4fbe6b292eccaab9aa532b95aee5637b9130b
+    size_bytes: 260809
   - name: iptables
     version: "1.8.11-r1"
     repo: main
@@ -111,6 +118,13 @@ packages:
     url: https://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/libcap-ng-0.8.5-r0.apk
     sha256: 6c22edf32cee7b503db5a1ef6d0bd0d6d181a271956f357fc51c097df88da3ad
     size_bytes: 12804
+  - name: libelf
+    version: "0.193-r0"
+    repo: main
+    file: libelf-0.193-r0.apk
+    url: https://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/libelf-0.193-r0.apk
+    sha256: cbc2cbd52e27a381f17892392417fecfbeaba354479d3acd923cf57967d1b25a
+    size_bytes: 44640
   - name: libintl
     version: "0.24.1-r0"
     repo: main
@@ -230,6 +244,13 @@ packages:
     url: https://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/unfs3-0.10.0-r2.apk
     sha256: bbea106dfce8d32059b7bd87b99f1f670087ec8607ba27fedd0babae58a33098
     size_bytes: 51332
+  - name: zstd-libs
+    version: "1.5.7-r0"
+    repo: main
+    file: zstd-libs-1.5.7-r0.apk
+    url: https://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/zstd-libs-1.5.7-r0.apk
+    sha256: a0e92d2225941a514eb0b2325b137fe6444ef9171627aae8129b74a6ad934ac4
+    size_bytes: 362854
 # Binary archives placed into the guest overlay (not Alpine packages). Appended to the packages lock by
 # scripts/systemvm/resolve-apks.py --extra-yaml. Every archive and member is digest-pinned.
 archives:
