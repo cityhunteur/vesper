@@ -27,11 +27,14 @@ harness (GH #87) and a design of the shim boundary (D-017), are not met.
 - [x] A Foundation: A1 toolchain pin (#234), A2 notices check in CI (#234), A3 file splits (#235), A4 formatting and lint (#237, #238), A5 checks (#239, #240, #241)
 - [ ] B Docker containers in microVMs: B1 spike done (`run/B1/findings.md`), B2 ADR 0011 accepted (D-068); B3 slices 1 to 3 merged (#242, #244, #245; D-071, D-073), slices 4 to 6 open
 - [x] C API and proxy fixes (#246, 2026-11-22; D-072): TD-019, TD-024, TD-017 and TD-021 done, TD-007 narrowed
-- [ ] D Runtime fixes and smaller decisions: TD-060 done (#247); the rest open
-- [ ] E Sandbox and signing (ADR 0012)
-- [ ] F Evidence: nightly run, parser fuzzing, measurements
-- [ ] G Deviations and compat exceptions recorded
-- [ ] H Tracker truth
+- [x] D Runtime fixes and smaller decisions: TD-060 (#247), TD-039 narrowed (#249, D-074), TD-059 (#250),
+  TD-026 narrowed with the bridge fault fixed (#251, D-075), TD-064 narrowed (#252), TD-044 narrowed (#253), TD-041
+  (#254), TD-053 narrowed (#255, D-076), TD-037 UDP on loopback (#256, D-077). Residuals in the tracker (HOSTFREE for
+  TD-053, the name without `extra_hosts` for TD-039, TD-087, TD-088)
+- [ ] E Sandbox and signing: TD-010 (#258); ADR 0012 accepted (#261, D-080); slices 1 to 3 open
+- [ ] F Evidence: TD-047 property tests (#260), TD-052 (#259, D-079); TD-005 nightly and TD-033 open
+- [x] G Deviations and compat exceptions recorded: CE-0011 and CE-0012, the Uffd answer measured (#257, D-078)
+- [x] H Tracker truth: #96 closed as not planned; #59's criterion corrected; #103 and #56 given their status (2026-11-22)
 - [ ] Outcomes & Retrospective written; plan moved to completed
 
 ## Surprises & Discoveries
@@ -49,6 +52,15 @@ harness (GH #87) and a design of the shim boundary (D-017), are not met.
 - C: the first FIFO test of TD-024 passed with the bug in place: the request ran on the test's own thread, and a
   blocked runtime worker also stops tokio's timers. The test now spawns the request on the worker and waits on a
   std channel; it fails in 5 s with the bug.
+- D: the TD-026 runtime test found that the launcher's vsock bridge served at most 32 connections at a time (two
+  GCD threads blocked per relay, 64 in the pool), which capped every host-to-guest path, the Docker socket included
+  (D-075).
+- D: dockerd 28 writes the single `host-gateway-ip` as `::ffff:<ip>`, which musl cannot use and a `vesper` guest
+  drops; the list option `host-gateway-ips` works (D-074).
+- D: macOS refuses a UDP datagram larger than the socket's send buffer, 9,216 bytes by default (D-077).
+- G: Firecracker ends after a failed `PUT /snapshot/load`, so the Uffd probe needs a `vesperd` of its own.
+- E: an unbundled binary with the App Sandbox entitlement is stopped at start; `sandbox_init` works in the process
+  and fails under an already-sandboxed parent (`scripts/macos/sandbox-spike/run.sh`).
 - C: the per-request log line exists on the model backend only; the System VM backend relays bytes and logs per
   connection (review F1).
 - P0: TD-004 is out of date: the launcher already uses Virtualization.framework's virtio-vsock device
@@ -69,6 +81,9 @@ harness (GH #87) and a design of the shim boundary (D-017), are not met.
 - 2026-11-22 (D-067): Backend B deferred.
 - 2026-11-22 (D-072): `vesper-proxy` has a 256-connection cap and a 5 s preface bound, and no idle timeout.
 - 2026-11-22 (D-073): ADR 0011 slice 3, user-defined networks: DNS over its own DNATed link; id-derived guest MACs.
+- 2026-11-22 (D-074 to D-080): host-gateway names the Mac; control-channel bounds and the bridge fix; the root
+  reserve for jail writes; UDP on loopback; CE-0011 and CE-0012; two unmeasurable design-v0 phrases removed;
+  ADR 0012.
 - The council's acceptance is never the owner's consent: every further ask-first item that appears during the
   work is asked by name.
 
