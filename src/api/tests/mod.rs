@@ -262,5 +262,6 @@ mod memory_hotplug;
 mod mmds;
 mod network;
 mod pmem;
+mod properties;
 mod snapshot;
 mod vsock;
