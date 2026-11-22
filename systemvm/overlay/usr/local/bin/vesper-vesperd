@@ -558,7 +558,13 @@ reserve_bytes() {
   digits "$r" && { echo "$r"; return; }
   awk '/^MemTotal:/{print $2 * 1024}' /proc/meminfo
 }
-avail_bytes() { df -k "$DATA" | awk 'NR==2 {print $4 * 1024}'; }
+# Free space including the blocks only root may use (TD-053): the copies this script makes run as root and may use
+# them; df's "available" leaves them out, which would count the root reserve against the reserve a second time.
+avail_bytes() {
+  # shellcheck disable=SC2046
+  set -- $(stat -f -c '%f %S' "$DATA" 2>/dev/null)
+  digits "${1:-}" && digits "${2:-}" && echo $(($1 * $2))
+}
 store_quota() { # bytes the store may hold: STORE_PCT of the data disk, unless a test overrides it
   q=$(cat "$QUOTA_OVERRIDE" 2>/dev/null)
   digits "$q" && { echo "$q"; return; }
