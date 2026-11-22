@@ -147,13 +147,7 @@ fn validate(lock: &vesper::baseline::Lock, metadata_path: &str) -> Result<(), St
 fn generate_api_matrix(lock: &vesper::baseline::Lock, args: &Args) -> Result<(), String> {
     let firecracker_revision = firecracker_revision(lock)?;
     let firecracker_version = vesper::spec::load_info_version(&args.swagger)?;
-    let routes = vesper::spec::load_routes(&args.swagger)?
-        .into_iter()
-        .map(|route| vesper::api::RouteSpec {
-            method: route.method,
-            path: route.path,
-        })
-        .collect::<Vec<_>>();
+    let routes = vesper::spec::load_routes(&args.swagger)?;
     let capture_registry = vesper::api_matrix::load_baseline_capture_registry(&args.captures)?;
     let matrix = vesper::api_matrix::generate_surface_stub_matrix_with_captures(
         &routes,
@@ -171,13 +165,7 @@ fn generate_api_matrix(lock: &vesper::baseline::Lock, args: &Args) -> Result<(),
 fn validate_api_matrix(lock: &vesper::baseline::Lock, args: &Args) -> Result<(), String> {
     let firecracker_revision = firecracker_revision(lock)?;
     let firecracker_version = vesper::spec::load_info_version(&args.swagger)?;
-    let routes = vesper::spec::load_routes(&args.swagger)?
-        .into_iter()
-        .map(|route| vesper::api::RouteSpec {
-            method: route.method,
-            path: route.path,
-        })
-        .collect::<Vec<_>>();
+    let routes = vesper::spec::load_routes(&args.swagger)?;
     let capture_registry = vesper::api_matrix::load_baseline_capture_registry(&args.captures)?;
     let expected = vesper::api_matrix::generate_surface_stub_matrix_with_captures(
         &routes,
@@ -207,13 +195,7 @@ fn validate_api_matrix(lock: &vesper::baseline::Lock, args: &Args) -> Result<(),
 fn generate_api_behavior_matrix(lock: &vesper::baseline::Lock, args: &Args) -> Result<(), String> {
     let firecracker_revision = firecracker_revision(lock)?;
     let firecracker_version = vesper::spec::load_info_version(&args.swagger)?;
-    let routes = vesper::spec::load_routes(&args.swagger)?
-        .into_iter()
-        .map(|route| vesper::api::RouteSpec {
-            method: route.method,
-            path: route.path,
-        })
-        .collect::<Vec<_>>();
+    let routes = vesper::spec::load_routes(&args.swagger)?;
     let capture_registry =
         vesper::api_behavior_matrix::load_api_behavior_capture_registry(&args.behavior_captures)?;
     let matrix = vesper::api_behavior_matrix::generate_api_behavior_matrix_with_captures(
@@ -232,13 +214,7 @@ fn generate_api_behavior_matrix(lock: &vesper::baseline::Lock, args: &Args) -> R
 fn validate_api_behavior_matrix(lock: &vesper::baseline::Lock, args: &Args) -> Result<(), String> {
     let firecracker_revision = firecracker_revision(lock)?;
     let firecracker_version = vesper::spec::load_info_version(&args.swagger)?;
-    let routes = vesper::spec::load_routes(&args.swagger)?
-        .into_iter()
-        .map(|route| vesper::api::RouteSpec {
-            method: route.method,
-            path: route.path,
-        })
-        .collect::<Vec<_>>();
+    let routes = vesper::spec::load_routes(&args.swagger)?;
     let capture_registry =
         vesper::api_behavior_matrix::load_api_behavior_capture_registry(&args.behavior_captures)?;
     let expected = vesper::api_behavior_matrix::generate_api_behavior_matrix_with_captures(

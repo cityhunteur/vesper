@@ -59,13 +59,7 @@ fn app_router() -> (axum::Router, String) {
         vesper::spec::load_info_version("third_party/firecracker/firecracker.yaml").unwrap();
 
     let routes = vesper::spec::load_routes("third_party/firecracker/firecracker.yaml")
-        .unwrap()
-        .into_iter()
-        .map(|route| vesper::api::RouteSpec {
-            method: route.method,
-            path: route.path,
-        })
-        .collect::<Vec<_>>();
+        .unwrap();
     let surface_stub_matrix = vesper::api_matrix::load_surface_stub_matrix(
         vesper::api_matrix::DEFAULT_SURFACE_STUB_MATRIX_PATH,
     )

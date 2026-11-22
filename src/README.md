@@ -36,7 +36,7 @@ Public symbols by file:
 - `api/errors.rs:ErrorEnvelope` (re-exported as `api::ErrorEnvelope`) `{ fault_message, code, path, method,
   baseline_firecracker_revision }`; `api.rs:OperationStatus`
   `{ status_code: StatusCode, code, message }`; `api.rs:RouteSpec`
-  `{ method, path }`.
+  (an alias of `spec::Route { method, path }`, kept for one release, TD-020).
 - `api.rs:AppState` (all fields private; `RwLock`-guarded VM state).
   `AppState::new(routes, firecracker_revision, firecracker_version)` generates
   the surface stub matrix then calls `AppState::new_with_matrix(routes,

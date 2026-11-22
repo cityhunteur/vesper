@@ -14,8 +14,8 @@ the broader suite. `cargo test` was run successfully on 2026-11-05.
 
 | Category | Implemented? | Location | Framework | Command | Needs |
 |---|---|---|---|---|---|
-| Unit | Yes | `#[cfg(test)]` modules in `src/*.rs`; API handler tests in `src/api/tests.rs` | Rust test harness, `tokio::test` for proxy, `tempfile` | `cargo test --lib` | nothing |
-| Component | Yes (router level) | `src/api/tests.rs`, `tests/api_contract.rs` drive the axum router with `tower::ServiceExt::oneshot` | Rust, `tower` | `cargo test --test api_contract` | nothing |
+| Unit | Yes | `#[cfg(test)]` modules in `src/*.rs`; API handler tests in `src/api/tests/` (one file for each route family) | Rust test harness, `tokio::test` for proxy, `tempfile` | `cargo test --lib` | nothing |
+| Component | Yes (router level) | `src/api/tests/`, `tests/api_contract.rs` drive the axum router with `tower::ServiceExt::oneshot` | Rust, `tower` | `cargo test --test api_contract` | nothing |
 | Integration | Partial | `tests/contract_golden.rs` loads the vendored swagger and golden JSON from disk | Rust | `cargo test --test contract_golden` | repo checkout |
 | Process (vesperd socket) | Yes | `tests/vesperd_socket.rs` starts the `vesperd` binary with `--backend model`: owner-only default directory and socket, a second `vesperd` refused, a live or non-socket path never removed, a stale socket replaced, a shared directory refused, the socket owner-only at the first connect that works (TD-050) | Rust | `cargo test --test vesperd_socket` | nothing |
 | Process (vesperd System VM backend) | Yes | `tests/vesperd_systemvm.rs` starts `vesperd --backend systemvm` against a fake bridge and agent: Firecracker's bytes relayed unchanged, SIGTERM closes the lease and exits 0 (also with stdout closed), a `READY` version other than the pinned swagger's refused with no socket, the lease closing makes `vesperd` exit 1 and remove its socket, `ERR busy` retried, a refused `FCAPI` closes the client with no bytes, a second `vesperd` on the socket launches nothing, bad arguments refused (ADR 0007 slice 4). `src/proxy.rs` and `src/proxy/relay.rs` unit tests cover the preface, a refused `FCAPI`, an overlong or missing greeting, the per-read bound with a 4 MiB transfer and a half-close, the idle timeout, the per-request ceiling, the connection cap, an upstream error passed through byte for byte, a refused live socket and eight racing `claim_socket` calls | Rust | `cargo test --test vesperd_systemvm`; `cargo test --lib proxy` | nothing |
@@ -60,7 +60,7 @@ the broader suite. `cargo test` was run successfully on 2026-11-05.
 | Image reproducibility | Yes | `systemvmctl verify-image` checks the unpacked kernel, initramfs and ISO digests and the `expected_image_id` against `docs/specs/systemvm-image.lock.yaml`; `verify-packages` checks every guest package against `systemvm-packages.lock.yaml`; the derived initramfs must start with the pinned one | Rust, bash, Python | `make systemvm-fetch`, `make systemvm-overlay` (CI: `systemvm-image.yml`, Linux) | network on first run (ISO and packages cached afterwards); `bsdtar` |
 | Documentation | Yes | `harness/tests/`, `harness/check_docs.py`, `scripts/harness/check_docs.py` | unittest | `python3 harness/check_docs.py --strict`, `python3 -m unittest discover -s harness/tests`, `python3 scripts/harness/check_docs.py --root .` | Python 3.11+ |
 
-Suite sizes on 2026-11-05: `tests/api_contract.rs` 115 tests, `tests/contract_golden.rs` 1, `src/api/tests.rs` 67,
+Suite sizes on 2026-11-05: `tests/api_contract.rs` 115 tests, `tests/contract_golden.rs` 1, `src/api/tests.rs` 67 (now `src/api/tests/`, 80 on 2026-11-22),
 plus smaller unit modules in `api_matrix`, `api_behavior_matrix`, `proxy`, `baseline`, `compat`, `spec`, `platform`
 and `systemvm`.
 

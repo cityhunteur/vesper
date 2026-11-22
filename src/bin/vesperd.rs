@@ -144,13 +144,7 @@ async fn run(args: Args) -> Result<(), String> {
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| "baseline lock missing firecracker revision".to_string())?;
 
-    let routes = vesper::spec::load_routes(&args.swagger)?
-        .into_iter()
-        .map(|route| vesper::api::RouteSpec {
-            method: route.method,
-            path: route.path,
-        })
-        .collect::<Vec<_>>();
+    let routes = vesper::spec::load_routes(&args.swagger)?;
     let firecracker_version = vesper::spec::load_info_version(&args.swagger)?;
     let surface_stub_matrix =
         vesper::api_matrix::load_surface_stub_matrix(&args.surface_stub_matrix)?;
