@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	MaxFlows  = 1024
+	MaxFlows  = 1280              // the host holds 1,024; the rest is room for flows whose close is still on its way
 	IdleClose = 120 * time.Second // a little after the host's 90 s, so the host normally closes first
 )
 

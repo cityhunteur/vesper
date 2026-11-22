@@ -177,8 +177,12 @@ pub async fn forward(
             .await
         {
             Ok(Ok(stream)) => {
-                backoff = Duration::from_secs(1);
+                let began = Instant::now();
                 session(&socket, stream, &counters, IDLE).await;
+                // A bridge that accepts and closes at once (its cap, no relay) keeps the backoff growing.
+                if began.elapsed() >= Duration::from_secs(10) {
+                    backoff = Duration::from_secs(1);
+                }
                 eprintln!("ports: udp {host_port}: bridge stream ended; dialling again");
             }
             Ok(Err(err)) => eprintln!("ports: udp {host_port}: {err}"),
@@ -199,17 +203,26 @@ pub async fn session(
 ) {
     let (mut rd, mut wr) = stream.into_split();
     let (tx, mut rx) = mpsc::channel::<Vec<u8>>(QUEUE);
-    let writer = tokio::spawn(async move {
-        while let Some(frame) = rx.recv().await {
+    // Close frames have their own queue, served first, so a busy data queue never loses one: a lost close would
+    // leave the guest holding a flow the host has forgotten. At most one close per flow is ever queued.
+    let (ctl, mut ctl_rx) = mpsc::unbounded_channel::<Vec<u8>>();
+    let _writer = AbortOnDrop(tokio::spawn(async move {
+        loop {
+            let frame = tokio::select! {
+                biased;
+                f = ctl_rx.recv() => f,
+                f = rx.recv() => f,
+            };
+            let Some(frame) = frame else { break };
             if wr.write_all(&frame).await.is_err() {
                 break;
             }
         }
-    });
+    }));
     let flows = Arc::new(Mutex::new(Flows::default()));
     let mut reader = {
         let (socket, flows) = (socket.clone(), flows.clone());
-        tokio::spawn(async move {
+        AbortOnDrop(tokio::spawn(async move {
             while let Ok((kind, id, payload)) = read_frame(&mut rd).await {
                 if kind == CLOSE {
                     flows.lock().unwrap().remove(id);
@@ -220,14 +233,19 @@ pub async fn session(
                     let _ = socket.send_to(&payload, addr).await;
                 }
             }
-        })
+        }))
     };
     let mut ticker = tokio::time::interval(Duration::from_secs(5).min(idle));
-    let mut buf = vec![0u8; MAX_PAYLOAD];
+    // Room for one byte more than the largest IPv4 payload, so a larger IPv6 datagram is seen and dropped, not cut.
+    let mut buf = vec![0u8; MAX_PAYLOAD + 1];
     loop {
         tokio::select! {
             got = socket.recv_from(&mut buf) => {
                 let Ok((n, addr)) = got else { continue };
+                if n > MAX_PAYLOAD {
+                    counters.drops.fetch_add(1, Ordering::Relaxed);
+                    continue;
+                }
                 let (id, evicted) = {
                     let mut f = flows.lock().unwrap();
                     let before = f.len();
@@ -239,7 +257,7 @@ pub async fn session(
                 };
                 if let Some(old) = evicted {
                     counters.evictions.fetch_add(1, Ordering::Relaxed);
-                    let _ = tx.try_send(encode(CLOSE, old, &[]));
+                    let _ = ctl.send(encode(CLOSE, old, &[]));
                 }
                 if tx.try_send(encode(DATA, id, &buf[..n])).is_err() {
                     counters.drops.fetch_add(1, Ordering::Relaxed);
@@ -249,13 +267,22 @@ pub async fn session(
                 let old = flows.lock().unwrap().expire(Instant::now(), idle);
                 counters.expired.fetch_add(old.len() as u64, Ordering::Relaxed);
                 for id in old {
-                    let _ = tx.try_send(encode(CLOSE, id, &[]));
+                    let _ = ctl.send(encode(CLOSE, id, &[]));
                 }
             }
-            _ = &mut reader => break,
+            _ = &mut reader.0 => break,
         }
     }
-    writer.abort();
+}
+
+/// Aborts its task when dropped, so a session's reader and writer end with the session, also when the mapping's
+/// task is aborted (council R1: an orphaned reader kept the published socket bound).
+struct AbortOnDrop(tokio::task::JoinHandle<()>);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
 }
 
 #[cfg(test)]
@@ -336,6 +363,8 @@ mod tests {
                     wr.write_all(&encode(DATA, id, &echo)).await.unwrap();
                 }
             }
+            // A wedged guest: it keeps its end of the stream open after the host stops writing.
+            std::future::pending::<()>().await;
         });
         let published = bind("127.0.0.1:0".parse().unwrap()).unwrap();
         let at = published.local_addr().unwrap();
@@ -358,6 +387,20 @@ mod tests {
         }
         assert_eq!(counters.flows_opened.load(Ordering::Relaxed), 2);
         relay.abort();
+        // The published socket goes with the mapping's task, though the guest still holds the stream open: the port
+        // can be bound again (council R1, T1).
+        let mut rebound = false;
+        for _ in 0..50 {
+            if bind(at).is_ok() {
+                rebound = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(
+            rebound,
+            "{at} stayed bound after the mapping's task was aborted"
+        );
         guest.abort();
     }
 }

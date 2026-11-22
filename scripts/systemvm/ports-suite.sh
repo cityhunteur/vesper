@@ -115,7 +115,16 @@ if "${DOCKER}" image inspect "${UDP_IMAGE}" >/dev/null 2>&1 || "${DOCKER}" pull 
   [ "${many}" = "replies=1100" ] && record udp_flows_past_the_table_cap true "1,100 client sockets in turn, ${many} (table cap 1,024)" || record udp_flows_past_the_table_cap false "${many}"
   "${DOCKER}" rm -f pp6 >/dev/null 2>&1
   for _ in $(seq 1 40); do mappings | grep -q '^pp6' || break; sleep 0.25; done
-  mappings | grep -q '^pp6' && record udp_mapping_cleared false "$(mappings | tr '\n' ';')" || record udp_mapping_cleared true "no pp6 mapping after docker rm -f"
+  freed="$(python3 -c 'import socket,time
+for _ in range(40):
+    try:
+        socket.socket(socket.AF_INET, socket.SOCK_DGRAM).bind(("127.0.0.1", 18096)); print("bound"); break
+    except OSError:
+        time.sleep(0.25)
+else:
+    print("still bound")' 2>&1)"
+  if mappings | grep -q '^pp6' || [ "${freed}" != bound ]; then record udp_mapping_cleared false "$(mappings | tr '\n' ';'); 127.0.0.1:18096/udp ${freed}"
+  else record udp_mapping_cleared true "no pp6 mapping after docker rm -f; 127.0.0.1:18096/udp can be bound again"; fi
 else
   record udp_datagrams_whole false "cannot pull ${UDP_IMAGE}"
 fi
