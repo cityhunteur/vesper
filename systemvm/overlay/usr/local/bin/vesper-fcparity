@@ -81,8 +81,10 @@ conformance() {
   # A run stopped part way still removes its microVM, whose jail holds the snapshot and whose booking holds the
   # budget until the jail is gone (council REL-2). The checklist's own cleanup step runs first; this one then
   # finds nothing.
-  trap '"$MV" cleanup "$id" >/dev/null 2>&1' EXIT
-  trap '"$MV" cleanup "$id" >/dev/null 2>&1; exit 130' INT TERM HUP
+  # The traps keep their own copy of the id: api() sets id too (judge).
+  cf_id=$id
+  trap '"$MV" cleanup "$cf_id" >/dev/null 2>&1' EXIT
+  trap 'exit 129' HUP; trap 'exit 130' INT; trap 'exit 143' TERM   # 128 + the signal; exit runs the EXIT trap
   binver=$("$FC" --version 2>/dev/null | head -1 | sed -n 's/^Firecracker v\([0-9.]*\).*/\1/p')
   # The checklist takes a full snapshot of the paused guest, so the ceiling holds its memory file (TD-085).
   out=$("$MV" launch "$id" --snapshot-room 2>&1) || { echo "CONFORMANCE passed=0 failed=1 firecracker_version=${binver:-unknown}"; echo "ERR launch: $(printf '%s' "$out" | head -1)"; return 1; }
