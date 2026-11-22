@@ -432,7 +432,7 @@ mod tests {
                                 let n = open.load(std::sync::atomic::Ordering::SeqCst);
                                 let reply = if n > 56 {
                                     format!(
-                                        "ERR busy: {n} of 64 handlers open; 8 are kept for control commands\n"
+                                        "ERR full: {n} of 64 handlers open; 8 are kept for control commands\n"
                                     )
                                 } else {
                                     "ERR bad id\n".to_string()

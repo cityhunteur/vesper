@@ -316,6 +316,9 @@ final class Launcher: NSObject, VZVirtualMachineDelegate {
     var probeDone = false
     var bridgeSource: DispatchSourceRead?
     var bridgeFd: Int32 = -1
+    /// Open bridge connections, changed on the main queue only. Each costs up to two threads (council F1, TD-026).
+    var bridgeOpen = 0
+    static let bridgeMax = 512
     var signalSource: DispatchSourceSignal?
     var shareWatcher: ShareWatcher?
 
@@ -451,8 +454,18 @@ final class Launcher: NSObject, VZVirtualMachineDelegate {
             guard let self = self else { return }
             let client = accept(fd, nil, nil)
             if client >= 0 {
+                guard self.bridgeOpen < Launcher.bridgeMax else {
+                    FileHandle.standardError.write(
+                        "vesper-vmlauncher: bridge: \(Launcher.bridgeMax) connections open; one refused\n".data(using: .utf8)!)
+                    close(client)
+                    return
+                }
+                self.bridgeOpen += 1
                 var one: Int32 = 1
                 setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))
+                // The preface must arrive within 10 s; the relay itself has no timeout.
+                var wait = timeval(tv_sec: 10, tv_usec: 0)
+                setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &wait, socklen_t(MemoryLayout<timeval>.size))
                 self.handleBridgeClient(client, device)
             }
         }
@@ -471,13 +484,19 @@ final class Launcher: NSObject, VZVirtualMachineDelegate {
         thread.start()
     }
 
+    /// Closes a bridge client that never reached the relay and gives back its place.
+    func dropBridgeClient(_ client: Int32) {
+        close(client)
+        DispatchQueue.main.async { self.bridgeOpen -= 1 }
+    }
+
     func handleBridgeClient(_ client: Int32, _ device: VZVirtioSocketDevice) {
         Launcher.blocking("bridge-preface") {
             var line = [UInt8]()
             var byte: UInt8 = 0
             while line.count < 64 {
                 let n = read(client, &byte, 1)
-                if n <= 0 { close(client); return }
+                if n <= 0 { self.dropBridgeClient(client); return }
                 if byte == 10 { break }
                 line.append(byte)
             }
@@ -486,25 +505,27 @@ final class Launcher: NSObject, VZVirtualMachineDelegate {
                 let port = UInt32(text.dropFirst(8).trimmingCharacters(in: .whitespaces))
             else {
                 FileHandle.standardError.write("vesper-vmlauncher: bridge: bad preface\n".data(using: .utf8)!)
-                close(client)
+                self.dropBridgeClient(client)
                 return
             }
             // Deny by default: only the ports the launch config lists (TD-027, ADR 0007).
             guard (self.config.bridge_allowed_ports ?? []).contains(port) else {
                 FileHandle.standardError.write(
                     "vesper-vmlauncher: bridge: port \(port) is not allowed\n".data(using: .utf8)!)
-                close(client)
+                self.dropBridgeClient(client)
                 return
             }
             DispatchQueue.main.async {
                 device.connect(toPort: port) { result in
                     switch result {
                     case .success(let connection):
+                        var none = timeval(tv_sec: 0, tv_usec: 0)
+                        setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &none, socklen_t(MemoryLayout<timeval>.size))
                         self.relay(client: client, connection: connection)
                     case .failure(let error):
                         FileHandle.standardError.write(
                             "vesper-vmlauncher: bridge: connect to guest port \(port) failed: \(error)\n".data(using: .utf8)!)
-                        close(client)
+                        self.dropBridgeClient(client)
                     }
                 }
             }
@@ -537,6 +558,7 @@ final class Launcher: NSObject, VZVirtualMachineDelegate {
         group.notify(queue: .main) {
             close(client)
             connection.close()
+            self.bridgeOpen -= 1
         }
     }
 

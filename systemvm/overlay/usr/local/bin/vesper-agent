@@ -38,31 +38,40 @@
 #   QUIT                  -> BYE then the connection is closed
 #   anything else         -> ERR unknown command
 # Bounds (TD-026): a connection that sends no command for AGENT_IDLE_S is closed (a LAUNCHAPI lease or an FCAPI relay
-# is no longer this loop's); LAUNCHAPI and FCAPI, which hold a handler for their life, are refused with
-# "ERR busy: ..." when more than HANDLERS_MAX - CONTROL_RESERVE handlers are open, so control commands keep a slot.
+# is no longer this loop's; ECHO's bytes have the same limit); LAUNCHAPI and FCAPI, which hold a handler for their
+# life, are refused with "ERR full: ..." when more than HANDLERS_MAX - CONTROL_RESERVE handlers are open, or when they
+# cannot be counted, so control commands keep a slot.
 . "$(dirname "$0")/../lib/vesper/vsock-peer.sh"
 vsock_host_only
 AGENT_IDLE_S=900     # seconds a connection may wait between commands
 HANDLERS_MAX=64      # socat's max-children in etc/init.d/vesper-agent (tests/agent_protocol.rs checks they agree)
 CONTROL_RESERVE=8    # handlers that LAUNCHAPI and FCAPI never take
 # The open connections: socat forks one relay per connection (this script's parent) from the listener (its parent).
+# With the shell's own read, not a process for each entry (council F3). Prints nothing when the listener is unknown.
+stat_ppid() { # FILE -> the ppid field of a /proc/PID/stat
+  sp=""; read -r sp < "$1" 2>/dev/null || [ -n "$sp" ] || return 1
+  sp=${sp##*) }
+  # shellcheck disable=SC2086
+  set -- $sp
+  echo "${2:-}"
+}
 handlers() {
-  hl=$(awk '{print $4}' "/proc/$PPID/stat" 2>/dev/null)
-  case "$hl" in ''|*[!0-9]*) echo 0; return ;; esac
+  hl=$(stat_ppid "/proc/$PPID/stat")
+  case "$hl" in ''|*[!0-9]*) return 1 ;; esac
   hn=0
   for hs in /proc/[0-9]*/stat; do
-    hs=$(cat "$hs" 2>/dev/null) || continue
-    hs=${hs##*) }
+    sp=""; read -r sp < "$hs" 2>/dev/null || [ -n "$sp" ] || continue
+    sp=${sp##*) }
     # shellcheck disable=SC2086
-    set -- $hs
+    set -- $sp
     [ "${2:-}" = "$hl" ] && hn=$((hn + 1))
   done
   echo "$hn"
 }
-lease_room() { # -> 0 when a LAUNCHAPI or FCAPI may take a handler; else prints the refusal
-  lr=$(handlers)
+lease_room() { # -> 0 when a LAUNCHAPI or FCAPI may take a handler; else prints the refusal ("full", not vesperd's "busy <id>")
+  lr=$(handlers) || { echo "ERR full: the open handlers cannot be counted"; return 1; }
   [ "$lr" -le $((HANDLERS_MAX - CONTROL_RESERVE)) ] && return 0
-  echo "ERR busy: $lr of $HANDLERS_MAX handlers open; $CONTROL_RESERVE are kept for control commands"
+  echo "ERR full: $lr of $HANDLERS_MAX handlers open; $CONTROL_RESERVE are kept for control commands"
   return 1
 }
 printf 'VESPER-AGENT 1 %s\n' "$(hostname)"
@@ -82,7 +91,8 @@ while IFS= read -r -t "$AGENT_IDLE_S" line; do
       n="${2:-0}"
       case "$n" in ''|*[!0-9]*) echo "ERR bad length"; continue ;; esac
       echo "ECHO $n"
-      head -c "$n"
+      # Bounded like the command loop: a client that never sends the bytes does not hold a handler (TD-026).
+      timeout "$AGENT_IDLE_S" head -c "$n"
       ;;
     HEALTH)
       ready=false; sready=false; cok=false; dok=false; dver=""; kvm=false
@@ -101,7 +111,7 @@ while IFS= read -r -t "$AGENT_IDLE_S" line; do
       # TD-070: the shim microVMs whose share server has stopped for good (ids are [A-Za-z0-9_.-]).
       sdown=$(/usr/local/bin/vesper-microvm unfs-down 2>/dev/null | tr -cd 'A-Za-z0-9_.\n-' | paste -sd, -)
       printf 'HEALTH {"packages_ready":%s,"services_ready":%s,"services":{"containerd":"%s","docker":"%s","vesper-agent":"%s"},"containerd_ok":%s,"docker_ok":%s,"docker_version":"%s","kvm":%s,"tun":%s,"ip":"%s","containers":"%s","authz":"%s","legacy_store":"%s","share_servers_down":"%s","handlers":%s,"handlers_max":%s}\n' \
-        "$ready" "$sready" "$(service_state containerd)" "$(service_state docker)" "$(service_state vesper-agent)" "$cok" "$dok" "$dver" "$kvm" "$tun" "$ip" "${cmode:-unknown}" "${authz:-unknown}" "${legacy:-unknown}" "$sdown" "$(handlers)" "$HANDLERS_MAX"
+        "$ready" "$sready" "$(service_state containerd)" "$(service_state docker)" "$(service_state vesper-agent)" "$cok" "$dok" "$dver" "$kvm" "$tun" "$ip" "${cmode:-unknown}" "${authz:-unknown}" "${legacy:-unknown}" "$sdown" "$(handlers || echo -1)" "$HANDLERS_MAX"
       ;;
     KILL)
       case "$2" in

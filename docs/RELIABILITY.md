@@ -172,7 +172,8 @@ a live event stream and checks the launcher pid survives.
 The launcher relayed each bridge connection with two blocking reads on GCD's global queue, which has at most 64
 worker threads, so at most 32 connections were open at a time across every port (control, `LAUNCHAPI` leases,
 `FCAPI` relays, Docker clients through `vesper-proxy`); the 33rd waited, with no message, until one closed. Each
-blocking loop now has a thread of its own. `systemvmctl control suite` step `control_slots_reserved` holds 57
+blocking loop now has a thread of its own; the bridge closes a client that sends no `CONNECT` preface within 10 s
+and refuses connections past 512, with a log line. `systemvmctl control suite` step `control_slots_reserved` holds 57
 connections and checks that a 58th is answered.
 
 ## A directory bind when macOS replaces its directory (TD-083, D-062)

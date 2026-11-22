@@ -14,7 +14,11 @@ fn documented() -> BTreeSet<String> {
         .filter_map(|l| l.strip_prefix("#   "))
         .filter(|l| !l.starts_with(' '))
         .filter_map(|l| l.split_whitespace().next())
-        .filter(|w| w.len() > 1 && w.chars().all(|c| c.is_ascii_uppercase()))
+        .filter(|w| {
+            w.len() > 1
+                && w.chars()
+                    .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+        })
         .map(str::to_string)
         .collect()
 }
@@ -27,7 +31,11 @@ fn answered() -> BTreeSet<String> {
         .filter(|l| !l.starts_with(' '))
         .filter_map(|l| l.split_once(')').map(|(labels, _)| labels))
         .flat_map(|labels| labels.split('|'))
-        .filter(|w| !w.is_empty() && w.chars().all(|c| c.is_ascii_uppercase()))
+        .filter(|w| {
+            !w.is_empty()
+                && w.chars()
+                    .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+        })
         .map(str::to_string)
         .collect()
 }
@@ -71,7 +79,7 @@ fn the_handler_bound_is_socats_and_leases_check_it_first() {
             .find(|l| l.trim_start().starts_with(&format!("{verb})")))
             .unwrap();
         let (check, exec) = (
-            arm.find("lease_room").expect("lease_room"),
+            arm.find("lease_room || exit").expect("lease_room || exit"),
             arm.find("exec ").expect("exec"),
         );
         assert!(

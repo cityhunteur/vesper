@@ -150,9 +150,10 @@ pub fn run_suite(
     }
 }
 
-/// TD-026: with the agent's handlers filled to the lease cap by idle connections, `LAUNCHAPI` is refused as busy and
+/// TD-026: with the agent's handlers filled to the lease cap by idle connections, `LAUNCHAPI` is refused as full and
 /// a control command on one more connection is still answered. The probe's id is not valid, so an accepted request
-/// fails at once instead of starting a microVM.
+/// fails at once instead of starting a microVM. Only a run against the real agent proves the agent: `cargo test`'s
+/// fake bridge has its own copy of the rule.
 fn control_slots_reserved(
     endpoint: &ControlEndpoint,
     session: &mut Session,
@@ -177,9 +178,15 @@ fn control_slots_reserved(
     let answered = control.health()?;
     let seen = answered["handlers"].as_u64().unwrap_or(0);
     drop(held);
-    if !refused.starts_with("ERR busy:") {
+    if !refused.starts_with("ERR full:") {
         return Err(format!(
-            "LAUNCHAPI at the cap ({cap} of {max}) was not refused as busy: {refused:?}"
+            "LAUNCHAPI at the cap ({cap} of {max}) was not refused as full: {refused:?}"
+        ));
+    }
+    if (seen as usize) < cap + 1 {
+        return Err(format!(
+            "HEALTH counted {seen} handlers with at least {} open",
+            cap + 1
         ));
     }
     Ok((
