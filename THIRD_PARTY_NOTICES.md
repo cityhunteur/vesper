@@ -31,6 +31,7 @@ obligations of each component's licence, including offering the corresponding so
 | tini | MIT |
 | unfs3, with rpcbind (installed, never started), libtirpc and libtirpc-conf (GH #160, D-021, D-033); the `unfsd` that runs is Vesper's patched build of 0.10.0 (`third_party/unfs3`, its licence and patches there; D-044) | BSD-3-Clause |
 | krb5-libs, krb5-conf, libverto (linked by libtirpc) | MIT |
+| iproute2-tc (`tc`, for the network of a microVM container, ADR 0011, D-066), with libelf (elfutils) and zstd-libs | GPL-2.0-or-later; libelf GPL-3.0-or-later AND (GPL-2.0-or-later OR LGPL-3.0-or-later); zstd-libs BSD-3-Clause |
 | keyutils-libs (linked by krb5-libs) | GPL-2.0-or-later / LGPL-2.0-or-later |
 | util-linux `setpriv`, libcap-ng (drop the share server's uid and capabilities) | GPL-2.0-or-later (libcap-ng library LGPL-2.1-or-later) |
 | ca-certificates | MPL-2.0 (certificate data) |
