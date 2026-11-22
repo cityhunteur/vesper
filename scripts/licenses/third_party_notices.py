@@ -11,6 +11,7 @@ the shim for linux/arm64 (what `containerd-shim-vesper-v2` links in the System V
 from __future__ import annotations
 
 import argparse
+import difflib
 import os
 import re
 import subprocess
@@ -147,6 +148,9 @@ def main() -> int:
         if not OUT.exists() or OUT.read_text() != text:
             print("third-party-notices: THIRD_PARTY_NOTICES.md is out of date (fix: make third-party-notices)",
                   file=sys.stderr)
+            old = OUT.read_text().splitlines() if OUT.exists() else []
+            for line in difflib.unified_diff(old, text.splitlines(), "committed", "generated", lineterm="", n=0):
+                print(line, file=sys.stderr)
             return 1
         return 0
     OUT.write_text(text)
