@@ -10,10 +10,10 @@
 //! layer holds alone; one with its masquerade and reverse-path check also removed, to show the root `raw` rule drops
 //! sources outside the pool.
 
-use super::launchapi::{first, wait_absent};
-use super::vesperd::{signal, wait_exit, Client, BOOT_ARGS, TEARDOWN_TIMEOUT};
 use super::super::Session;
-use super::{connect, report, step, ControlEndpoint, SuiteReport, SuiteStep, VesperdRun};
+use super::launchapi::{first, wait_absent};
+use super::vesperd::{BOOT_ARGS, Client, TEARDOWN_TIMEOUT, signal, wait_exit};
+use super::{ControlEndpoint, SuiteReport, SuiteStep, VesperdRun, connect, report, step};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -50,7 +50,7 @@ fn denied(sys: &SystemVm, peer: &[String]) -> Vec<String> {
         format!("tcp:{}:80", sys.gateway),       // the macOS vmnet gateway, other than DNS
         format!("tcp:{}:22", sys.gateway),
         format!("tcp:198.18.0.1:{LISTEN_PORT}"), // the veth pool
-        "tcp:10.0.0.1:443".to_string(),          // RFC 1918, CGNAT, link-local, metadata, multicast, reserved
+        "tcp:10.0.0.1:443".to_string(), // RFC 1918, CGNAT, link-local, metadata, multicast, reserved
         "tcp:172.16.0.1:443".to_string(),
         "tcp:100.64.0.1:443".to_string(),
         "tcp:169.254.169.254:80".to_string(),
@@ -90,18 +90,38 @@ fn boot(
     probes: &[String],
     before: &mut dyn FnMut(&mut Session) -> Result<(), String>,
 ) -> Result<Lease, String> {
-    let flags: Vec<String> = ["--network", "nat", "--tap", "tap0:172.16.0.1/30"].map(String::from).to_vec();
+    let flags: Vec<String> = ["--network", "nat", "--tap", "tap0:172.16.0.1/30"]
+        .map(String::from)
+        .to_vec();
     let (v, _, _) = run.start_with(id, &format!("{id}.sock"), &flags)?;
-    let lease = Lease { id: id.to_string(), v };
+    let lease = Lease {
+        id: id.to_string(),
+        v,
+    };
     before(control)?;
     let mut api = Client::connect(&lease.v.socket)?;
     let eth0 = r#"{"iface_id":"eth0","host_dev_name":"tap0","guest_mac":"06:00:ac:10:00:02"}"#;
     api.expect("PUT", "/network-interfaces/eth0", Some(eth0), 204)?;
-    api.expect("PUT", "/machine-config", Some(r#"{"vcpu_count":1,"mem_size_mib":256}"#), 204)?;
-    let args = format!("{BOOT_ARGS} vesper_net=172.16.0.2/30,172.16.0.1 vesper_probe={}", probes.join(","));
-    let boot = format!(r#"{{"kernel_image_path":"/Image","initrd_path":"/initrd.gz","boot_args":"{args}"}}"#);
+    api.expect(
+        "PUT",
+        "/machine-config",
+        Some(r#"{"vcpu_count":1,"mem_size_mib":256}"#),
+        204,
+    )?;
+    let args = format!(
+        "{BOOT_ARGS} vesper_net=172.16.0.2/30,172.16.0.1 vesper_probe={}",
+        probes.join(",")
+    );
+    let boot = format!(
+        r#"{{"kernel_image_path":"/Image","initrd_path":"/initrd.gz","boot_args":"{args}"}}"#
+    );
     api.expect("PUT", "/boot-source", Some(&boot), 204)?;
-    api.expect("PUT", "/actions", Some(r#"{"action_type":"InstanceStart"}"#), 204)?;
+    api.expect(
+        "PUT",
+        "/actions",
+        Some(r#"{"action_type":"InstanceStart"}"#),
+        204,
+    )?;
     Ok(lease)
 }
 
@@ -117,7 +137,10 @@ fn results(control: &mut Session, id: &str) -> Result<Vec<(String, bool)>, Strin
             return Ok(probe_results(&lines));
         }
         if Instant::now() >= deadline {
-            return Err(format!("{id}: no VESPER-PROBES-DONE within {} s", PROBE_WAIT.as_secs()));
+            return Err(format!(
+                "{id}: no VESPER-PROBES-DONE within {} s",
+                PROBE_WAIT.as_secs()
+            ));
         }
         thread::sleep(Duration::from_millis(500));
     }
@@ -133,9 +156,21 @@ struct Drops {
 
 fn drops(control: &mut Session, id: &str) -> Result<Drops, String> {
     let (_, lines) = control.vesperd(&["net", id])?;
-    let line = lines.iter().find(|l| l.starts_with("DROPS ")).ok_or_else(|| format!("net {id}: {}", lines.join(" | ")))?;
-    let field = |k: &str| line.split_whitespace().find_map(|w| w.strip_prefix(k)).and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
-    Ok(Drops { ns: field("ns="), root: field("root="), raw: field("raw=") })
+    let line = lines
+        .iter()
+        .find(|l| l.starts_with("DROPS "))
+        .ok_or_else(|| format!("net {id}: {}", lines.join(" | ")))?;
+    let field = |k: &str| {
+        line.split_whitespace()
+            .find_map(|w| w.strip_prefix(k))
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(0)
+    };
+    Ok(Drops {
+        ns: field("ns="),
+        root: field("root="),
+        raw: field("raw="),
+    })
 }
 
 /// `FLOWS <id> ns= root= cap_ns= cap_root= capdrop_ns= capdrop_root=`: tracked flows in the lease's namespace and
@@ -152,13 +187,22 @@ struct Flows {
 
 fn flows(control: &mut Session, id: &str) -> Result<Flows, String> {
     let (_, lines) = control.vesperd(&["net", id])?;
-    let line = lines.iter().find(|l| l.starts_with("FLOWS ")).ok_or_else(|| format!("net {id}: {}", lines.join(" | ")))?;
-    parse_flows(line).ok_or_else(|| format!("net {id}: a flow field is missing or unreadable (a cap rule gone?): {line}"))
+    let line = lines
+        .iter()
+        .find(|l| l.starts_with("FLOWS "))
+        .ok_or_else(|| format!("net {id}: {}", lines.join(" | ")))?;
+    parse_flows(line).ok_or_else(|| {
+        format!("net {id}: a flow field is missing or unreadable (a cap rule gone?): {line}")
+    })
 }
 
 /// Every field must be a number: `-` means the helper could not read it, which the steps treat as a failure.
 fn parse_flows(line: &str) -> Option<Flows> {
-    let field = |k: &str| line.split_whitespace().find_map(|w| w.strip_prefix(k)?.strip_prefix('=')).and_then(|v| v.parse::<u64>().ok());
+    let field = |k: &str| {
+        line.split_whitespace()
+            .find_map(|w| w.strip_prefix(k)?.strip_prefix('='))
+            .and_then(|v| v.parse::<u64>().ok())
+    };
     Some(Flows {
         ns: field("ns")?,
         root: field("root")?,
@@ -173,7 +217,10 @@ fn parse_flows(line: &str) -> Option<Flows> {
 fn root_flows(control: &mut Session) -> Result<(u64, String), String> {
     let (rc, lines) = control.vesperd(&["flows"])?;
     let line = first(&lines);
-    let n = line.split_whitespace().find_map(|w| w.strip_prefix("root=")).and_then(|v| v.parse::<u64>().ok());
+    let n = line
+        .split_whitespace()
+        .find_map(|w| w.strip_prefix("root="))
+        .and_then(|v| v.parse::<u64>().ok());
     match n {
         Some(n) if rc == 0 && line.starts_with("FLOWS ") => Ok((n, line)),
         _ => Err(format!("flows (rc {rc}): {line}")),
@@ -182,7 +229,13 @@ fn root_flows(control: &mut Session) -> Result<(u64, String), String> {
 
 /// Both layers carry the cap ADR 0008 sets.
 fn caps_installed(f: &Flows) -> Result<(), String> {
-    if f.cap_ns == FLOW_CAP && f.cap_root == FLOW_CAP { Ok(()) } else { Err(format!("installed caps {f:?}, expected {FLOW_CAP} in both layers")) }
+    if f.cap_ns == FLOW_CAP && f.cap_root == FLOW_CAP {
+        Ok(())
+    } else {
+        Err(format!(
+            "installed caps {f:?}, expected {FLOW_CAP} in both layers"
+        ))
+    }
 }
 
 /// The excess a cap rule must have dropped: at least the flood less the cap and the slack, at most the flood less the cap.
@@ -199,13 +252,20 @@ fn flood_probe() -> String {
 /// Waits for the flood to finish and checks that the probe ran.
 fn flooded(control: &mut Session, id: &str) -> Result<(), String> {
     let got = results(control, id)?;
-    if got.iter().any(|(p, _)| *p == flood_probe()) { Ok(()) } else { Err(format!("{id}: the flood probe did not run: {got:?}")) }
+    if got.iter().any(|(p, _)| *p == flood_probe()) {
+        Ok(())
+    } else {
+        Err(format!("{id}: the flood probe did not run: {got:?}"))
+    }
 }
 
 /// A `POLICY nat` field of `VESPERD net <id>`.
 fn policy_field(control: &mut Session, id: &str, key: &str) -> Result<String, String> {
     let (_, lines) = control.vesperd(&["net", id])?;
-    let line = lines.iter().find(|l| l.starts_with("POLICY nat")).ok_or_else(|| format!("net {id}: {}", lines.join(" | ")))?;
+    let line = lines
+        .iter()
+        .find(|l| l.starts_with("POLICY nat"))
+        .ok_or_else(|| format!("net {id}: {}", lines.join(" | ")))?;
     line.split_whitespace()
         .find_map(|w| w.strip_prefix(key))
         .map(str::to_string)
@@ -214,7 +274,10 @@ fn policy_field(control: &mut Session, id: &str, key: &str) -> Result<String, St
 
 /// The lease's veth addresses (root end, namespace end).
 fn veth_addrs(control: &mut Session, id: &str) -> Result<Vec<String>, String> {
-    Ok(vec![policy_field(control, id, "root=")?, policy_field(control, id, "ns=")?])
+    Ok(vec![
+        policy_field(control, id, "root=")?,
+        policy_field(control, id, "ns=")?,
+    ])
 }
 
 /// The System VM's eth0 address and gateway, from a running nat lease.
@@ -222,7 +285,8 @@ fn system_vm(control: &mut Session, id: &str) -> Result<SystemVm, String> {
     let eth0 = policy_field(control, id, "eth0=")?;
     let eth0 = eth0.split('/').next().unwrap_or_default().to_string();
     let gateway = policy_field(control, id, "gw=")?;
-    if eth0.parse::<std::net::Ipv4Addr>().is_err() || gateway.parse::<std::net::Ipv4Addr>().is_err() {
+    if eth0.parse::<std::net::Ipv4Addr>().is_err() || gateway.parse::<std::net::Ipv4Addr>().is_err()
+    {
         return Err(format!("System VM addresses eth0={eth0} gw={gateway}"));
     }
     Ok(SystemVm { eth0, gateway })
@@ -238,7 +302,10 @@ fn docker_back(control: &mut Session, within: Duration) -> Result<Duration, Stri
             return Ok(start.elapsed());
         }
         if start.elapsed() > within {
-            return Err(format!("dockerd not back within {} s: {health}", within.as_secs()));
+            return Err(format!(
+                "dockerd not back within {} s: {health}",
+                within.as_secs()
+            ));
         }
         thread::sleep(Duration::from_millis(500));
     }
@@ -263,7 +330,11 @@ fn judge(got: &[(String, bool)], deny: &[String], allow: &[String]) -> Result<St
         }
     }
     if wrong.is_empty() {
-        Ok(format!("{} denied probes closed; {} allowed probes open", deny.len(), allow.len()))
+        Ok(format!(
+            "{} denied probes closed; {} allowed probes open",
+            deny.len(),
+            allow.len()
+        ))
     } else {
         Err(wrong.join(", "))
     }
@@ -277,13 +348,25 @@ fn stop(control: &mut Session, lease: &mut Lease) -> Result<(), String> {
 
 fn no_veth_left(control: &mut Session) -> Result<(), String> {
     let (_, lines) = control.vesperd(&["list"])?;
-    let left: Vec<&String> = lines.iter().filter(|l| l.starts_with("VETH ") || l.starts_with("LINK vpd")).collect();
-    if left.is_empty() { Ok(()) } else { Err(format!("left: {left:?}")) }
+    let left: Vec<&String> = lines
+        .iter()
+        .filter(|l| l.starts_with("VETH ") || l.starts_with("LINK vpd"))
+        .collect();
+    if left.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("left: {left:?}"))
+    }
 }
 
 pub fn run_egress_suite(endpoint: &ControlEndpoint, run: &VesperdRun, id: &str) -> SuiteReport {
     let mut steps: Vec<SuiteStep> = Vec::new();
-    let [a, b, c, d] = [format!("{id}-a"), format!("{id}-b"), format!("{id}-root"), format!("{id}-none")];
+    let [a, b, c, d] = [
+        format!("{id}-a"),
+        format!("{id}-b"),
+        format!("{id}-root"),
+        format!("{id}-none"),
+    ];
     let control = step(&mut steps, "handshake", || {
         let session = connect(endpoint)?;
         let detail = format!("protocol {}", session.handshake.protocol_version);
@@ -306,9 +389,15 @@ pub fn run_egress_suite(endpoint: &ControlEndpoint, run: &VesperdRun, id: &str) 
         }
         let (_, reach) = control.vesperd(&["test-reach", ip, port])?;
         if !first(&reach).ends_with(" open") {
-            return Err(format!("the System VM itself does not reach {PUBLIC} ({}); the allowed probes cannot be judged", first(&reach)));
+            return Err(format!(
+                "the System VM itself does not reach {PUBLIC} ({}); the allowed probes cannot be judged",
+                first(&reach)
+            ));
         }
-        Ok(((), format!("{}; System VM to {PUBLIC}: {}", first(&l), first(&reach))))
+        Ok((
+            (),
+            format!("{}; System VM to {PUBLIC}: {}", first(&l), first(&reach)),
+        ))
     });
     let mut sys = SystemVm::default();
     let allow = vec![format!("tcp:{PUBLIC}"), "dns:example.com".to_string()];
@@ -328,34 +417,56 @@ pub fn run_egress_suite(endpoint: &ControlEndpoint, run: &VesperdRun, id: &str) 
         let verdict = judge(&got, &deny, &allow)?;
         let ns1 = drops(&mut control, &b)?.ns;
         if ns1 == 0 {
-            return Err(format!("{verdict}; but the namespace layer counted no drops"));
+            return Err(format!(
+                "{verdict}; but the namespace layer counted no drops"
+            ));
         }
         let pb = veth_addrs(&mut control, &b)?;
         if pb == peer {
             return Err(format!("both leases have the veth {peer:?}"));
         }
-        Ok(((), format!("{verdict} (System VM {} via {}); namespace layer dropped {ns1}; {b} and {a} on distinct veths {pb:?} / {peer:?} and {b} reached neither of {a}'s", sys.eth0, sys.gateway)))
+        Ok((
+            (),
+            format!(
+                "{verdict} (System VM {} via {}); namespace layer dropped {ns1}; {b} and {a} on distinct veths {pb:?} / {peer:?} and {b} reached neither of {a}'s",
+                sys.eth0, sys.gateway
+            ),
+        ))
     });
     step(&mut steps, "isolation_reports_egress", || {
         let mut out = Vec::new();
         for l in &leases {
             let (_, iso) = control.vesperd(&["isolation", &l.id])?;
             let j = first(&iso);
-            for want in [r#""netns_ok":true"#, r#""ipv6_off":true"#, r#""egress":"nat""#, r#""egress_ok":true"#] {
+            for want in [
+                r#""netns_ok":true"#,
+                r#""ipv6_off":true"#,
+                r#""egress":"nat""#,
+                r#""egress_ok":true"#,
+            ] {
                 if !j.contains(want) {
                     return Err(format!("{}: {j}", l.id));
                 }
             }
             out.push(l.id.clone());
         }
-        Ok(((), format!("{}: netns_ok, ipv6_off, egress nat, egress_ok", out.join(", "))))
+        Ok((
+            (),
+            format!(
+                "{}: netns_ok, ipv6_off, egress nat, egress_ok",
+                out.join(", ")
+            ),
+        ))
     });
     step(&mut steps, "teardown_removes_veths", || {
         for l in leases.iter_mut() {
             stop(&mut control, l)?;
         }
         no_veth_left(&mut control)?;
-        Ok(((), "SIGTERM: both leases ABSENT, no VETH record or vpd link left".to_string()))
+        Ok((
+            (),
+            "SIGTERM: both leases ABSENT, no VETH record or vpd link left".to_string(),
+        ))
     });
     leases.clear();
 
@@ -374,7 +485,11 @@ pub fn run_egress_suite(endpoint: &ControlEndpoint, run: &VesperdRun, id: &str) 
                 return Err(format!("test-open-ns: {}", first(&l)));
             }
             before = drops(s, &c)?;
-            note = format!("dockerd (pid {pid}) killed after LAUNCHAPI, healthy again after {} ms; {}", back.as_millis(), first(&l));
+            note = format!(
+                "dockerd (pid {pid}) killed after LAUNCHAPI, healthy again after {} ms; {}",
+                back.as_millis(),
+                first(&l)
+            );
             Ok(())
         })?;
         let got = results(&mut control, &c);
@@ -383,34 +498,59 @@ pub fn run_egress_suite(endpoint: &ControlEndpoint, run: &VesperdRun, id: &str) 
         let verdict = judge(&got?, &deny, &allow)?;
         let after = after?;
         if after.ns != before.ns || after.root <= before.root {
-            return Err(format!("{verdict}; drops {before:?} -> {after:?}: the root layer did not do the dropping"));
+            return Err(format!(
+                "{verdict}; drops {before:?} -> {after:?}: the root layer did not do the dropping"
+            ));
         }
-        Ok(((), format!("{note}; {verdict}; root drops +{}, namespace +0", after.root - before.root)))
+        Ok((
+            (),
+            format!(
+                "{note}; {verdict}; root drops +{}, namespace +0",
+                after.root - before.root
+            ),
+        ))
     });
 
     // The root raw layer: no namespace filter, masquerade or reverse-path check, so guest sources arrive unchanged.
-    step(&mut steps, "root_raw_drops_sources_outside_the_pool", || {
-        let deny = denied(&sys, &[]);
-        let probes: Vec<String> = allow.iter().cloned().chain(deny.iter().cloned()).collect();
-        let mut before = Drops::default();
-        let mut opened = String::new();
-        let mut lease = boot(run, &mut control, &c, &probes, &mut |s| {
-            let (rc, l) = s.vesperd(&["test-open-ns", &c, "all"])?;
-            opened = first(&l);
-            before = drops(s, &c)?;
-            if rc == 0 { Ok(()) } else { Err(format!("test-open-ns: {opened}")) }
-        })?;
-        let got = results(&mut control, &c);
-        let after = drops(&mut control, &c);
-        let _ = stop(&mut control, &mut lease);
-        let every: Vec<String> = probes.clone();
-        let verdict = judge(&got?, &every, &[])?;
-        let after = after?;
-        if after.raw <= before.raw {
-            return Err(format!("{verdict}; raw drops {} -> {}", before.raw, after.raw));
-        }
-        Ok(((), format!("{opened}; every probe closed, the allowed ones too ({verdict}); raw drops +{}", after.raw - before.raw)))
-    });
+    step(
+        &mut steps,
+        "root_raw_drops_sources_outside_the_pool",
+        || {
+            let deny = denied(&sys, &[]);
+            let probes: Vec<String> = allow.iter().cloned().chain(deny.iter().cloned()).collect();
+            let mut before = Drops::default();
+            let mut opened = String::new();
+            let mut lease = boot(run, &mut control, &c, &probes, &mut |s| {
+                let (rc, l) = s.vesperd(&["test-open-ns", &c, "all"])?;
+                opened = first(&l);
+                before = drops(s, &c)?;
+                if rc == 0 {
+                    Ok(())
+                } else {
+                    Err(format!("test-open-ns: {opened}"))
+                }
+            })?;
+            let got = results(&mut control, &c);
+            let after = drops(&mut control, &c);
+            let _ = stop(&mut control, &mut lease);
+            let every: Vec<String> = probes.clone();
+            let verdict = judge(&got?, &every, &[])?;
+            let after = after?;
+            if after.raw <= before.raw {
+                return Err(format!(
+                    "{verdict}; raw drops {} -> {}",
+                    before.raw, after.raw
+                ));
+            }
+            Ok((
+                (),
+                format!(
+                    "{opened}; every probe closed, the allowed ones too ({verdict}); raw drops +{}",
+                    after.raw - before.raw
+                ),
+            ))
+        },
+    );
 
     // The flow cap in the namespace layer: the guest opens more flows than the cap; the excess is dropped there,
     // its namespace holds no more than the cap, and teardown's effect on the System VM's table is recorded.
@@ -429,14 +569,28 @@ pub fn run_egress_suite(endpoint: &ControlEndpoint, run: &VesperdRun, id: &str) 
         stopped?;
         let (held, (root_up, _), (root_down, timeouts)) = (held?, root_up?, root_down?);
         caps_installed(&held)?;
-        let (ns_dropped, root_dropped) = (held.capdrop_ns.saturating_sub(before.capdrop_ns), held.capdrop_root.saturating_sub(before.capdrop_root));
+        let (ns_dropped, root_dropped) = (
+            held.capdrop_ns.saturating_sub(before.capdrop_ns),
+            held.capdrop_root.saturating_sub(before.capdrop_root),
+        );
         if held.ns > FLOW_CAP + 16 || held.ns + FLOOD_SLACK < FLOW_CAP {
-            return Err(format!("the namespace holds {} flows against a cap of {FLOW_CAP}", held.ns));
+            return Err(format!(
+                "the namespace holds {} flows against a cap of {FLOW_CAP}",
+                held.ns
+            ));
         }
         if !excess_dropped(ns_dropped) || root_dropped != 0 {
-            return Err(format!("{FLOOD} flows sent, cap {FLOW_CAP}: the namespace cap rule dropped {ns_dropped}, the root one {root_dropped}"));
+            return Err(format!(
+                "{FLOOD} flows sent, cap {FLOW_CAP}: the namespace cap rule dropped {ns_dropped}, the root one {root_dropped}"
+            ));
         }
-        Ok(((), format!("{FLOOD} UDP flows to {FLOOD_TO}: the namespace holds {} (cap {FLOW_CAP} in both layers); its cap rule dropped {ns_dropped}, the root one 0; System VM flows {root_up} with the lease, {root_down} after teardown ({timeouts})", held.ns)))
+        Ok((
+            (),
+            format!(
+                "{FLOOD} UDP flows to {FLOOD_TO}: the namespace holds {} (cap {FLOW_CAP} in both layers); its cap rule dropped {ns_dropped}, the root one 0; System VM flows {root_up} with the lease, {root_down} after teardown ({timeouts})",
+                held.ns
+            ),
+        ))
     });
 
     // The flow cap in the root layer alone: the namespace filter is opened, so only the root mangle connlimit
@@ -448,7 +602,11 @@ pub fn run_egress_suite(endpoint: &ControlEndpoint, run: &VesperdRun, id: &str) 
             let (rc, l) = s.vesperd(&["test-open-ns", &c, "filter"])?;
             opened = first(&l);
             before = flows(s, &c)?;
-            if rc == 0 { Ok(()) } else { Err(format!("test-open-ns: {opened}")) }
+            if rc == 0 {
+                Ok(())
+            } else {
+                Err(format!("test-open-ns: {opened}"))
+            }
         })?;
         let ran = flooded(&mut control, &c);
         let after = flows(&mut control, &c);
@@ -457,11 +615,21 @@ pub fn run_egress_suite(endpoint: &ControlEndpoint, run: &VesperdRun, id: &str) 
         stopped?;
         let after = after?;
         caps_installed(&after)?;
-        let (ns_dropped, root_dropped) = (after.capdrop_ns.saturating_sub(before.capdrop_ns), after.capdrop_root.saturating_sub(before.capdrop_root));
+        let (ns_dropped, root_dropped) = (
+            after.capdrop_ns.saturating_sub(before.capdrop_ns),
+            after.capdrop_root.saturating_sub(before.capdrop_root),
+        );
         if ns_dropped != 0 || !excess_dropped(root_dropped) {
-            return Err(format!("{FLOOD} flows sent with the namespace filter open: the root cap rule dropped {root_dropped}, the namespace one {ns_dropped}"));
+            return Err(format!(
+                "{FLOOD} flows sent with the namespace filter open: the root cap rule dropped {root_dropped}, the namespace one {ns_dropped}"
+            ));
         }
-        Ok(((), format!("{opened}; {FLOOD} UDP flows: the root cap rule dropped {root_dropped}, the namespace one 0")))
+        Ok((
+            (),
+            format!(
+                "{opened}; {FLOOD} UDP flows: the root cap rule dropped {root_dropped}, the namespace one 0"
+            ),
+        ))
     });
 
     step(&mut steps, "none_lease_has_no_uplink", || {
@@ -470,7 +638,9 @@ pub fn run_egress_suite(endpoint: &ControlEndpoint, run: &VesperdRun, id: &str) 
         let checked = (|| -> Result<String, String> {
             let (_, iso) = control.vesperd(&["isolation", &d])?;
             let (_, net) = control.vesperd(&["net", &d])?;
-            if !first(&iso).contains(r#""egress":"none""#) || !net.iter().any(|l| l == "POLICY none") {
+            if !first(&iso).contains(r#""egress":"none""#)
+                || !net.iter().any(|l| l == "POLICY none")
+            {
                 return Err(format!("{} / {}", first(&iso), net.join(" | ")));
             }
             if net.iter().any(|l| l.starts_with("LINK up.")) {
@@ -494,7 +664,17 @@ pub fn run_egress_suite(endpoint: &ControlEndpoint, run: &VesperdRun, id: &str) 
         let (_, reap) = control.vesperd(&["reap"])?;
         wait_absent(&mut control, &a, TEARDOWN_TIMEOUT)?;
         no_veth_left(&mut control)?;
-        Ok(((), format!("{}; {}; no veth left", first(&l), reap.iter().find(|r| r.contains(&a)).cloned().unwrap_or_default())))
+        Ok((
+            (),
+            format!(
+                "{}; {}; no veth left",
+                first(&l),
+                reap.iter()
+                    .find(|r| r.contains(&a))
+                    .cloned()
+                    .unwrap_or_default()
+            ),
+        ))
     });
 
     step(&mut steps, "listeners_stopped", || {
@@ -517,23 +697,63 @@ mod tests {
             "VESPER-PROBES-DONE".to_string(),
         ];
         let got = probe_results(&lines);
-        assert_eq!(got, vec![("tcp:1.1.1.1:443".to_string(), true), ("tcp:10.0.0.1:443".to_string(), false)]);
+        assert_eq!(
+            got,
+            vec![
+                ("tcp:1.1.1.1:443".to_string(), true),
+                ("tcp:10.0.0.1:443".to_string(), false)
+            ]
+        );
         let allow = vec!["tcp:1.1.1.1:443".to_string()];
         assert!(judge(&got, &["tcp:10.0.0.1:443".to_string()], &allow).is_ok());
-        assert!(judge(&got, &["tcp:1.1.1.1:443".to_string()], &[]).unwrap_err().contains("open"));
-        assert!(judge(&got, &["tcp:9.9.9.9:1".to_string()], &[]).unwrap_err().contains("not run"));
+        assert!(
+            judge(&got, &["tcp:1.1.1.1:443".to_string()], &[])
+                .unwrap_err()
+                .contains("open")
+        );
+        assert!(
+            judge(&got, &["tcp:9.9.9.9:1".to_string()], &[])
+                .unwrap_err()
+                .contains("not run")
+        );
         let closed = vec![("tcp:1.1.1.1:443".to_string(), false)];
         assert!(judge(&closed, &[], &allow).unwrap_err().contains("closed"));
-        let sys = SystemVm { eth0: "192.168.65.3".into(), gateway: "192.168.65.1".into() };
+        let sys = SystemVm {
+            eth0: "192.168.65.3".into(),
+            gateway: "192.168.65.1".into(),
+        };
         let d = denied(&sys, &["198.18.0.5".to_string()]);
-        assert!(d.iter().any(|p| p == "tcp:198.18.0.5:7777") && d.iter().any(|p| p == "tcp:192.168.65.3:7777"));
-        assert!(d.iter().any(|p| p == "tcp:192.168.65.1:80") && !d.iter().any(|p| p.contains("192.168.64.")));
-        let f = parse_flows("FLOWS vm-a ns=1024 root=1100 cap_ns=1024 cap_root=1024 capdrop_ns=356 capdrop_root=0").unwrap();
-        assert_eq!((f.ns, f.cap_ns, f.capdrop_ns, f.capdrop_root), (1024, 1024, 356, 0));
+        assert!(
+            d.iter().any(|p| p == "tcp:198.18.0.5:7777")
+                && d.iter().any(|p| p == "tcp:192.168.65.3:7777")
+        );
+        assert!(
+            d.iter().any(|p| p == "tcp:192.168.65.1:80")
+                && !d.iter().any(|p| p.contains("192.168.64."))
+        );
+        let f = parse_flows(
+            "FLOWS vm-a ns=1024 root=1100 cap_ns=1024 cap_root=1024 capdrop_ns=356 capdrop_root=0",
+        )
+        .unwrap();
+        assert_eq!(
+            (f.ns, f.cap_ns, f.capdrop_ns, f.capdrop_root),
+            (1024, 1024, 356, 0)
+        );
         assert!(caps_installed(&f).is_ok());
         // A cap rule that is gone prints `-`, which must not read as zero.
-        assert!(parse_flows("FLOWS vm-a ns=1380 root=1400 cap_ns=- cap_root=1024 capdrop_ns=- capdrop_root=0").is_none());
-        assert!(excess_dropped(356) && excess_dropped(376) && !excess_dropped(377) && !excess_dropped(311) && !excess_dropped(0));
+        assert!(
+            parse_flows(
+                "FLOWS vm-a ns=1380 root=1400 cap_ns=- cap_root=1024 capdrop_ns=- capdrop_root=0"
+            )
+            .is_none()
+        );
+        assert!(
+            excess_dropped(356)
+                && excess_dropped(376)
+                && !excess_dropped(377)
+                && !excess_dropped(311)
+                && !excess_dropped(0)
+        );
         assert_eq!(flood_probe(), "flood:1.1.1.1:9:1400");
     }
 }

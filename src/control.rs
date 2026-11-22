@@ -9,12 +9,12 @@ mod launchapi;
 mod stage;
 mod suites;
 pub use launchapi::{
-    http_request, parse_http_response, parse_ready, read_http_response, valid_microvm_id, valid_tap_name, HttpResponse, Ready,
-    MAX_TAPS, TapSpec, check_network, nets_overlap,
+    HttpResponse, MAX_TAPS, Ready, TapSpec, check_network, http_request, nets_overlap,
+    parse_http_response, parse_ready, read_http_response, valid_microvm_id, valid_tap_name,
 };
 pub use stage::{
-    check_pair, data_disk_in_use, needs_id, parse_store_list, valid_stage_path, valid_store_name, StageDest, StageSource,
-    StageSpec, StoreEntry, MAX_STAGES, MAX_STAGE_PATH, MAX_STORE_NAME,
+    MAX_STAGE_PATH, MAX_STAGES, MAX_STORE_NAME, StageDest, StageSource, StageSpec, StoreEntry,
+    check_pair, data_disk_in_use, needs_id, parse_store_list, valid_stage_path, valid_store_name,
 };
 pub use suites::*;
 
@@ -74,7 +74,9 @@ pub fn connect(endpoint: &ControlEndpoint) -> Result<Session, String> {
         .set_read_timeout(Some(endpoint.io_timeout))
         .and_then(|_| stream.set_write_timeout(Some(endpoint.io_timeout)))
         .map_err(|err| format!("set bridge timeouts: {err}"))?;
-    let writer = stream.try_clone().map_err(|err| format!("clone bridge stream: {err}"))?;
+    let writer = stream
+        .try_clone()
+        .map_err(|err| format!("clone bridge stream: {err}"))?;
     let mut session = Session {
         reader: BufReader::new(stream),
         writer,
@@ -89,7 +91,8 @@ pub fn connect(endpoint: &ControlEndpoint) -> Result<Session, String> {
         .map_err(|err| format!("send CONNECT preface: {err}"))?;
     let greeting = session.read_line()?;
     let mut parts = greeting.split_whitespace();
-    let (Some("VESPER-AGENT"), Some(version), Some(hostname)) = (parts.next(), parts.next(), parts.next())
+    let (Some("VESPER-AGENT"), Some(version), Some(hostname)) =
+        (parts.next(), parts.next(), parts.next())
     else {
         return Err(format!("unexpected greeting from the agent: {greeting:?}"));
     };
@@ -199,10 +202,16 @@ impl Session {
             .reader
             .read_exact(&mut back)
             .map_err(|err| format!("read echo payload: {err}"));
-        sender.join().map_err(|_| "echo writer thread panicked".to_string())??;
+        sender
+            .join()
+            .map_err(|_| "echo writer thread panicked".to_string())??;
         read?;
         if back != payload {
-            let first = back.iter().zip(payload).position(|(a, b)| a != b).unwrap_or(0);
+            let first = back
+                .iter()
+                .zip(payload)
+                .position(|(a, b)| a != b)
+                .unwrap_or(0);
             return Err(format!("ECHO: payload corrupted at byte {first}"));
         }
         Ok(started.elapsed())
@@ -224,9 +233,9 @@ impl Session {
         let line = self.read_line()?;
         let mut parts = line.split_whitespace();
         match (parts.next(), parts.next(), parts.next()) {
-            (Some("KILL"), Some(name), Some(pid)) if name == service => {
-                pid.parse().map_err(|_| format!("KILL: bad pid in {line:?}"))
-            }
+            (Some("KILL"), Some(name), Some(pid)) if name == service => pid
+                .parse()
+                .map_err(|_| format!("KILL: bad pid in {line:?}")),
             _ => Err(format!("KILL {service}: unexpected reply {line:?}")),
         }
     }
@@ -291,7 +300,9 @@ impl Session {
     /// because launches, image builds and performance runs take longer than the default I/O timeout.
     fn guest_tool(&mut self, tool: &str, args: &[&str]) -> Result<(i32, Vec<String>), String> {
         let stream = self.reader.get_ref();
-        let previous = stream.read_timeout().map_err(|err| format!("read timeout: {err}"))?;
+        let previous = stream
+            .read_timeout()
+            .map_err(|err| format!("read timeout: {err}"))?;
         stream
             .set_read_timeout(Some(Duration::from_secs(600)))
             .map_err(|err| format!("set read timeout: {err}"))?;
@@ -300,19 +311,30 @@ impl Session {
         result
     }
 
-    fn guest_tool_inner(&mut self, tool: &str, args: &[&str]) -> Result<(i32, Vec<String>), String> {
+    fn guest_tool_inner(
+        &mut self,
+        tool: &str,
+        args: &[&str],
+    ) -> Result<(i32, Vec<String>), String> {
         self.send(&format!("{tool} {}", args.join(" ")))?;
         let line = self.read_line()?;
         let mut parts = line.split_whitespace();
-        let (Some(reply), Some(rc), Some(count)) = (parts.next(), parts.next(), parts.next()) else {
+        let (Some(reply), Some(rc), Some(count)) = (parts.next(), parts.next(), parts.next())
+        else {
             return Err(format!("{tool}: unexpected reply {line:?}"));
         };
         if reply != tool {
             return Err(format!("{tool}: unexpected reply {line:?}"));
         }
-        let rc: i32 = rc.parse().map_err(|_| format!("{tool}: bad rc in {line:?}"))?;
-        let count: usize = count.parse().map_err(|_| format!("{tool}: bad count in {line:?}"))?;
-        let lines = (0..count).map(|_| self.read_line()).collect::<Result<Vec<_>, _>>()?;
+        let rc: i32 = rc
+            .parse()
+            .map_err(|_| format!("{tool}: bad rc in {line:?}"))?;
+        let count: usize = count
+            .parse()
+            .map_err(|_| format!("{tool}: bad count in {line:?}"))?;
+        let lines = (0..count)
+            .map(|_| self.read_line())
+            .collect::<Result<Vec<_>, _>>()?;
         Ok((rc, lines))
     }
 
@@ -361,7 +383,9 @@ mod tests {
                     let mut line = String::new();
                     reader.read_line(&mut line).unwrap();
                     assert_eq!(line, "CONNECT 1024\n");
-                    writer.write_all(format!("{greeting}\n").as_bytes()).unwrap();
+                    writer
+                        .write_all(format!("{greeting}\n").as_bytes())
+                        .unwrap();
                     if drop_after_greeting {
                         return;
                     }
@@ -455,7 +479,12 @@ mod tests {
         let missing = dir.path().join("missing.sock");
         let err = connect(&ControlEndpoint::new(&missing, DEFAULT_AGENT_PORT)).unwrap_err();
         assert!(err.contains("make systemvm-up"));
-        let err = connect_with_retry(&ControlEndpoint::new(&missing, 1024), 2, Duration::from_millis(10)).unwrap_err();
+        let err = connect_with_retry(
+            &ControlEndpoint::new(&missing, 1024),
+            2,
+            Duration::from_millis(10),
+        )
+        .unwrap_err();
         assert!(err.contains("gave up after 2 attempts"));
     }
 
@@ -465,13 +494,22 @@ mod tests {
         let path = dir.path().join("3.sock");
         fake_bridge(&path, "VESPER-AGENT 1 vesper", false);
         let endpoint = ControlEndpoint::new(&path, DEFAULT_AGENT_PORT);
-        let report = run_suite(&endpoint, Duration::from_millis(20), Duration::from_millis(100), 1024 * 1024 + 1);
+        let report = run_suite(
+            &endpoint,
+            Duration::from_millis(20),
+            Duration::from_millis(100),
+            1024 * 1024 + 1,
+        );
         let names: Vec<&str> = report.steps.iter().map(|s| s.name.as_str()).collect();
-        assert_eq!(names, ["handshake", "keepalive", "reconnect", "large_payload"]);
+        assert_eq!(
+            names,
+            ["handshake", "keepalive", "reconnect", "large_payload"]
+        );
         assert!(report.passed, "{:?}", report.steps);
         let out = dir.path().join("control-report.json");
         write_report(&out, &report).unwrap();
-        let written: SuiteReport = serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
+        let written: SuiteReport =
+            serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
         assert!(written.passed);
     }
 
@@ -486,7 +524,16 @@ mod tests {
         assert_eq!((rc, lines[0].as_str()), (0, "EXITED demo"));
         let report = run_microvm_suite(&endpoint, "demo");
         let names: Vec<&str> = report.steps.iter().map(|s| s.name.as_str()).collect();
-        for n in ["launch", "jailer_isolation", "stop", "cleanup_after_stop", "abnormal_termination", "cleanup_after_crash", "guest_poweroff_exits", "cleanup_after_poweroff"] {
+        for n in [
+            "launch",
+            "jailer_isolation",
+            "stop",
+            "cleanup_after_stop",
+            "abnormal_termination",
+            "cleanup_after_crash",
+            "guest_poweroff_exits",
+            "cleanup_after_poweroff",
+        ] {
             assert!(names.contains(&n), "missing {n} in {names:?}");
         }
         assert!(report.passed, "{:?}", report.steps);
@@ -501,11 +548,15 @@ mod tests {
         let mut session = connect(&endpoint).unwrap();
         assert_eq!(session.kill_service("docker").unwrap(), 4242);
         assert_eq!(session.logs("docker", 10).unwrap().len(), 2);
-        let report = run_services_suite(&endpoint, &["containerd", "docker"], Duration::from_secs(2));
+        let report =
+            run_services_suite(&endpoint, &["containerd", "docker"], Duration::from_secs(2));
         let names: Vec<&str> = report.steps.iter().map(|s| s.name.as_str()).collect();
         assert_eq!(names.len(), 10);
         assert!(names.contains(&"tun_loaded_at_boot"));
-        assert!(names.contains(&"docker_recovers") && names.contains(&"containerd_logs_capture_startup_and_recovery"));
+        assert!(
+            names.contains(&"docker_recovers")
+                && names.contains(&"containerd_logs_capture_startup_and_recovery")
+        );
         assert!(report.passed, "{:?}", report.steps);
     }
 }

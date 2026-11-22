@@ -10,7 +10,9 @@ use tokio::sync::Semaphore;
 use tokio::time::timeout;
 use url::Url;
 
-pub use relay::{Bounds, DEFAULT_MAX_LINE, DEFAULT_READ_BUFFER, Preface, RelayEnd, read_line_bounded, write_line};
+pub use relay::{
+    Bounds, DEFAULT_MAX_LINE, DEFAULT_READ_BUFFER, Preface, RelayEnd, read_line_bounded, write_line,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Target {
@@ -102,7 +104,10 @@ impl Default for ServerConfig {
 }
 
 /// The host socket a unix or vsock upstream dials, when there is one to check.
-pub fn upstream_socket_path(target: &Target, vsock_socket_dir: &str) -> Result<Option<String>, String> {
+pub fn upstream_socket_path(
+    target: &Target,
+    vsock_socket_dir: &str,
+) -> Result<Option<String>, String> {
     Ok(match target.scheme.as_str() {
         "unix" => Some(target.address.clone()),
         "vsock" => Some(vsock_socket_path(vsock_socket_dir, target.cid)?),
@@ -145,7 +150,12 @@ pub async fn run_server(
         &config.listen_path,
         std::os::unix::fs::PermissionsExt::from_mode(config.listen_mode),
     )
-    .map_err(|err| format!("set mode {:o} on {}: {err}", config.listen_mode, config.listen_path))?;
+    .map_err(|err| {
+        format!(
+            "set mode {:o} on {}: {err}",
+            config.listen_mode, config.listen_path
+        )
+    })?;
 
     serve(listener, config, shutdown).await
 }
@@ -158,7 +168,10 @@ pub async fn serve(
     shutdown: impl std::future::Future<Output = ()>,
 ) -> Result<(), String> {
     let target = parse_target(&config.upstream_raw)?;
-    let slots = config.bounds.max_connections.map(|n| Arc::new(Semaphore::new(n)));
+    let slots = config
+        .bounds
+        .max_connections
+        .map(|n| Arc::new(Semaphore::new(n)));
     let config = Arc::new(config);
     let accept_loop = async {
         loop {
@@ -198,7 +211,10 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send> Upstream for T {}
 
 /// Dials `target` within `config.dial_timeout`; for vsock also writes the bridge's `CONNECT <port>` preface,
 /// within `config.bounds.handshake_timeout` when it is set.
-pub async fn open_upstream(target: &Target, config: &ServerConfig) -> Result<Box<dyn Upstream>, String> {
+pub async fn open_upstream(
+    target: &Target,
+    config: &ServerConfig,
+) -> Result<Box<dyn Upstream>, String> {
     let dial_timeout = config.dial_timeout;
     match target.scheme.as_str() {
         "unix" => {
@@ -221,16 +237,24 @@ pub async fn open_upstream(target: &Target, config: &ServerConfig) -> Result<Box
                 .await
                 .map_err(|_| "upstream dial timeout".to_string())?
                 .map_err(|err| format!("dial vsock bridge {socket_path}: {err}"))?;
-            write_line(&mut upstream, &format!("CONNECT {}", target.port), config.bounds.handshake_timeout)
-                .await
-                .map_err(|err| format!("vsock CONNECT preface: {err}"))?;
+            write_line(
+                &mut upstream,
+                &format!("CONNECT {}", target.port),
+                config.bounds.handshake_timeout,
+            )
+            .await
+            .map_err(|err| format!("vsock CONNECT preface: {err}"))?;
             Ok(Box::new(upstream))
         }
         _ => Err("unsupported target scheme".to_string()),
     }
 }
 
-async fn handle_client(client: UnixStream, target: &Target, config: &ServerConfig) -> Result<(), String> {
+async fn handle_client(
+    client: UnixStream,
+    target: &Target,
+    config: &ServerConfig,
+) -> Result<(), String> {
     let mut upstream = open_upstream(target, config).await?;
     if let Some(preface) = &config.preface {
         // On a refusal or a timeout the client connection is dropped here: closed, with no bytes.
@@ -249,9 +273,13 @@ async fn handle_client(client: UnixStream, target: &Target, config: &ServerConfi
 /// check, the unlink and the caller's bind all happen while it is held.
 pub fn claim_socket(socket: &Path) -> Result<std::fs::File, String> {
     use std::os::unix::fs::{FileTypeExt, PermissionsExt};
-    let parent = socket.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    let parent = socket
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
     if !parent.exists() {
-        std::fs::create_dir_all(parent).map_err(|err| format!("create socket dir {}: {err}", parent.display()))?;
+        std::fs::create_dir_all(parent)
+            .map_err(|err| format!("create socket dir {}: {err}", parent.display()))?;
         std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700))
             .map_err(|err| format!("set socket dir permissions {}: {err}", parent.display()))?;
     }
@@ -278,12 +306,16 @@ pub fn claim_socket(socket: &Path) -> Result<std::fs::File, String> {
         .map_err(|_| format!("another vesperd holds {}", Path::new(&lock_path).display()))?;
     if let Ok(meta) = std::fs::symlink_metadata(socket) {
         if !meta.file_type().is_socket() {
-            return Err(format!("{} exists and is not a socket; refusing to remove it", socket.display()));
+            return Err(format!(
+                "{} exists and is not a socket; refusing to remove it",
+                socket.display()
+            ));
         }
         if std::os::unix::net::UnixStream::connect(socket).is_ok() {
             return Err(format!("another process is serving {}", socket.display()));
         }
-        std::fs::remove_file(socket).map_err(|err| format!("remove stale socket {}: {err}", socket.display()))?;
+        std::fs::remove_file(socket)
+            .map_err(|err| format!("remove stale socket {}: {err}", socket.display()))?;
     }
     Ok(lock)
 }
@@ -315,9 +347,19 @@ mod tests {
     #[test]
     fn upstream_socket_path_follows_the_scheme() {
         let unix = parse_target("unix:///tmp/x.sock").unwrap();
-        assert_eq!(upstream_socket_path(&unix, "/tmp/vsock").unwrap().as_deref(), Some("/tmp/x.sock"));
+        assert_eq!(
+            upstream_socket_path(&unix, "/tmp/vsock")
+                .unwrap()
+                .as_deref(),
+            Some("/tmp/x.sock")
+        );
         let vsock = parse_target("vsock://3:2375").unwrap();
-        assert_eq!(upstream_socket_path(&vsock, "/tmp/vsock").unwrap().as_deref(), Some("/tmp/vsock/3.sock"));
+        assert_eq!(
+            upstream_socket_path(&vsock, "/tmp/vsock")
+                .unwrap()
+                .as_deref(),
+            Some("/tmp/vsock/3.sock")
+        );
         let tcp = parse_target("tcp://127.0.0.1:1").unwrap();
         assert!(upstream_socket_path(&tcp, "/tmp/vsock").unwrap().is_none());
     }
@@ -356,13 +398,15 @@ mod tests {
         )
         .await
         .unwrap();
-        let mode = std::os::unix::fs::PermissionsExt::mode(&std::fs::metadata(&listen).unwrap().permissions()) & 0o777;
+        let mode = std::os::unix::fs::PermissionsExt::mode(
+            &std::fs::metadata(&listen).unwrap().permissions(),
+        ) & 0o777;
         assert_eq!(mode, 0o640);
     }
+    use tempfile::tempdir;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
     use tokio::sync::Notify;
-    use tempfile::tempdir;
 
     async fn wait_for_socket(path: &Path) {
         for _ in 0..100 {
@@ -621,7 +665,12 @@ mod tests {
         let results: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
         let won = results.iter().filter(|r| r.is_ok()).count();
         assert_eq!(won, 1, "{results:?}");
-        assert!(results.iter().filter_map(|r| r.as_ref().err()).all(|e| e.contains("another vesperd holds")));
+        assert!(
+            results
+                .iter()
+                .filter_map(|r| r.as_ref().err())
+                .all(|e| e.contains("another vesperd holds"))
+        );
         assert!(!path.exists(), "the winner removed the stale socket");
     }
 }

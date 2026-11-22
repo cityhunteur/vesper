@@ -124,15 +124,17 @@ pub fn run_boot_check(config: &BootCheckConfig) -> Result<BootCheckReport, Strin
         let boot_ms = ready_elapsed_ms(&output).unwrap_or(duration_ms);
         report.boot_ms.push(boot_ms);
         let status = match (status, config.max_boot_ms) {
-            (Ok(exit), Some(limit)) if exit.success() && boot_ms > limit => {
-                Err(format!("boot took {boot_ms} ms, over the {limit} ms threshold"))
-            }
+            (Ok(exit), Some(limit)) if exit.success() && boot_ms > limit => Err(format!(
+                "boot took {boot_ms} ms, over the {limit} ms threshold"
+            )),
             (other, _) => other,
         };
         match status {
             Ok(exit) if exit.success() => {
                 report.successful += 1;
-                log.push_str(&format!("result=ok duration_ms={duration_ms} boot_ms={boot_ms}\n"));
+                log.push_str(&format!(
+                    "result=ok duration_ms={duration_ms} boot_ms={boot_ms}\n"
+                ));
             }
             Ok(exit) => {
                 report.failed += 1;
@@ -154,7 +156,8 @@ pub fn run_boot_check(config: &BootCheckConfig) -> Result<BootCheckReport, Strin
 
     report.max_duration_ms = report.durations_ms.iter().copied().max().unwrap_or(0);
     report.max_boot_ms = report.boot_ms.iter().copied().max().unwrap_or(0);
-    report.mean_duration_ms = report.durations_ms.iter().sum::<u64>() / report.durations_ms.len().max(1) as u64;
+    report.mean_duration_ms =
+        report.durations_ms.iter().sum::<u64>() / report.durations_ms.len().max(1) as u64;
 
     fs::write(log_path, log)
         .map_err(|err| format!("write boot log {}: {err}", log_path.display()))?;
@@ -252,7 +255,10 @@ mod tests {
 
         let report = run_boot_check(&config).unwrap();
         assert_eq!(report.durations_ms.len(), 2);
-        assert_eq!(report.boot_ms, report.durations_ms, "no ready line: boot_ms falls back to wall clock");
+        assert_eq!(
+            report.boot_ms, report.durations_ms,
+            "no ready line: boot_ms falls back to wall clock"
+        );
         assert!(report.max_duration_ms >= report.mean_duration_ms);
         let written: BootCheckReport =
             serde_json::from_str(&fs::read_to_string(&report_path).unwrap()).unwrap();

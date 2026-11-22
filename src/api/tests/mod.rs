@@ -224,31 +224,42 @@ async fn get_json(router: &Router, uri: &str) -> serde_json::Value {
 async fn put_kernel(router: &Router, kernel: &NamedTempFile) {
     let response = router
         .clone()
-        .oneshot(put_boot_source_request(kernel.path().to_str().unwrap(), None))
+        .oneshot(put_boot_source_request(
+            kernel.path().to_str().unwrap(),
+            None,
+        ))
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
 }
 
 async fn instance_start(router: &Router) -> (StatusCode, serde_json::Value) {
-    send_json(router, "PUT", "/actions", r#"{"action_type":"InstanceStart"}"#).await
+    send_json(
+        router,
+        "PUT",
+        "/actions",
+        r#"{"action_type":"InstanceStart"}"#,
+    )
+    .await
 }
 
 fn pmem_body(id: &str, path: &std::path::Path, extra: &str) -> String {
-    format!(r#"{{"id":"{id}","path_on_host":"{}"{extra}}}"#, path.display())
+    format!(
+        r#"{{"id":"{id}","path_on_host":"{}"{extra}}}"#,
+        path.display()
+    )
 }
 
-const RATE_LIMITER_JSON: &str =
-    r#"{"bandwidth":{"size":1048576,"refill_time":100},"ops":{"size":10,"one_time_burst":5,"refill_time":1000}}"#;
+const RATE_LIMITER_JSON: &str = r#"{"bandwidth":{"size":1048576,"refill_time":100},"ops":{"size":10,"one_time_burst":5,"refill_time":1000}}"#;
 
-mod lifecycle;
 mod balloon;
 mod balloon_reporting;
+mod device_config;
+mod drives;
+mod lifecycle;
 mod memory_hotplug;
 mod mmds;
-mod device_config;
-mod vsock;
-mod drives;
-mod pmem;
 mod network;
+mod pmem;
 mod snapshot;
+mod vsock;

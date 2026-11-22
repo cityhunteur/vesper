@@ -30,7 +30,9 @@ fn vesperd(socket: Option<&Path>, runtime_dir: &Path) -> Command {
 static SPAWN: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn spawn_lock() -> std::sync::MutexGuard<'static, ()> {
-    SPAWN.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    SPAWN
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 struct Running(Child);
@@ -63,12 +65,19 @@ fn refused(socket: Option<&Path>, runtime_dir: &Path) -> String {
         vesperd(socket, runtime_dir).spawn().expect("spawn vesperd")
     };
     let out = child.wait_with_output().expect("run vesperd");
-    assert!(!out.status.success(), "vesperd should have refused to start");
+    assert!(
+        !out.status.success(),
+        "vesperd should have refused to start"
+    );
     String::from_utf8_lossy(&out.stderr).into_owned()
 }
 
 fn mode(path: &Path) -> u32 {
-    std::fs::metadata(path).expect("metadata").permissions().mode() & 0o777
+    std::fs::metadata(path)
+        .expect("metadata")
+        .permissions()
+        .mode()
+        & 0o777
 }
 
 #[test]
@@ -88,7 +97,10 @@ fn a_second_vesperd_does_not_take_the_socket() {
     let _first = start(None, tmp.path(), &socket);
     let err = refused(None, tmp.path());
     assert!(err.contains("another vesperd holds"), "stderr: {err}");
-    assert!(std::os::unix::net::UnixStream::connect(&socket).is_ok(), "the first server must keep its socket");
+    assert!(
+        std::os::unix::net::UnixStream::connect(&socket).is_ok(),
+        "the first server must keep its socket"
+    );
 }
 
 #[test]
@@ -126,7 +138,11 @@ fn a_socket_that_takes_a_connect_is_owner_only() {
     let socket = tmp.path().join("early.sock");
     let mut server = {
         let _spawning = spawn_lock();
-        Running(vesperd(Some(&socket), tmp.path()).spawn().expect("spawn vesperd"))
+        Running(
+            vesperd(Some(&socket), tmp.path())
+                .spawn()
+                .expect("spawn vesperd"),
+        )
     };
     let started = Instant::now();
     let mut seen = None;
@@ -138,7 +154,11 @@ fn a_socket_that_takes_a_connect_is_owner_only() {
             panic!("vesperd ended before it listened: {status}");
         }
     }
-    assert_eq!(seen, Some(0o600), "the mode of the socket at the first connect that worked");
+    assert_eq!(
+        seen,
+        Some(0o600),
+        "the mode of the socket at the first connect that worked"
+    );
 }
 
 #[test]

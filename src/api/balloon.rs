@@ -126,7 +126,11 @@ impl Default for BalloonHintingState {
     }
 }
 
-pub(super) fn handle_get_balloon(state: &Arc<AppState>, method: &Method, template: &str) -> Response {
+pub(super) fn handle_get_balloon(
+    state: &Arc<AppState>,
+    method: &Method,
+    template: &str,
+) -> Response {
     let balloon = state
         .balloon_config
         .read()

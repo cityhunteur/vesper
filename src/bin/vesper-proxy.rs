@@ -35,7 +35,10 @@ async fn main() {
     let args = Args::parse();
 
     let listen_mode = u32::from_str_radix(&args.listen_mode, 8).unwrap_or_else(|_| {
-        eprintln!("vesper-proxy failed: --listen-mode must be octal, got {}", args.listen_mode);
+        eprintln!(
+            "vesper-proxy failed: --listen-mode must be octal, got {}",
+            args.listen_mode
+        );
         std::process::exit(2);
     });
 

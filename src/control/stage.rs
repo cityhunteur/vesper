@@ -59,9 +59,13 @@ pub fn valid_stage_path(path: &str) -> bool {
         return false;
     };
     path.len() <= MAX_STAGE_PATH
-        && rest
-            .split('/')
-            .all(|c| !c.is_empty() && c != "." && c != ".." && c.chars().all(|ch| ch.is_ascii_alphanumeric() || PATH_CHARS.contains(ch)))
+        && rest.split('/').all(|c| {
+            !c.is_empty()
+                && c != "."
+                && c != ".."
+                && c.chars()
+                    .all(|ch| ch.is_ascii_alphanumeric() || PATH_CHARS.contains(ch))
+        })
 }
 
 /// A store name: 1 to `MAX_STORE_NAME` letters, digits and `._+,@=-`, not starting with a dot.
@@ -69,20 +73,26 @@ pub fn valid_store_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= MAX_STORE_NAME
         && !name.starts_with('.')
-        && name.chars().all(|ch| ch.is_ascii_alphanumeric() || PATH_CHARS.contains(ch))
+        && name
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || PATH_CHARS.contains(ch))
 }
 
 impl StageSource {
     /// `share:/PATH`, `store:NAME` or `jail:/PATH`.
     pub fn parse(text: &str) -> Result<StageSource, String> {
-        let (scheme, value) = text.split_once(':').ok_or_else(|| format!("bad SRC {text:?}: use share:/PATH, store:NAME or jail:/PATH"))?;
+        let (scheme, value) = text.split_once(':').ok_or_else(|| {
+            format!("bad SRC {text:?}: use share:/PATH, store:NAME or jail:/PATH")
+        })?;
         match scheme {
             "share" if valid_stage_path(value) => Ok(StageSource::Share(value.to_string())),
             "jail" if valid_stage_path(value) => Ok(StageSource::Jail(value.to_string())),
             "store" if valid_store_name(value) => Ok(StageSource::Store(value.to_string())),
             "share" | "jail" => Err(format!("bad SRC {text:?}: {}", path_rule())),
             "store" => Err(format!("bad SRC {text:?}: {}", name_rule())),
-            _ => Err(format!("bad SRC {text:?}: use share:/PATH, store:NAME or jail:/PATH")),
+            _ => Err(format!(
+                "bad SRC {text:?}: use share:/PATH, store:NAME or jail:/PATH"
+            )),
         }
     }
 
@@ -110,7 +120,9 @@ impl StageDest {
         } else if text.starts_with('/') {
             Err(format!("bad DEST {text:?}: {}", path_rule()))
         } else {
-            Err(format!("bad DEST {text:?}: use /PATH in the jail or store:NAME"))
+            Err(format!(
+                "bad DEST {text:?}: use /PATH in the jail or store:NAME"
+            ))
         }
     }
 
@@ -123,18 +135,26 @@ impl StageDest {
 }
 
 fn path_rule() -> String {
-    format!("a path is absolute, of letters, digits and {PATH_CHARS} between single slashes, with no . or .. component, at most {MAX_STAGE_PATH} bytes")
+    format!(
+        "a path is absolute, of letters, digits and {PATH_CHARS} between single slashes, with no . or .. component, at most {MAX_STAGE_PATH} bytes"
+    )
 }
 
 fn name_rule() -> String {
-    format!("a store name is 1 to {MAX_STORE_NAME} letters, digits and {PATH_CHARS}, not starting with a dot")
+    format!(
+        "a store name is 1 to {MAX_STORE_NAME} letters, digits and {PATH_CHARS}, not starting with a dot"
+    )
 }
 
 /// The pairs `vesperd stage` refuses whatever the paths: store to store and jail to jail.
 pub fn check_pair(src: &StageSource, dest: &StageDest) -> Result<(), String> {
     match (src, dest) {
-        (StageSource::Store(_), StageDest::Store(_)) => Err("store to store is not a stage".to_string()),
-        (StageSource::Jail(_), StageDest::Jail(_)) => Err("jail to jail is not a stage".to_string()),
+        (StageSource::Store(_), StageDest::Store(_)) => {
+            Err("store to store is not a stage".to_string())
+        }
+        (StageSource::Jail(_), StageDest::Jail(_)) => {
+            Err("jail to jail is not a stage".to_string())
+        }
         _ => Ok(()),
     }
 }
@@ -148,14 +168,20 @@ impl StageSpec {
     /// Parses `--stage SRC:DEST`: `share:/PATH:/DEST` or `store:NAME:/DEST`. Paths hold no colon, so the second
     /// colon ends SRC. `--stage` fills the fresh jail, so DEST is a jail path and SRC is not in the jail.
     pub fn parse(text: &str) -> Result<StageSpec, String> {
-        let bad = || format!("--stage {text:?}: use SRC:DEST, for example store:snap.mem:/snap.mem");
+        let bad =
+            || format!("--stage {text:?}: use SRC:DEST, for example store:snap.mem:/snap.mem");
         let (scheme, rest) = text.split_once(':').ok_or_else(bad)?;
         let (value, dest) = rest.split_once(':').ok_or_else(bad)?;
-        let src = StageSource::parse(&format!("{scheme}:{value}")).map_err(|err| format!("--stage {text:?}: {err}"))?;
+        let src = StageSource::parse(&format!("{scheme}:{value}"))
+            .map_err(|err| format!("--stage {text:?}: {err}"))?;
         let dest = StageDest::parse(dest).map_err(|err| format!("--stage {text:?}: {err}"))?;
         match (&src, &dest) {
-            (StageSource::Jail(_), _) => Err(format!("--stage {text:?}: jail: sources need a running microVM; use vesperd stage")),
-            (_, StageDest::Store(_)) => Err(format!("--stage {text:?}: --stage writes into the jail; use vesperd stage for store:")),
+            (StageSource::Jail(_), _) => Err(format!(
+                "--stage {text:?}: jail: sources need a running microVM; use vesperd stage"
+            )),
+            (_, StageDest::Store(_)) => Err(format!(
+                "--stage {text:?}: --stage writes into the jail; use vesperd stage for store:"
+            )),
             _ => Ok(StageSpec { src, dest }),
         }
     }
@@ -183,10 +209,17 @@ pub fn parse_store_list(lines: &[String]) -> Result<(Vec<StoreEntry>, u64, u64),
         let mut words = line.split(' ');
         match words.next() {
             Some("STORE") => {
-                let name = words.next().filter(|n| valid_store_name(n)).ok_or_else(|| format!("bad store line {line:?}"))?;
+                let name = words
+                    .next()
+                    .filter(|n| valid_store_name(n))
+                    .ok_or_else(|| format!("bad store line {line:?}"))?;
                 let bytes = field(words.next(), "bytes=", line)?;
                 let links = field(words.next(), "links=", line)?;
-                entries.push(StoreEntry { name: name.to_string(), bytes, links });
+                entries.push(StoreEntry {
+                    name: name.to_string(),
+                    bytes,
+                    links,
+                });
             }
             Some("FREE") => {
                 let avail = field(words.next(), "avail=", line)?;
@@ -209,17 +242,30 @@ fn outcome(rc: i32, lines: Vec<String>) -> Result<Vec<String>, (i32, String)> {
     if rc == 0 {
         return Ok(lines);
     }
-    let reason = lines.first().map(|l| l.strip_prefix("ERR ").unwrap_or(l).to_string()).unwrap_or_else(|| format!("exit {rc}"));
+    let reason = lines
+        .first()
+        .map(|l| l.strip_prefix("ERR ").unwrap_or(l).to_string())
+        .unwrap_or_else(|| format!("exit {rc}"));
     Err((rc, reason))
 }
 
 impl Session {
     /// `VESPERD stage ID|- SRC DEST`; returns the `STAGED` line, or the guest's exit code and reason.
-    pub fn stage(&mut self, id: Option<&str>, src: &StageSource, dest: &StageDest) -> Result<String, (i32, String)> {
+    pub fn stage(
+        &mut self,
+        id: Option<&str>,
+        src: &StageSource,
+        dest: &StageDest,
+    ) -> Result<String, (i32, String)> {
         let (src, dest) = (src.wire(), dest.wire());
-        let (rc, lines) = self.vesperd(&["stage", id.unwrap_or("-"), &src, &dest]).map_err(|err| (1, err))?;
+        let (rc, lines) = self
+            .vesperd(&["stage", id.unwrap_or("-"), &src, &dest])
+            .map_err(|err| (1, err))?;
         let lines = outcome(rc, lines)?;
-        lines.into_iter().find(|l| l.starts_with("STAGED ")).ok_or((1, "no STAGED line".to_string()))
+        lines
+            .into_iter()
+            .find(|l| l.starts_with("STAGED "))
+            .ok_or((1, "no STAGED line".to_string()))
     }
 
     /// `VESPERD store-list`; returns the raw lines (`STORE …` then `FREE …`).
@@ -244,15 +290,43 @@ mod tests {
 
     #[test]
     fn paths_and_names_follow_the_guest_rules() {
-        for ok in ["/a", "/snap.mem", "/a/b-c/d_e.f+g,h@i=j", &format!("/{}", "x".repeat(MAX_STAGE_PATH - 1))] {
+        for ok in [
+            "/a",
+            "/snap.mem",
+            "/a/b-c/d_e.f+g,h@i=j",
+            &format!("/{}", "x".repeat(MAX_STAGE_PATH - 1)),
+        ] {
             assert!(valid_stage_path(ok), "{ok:?}");
         }
-        for bad in ["", "a", "/", "/a/", "//a", "/a//b", "/./a", "/a/..", "/a/../b", "/a b", "/a*", "/a:b", "/a\\b", "/é",
-            &format!("/{}", "x".repeat(MAX_STAGE_PATH))] {
+        for bad in [
+            "",
+            "a",
+            "/",
+            "/a/",
+            "//a",
+            "/a//b",
+            "/./a",
+            "/a/..",
+            "/a/../b",
+            "/a b",
+            "/a*",
+            "/a:b",
+            "/a\\b",
+            "/é",
+            &format!("/{}", "x".repeat(MAX_STAGE_PATH)),
+        ] {
             assert!(!valid_stage_path(bad), "accepted {bad:?}");
         }
         assert!(valid_store_name("snap-1.mem") && valid_store_name(&"n".repeat(MAX_STORE_NAME)));
-        for bad in ["", ".partial.1", "..", "a/b", "a b", "a:b", &"n".repeat(MAX_STORE_NAME + 1)] {
+        for bad in [
+            "",
+            ".partial.1",
+            "..",
+            "a/b",
+            "a b",
+            "a:b",
+            &"n".repeat(MAX_STORE_NAME + 1),
+        ] {
             assert!(!valid_store_name(bad), "accepted {bad:?}");
         }
     }
@@ -260,14 +334,31 @@ mod tests {
     #[test]
     fn stage_specs_parse_into_launch_tokens() {
         let spec = StageSpec::parse("store:a.mem:/snap/a.mem").unwrap();
-        assert_eq!(spec, StageSpec { src: StageSource::Store("a.mem".into()), dest: StageDest::Jail("/snap/a.mem".into()) });
+        assert_eq!(
+            spec,
+            StageSpec {
+                src: StageSource::Store("a.mem".into()),
+                dest: StageDest::Jail("/snap/a.mem".into())
+            }
+        );
         assert_eq!(spec.launch_token(), "stage=store:a.mem:/snap/a.mem");
         assert!(spec.links());
         let share = StageSpec::parse("share:/Users/me/vm/disk.ext4:/disk.ext4").unwrap();
-        assert_eq!(share.launch_token(), "stage=share:/Users/me/vm/disk.ext4:/disk.ext4");
+        assert_eq!(
+            share.launch_token(),
+            "stage=share:/Users/me/vm/disk.ext4:/disk.ext4"
+        );
         assert!(!share.links());
-        assert!(!StageSpec::parse("store:disk.ext4:/disk.ext4").unwrap().links());
-        assert!(StageSpec::parse("store:a.vmstate:/a.vmstate").unwrap().links());
+        assert!(
+            !StageSpec::parse("store:disk.ext4:/disk.ext4")
+                .unwrap()
+                .links()
+        );
+        assert!(
+            StageSpec::parse("store:a.vmstate:/a.vmstate")
+                .unwrap()
+                .links()
+        );
         for (bad, why) in [
             ("store:a.mem", "use SRC:DEST"),
             ("/x:/y:/z", "use share:/PATH"),
@@ -292,22 +383,47 @@ mod tests {
         assert!(check_pair(&jail(), &StageDest::Store("a.mem".into())).is_ok());
         assert!(needs_id(&jail(), &StageDest::Store("a".into())));
         assert!(needs_id(&store_src(), &StageDest::Jail("/a".into())));
-        assert!(!needs_id(&StageSource::Share("/s/a".into()), &StageDest::Store("a".into())));
+        assert!(!needs_id(
+            &StageSource::Share("/s/a".into()),
+            &StageDest::Store("a".into())
+        ));
         assert_eq!(StageDest::parse("store:x").unwrap().wire(), "store:x");
-        assert_eq!(StageSource::parse("jail:/a.mem").unwrap().wire(), "jail:/a.mem");
+        assert_eq!(
+            StageSource::parse("jail:/a.mem").unwrap().wire(),
+            "jail:/a.mem"
+        );
     }
 
     #[test]
     fn store_list_and_data_status_parse() {
-        let lines: Vec<String> = ["STORE a.mem bytes=268435456 links=2", "FREE avail=100 reserve=50"].iter().map(|s| s.to_string()).collect();
+        let lines: Vec<String> = [
+            "STORE a.mem bytes=268435456 links=2",
+            "FREE avail=100 reserve=50",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
         let (entries, avail, reserve) = parse_store_list(&lines).unwrap();
-        assert_eq!(entries, vec![StoreEntry { name: "a.mem".into(), bytes: 268435456, links: 2 }]);
+        assert_eq!(
+            entries,
+            vec![StoreEntry {
+                name: "a.mem".into(),
+                bytes: 268435456,
+                links: 2
+            }]
+        );
         assert_eq!((avail, reserve), (100, 50));
         assert!(parse_store_list(&lines[..1]).is_err());
         assert!(parse_store_list(&["STORE ../x bytes=1 links=1".to_string()]).is_err());
         assert!(data_disk_in_use("DATA mounted /dev/vdb used=1 avail=2"));
         assert!(data_disk_in_use("DATA formatted /dev/vdb"));
-        for no in ["DATA absent", "DATA refused /dev/vdb foreign:ext4:x", "DATA unknown", "mounted", ""] {
+        for no in [
+            "DATA absent",
+            "DATA refused /dev/vdb foreign:ext4:x",
+            "DATA unknown",
+            "mounted",
+            "",
+        ] {
             assert!(!data_disk_in_use(no), "{no:?}");
         }
     }

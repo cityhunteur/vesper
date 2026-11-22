@@ -46,13 +46,26 @@ pub fn load(path: impl AsRef<Path>) -> Result<Lock, String> {
     for (name, baseline) in &lock.baselines {
         if let Some(suite) = &baseline.upstream_suite {
             if name != "firecracker" {
-                return Err(format!("baselines.{name}.upstream_suite: only the firecracker baseline runs an upstream suite"));
+                return Err(format!(
+                    "baselines.{name}.upstream_suite: only the firecracker baseline runs an upstream suite"
+                ));
             }
-            let arch = suite.artifacts_prefix.rsplit('/').next().unwrap_or_default();
+            let arch = suite
+                .artifacts_prefix
+                .rsplit('/')
+                .next()
+                .unwrap_or_default();
             if !matches!(arch, "aarch64" | "x86_64") {
-                return Err(format!("baselines.firecracker.upstream_suite.artifacts_prefix must end in /aarch64 or /x86_64"));
+                return Err(format!(
+                    "baselines.firecracker.upstream_suite.artifacts_prefix must end in /aarch64 or /x86_64"
+                ));
             }
-            if baseline.revision.len() != 40 || !baseline.revision.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')) {
+            if baseline.revision.len() != 40
+                || !baseline
+                    .revision
+                    .bytes()
+                    .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+            {
                 return Err("baselines.firecracker.revision must be a 40-character hex commit for the upstream suite".to_string());
             }
             suite.validate(arch)?;
@@ -123,11 +136,22 @@ mod tests {
 
     #[test]
     fn repository_lock_pins_the_upstream_suite() {
-        let lock = load(concat!(env!("CARGO_MANIFEST_DIR"), "/docs/specs/design-v0.baselines.lock.yaml")).unwrap();
-        let suite = lock.baselines["firecracker"].upstream_suite.as_ref().expect("upstream_suite pinned");
+        let lock = load(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/docs/specs/design-v0.baselines.lock.yaml"
+        ))
+        .unwrap();
+        let suite = lock.baselines["firecracker"]
+            .upstream_suite
+            .as_ref()
+            .expect("upstream_suite pinned");
         assert!(suite.artifacts_prefix.ends_with("/aarch64"));
         let classes: upstream::ClassFile = serde_yaml::from_str(
-            &fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/docs/specs/upstream-suite-classes.yaml")).unwrap(),
+            &fs::read_to_string(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/docs/specs/upstream-suite-classes.yaml"
+            ))
+            .unwrap(),
         )
         .unwrap();
         classes.validate().unwrap();

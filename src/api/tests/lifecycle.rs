@@ -535,7 +535,11 @@ async fn postboot_device_puts_report_pci_not_enabled() {
 
     let vm_config = get_json(&router, "/vm/config").await;
     assert!(vm_config["drives"].as_array().is_some_and(Vec::is_empty));
-    assert!(vm_config["network-interfaces"].as_array().is_some_and(Vec::is_empty));
+    assert!(
+        vm_config["network-interfaces"]
+            .as_array()
+            .is_some_and(Vec::is_empty)
+    );
     assert!(vm_config["pmem"].as_array().is_some_and(Vec::is_empty));
 }
 

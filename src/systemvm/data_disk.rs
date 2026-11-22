@@ -12,7 +12,8 @@ pub const DATA_DISK_LABEL: &str = "vesper-data";
 
 /// Guest device name of the data disk: the next virtio block device after the boot media and the rootfs.
 pub fn data_disk_device(config: &LaunchConfig) -> String {
-    let before = usize::from(config.boot_media_path.is_some()) + usize::from(config.rootfs_path.is_some());
+    let before =
+        usize::from(config.boot_media_path.is_some()) + usize::from(config.rootfs_path.is_some());
     format!("/dev/vd{}", (b'a' + before as u8) as char)
 }
 
@@ -34,7 +35,7 @@ pub fn attach_data_disk(config: &mut LaunchConfig, path: &str) -> Result<(), Str
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::systemvm::{default_launch_config, LaunchInputs};
+    use crate::systemvm::{LaunchInputs, default_launch_config};
 
     fn config(boot_media: Option<&str>, rootfs: Option<&str>) -> LaunchConfig {
         default_launch_config(&LaunchInputs {
@@ -58,7 +59,10 @@ mod tests {
     fn data_disk_follows_boot_media_and_rootfs() {
         assert_eq!(data_disk_device(&config(None, None)), "/dev/vda");
         assert_eq!(data_disk_device(&config(Some("/m.iso"), None)), "/dev/vdb");
-        assert_eq!(data_disk_device(&config(Some("/m.iso"), Some("/r.ext4"))), "/dev/vdc");
+        assert_eq!(
+            data_disk_device(&config(Some("/m.iso"), Some("/r.ext4"))),
+            "/dev/vdc"
+        );
     }
 
     #[test]
@@ -66,7 +70,10 @@ mod tests {
         let mut c = config(Some("/m.iso"), None);
         attach_data_disk(&mut c, "/Users/u/data.img").expect("attach");
         assert_eq!(c.data_disk_path.as_deref(), Some("/Users/u/data.img"));
-        assert_eq!(c.kernel_cmdline, "console=hvc0 modules=virtio_blk vesper_data=/dev/vdb");
+        assert_eq!(
+            c.kernel_cmdline,
+            "console=hvc0 modules=virtio_blk vesper_data=/dev/vdb"
+        );
         let json = serde_json::to_value(&c).expect("json");
         assert_eq!(json["data_disk_path"], "/Users/u/data.img");
     }
@@ -82,7 +89,9 @@ mod tests {
     #[test]
     fn configs_without_the_field_still_parse() {
         let mut json = serde_json::to_value(config(None, None)).expect("json");
-        json.as_object_mut().expect("object").remove("data_disk_path");
+        json.as_object_mut()
+            .expect("object")
+            .remove("data_disk_path");
         let parsed: LaunchConfig = serde_json::from_value(json).expect("parse");
         assert!(parsed.data_disk_path.is_none());
     }

@@ -82,7 +82,13 @@ async fn pmem_backing_files_are_validated_at_instance_start() {
     backing_file.as_file().set_len(0x1000).unwrap();
 
     // Firecracker stores the pmem config without opening the backing file.
-    let (status, _) = send_json(&router, "PUT", "/pmem/pmem0", &pmem_body("pmem0", &missing_path, "")).await;
+    let (status, _) = send_json(
+        &router,
+        "PUT",
+        "/pmem/pmem0",
+        &pmem_body("pmem0", &missing_path, ""),
+    )
+    .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
     let (status, payload) = instance_start(&router).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
@@ -103,10 +109,19 @@ async fn pmem_backing_files_are_validated_at_instance_start() {
     assert_eq!(status, StatusCode::NO_CONTENT);
     let (status, payload) = instance_start(&router).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert_eq!(payload["fault_message"], PMEM_BACKING_FILE_ZERO_SIZE_MESSAGE);
+    assert_eq!(
+        payload["fault_message"],
+        PMEM_BACKING_FILE_ZERO_SIZE_MESSAGE
+    );
     assert_eq!(get_json(&router, "/").await["state"], "Not started");
 
-    let (status, _) = send_json(&router, "PUT", "/pmem/pmem0", &pmem_body("pmem0", backing_file.path(), "")).await;
+    let (status, _) = send_json(
+        &router,
+        "PUT",
+        "/pmem/pmem0",
+        &pmem_body("pmem0", backing_file.path(), ""),
+    )
+    .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
     let (status, _) = instance_start(&router).await;
     assert_eq!(status, StatusCode::NO_CONTENT);
@@ -123,7 +138,11 @@ async fn pmem_put_accepts_and_exports_rate_limiter() {
         &router,
         "PUT",
         "/pmem/pmem0",
-        &pmem_body("pmem0", backing_file.path(), &format!(r#","rate_limiter":{RATE_LIMITER_JSON}"#)),
+        &pmem_body(
+            "pmem0",
+            backing_file.path(),
+            &format!(r#","rate_limiter":{RATE_LIMITER_JSON}"#),
+        ),
     )
     .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
@@ -137,7 +156,11 @@ async fn pmem_put_accepts_and_exports_rate_limiter() {
         &router,
         "PUT",
         "/pmem/pmem1",
-        &pmem_body("pmem1", backing_file.path(), r#","rate_limiter":{"bandwidth":{"size":1}}"#),
+        &pmem_body(
+            "pmem1",
+            backing_file.path(),
+            r#","rate_limiter":{"bandwidth":{"size":1}}"#,
+        ),
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
@@ -151,14 +174,23 @@ async fn pmem_patch_requires_running_vm_and_matching_ids() {
     put_kernel(&router, &kernel).await;
     let backing_file = NamedTempFile::new().unwrap();
     backing_file.as_file().set_len(0x1000).unwrap();
-    let (status, _) = send_json(&router, "PUT", "/pmem/pmem0", &pmem_body("pmem0", backing_file.path(), "")).await;
+    let (status, _) = send_json(
+        &router,
+        "PUT",
+        "/pmem/pmem0",
+        &pmem_body("pmem0", backing_file.path(), ""),
+    )
+    .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
     let patch_body = format!(r#"{{"id":"pmem0","rate_limiter":{RATE_LIMITER_JSON}}}"#);
 
     let (status, payload) = send_json(&router, "PATCH", "/pmem/pmem0", &patch_body).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(payload["code"], "InvalidState");
-    assert_eq!(payload["fault_message"], ACTION_NOT_SUPPORTED_PREBOOT_MESSAGE);
+    assert_eq!(
+        payload["fault_message"],
+        ACTION_NOT_SUPPORTED_PREBOOT_MESSAGE
+    );
 
     let (status, _) = instance_start(&router).await;
     assert_eq!(status, StatusCode::NO_CONTENT);
@@ -197,7 +229,10 @@ async fn pmem_patch_requires_running_vm_and_matching_ids() {
     ] {
         let (status, payload) = send_json(&router, "PATCH", "/pmem/pmem0", bad_body).await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{bad_body}");
-        assert_eq!(payload["fault_message"], "invalid JSON payload", "{bad_body}");
+        assert_eq!(
+            payload["fault_message"], "invalid JSON payload",
+            "{bad_body}"
+        );
     }
 }
 

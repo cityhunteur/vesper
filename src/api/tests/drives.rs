@@ -251,7 +251,11 @@ async fn drive_stub_rejects_missing_backing_files() {
         .await
         .unwrap();
     let vm_config_payload: serde_json::Value = serde_json::from_slice(&vm_config_body).unwrap();
-    assert!(vm_config_payload["drives"].as_array().is_some_and(Vec::is_empty));
+    assert!(
+        vm_config_payload["drives"]
+            .as_array()
+            .is_some_and(Vec::is_empty)
+    );
 }
 
 #[tokio::test]
