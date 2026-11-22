@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Write THIRD_PARTY_NOTICES.md: the third-party components Vesper links, vendors or fetches, with their licences.
 
-Rust crates come from `cargo tree -e normal` (what the shipped binaries link), Go modules from `go list -deps` over
-the shim (what `containerd-shim-vesper-v2` links). Run from the repository root:
+Rust crates come from `cargo tree -e normal --target all` (what the shipped binaries link on Apple-silicon macOS, the one target they ship for, whatever host runs this), Go modules from `go list -deps` over
+the shim for linux/arm64 (what `containerd-shim-vesper-v2` links in the System VM). Run from the repository root:
 
     python3 scripts/licenses/third_party_notices.py            # rewrite THIRD_PARTY_NOTICES.md
     python3 scripts/licenses/third_party_notices.py --check    # exit 1 if the file is out of date
@@ -11,6 +11,7 @@ the shim (what `containerd-shim-vesper-v2` links). Run from the repository root:
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import subprocess
 import sys
@@ -31,12 +32,12 @@ LICENCE_PATTERNS = [
 ]
 
 
-def run(cmd: list[str], cwd: Path) -> str:
-    return subprocess.run(cmd, cwd=cwd, check=True, capture_output=True, text=True).stdout
+def run(cmd: list[str], cwd: Path, env: dict[str, str] | None = None) -> str:
+    return subprocess.run(cmd, cwd=cwd, check=True, capture_output=True, text=True, env=env).stdout
 
 
 def rust_crates() -> list[tuple[str, str, str]]:
-    out = run(["cargo", "tree", "-e", "normal", "--prefix", "none", "--format", "{p}\t{l}", "--locked"], ROOT)
+    out = run(["cargo", "tree", "-e", "normal", "--target", "aarch64-apple-darwin", "--prefix", "none", "--format", "{p}\t{l}", "--locked"], ROOT)
     rows = set()
     for line in out.splitlines():
         if "\t" not in line:
@@ -45,7 +46,8 @@ def rust_crates() -> list[tuple[str, str, str]]:
         parts = pkg.split()
         if len(parts) < 2 or parts[0] == "vesper":
             continue
-        rows.add((parts[0], parts[1].lstrip("v"), lic.strip() or "UNKNOWN"))
+        lic = lic.replace("(*)", "").strip()  # cargo tree marks a repeated subtree with (*)
+        rows.add((parts[0], parts[1].lstrip("v"), lic or "UNKNOWN"))
     return sorted(rows)
 
 
@@ -63,7 +65,9 @@ def detect_licence(directory: Path) -> str:
 def go_modules() -> list[tuple[str, str, str]]:
     shim = ROOT / "shim"
     fmt = "{{with .Module}}{{if not .Main}}{{.Path}}\t{{.Version}}\t{{.Dir}}{{end}}{{end}}"
-    out = run(["go", "list", "-deps", "-f", fmt, "./..."], shim)
+    # The shim ships only into the System VM, so list what it links there, whatever host runs this.
+    env = dict(os.environ, GOOS="linux", GOARCH="arm64", CGO_ENABLED="0")
+    out = run(["go", "list", "-deps", "-f", fmt, "./..."], shim, env)
     rows = set()
     for line in out.splitlines():
         if line.count("\t") != 2:

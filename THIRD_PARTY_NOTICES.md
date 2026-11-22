@@ -36,7 +36,7 @@ obligations of each component's licence, including offering the corresponding so
 | ca-certificates | MPL-2.0 (certificate data) |
 | Upstream Firecracker CI images and test artefacts (only for parity runs) | Apache-2.0 and the licences of each guest image |
 
-## Rust crates linked into the Vesper binaries (135)
+## Rust crates linked into the Vesper binaries (112)
 
 | Crate | Version | Licence |
 |---|---|---|
@@ -61,43 +61,32 @@ obligations of each component's licence, including offering the corresponding so
 | crypto-common | 0.1.7 | MIT OR Apache-2.0 |
 | digest | 0.10.7 | MIT OR Apache-2.0 |
 | displaydoc | 0.2.5 | MIT OR Apache-2.0 |
-| displaydoc | 0.2.5 | MIT OR Apache-2.0 (*) |
 | equivalent | 1.0.2 | Apache-2.0 OR MIT |
 | errno | 0.3.14 | MIT OR Apache-2.0 |
 | form_urlencoded | 1.2.2 | MIT OR Apache-2.0 |
-| form_urlencoded | 1.2.2 | MIT OR Apache-2.0 (*) |
 | futures-channel | 0.3.32 | MIT OR Apache-2.0 |
 | futures-core | 0.3.32 | MIT OR Apache-2.0 |
 | futures-task | 0.3.32 | MIT OR Apache-2.0 |
 | futures-util | 0.3.32 | MIT OR Apache-2.0 |
-| futures-util | 0.3.32 | MIT OR Apache-2.0 (*) |
 | generic-array | 0.14.7 | MIT |
-| generic-array | 0.14.7 | MIT (*) |
 | hashbrown | 0.16.1 | MIT OR Apache-2.0 |
 | heck | 0.5.0 | MIT OR Apache-2.0 |
 | hex | 0.4.3 | MIT OR Apache-2.0 |
 | http | 1.4.0 | MIT OR Apache-2.0 |
-| http | 1.4.0 | MIT OR Apache-2.0 (*) |
 | http-body | 1.0.1 | MIT |
-| http-body | 1.0.1 | MIT (*) |
 | http-body-util | 0.1.3 | MIT |
-| http-body-util | 0.1.3 | MIT (*) |
 | httparse | 1.10.1 | MIT OR Apache-2.0 |
 | httpdate | 1.0.3 | MIT OR Apache-2.0 |
 | hyper | 1.8.1 | MIT |
-| hyper | 1.8.1 | MIT (*) |
 | hyper-util | 0.1.20 | MIT |
 | iana-time-zone | 0.1.65 | MIT OR Apache-2.0 |
 | icu_collections | 2.1.1 | Unicode-3.0 |
-| icu_collections | 2.1.1 | Unicode-3.0 (*) |
 | icu_locale_core | 2.1.1 | Unicode-3.0 |
-| icu_locale_core | 2.1.1 | Unicode-3.0 (*) |
 | icu_normalizer | 2.1.1 | Unicode-3.0 |
 | icu_normalizer_data | 2.1.1 | Unicode-3.0 |
 | icu_properties | 2.1.2 | Unicode-3.0 |
 | icu_properties_data | 2.1.2 | Unicode-3.0 |
 | icu_provider | 2.1.1 | Unicode-3.0 |
-| icu_provider | 2.1.1 | Unicode-3.0 (*) |
 | idna | 1.1.0 | MIT OR Apache-2.0 |
 | idna_adapter | 1.2.1 | Apache-2.0 OR MIT |
 | indexmap | 2.13.0 | Apache-2.0 OR MIT |
@@ -120,17 +109,13 @@ obligations of each component's licence, including offering the corresponding so
 | pin-utils | 0.1.0 | MIT OR Apache-2.0 |
 | potential_utf | 0.1.4 | Unicode-3.0 |
 | proc-macro2 | 1.0.106 | MIT OR Apache-2.0 |
-| proc-macro2 | 1.0.106 | MIT OR Apache-2.0 (*) |
 | quote | 1.0.44 | MIT OR Apache-2.0 |
-| quote | 1.0.44 | MIT OR Apache-2.0 (*) |
 | ryu | 1.0.23 | Apache-2.0 OR BSL-1.0 |
 | scopeguard | 1.2.0 | MIT OR Apache-2.0 |
 | serde | 1.0.228 | MIT OR Apache-2.0 |
-| serde | 1.0.228 | MIT OR Apache-2.0 (*) |
 | serde_core | 1.0.228 | MIT OR Apache-2.0 |
 | serde_derive | 1.0.228 | MIT OR Apache-2.0 |
 | serde_json | 1.0.149 | MIT OR Apache-2.0 |
-| serde_json | 1.0.149 | MIT OR Apache-2.0 (*) |
 | serde_path_to_error | 0.1.20 | MIT OR Apache-2.0 |
 | serde_urlencoded | 0.7.1 | MIT/Apache-2.0 |
 | serde_yaml | 0.9.34+deprecated | MIT OR Apache-2.0 |
@@ -142,19 +127,15 @@ obligations of each component's licence, including offering the corresponding so
 | stable_deref_trait | 1.2.1 | MIT OR Apache-2.0 |
 | strsim | 0.11.1 | MIT |
 | syn | 2.0.117 | MIT OR Apache-2.0 |
-| syn | 2.0.117 | MIT OR Apache-2.0 (*) |
 | sync_wrapper | 1.0.2 | Apache-2.0 |
 | synstructure | 0.13.2 | MIT |
-| synstructure | 0.13.2 | MIT (*) |
 | tinystr | 0.8.2 | Unicode-3.0 |
 | tokio | 1.49.0 | MIT |
-| tokio | 1.49.0 | MIT (*) |
 | tokio-macros | 2.6.0 | MIT |
 | tower | 0.5.3 | MIT |
 | tower-layer | 0.3.3 | MIT |
 | tower-service | 0.3.3 | MIT |
 | tracing | 0.1.44 | MIT |
-| tracing | 0.1.44 | MIT (*) |
 | tracing-core | 0.1.36 | MIT |
 | typenum | 1.19.0 | MIT OR Apache-2.0 |
 | unicode-ident | 1.0.24 | (MIT OR Apache-2.0) AND Unicode-3.0 |
@@ -164,22 +145,19 @@ obligations of each component's licence, including offering the corresponding so
 | utf8parse | 0.2.2 | Apache-2.0 OR MIT |
 | writeable | 0.6.2 | Unicode-3.0 |
 | yoke | 0.8.1 | Unicode-3.0 |
-| yoke | 0.8.1 | Unicode-3.0 (*) |
 | yoke-derive | 0.8.1 | Unicode-3.0 |
 | zerofrom | 0.1.6 | Unicode-3.0 |
-| zerofrom | 0.1.6 | Unicode-3.0 (*) |
 | zerofrom-derive | 0.1.6 | Unicode-3.0 |
 | zerotrie | 0.2.3 | Unicode-3.0 |
-| zerotrie | 0.2.3 | Unicode-3.0 (*) |
 | zerovec | 0.11.5 | Unicode-3.0 |
-| zerovec | 0.11.5 | Unicode-3.0 (*) |
 | zerovec-derive | 0.11.2 | Unicode-3.0 |
 | zmij | 1.0.21 | MIT |
 
-## Go modules linked into `containerd-shim-vesper-v2` (26)
+## Go modules linked into `containerd-shim-vesper-v2` (29)
 
 | Module | Version | Licence |
 |---|---|---|
+| github.com/containerd/cgroups/v3 | v3.0.5 | Apache-2.0 |
 | github.com/containerd/console | v1.0.4 | Apache-2.0 |
 | github.com/containerd/containerd/api | v1.9.0 | Apache-2.0 |
 | github.com/containerd/containerd/v2 | v2.1.5 | Apache-2.0 |
@@ -193,8 +171,10 @@ obligations of each component's licence, including offering the corresponding so
 | github.com/containerd/ttrpc | v1.2.7 | Apache-2.0 |
 | github.com/containerd/typeurl/v2 | v2.3.0 | Apache-2.0 |
 | github.com/google/go-cmp | v0.7.0 | BSD-3-Clause |
+| github.com/mdlayher/socket | v0.5.1 | MIT |
 | github.com/mdlayher/vsock | v1.2.1 | MIT |
 | github.com/moby/sys/mountinfo | v0.7.2 | Apache-2.0 |
+| github.com/moby/sys/userns | v0.1.0 | Apache-2.0 |
 | github.com/opencontainers/go-digest | v1.0.0 | Apache-2.0 |
 | github.com/opencontainers/image-spec | v1.1.1 | Apache-2.0 |
 | github.com/opencontainers/runtime-spec | v1.3.0 | Apache-2.0 |
