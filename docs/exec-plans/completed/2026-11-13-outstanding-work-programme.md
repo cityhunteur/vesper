@@ -48,8 +48,8 @@ it is why the run comes last.
   `run/GH-172/20261117T110730Z`, 980 tests, 761 passed (2 of them only alone: an SSH timeout and a SysGenID read under
   load), 219 explained, comparator exit 0. That run matched the vsock class 3 times and settled no test by a classified
   failure alone, so it did not depend on D-039 or D-040.
-- [ ] W8 CE-0003 Linux reference run (gated: quote and quota approval)
-- [ ] Outcomes & Retrospective written; plan moved to completed
+- [x] W8 handed over, not run: the CE-0003 Linux reference run (gated: quote and quota approval) is carried by `2026-11-12-CE0003-linux-reference-run.md`, which stays active; this plan closes without it (2026-11-22)
+- [x] Outcomes & Retrospective written; plan moved to completed (2026-11-22)
 
 ## Surprises & Discoveries
 
@@ -99,7 +99,14 @@ it is why the run comes last.
 
 ## Outcomes & Retrospective
 
-Not yet written.
+Closed on 2026-11-22 with W1 to W7 done and W8 handed to its own plan, `2026-11-12-CE0003-linux-reference-run.md`,
+which waits for the owner's approval of the quote and the CPU quota. Backend A reached code complete for parity:
+`vesperd` drives jailed Firecracker by default (D-063), the upstream suite runs through a committed runner with
+every result explained (D-031), the runtime bounds hold (W4), and host shares reach microVMs (W5). After the plan:
+the parity baseline was captured again (TD-085), so CE-0006 closed. What remains is in the 2026-11-22 programme
+(D-065), led by Docker containers in microVMs. Lesson: the order "code complete first, Linux run once at the end"
+held, and the W3 regeneration after W4 and W5 found a flaky class whose cap had to be raised (D-040) before the
+frozen run was clean.
 
 ## Context and Orientation
 
