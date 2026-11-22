@@ -1,6 +1,6 @@
 # GH #160: carry host shares into the shim's microVMs over NFS from `unfs3`
 
-This is workstream W5 of `docs/exec-plans/active/2026-11-13-outstanding-work-programme.md` (D-029). The GH #159
+This is workstream W5 of `docs/exec-plans/completed/2026-11-13-outstanding-work-programme.md` (D-029). The GH #159
 prototype (D-020) found one share path into a Firecracker microVM that works, NFSv3 from the userspace server
 `unfs3` in the System VM over a tap device, and the owner approved `unfs3` as a runtime dependency on three
 conditions (D-021). This plan turns the prototype into the shim's bind-mount path.

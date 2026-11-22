@@ -1,6 +1,6 @@
 # GH #172: a committed runner for the upstream Firecracker suite on Backend A, with a comparator
 
-This is workstream W3 of `docs/exec-plans/active/2026-11-13-outstanding-work-programme.md` (D-029). It turns the
+This is workstream W3 of `docs/exec-plans/completed/2026-11-13-outstanding-work-programme.md` (D-029). It turns the
 GH #166 trial, which exists only as untracked scripts in `run/GH-166/`, into a repeatable, committed procedure. With
 ADR 0007 complete, this is the last piece of "code complete" for Backend A.
 
