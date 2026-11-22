@@ -168,3 +168,37 @@ exceptions:
       PUT /network-interfaces failed with Firecracker's own 400 "Open tap device failed: ... Operation not
       permitted (os error 1)", because the jailed Firecracker runs as uid 20000 without CAP_NET_ADMIN and no tap
       device was prepared for it.
+  - id: CE-0011
+    owner: cityhunteur
+    issue: 156
+    expiry_date: "2027-03-31"
+    target_release: parity-ga
+    status: open
+    approved_by: cityhunteur
+    approved_on: "2026-11-22"
+    description: >-
+      PUT /snapshot/load with mem_backend.backend_type Uffd cannot work on Backend A: the System VM's Alpine virt
+      kernel (6.12.115-0-virt, boot/config in the pinned ISO) has CONFIG_USERFAULTFD unset, and Alpine's linux-lts
+      for aarch64 (3.22-stable, 6.12.118) does not enable it either, so Firecracker cannot create the userfaultfd.
+      Firecracker's own answer is returned: 400 {"fault_message":"Load snapshot error: Failed to restore from
+      snapshot: Failed to load guest memory: Error creating guest memory from uffd: Failed to UFFD object: System
+      error"}, and the Firecracker process then ends, as upstream after a failed load, so vesperd exits. Measured by
+      make systemvm-snapshot-suite step uffd_load_refused (2026-11-22). The File backend works (load_and_resume).
+      The owner approved this exception in D-066. Resolve by a System VM kernel with userfaultfd (a kernel or
+      packaging change, which the owner must approve), or by accepting it at the parity-GA review.
+  - id: CE-0012
+    owner: cityhunteur
+    issue: 156
+    expiry_date: "2027-03-31"
+    target_release: parity-ga
+    status: open
+    approved_by: cityhunteur
+    approved_on: "2026-11-22"
+    description: >-
+      On vesperd --backend systemvm (ADR 0007 section 4) a microVM ends when its vesperd ends, SIGKILL included,
+      and when the System VM stops, because its lease is vesperd's connection to the agent; upstream a microVM
+      ends only with its own Firecracker process. Neither side has reattach: a new vesperd cannot take over a
+      running microVM, and at boot vesper-services removes every vesperd jail. A client that keeps a microVM
+      through a restart of its control process, or of the System VM, cannot do so here. Measured by make
+      systemvm-vesperd-suite step sigkill_removes_microvm. The owner approved this exception in D-066. Resolve by
+      accepting it at the parity-GA review, or by a detached lease that a later vesperd can claim.
