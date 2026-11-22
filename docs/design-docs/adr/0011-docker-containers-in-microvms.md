@@ -108,11 +108,11 @@ IPv6 address) fails the start with a message naming it.
 
 | Link | In the container's namespace | Guest | Carries |
 | --- | --- | --- | --- |
-| data | tap `vd0`, mirred both ways with `eth0` (ingress `matchall`, redirect); an allow-list on `vd0` ingress | `eth0` with `eth0`'s address, prefix, MAC, MTU and routes | what a runc container's `eth0` carries |
+| data | tap `vd0`, mirred both ways with `eth0` (ingress `matchall`, redirect); an allow-list on `vd0` ingress | `eth0` with `eth0`'s address, prefix, MTU and routes, and a MAC of its own derived from the container id (dockerd sets `eth0`'s final MAC only after the task starts) | what a runc container's `eth0` carries |
 | DNS (only when dockerd's `resolv.conf` names `127.0.0.11`) | tap `vn0` with `169.254.78.1/30`; `INPUT` accepts DNS to that address on `vn0` (the conntrack rule below); DNS to it is passed to dockerd's resolver (below) | `eth1` with `169.254.78.2/30`; `127.0.0.11/32` on the guest's `lo` and a forwarder in the guest from there to `169.254.78.1:53`, so the container's `resolv.conf` is dockerd's, unchanged | DNS only |
 | share (only with share binds) | tap `vs0`, mirred both ways with the end `vh1` of a veth pair whose other end `vh0` is in the share namespace | the next `ethN` with `169.254.77.2/30` | NFS to the task's own server |
 
-- **Allow-list on `vd0`** (`tc` flower, `cls_flower` is built in): pass frames whose source MAC is `eth0`'s and that
+- **Allow-list on `vd0`** (`tc` flower, `cls_flower` is built in): pass frames whose source MAC is the guest's and that
   are IPv4 from the container's address, or ARP whose sender MAC and sender address are the container's; drop
   everything else, including VLAN-tagged frames, other ethertypes, IPv6 and link-local multicast.
 - **DNS to dockerd's resolver**: first choice, a DNAT rule in the namespace's `PREROUTING` on `vn0` from

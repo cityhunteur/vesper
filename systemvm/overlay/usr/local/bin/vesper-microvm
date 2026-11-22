@@ -644,7 +644,11 @@ ctrns_links() {
   cl_addr=$(nsenter --net="$cl_f" ip -o -4 addr show dev eth0 | awk '{print $4}')
   [ "$(printf '%s\n' "$cl_addr" | grep -c .)" = 1 ] || { echo "eth0 needs exactly one IPv4 address, it has: ${cl_addr:-none}"; return 1; }
   [ -z "$(nsenter --net="$cl_f" ip -o -6 addr show dev eth0 scope global 2>/dev/null)" ] || { echo "IPv6 networks are refused for the vesper runtime (ADR 0011)"; return 1; }
-  cl_mac=$(nsenter --net="$cl_f" cat /sys/class/net/eth0/address); cl_mtu=$(nsenter --net="$cl_f" cat /sys/class/net/eth0/mtu)
+  # The guest's MAC is the container's own, derived from its id (stable across its starts, unique per container):
+  # dockerd sets eth0's final MAC only after the task starts, and until then eth0 may carry a placeholder that
+  # other containers share. Peers learn the guest's MAC by ARP; `docker inspect` reports dockerd's (TD-086).
+  cl_mac=$(printf '%s' "$1" | sha256sum | sed 's/^\(..\)\(..\)\(..\)\(..\)\(..\).*/02:\1:\2:\3:\4:\5/')
+  cl_mtu=$(nsenter --net="$cl_f" cat /sys/class/net/eth0/mtu)
   cl_gw=$(nsenter --net="$cl_f" ip route | awk '/^default/ {print $3; exit}')
   cl_ip=${cl_addr%/*}
   # The tap carries the guest's frames; eth0's are redirected to it before the namespace's stack sees them, and the
@@ -660,12 +664,34 @@ ctrns_links() {
     tc filter add dev vd0 parent ffff: prio 2 protocol arp flower src_mac "$3" arp_sip "$4" arp_sha "$3" action mirred egress redirect dev eth0
     tc filter add dev vd0 parent ffff: prio 9 matchall action drop' sh "$JUSER" "$cl_mtu" "$cl_mac" "$cl_ip" 2>&1 \
     || { echo "data link: tc failed"; return 1; }
-  echo ",\"network-interfaces\":[{\"iface_id\":\"eth0\",\"host_dev_name\":\"vd0\",\"guest_mac\":\"$cl_mac\"}]"
+  cl_nics="{\"iface_id\":\"eth0\",\"host_dev_name\":\"vd0\",\"guest_mac\":\"$cl_mac\"}"
   cl_boot=" vesper_net=$cl_addr${cl_gw:+,$cl_gw}"
+  # The DNS link (ADR 0011 §3), when dockerd runs its resolver in the namespace (a user-defined network): a tap with
+  # 169.254.78.1/30 whose DNS is DNATed to the resolver's ports, read from dockerd's own DOCKER_OUTPUT rules; INPUT
+  # accepts only that DNS, matched on the original destination; the tap is rate-limited. No process on this side.
+  cl_rules=$(nsenter --net="$cl_f" iptables -w -t nat -S DOCKER_OUTPUT 2>/dev/null)
+  cl_udp=$(printf '%s\n' "$cl_rules" | sed -n '/-p udp/s/.*--to-destination 127\.0\.0\.11:\([0-9]*\).*/\1/p' | head -1)
+  cl_tcp=$(printf '%s\n' "$cl_rules" | sed -n '/-p tcp/s/.*--to-destination 127\.0\.0\.11:\([0-9]*\).*/\1/p' | head -1)
+  if digits "$cl_udp" && digits "$cl_tcp"; then
+    cl_why=$(vnetns_tap "$cl_f" "$JUSER" vn0) || { echo "DNS link: $cl_why"; return 1; }
+    nsenter --net="$cl_f" sh -c '
+      set -e
+      ip addr add 169.254.78.1/30 dev vn0
+      echo 1 > /proc/sys/net/ipv4/conf/vn0/route_localnet
+      iptables -w -t nat -A PREROUTING -i vn0 -d 169.254.78.1 -p udp --dport 53 -j DNAT --to-destination "127.0.0.11:$1"
+      iptables -w -t nat -A PREROUTING -i vn0 -d 169.254.78.1 -p tcp --dport 53 -j DNAT --to-destination "127.0.0.11:$2"
+      iptables -w -A INPUT -i vn0 -p udp -m conntrack --ctstate DNAT --ctorigdst 169.254.78.1 --ctorigdstport 53 -j ACCEPT
+      iptables -w -A INPUT -i vn0 -p tcp -m conntrack --ctstate DNAT --ctorigdst 169.254.78.1 --ctorigdstport 53 -j ACCEPT' \
+      sh "$cl_udp" "$cl_tcp" 2>&1 || { echo "DNS link: rules failed"; return 1; }
+    cl_rl='{"ops":{"size":200,"refill_time":1000}}'
+    cl_nics="$cl_nics,{\"iface_id\":\"eth1\",\"host_dev_name\":\"vn0\",\"guest_mac\":\"06:00:a9:fe:4e:02\",\"rx_rate_limiter\":$cl_rl,\"tx_rate_limiter\":$cl_rl}"
+    cl_boot="$cl_boot vesper_dns=169.254.78.2/30"
+  fi
+  echo ",\"network-interfaces\":[$cl_nics]"
   [ "$cl_mtu" = 1500 ] || cl_boot="$cl_boot vesper_mtu=$cl_mtu"
   echo "$cl_boot"
 }
-ctrns_links_down() { [ -e "$CTRNS/$1" ] && nsenter --net="$CTRNS/$1" sh -c 'tc qdisc del dev eth0 ingress 2>/dev/null; ip link del vd0 2>/dev/null' ; return 0; }
+ctrns_links_down() { [ -e "$CTRNS/$1" ] && nsenter --net="$CTRNS/$1" sh -c 'tc qdisc del dev eth0 ingress 2>/dev/null; ip link del vd0 2>/dev/null; ip link del vn0 2>/dev/null' ; return 0; }
 
 # ctrns-up ID HOLDER: make the bound namespace default-deny before dockerd wires it (ADR 0011 §2).
 ctrns_up() {
@@ -1086,6 +1112,8 @@ case "$cmd" in
   ctrns-down) lock || { echo "ERR lifecycle lock"; exit 1; }; ctrns_down "$@"; rc=$?; unlock; exit $rc ;;
   drives-sweep) drives_sweep ;;
   disk-sweep) lock || { echo "ERR lifecycle lock"; exit 1; }; disk_sweep; unlock ;;
+  ctrns-show) valid_id "${1:-}" && [ -e "$CTRNS/$1" ] || { echo "ERR no namespace for ${1:-}"; exit 1; }
+    nsenter --net="$CTRNS/$1" ip -o link | sed 's/^/LINK /'; nsenter --net="$CTRNS/$1" ip -o addr | sed 's/^/ADDR /'; sed 's/^/VMJSON /' "$DISK_JAIL/firecracker/$1/root/vm.json" 2>/dev/null; echo "CTRNS $1" ;;
   drives-list) for d in "$DRIVES"/*.ext4; do [ -f "$d" ] && echo "DRIVE $(basename "$d" .ext4) bytes=$(stat -c %s "$d") used=$(du -k "$d" | cut -f1)K"; done; echo "DRIVES" ;;
   log) mlog "$@" ;;
   sharenet) sharenet "$@" ;;

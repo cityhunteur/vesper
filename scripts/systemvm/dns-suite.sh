@@ -11,12 +11,21 @@ STACK="${ROOT_DIR}/scripts/systemvm/fixtures/dns-stack.yml"
 IMAGE="${DNS_IMAGE:-alpine:3.22}"
 EXTERNAL="${DNS_EXTERNAL_HOST:-registry-1.docker.io}"
 DOCKER="${DOCKER_BIN:-docker}"
+# VESPER_DOCKER_RUNTIME=vesper runs every container of the suite in a microVM (ADR 0011 slice 3); empty is dockerd's
+# default runtime.
+RUNTIME="${VESPER_DOCKER_RUNTIME:-}"
+RUN_ARGS=(); [ -n "${RUNTIME}" ] && RUN_ARGS=(--runtime "${RUNTIME}")
+OVERRIDE=""
+if [ -n "${RUNTIME}" ]; then
+  OVERRIDE="${ROOT_DIR}/run/systemvm/dns-stack.runtime.yml"; mkdir -p "$(dirname "${OVERRIDE}")"
+  printf 'services:\n  web:\n    runtime: %s\n  client:\n    runtime: %s\n' "${RUNTIME}" "${RUNTIME}" > "${OVERRIDE}"
+fi
 export DOCKER_HOST="unix://${SOCKET}" DNS_IMAGE="${IMAGE}"
 cd "${ROOT_DIR}"; mkdir -p "$(dirname "${REPORT}")"
 steps=()
 record() { local d; d="$(printf '%s' "$3" | tr '\n' ' ' | cut -c1-300 | sed 's/\\/\\\\/g; s/"/\\"/g')"; steps+=("{\"name\":\"$1\",\"ok\":$2,\"detail\":\"${d}\"}"); if [ "$2" = true ]; then echo "ok   $1: ${d:0:150}"; else echo "FAIL $1: ${d:0:200}"; fi; }
-compose() { "${DOCKER}" compose -f "${STACK}" -p vesper-dns "$@"; }
-cexec() { compose exec -T client "$@"; }
+compose() { "${DOCKER}" compose -f "${STACK}" ${OVERRIDE:+-f "${OVERRIDE}"} -p vesper-dns "$@"; }
+cexec() { compose exec -T client "$@" </dev/null; }
 cleanup() { compose down --remove-orphans -t 1 >/dev/null 2>&1; }
 cleanup
 [ -S "${SOCKET}" ] || { echo "dns-suite: ${SOCKET} missing; run 'make docker-up'" >&2; exit 2; }
@@ -24,11 +33,11 @@ cleanup
 "${DOCKER}" image inspect "${IMAGE}" >/dev/null 2>&1 || "${DOCKER}" pull -q "${IMAGE}" >/dev/null 2>&1 || { echo "dns-suite: cannot pull ${IMAGE}" >&2; exit 2; }
 
 # Default bridge network: the container inherits the System VM's resolver and reaches external DNS.
-rc_out="$("${DOCKER}" run --rm "${IMAGE}" sh -c 'grep -E "^nameserver" /etc/resolv.conf | tr "\n" " "' 2>&1)"
+rc_out="$("${DOCKER}" run --rm "${RUN_ARGS[@]}" "${IMAGE}" sh -c 'grep -E "^nameserver" /etc/resolv.conf | tr "\n" " "' 2>&1)"
 case "${rc_out}" in nameserver*) record default_bridge_resolver true "/etc/resolv.conf: ${rc_out}" ;; *) record default_bridge_resolver false "${rc_out}" ;; esac
-out="$("${DOCKER}" run --rm "${IMAGE}" sh -c "getent hosts ${EXTERNAL} | awk '{print \$1}' | head -1" 2>&1)"
+out="$("${DOCKER}" run --rm "${RUN_ARGS[@]}" "${IMAGE}" sh -c "getent hosts ${EXTERNAL} | awk '{print \$1}' | head -1" 2>&1)"
 [ -n "${out}" ] && record external_dns_default_bridge true "${EXTERNAL} -> ${out}" || record external_dns_default_bridge false "no answer for ${EXTERNAL}"
-out="$("${DOCKER}" run --rm "${IMAGE}" sh -c "nc -zw5 ${EXTERNAL} 443 && echo connected" 2>&1)"
+out="$("${DOCKER}" run --rm "${RUN_ARGS[@]}" "${IMAGE}" sh -c "nc -zw5 ${EXTERNAL} 443 && echo connected" 2>&1)"
 [ "${out}" = "connected" ] && record external_tcp_egress true "${EXTERNAL}:443 reachable through the System VM NAT" || record external_tcp_egress false "${out}"
 
 run_stack() { # suffix -> records web ip, subnet, resolver
@@ -61,6 +70,6 @@ left="$("${DOCKER}" network ls --filter name=vesper-dns --format '{{.Name}}' | w
 [ "${left}" = 0 ] && record compose_down_cleans_network true "no vesper-dns networks left" || record compose_down_cleans_network false "${left} networks left"
 
 passed=true; for s in "${steps[@]}"; do case "$s" in *'"ok":false'*) passed=false;; esac; done
-printf '{"socket":"%s","stack":"%s","steps":[%s],"passed":%s}\n' "${SOCKET}" "${STACK}" "$(IFS=,; echo "${steps[*]}")" "${passed}" > "${REPORT}"
+printf '{"socket":"%s","stack":"%s","runtime":"%s","steps":[%s],"passed":%s}\n' "${SOCKET}" "${STACK}" "${RUNTIME:-default}" "$(IFS=,; echo "${steps[*]}")" "${passed}" > "${REPORT}"
 echo "dns suite: passed=${passed} (report: ${REPORT})"
 [ "${passed}" = true ]
