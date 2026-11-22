@@ -256,6 +256,7 @@ mod balloon;
 mod balloon_reporting;
 mod device_config;
 mod drives;
+mod envelopes;
 mod lifecycle;
 mod memory_hotplug;
 mod mmds;

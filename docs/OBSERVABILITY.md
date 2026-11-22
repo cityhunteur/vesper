@@ -97,9 +97,10 @@ The durable signals this project relies on are artifacts rather than live teleme
 
 ## Gaps
 
-- No structured logging or log levels in any binary (TD-007).
+- `vesperd` and `vesper-proxy` write structured lines to stderr (`tracing`, level from `VESPER_LOG`, default `info`;
+  TD-007): one line for each API request (`id=`, `method=`, `path=`, `status=`, `ms=`) and one when a relayed
+  connection is accepted and when it ends (`conn=`, `ms=`). Other binaries print plain lines.
 - `PUT /metrics` and `PUT /logger` create the target file and store its path; nothing is ever emitted to it (TD-007).
-- No per-connection logging in `vesper-proxy`, so forwarding failures are invisible without a packet capture (TD-007).
-- No request or trace identifiers (TD-007).
+- No trace propagation across the bridge: a request id is local to the process that logs it.
 - `collect_verification_bundle.sh` copies the logs that exist: `run/vesperd.log` and `run/vesper-proxy.log` (dev loop),
-  `run/vesper/vesper-proxy.log` (Docker path) and `run/<ISSUE-ID>/proxy/proxy.log`. There is no request log (TD-007).
+  `run/vesper/vesper-proxy.log` (Docker path) and `run/<ISSUE-ID>/proxy/proxy.log`. `run/vesperd.log` now holds the request lines.

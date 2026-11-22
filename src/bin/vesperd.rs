@@ -115,6 +115,7 @@ struct Args {
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
+    vesper::platform::init_logging();
     if let Some(command) = &args.command {
         std::process::exit(stage::run(&args, command));
     }

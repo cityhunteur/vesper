@@ -19,6 +19,9 @@ sha2 = "0.10"
 tokio = { version = "1.48", features = ["full"] }
 url = "2.5"
 chrono = { version = "0.4", features = ["serde"] }
+# Structured logs (TD-007; the owner approved tracing-subscriber, D-066). tracing is already linked through axum.
+tracing = { version = "0.1", default-features = false, features = ["std"] }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "std"] }
 
 [dev-dependencies]
 tempfile = "3.23"

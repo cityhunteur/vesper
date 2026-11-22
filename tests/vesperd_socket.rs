@@ -179,3 +179,37 @@ fn a_regular_file_at_the_path_is_not_removed() {
     assert!(err.contains("is not a socket"), "stderr: {err}");
     assert_eq!(std::fs::read_to_string(&path).expect("read"), "keep me");
 }
+
+/// TD-007: each request writes one structured line to stderr, with an id, the method, the path and the status.
+#[test]
+fn each_request_writes_a_log_line() {
+    use std::io::{Read, Write};
+    let dir = tempfile::tempdir().unwrap();
+    let runtime = dir.path().join("rt");
+    std::fs::create_dir_all(&runtime).unwrap();
+    let socket = dir.path().join("api.sock");
+    let mut running = start(Some(&socket), &runtime, &socket);
+    let mut conn = std::os::unix::net::UnixStream::connect(&socket).unwrap();
+    conn.write_all(b"GET /version HTTP/1.1\r\nHost: v\r\nConnection: close\r\n\r\n")
+        .unwrap();
+    let mut reply = String::new();
+    let _ = conn.read_to_string(&mut reply);
+    assert!(reply.starts_with("HTTP/1.1 200"), "{reply}");
+    let _ = running.0.kill();
+    let _ = running.0.wait();
+    let mut err = String::new();
+    running
+        .0
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut err)
+        .unwrap();
+    let line = err
+        .lines()
+        .find(|l| l.contains(" request "))
+        .unwrap_or_else(|| panic!("no request line in: {err}"));
+    for want in ["id=1", "method=GET", "path=/version", "status=200", "ms="] {
+        assert!(line.contains(want), "{want} missing from {line}");
+    }
+}

@@ -175,6 +175,20 @@ pub fn select_backend(
     }
 }
 
+/// Structured log lines to stderr for the binaries (TD-007): `VESPER_LOG` is the level (`error`, `warn`, `info`, the
+/// default, `debug`, `trace`). A second call does nothing.
+pub fn init_logging() {
+    let level = std::env::var("VESPER_LOG")
+        .ok()
+        .and_then(|v| v.parse::<tracing::Level>().ok())
+        .unwrap_or(tracing::Level::INFO);
+    let _ = tracing_subscriber::fmt()
+        .with_max_level(level)
+        .with_writer(std::io::stderr)
+        .with_target(false)
+        .try_init();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

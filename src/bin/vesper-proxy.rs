@@ -28,11 +28,29 @@ struct Args {
     /// Status file listing the current port mappings and their state.
     #[arg(long, default_value = "run/vesper/ports.json")]
     ports_status: String,
+    /// Concurrent relayed connections; a client beyond it is closed at once, with no bytes (TD-021).
+    #[arg(long, default_value_t = 256)]
+    max_connections: usize,
+    /// Bound on the vsock bridge's `CONNECT` preface (TD-021). There is no idle timeout: Docker's attach, logs and
+    /// events streams can stay quiet for hours (D-072).
+    #[arg(long, default_value_t = 5)]
+    handshake_timeout_seconds: u64,
+    /// Entitlements plist to check before starting, as `vesperd` does (TD-017): it must grant the App Sandbox.
+    #[arg(long)]
+    entitlements_file: Option<String>,
 }
 
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
+    vesper::platform::init_logging();
+    if let Err(err) = vesper::platform::validate_entitlements_file(
+        args.entitlements_file.as_deref().map(std::path::Path::new),
+        &["com.apple.security.app-sandbox"],
+    ) {
+        eprintln!("vesper-proxy failed: {err}");
+        std::process::exit(1);
+    }
 
     let listen_mode = u32::from_str_radix(&args.listen_mode, 8).unwrap_or_else(|_| {
         eprintln!(
@@ -87,6 +105,11 @@ async fn main() {
             vsock_socket_dir: args.vsock_socket_dir.clone(),
             listen_mode,
             validate_upstream: args.validate_upstream,
+            bounds: vesper::proxy::Bounds {
+                handshake_timeout: Some(Duration::from_secs(args.handshake_timeout_seconds.max(1))),
+                max_connections: Some(args.max_connections.max(1)),
+                ..Default::default()
+            },
             ..Default::default()
         },
         shutdown,
