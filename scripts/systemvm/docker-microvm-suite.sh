@@ -67,6 +67,8 @@ case "${sp}|${mac}|${after}" in *no-reply*"|"*no-reply*"|peer-ok") record spoofe
 # --- 7. Writes survive stop and start ------------------------------------------------------------------------------
 docker exec vm-a sh -c 'echo kept-across-starts > /kept.txt' >/dev/null 2>&1
 docker stop -t 2 vm-a >/dev/null 2>&1; stopped="$(ctl microvm status "${id}" | head -1)"
+# The reaper's sweep runs every 10 s; a stopped container's drive must survive it (council REL-1, COR-1).
+ctl microvm -- drives-sweep >/dev/null
 docker start vm-a >/dev/null 2>&1; up vm-a; k="$(docker exec vm-a cat /kept.txt 2>&1)"
 case "${stopped}|${k}" in "ABSENT ${id}|kept-across-starts") record writes_survive_stop_and_start true "stopped: ${stopped}; read back: ${k}" ;;
   *) record writes_survive_stop_and_start false "stopped: ${stopped}; read back: ${k}" ;; esac

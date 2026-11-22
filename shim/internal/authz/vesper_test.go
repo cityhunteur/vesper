@@ -57,6 +57,7 @@ func TestVesperRefusals(t *testing.T) {
 		"host ipc":       `{"HostConfig":{"Runtime":"vesper","IpcMode":"host"}}`,
 		"host uts":       `{"HostConfig":{"Runtime":"vesper","UTSMode":"host"}}`,
 		"two networks":   `{"HostConfig":{"Runtime":"vesper"},"NetworkingConfig":{"EndpointsConfig":{"a":{},"b":{}}}}`,
+		"user endpoint":  `{"HostConfig":{"Runtime":"vesper"},"NetworkingConfig":{"EndpointsConfig":{"mynet":{}}}}`,
 		"lower-case key": `{"hostconfig":{"runtime":"vesper","privileged":true}}`,
 	} {
 		d := decide("POST", create, b)
@@ -91,6 +92,17 @@ func TestJoinsToVesperContainers(t *testing.T) {
 		if d := decide("POST", create, b); !d.Allow {
 			t.Errorf("%s refused: %s", b, d.Reason)
 		}
+	}
+}
+
+func TestJoinRefusedWhenARuntimeCannotBeRead(t *testing.T) {
+	store(t, [3]string{"bbbb2222", "db", "runc"})
+	root := StoreRoots()[0]
+	if err := os.Remove(filepath.Join(root, "bbbb2222", "hostconfig.json")); err != nil {
+		t.Fatal(err)
+	}
+	if d := decide("POST", create, `{"HostConfig":{"NetworkMode":"container:db"}}`); d.Allow {
+		t.Error("a join was allowed to a container whose runtime is unknown")
 	}
 }
 

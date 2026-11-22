@@ -114,6 +114,35 @@ Terminal dimensions are 1..65535. Init uses port 1028; execs reserve consecutive
 The session key `p<base-port>` also names its guest directory and console breadcrumbs.
 The task id names its VMM, jail, shim record and console log.
 
+## Docker tasks (ADR 0011)
+
+dockerd reaches the shim as the runtime `vesper` (`docker run --runtime vesper`). A task is a Docker task when its
+spec's `root.path` is dockerd's mounted rootfs and it is in a `moby` containerd namespace. For such a task:
+
+- `Create` checks the spec (`bundle.CheckDocker`), builds the container's drive once from `root.path` on the data disk
+  with `mke2fs` in a user namespace with the spec's mapping (`backend.PrepareDocker`; reused across starts, swept when
+  dockerd's store no longer has the container), and starts the namespace holder (`internal/ctrns`): its pid is the
+  task's for its life, and the shim stops the task if it exits.
+- `Start` reads `resolv.conf`, `hosts` and `hostname` (`backend.ReadDockerFiles`, `openat2` with no symbolic links,
+  64 KiB each), builds the guest spec (`bundle.GuestDockerConfig`) and launches with `vesper-microvm launch --ctrns`.
+- `Delete` keeps the drive and releases the namespace (`vesper-microvm ctrns-down`); `manager.Stop` does too.
+
+How each field of dockerd's spec is handled (ADR 0011 §4; tests in `internal/bundle/docker_test.go`):
+
+| Field | Handling |
+| --- | --- |
+| `process` (args, env, cwd, user, terminal, rlimits), `hostname` | honoured in the guest |
+| capabilities, seccomp, AppArmor, SELinux, `noNewPrivileges`, `oomScoreAdj` | ignored (CE-0004) |
+| mounts proc, cgroup, devpts, mqueue, tmpfs (`/dev`, `/dev/shm`, `--tmpfs`) | made by the guest's runc |
+| mount sysfs | the guest's `/sys` bound read-only (a second sysfs in the guest's network namespace is refused) |
+| binds of `resolv.conf`, `hosts`, `hostname` | written by the guest from the config, then bound |
+| binds of anonymous volumes | the image's own directory in the drive |
+| `--init` (docker-init) | the guest's `/sbin/tini-static` |
+| any other bind, devices, a namespace `path`, hooks, a read-only root | refused |
+| namespaces | as given, without the user namespace; network is the guest's own |
+| `linux.sysctl` | `net.*` set by the guest (`vesper-console files`), the others by the guest's runc |
+| memory and CPU limits | honoured (TD-048) |
+
 ## Invariants
 
 - A running process cannot start twice or be deleted. Concurrent lifecycle requests use a per-process lock.

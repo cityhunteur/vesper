@@ -200,8 +200,17 @@ func checkVesperCreate(c *createBody) Decision {
 			return denyVesper("%s=%s is refused for the vesper runtime: its namespaces are its own", m.name, m.value)
 		}
 	}
-	if c.NetworkingConfig != nil && len(c.NetworkingConfig.EndpointsConfig) > 1 {
-		return denyVesper("a vesper container gets one network at create")
+	if c.NetworkingConfig != nil {
+		if len(c.NetworkingConfig.EndpointsConfig) > 1 {
+			return denyVesper("a vesper container gets one network at create")
+		}
+		for name := range c.NetworkingConfig.EndpointsConfig {
+			switch name {
+			case "bridge", "default", "none":
+			default:
+				return denyVesper("network %q is refused for the vesper runtime: only the default bridge and none, until user-defined networks (ADR 0011 slice 3)", name)
+			}
+		}
 	}
 	return allow
 }

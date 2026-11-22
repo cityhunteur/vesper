@@ -23,7 +23,7 @@ func Hold() {
 
 func Path(id string) string { return filepath.Join(Dir, id) }
 
-func Start(context.Context, string) (int, error) { return 0, errLinuxOnly }
+func Start(context.Context, string, func()) (int, error) { return 0, errLinuxOnly }
 
 func Release(context.Context, string) error { return nil }
 

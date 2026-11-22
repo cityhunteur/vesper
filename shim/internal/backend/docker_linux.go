@@ -83,9 +83,10 @@ func ReadDockerFiles(files []bundle.DockerFile) (map[string][]byte, error) {
 }
 
 // PrepareDocker returns container id's drive, building it from dockerd's rootfs on its first start. mke2fs runs in
-// a user namespace with the spec's own mapping, so the guest sees the image's owners as the container sees them;
-// the shim opens the rootfs and the output file and passes them as descriptors, so the namespace's process never
-// walks a root-only directory and DriveDir stays root-only (ADR 0011 §5). built is false for a reused drive.
+// a user namespace with the spec's own mapping, so the guest sees the image's owners as the container sees them. It
+// runs as the mapping's root, so it writes by path, under a random name, into drives/.build, which that root owns
+// only while it builds; drives/ and microvm/ can be passed through but not listed (ADR 0011 §5). The published
+// drive is then given to the jail user by launch, which links it into the jail. built is false for a reused drive.
 func (m *MicroVM) PrepareDocker(ctx context.Context, id, root string, uids, gids []specs.LinuxIDMapping) (image string, built bool, err error) {
 	image = DrivePath(id)
 	if _, err := os.Stat(image); err == nil {
@@ -106,6 +107,16 @@ func (m *MicroVM) PrepareDocker(ctx context.Context, id, root string, uids, gids
 		return "", false, diagnose("size the rootfs", err, "")
 	}
 	size := used + used/5 + 4096 + DriveAllowanceKiB
+	// Admission and the build's file are one step under a lock, so two Creates do not both count the same free space
+	// (council SEC-3, REL-6).
+	lock, err := os.OpenFile(filepath.Join(DriveDir, ".admit"), os.O_CREATE|os.O_RDWR|unix.O_CLOEXEC, 0o600)
+	if err != nil {
+		return "", false, diagnose("open the drive admission lock", err, "")
+	}
+	defer lock.Close()
+	if err := unix.Flock(int(lock.Fd()), unix.LOCK_EX); err != nil {
+		return "", false, diagnose("take the drive admission lock", err, "")
+	}
 	if err := admitDrive(size); err != nil {
 		return "", false, err
 	}
@@ -165,23 +176,46 @@ func (m *MicroVM) PrepareDocker(ctx context.Context, id, root string, uids, gids
 	if err = out.Chown(0, 0); err != nil {
 		return "", false, diagnose("give the drive back to root", err, "")
 	}
+	_ = os.Chown(build, 0, 0)
+	// What is published is the file this build wrote, not whatever the name points at now (council SEC-4).
+	var a, b unix.Stat_t
+	if err = unix.Fstat(int(out.Fd()), &a); err == nil {
+		err = unix.Lstat(tmp, &b)
+	}
+	if err != nil || a.Dev != b.Dev || a.Ino != b.Ino {
+		if err == nil {
+			err = fmt.Errorf("the build's file was replaced")
+		}
+		return "", false, diagnose("check the drive", err, "")
+	}
 	if err = os.Rename(tmp, image); err != nil {
 		return "", false, diagnose("publish the drive", err, "")
 	}
 	return image, true, nil
 }
 
-// admitDrive refuses a drive that would leave less than the reserve free on the data disk: the System VM's memory
-// size, as vesperd's store does (ADR 0011 §5).
+// admitDrive refuses a drive that would leave less than the reserve free on the data disk (the System VM's memory
+// size, as vesperd's store does), counting the room the existing sparse drives may still take (ADR 0011 §5).
 func admitDrive(sizeKiB int64) error {
 	var st unix.Statfs_t
 	if err := unix.Statfs(StateDir, &st); err != nil {
 		return diagnose("check the data disk's free space", err, "")
 	}
 	free := int64(st.Bavail) * int64(st.Bsize)
+	var owed int64
+	entries, _ := os.ReadDir(DriveDir)
+	for _, e := range entries {
+		var fs unix.Stat_t
+		if !strings.HasSuffix(e.Name(), ".ext4") || unix.Stat(filepath.Join(DriveDir, e.Name()), &fs) != nil {
+			continue
+		}
+		if room := fs.Size - fs.Blocks*512; room > 0 {
+			owed += room
+		}
+	}
 	reserve := memTotalBytes()
-	if free-sizeKiB*1024 < reserve {
-		return diagnose("admit the drive", fmt.Errorf("the data disk has %d MiB free and the drive needs %d MiB with a reserve of %d MiB", free>>20, sizeKiB>>10, reserve>>20),
+	if free-owed-sizeKiB*1024 < reserve {
+		return diagnose("admit the drive", fmt.Errorf("the data disk has %d MiB free, existing drives may still take %d MiB, and this drive needs %d MiB with a reserve of %d MiB", free>>20, owed>>20, sizeKiB>>10, reserve>>20),
 			"remove unused containers (docker container prune) or enlarge the data disk")
 	}
 	return nil

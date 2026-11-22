@@ -23,6 +23,7 @@ import (
 	tasktypes "github.com/containerd/containerd/api/types/task"
 	"github.com/containerd/containerd/v2/core/mount"
 	"github.com/containerd/containerd/v2/core/runtime"
+	"github.com/containerd/containerd/v2/pkg/namespaces"
 	"github.com/containerd/containerd/v2/pkg/protobuf"
 	"github.com/containerd/containerd/v2/pkg/shim"
 	"github.com/containerd/containerd/v2/pkg/shutdown"
@@ -183,6 +184,12 @@ var (
 // container's own drive is built or reused, and a network namespace is made for dockerd to wire; Create reports the
 // holder's pid, through which dockerd finds that namespace.
 func (s *Service) createDocker(ctx context.Context, r *taskAPI.CreateTaskRequest, spec *specs.Spec, root string) (*taskAPI.CreateTaskResponse, error) {
+	// Only dockerd's tasks: its containerd namespaces are moby and moby-<uid>.<gid>. A task in another namespace with
+	// a Docker container's id and a root.path shaped like dockerd's would otherwise take that container's drive
+	// (council SEC-6).
+	if ns, _ := namespaces.Namespace(ctx); ns != "moby" && !strings.HasPrefix(ns, "moby-") {
+		return nil, errgrpc.ToGRPCf(errdefs.ErrInvalidArgument, "a dockerd root filesystem in containerd namespace %q is refused (ADR 0011)", ns)
+	}
 	files, err := bundle.CheckDocker(spec, r.ID)
 	if err != nil {
 		return nil, errgrpc.ToGRPCf(errdefs.ErrInvalidArgument, "%v", err)
@@ -208,7 +215,7 @@ func (s *Service) createDocker(ctx context.Context, r *taskAPI.CreateTaskRequest
 		return nil, errgrpc.ToGRPCf(errdefs.ErrFailedPrecondition, "%v", err)
 	}
 	log.G(ctx).WithFields(log.Fields{"task": r.ID, "drive": image, "built": built}).Info("docker drive ready")
-	holder, err := startNetns(ctx, r.ID)
+	holder, err := startNetns(ctx, r.ID, func() { s.holderGone(r.ID) })
 	if err != nil {
 		return nil, errgrpc.ToGRPCf(errdefs.ErrFailedPrecondition, "%v", err)
 	}
@@ -228,6 +235,25 @@ func (s *Service) createDocker(ctx context.Context, r *taskAPI.CreateTaskRequest
 	return &taskAPI.CreateTaskResponse{Pid: uint32(holder)}, nil
 }
 
+// holderGone stops a Docker task whose namespace holder exited: the holder's pid is the task's, which dockerd uses to
+// reach its namespaces, and a reused pid must never stand for it (ADR 0011 §2). After Delete it does nothing.
+func (s *Service) holderGone(id string) {
+	s.mu.Lock()
+	t := s.task
+	s.mu.Unlock()
+	if t == nil || t.ID != id {
+		return
+	}
+	t.mu.Lock()
+	t.holderDead = true
+	t.mu.Unlock()
+	switch t.Phase() {
+	case PhaseRunning:
+		log.G(context.Background()).WithField("task", id).Warn("namespace holder exited; stopping the microVM")
+		_ = s.backend.Stop(context.Background(), id)
+	}
+}
+
 // Start boots the microVM for init, then starts a runc process with connected streams.
 func (s *Service) Start(ctx context.Context, r *taskAPI.StartRequest) (*taskAPI.StartResponse, error) {
 	t, err := s.getProcess(r.ID, r.ExecID)
@@ -240,6 +266,9 @@ func (s *Service) Start(ctx context.Context, r *taskAPI.StartRequest) (*taskAPI.
 		return nil, errgrpc.ToGRPCf(errdefs.ErrFailedPrecondition, "process %s is %s, not created", t.ID, t.Phase())
 	}
 	pid := 0
+	if r.ExecID == "" && t.Docker && t.HolderDead() {
+		return nil, errgrpc.ToGRPCf(errdefs.ErrFailedPrecondition, "the task's network namespace holder has exited")
+	}
 	if r.ExecID == "" && t.Docker && t.dockerSpec != nil {
 		contents, err := backend.ReadDockerFiles(t.dockerFiles)
 		if err != nil {
@@ -278,6 +307,11 @@ func (s *Service) Start(ctx context.Context, r *taskAPI.StartRequest) (*taskAPI.
 		return nil, errgrpc.ToGRPCf(errdefs.ErrFailedPrecondition, "guest session p%d: %v (console: %s)", t.Port, err, s.backend.LogPath(r.ID))
 	}
 	t.Session = session
+	if r.ExecID == "" && t.Docker {
+		// The holder's pid stays the task's: anything dockerd joins through it (a race past the plugin's check) lands
+		// in the holder's empty namespaces, not in Firecracker's, which are the System VM's (council SEC-1).
+		pid = t.Holder
+	}
 	if t.stdinClosed {
 		session.CloseInput()
 	}

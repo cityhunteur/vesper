@@ -48,6 +48,7 @@ type Task struct {
 	SizeArgs    []string // vesper-microvm launch arguments for the machine the spec's resources ask for (TD-048)
 	Docker      bool     // a dockerd task: its own drive and network namespace (ADR 0011)
 	Holder      int      // pid of the namespace holder of a Docker task
+	holderDead  bool
 	dockerSpec  *specs.Spec
 	dockerFiles []bundle.DockerFile
 	Port        uint32
@@ -80,6 +81,13 @@ func (t *Task) Pid() int {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.pid
+}
+
+// HolderDead reports whether a Docker task's namespace holder has exited.
+func (t *Task) HolderDead() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.holderDead
 }
 
 // SetCreatedPid is the pid a created task reports until it starts: a Docker task's namespace holder, which

@@ -11,11 +11,14 @@ import (
 // The vesper runtime (ADR 0011). dockerd's name for it, as daemon.json registers it.
 const VesperRuntime = "vesper"
 
-// StoreRoots are dockerd's container stores, read to learn a container's runtime (ADR 0011 §1). Under userns-remap
-// the store is /var/lib/docker/<uid>.<gid>/containers; tests point this elsewhere.
+// StoreRoots are dockerd's active container store, read to learn a container's runtime (ADR 0011 §1). Under
+// userns-remap it is /var/lib/docker/<uid>.<gid>/containers, and a legacy store beside it is not dockerd's: a name in
+// it could otherwise shadow a prefix dockerd resolves (council COR-5). Tests point this elsewhere.
 var StoreRoots = func() []string {
-	roots, _ := filepath.Glob("/var/lib/docker/*/containers")
-	return append(roots, "/var/lib/docker/containers")
+	if roots, _ := filepath.Glob("/var/lib/docker/[0-9]*.[0-9]*/containers"); len(roots) > 0 {
+		return roots
+	}
+	return []string{"/var/lib/docker/containers"}
 }
 
 type storedContainer struct {
@@ -48,9 +51,14 @@ func readStore() ([]storedContainer, error) {
 			if err := json.Unmarshal(raw, &cfg); err != nil {
 				return nil, fmt.Errorf("parse %s/config.v2.json: %w", dir, err)
 			}
+			// A container whose runtime cannot be read could be a vesper one: refuse rather than guess (council COR-2).
 			var hc struct{ Runtime string }
-			if raw, err := os.ReadFile(filepath.Join(dir, "hostconfig.json")); err == nil {
-				_ = json.Unmarshal(raw, &hc)
+			raw, err = os.ReadFile(filepath.Join(dir, "hostconfig.json"))
+			if err != nil {
+				return nil, fmt.Errorf("read %s/hostconfig.json: %w", dir, err)
+			}
+			if err := json.Unmarshal(raw, &hc); err != nil {
+				return nil, fmt.Errorf("parse %s/hostconfig.json: %w", dir, err)
 			}
 			out = append(out, storedContainer{id: cfg.ID, name: strings.TrimPrefix(cfg.Name, "/"), runtime: hc.Runtime})
 		}

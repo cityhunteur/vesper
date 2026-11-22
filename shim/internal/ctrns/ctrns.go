@@ -44,8 +44,10 @@ func Hold() {
 // Path is where task id's namespace is bound.
 func Path(id string) string { return filepath.Join(Dir, id) }
 
-// Start makes the namespace for task id and returns the holder's pid. On error nothing is left behind.
-func Start(ctx context.Context, id string) (int, error) {
+// Start makes the namespace for task id and returns the holder's pid. onExit runs when the holder exits, for
+// whatever reason; the task's pid is the holder's, so a task whose holder is gone must stop (ADR 0011 §2). On error
+// nothing is left behind.
+func Start(ctx context.Context, id string, onExit func()) (int, error) {
 	if err := os.MkdirAll(Dir, 0o700); err != nil {
 		return 0, fmt.Errorf("namespace directory: %w", err)
 	}
@@ -61,9 +63,10 @@ func Start(ctx context.Context, id string) (int, error) {
 		runtime.LockOSThread()
 		cmd := exec.Command(self, HoldArg)
 		cmd.SysProcAttr = &syscall.SysProcAttr{
-			Cloneflags: unix.CLONE_NEWNET | unix.CLONE_NEWPID | unix.CLONE_NEWIPC | unix.CLONE_NEWUTS |
-				unix.CLONE_NEWNS | unix.CLONE_NEWCGROUP,
-			Pdeathsig: syscall.SIGKILL,
+			// No mount namespace: the holder needs none, and a copy of every mount would pin other tasks' namespace
+			// binds while it lives (council COR-6).
+			Cloneflags: unix.CLONE_NEWNET | unix.CLONE_NEWPID | unix.CLONE_NEWIPC | unix.CLONE_NEWUTS | unix.CLONE_NEWCGROUP,
+			Pdeathsig:  syscall.SIGKILL,
 		}
 		if err := cmd.Start(); err != nil {
 			started <- err
@@ -72,6 +75,9 @@ func Start(ctx context.Context, id string) (int, error) {
 		pidC <- cmd.Process.Pid
 		started <- nil
 		_ = cmd.Wait()
+		if onExit != nil {
+			onExit()
+		}
 	}()
 	if err := <-started; err != nil {
 		return 0, fmt.Errorf("start the namespace holder: %w", err)

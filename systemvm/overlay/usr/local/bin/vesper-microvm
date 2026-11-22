@@ -263,6 +263,16 @@ reap() { # one pass under the lock launch takes
     out=$(ctrns_down "$nid" | head -1)
     case "$out" in "CTRNS $nid down") echo "REAPED $nid namespace of a gone task"; reaped=$((reaped + 1)) ;; *) echo "KEPT $nid $out" ;; esac
   done
+  # A data-disk jail with no Firecracker, no shim and no namespace is left from a failed launch or cleanup.
+  for j in "$DISK_JAIL"/firecracker/*; do
+    [ -e "$j" ] || continue
+    jid=${j##*/}
+    valid_id "$jid" || continue
+    [ -n "$(fcpid "$jid")" ] && continue
+    [ -n "$(shim_for "$jid")" ] && continue
+    [ -e "$CTRNS/$jid" ] && continue
+    rm -rf "$j" && { echo "REAPED $jid data-disk jail"; reaped=$((reaped + 1)); }
+  done
   unlock
   drives_sweep
   echo "REAP $reaped"
@@ -692,19 +702,42 @@ ctrns_down() {
   echo "CTRNS $cd_id down"
 }
 
-# drives-sweep: remove the drive of each Docker container dockerd no longer has, unless a microVM of it runs.
+# drives-sweep: remove the drive of each Docker container dockerd no longer has, unless a microVM of it runs, and
+# build files left by a shim that died while it built one. It does nothing when no dockerd store can be read: a
+# drive is only ever removed on evidence that its container is gone (council REL-1, COR-1).
 drives_sweep() {
-  ds_n=0
+  ds_n=0; ds_b=0
+  ds_stores=$(ls -d /var/lib/docker/[0-9]*.[0-9]*/containers /var/lib/docker/containers 2>/dev/null)
+  if [ -z "$ds_stores" ]; then echo "SWEPT drives=0 build=0 (no dockerd store)"; return 0; fi
   for d in "$DRIVES"/*.ext4; do
     [ -f "$d" ] || continue
     ds_id=${d##*/}; ds_id=${ds_id%.ext4}
     valid_id "$ds_id" || continue
-    ls -d /var/lib/docker/*/containers/"$ds_id" /var/lib/docker/containers/"$ds_id" >/dev/null 2>&1 && continue
+    ds_keep=0
+    for st in $ds_stores; do [ -d "$st/$ds_id" ] && ds_keep=1; done
+    [ "$ds_keep" = 1 ] && continue
     [ -n "$(fcpid "$ds_id")" ] && continue
+    [ -e "$CTRNS/$ds_id" ] && continue
+    rm -rf "$DISK_JAIL/firecracker/$ds_id"   # a stale jail still links the drive
     rm -f "$d" && ds_n=$((ds_n + 1))
   done
-  [ "$ds_n" -gt 0 ] && fstrim /var/lib/vesper/state 2>/dev/null
-  echo "SWEPT drives=$ds_n"
+  # A build normally takes seconds; one older than an hour belongs to a shim that is gone.
+  for b in "$DRIVES"/.build/*; do
+    [ -f "$b" ] || continue
+    [ $(( $(date +%s) - $(stat -c %Y "$b" 2>/dev/null || echo 0) )) -gt 3600 ] || continue
+    rm -f "$b" && ds_b=$((ds_b + 1))
+  done
+  [ $((ds_n + ds_b)) -gt 0 ] && fstrim /var/lib/vesper/state 2>/dev/null
+  echo "SWEPT drives=$ds_n build=$ds_b"
+}
+
+# disk-sweep: at boot, before any task runs (vesper-data mount), the data-disk jails and build files of the last
+# boot go: their records, namespaces and shims were in tmpfs (council REL-2, REL-3). Drives stay.
+disk_sweep() {
+  dk_n=0
+  for j in "$DISK_JAIL"/firecracker/*; do [ -e "$j" ] || continue; rm -rf "$j" && dk_n=$((dk_n + 1)); done
+  rm -f "$DRIVES"/.build/* 2>/dev/null
+  echo "SWEPT diskjails=$dk_n"
 }
 
 launch() {
@@ -862,9 +895,16 @@ launch() {
   fi
   if [ -n "$rootfs" ]; then
     # The drive of a Docker task is on the same disk as its jail and is linked; anything else is copied.
-    ln "$rootfs" "$root/rootfs.ext4" 2>/dev/null || cp "$rootfs" "$root/rootfs.ext4"
+    if [ "$ctrns" = 1 ]; then
+      # A copy would take the container's writes with the jail (council REL-4, COR-4).
+      ln "$rootfs" "$root/rootfs.ext4" || { echo "ERR drive link: $rootfs"; cleanup "$id" > /dev/null; LAUNCHING=""; return 1; }
+    else
+      cp "$rootfs" "$root/rootfs.ext4"
+    fi
     extra="$extra vesper_rootfs=1"
     drives='[{"drive_id":"rootfs","path_on_host":"/rootfs.ext4","is_root_device":true,"is_read_only":false}]'
+    # A Docker task's drive outlives the task: the guest's flushes reach the data disk (council REL-7).
+    [ "$ctrns" = 1 ] && drives='[{"drive_id":"rootfs","path_on_host":"/rootfs.ext4","is_root_device":true,"is_read_only":false,"cache_type":"Writeback"}]'
   fi
   if [ "$sharenet" = 1 ]; then
     extra="$extra vesper_share_net=$SHARE_GUEST/$SHARE_PREFIX"
@@ -1045,6 +1085,7 @@ case "$cmd" in
   ctrns-up) ctrns_up "$@" ;;
   ctrns-down) lock || { echo "ERR lifecycle lock"; exit 1; }; ctrns_down "$@"; rc=$?; unlock; exit $rc ;;
   drives-sweep) drives_sweep ;;
+  disk-sweep) lock || { echo "ERR lifecycle lock"; exit 1; }; disk_sweep; unlock ;;
   drives-list) for d in "$DRIVES"/*.ext4; do [ -f "$d" ] && echo "DRIVE $(basename "$d" .ext4) bytes=$(stat -c %s "$d") used=$(du -k "$d" | cut -f1)K"; done; echo "DRIVES" ;;
   log) mlog "$@" ;;
   sharenet) sharenet "$@" ;;

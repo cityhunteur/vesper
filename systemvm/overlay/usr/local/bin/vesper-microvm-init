@@ -44,8 +44,11 @@ fi
 mtu=$(/bin/busybox sed -n 's/.*vesper_mtu=\([0-9]*\).*/\1/p' /proc/cmdline)
 if [ -n "$net" ]; then
   [ -n "$mtu" ] && ip link set dev eth0 mtu "$mtu"
-  ip link set dev eth0 up && ip addr add "${net%,*}" dev eth0 && ip route add default via "${net#*,}" \
-    && mkdir -p /etc && echo "nameserver ${net#*,}" > /etc/resolv.conf && echo "VESPER-NET-OK ${net}" || echo "VESPER-NET-FAILED"
+  case "$net" in
+    *,*) ip link set dev eth0 up && ip addr add "${net%,*}" dev eth0 && ip route add default via "${net#*,}" \
+           && mkdir -p /etc && echo "nameserver ${net#*,}" > /etc/resolv.conf && echo "VESPER-NET-OK ${net}" || echo "VESPER-NET-FAILED" ;;
+    *) ip link set dev eth0 up && ip addr add "$net" dev eth0 && echo "VESPER-NET-OK ${net}" || echo "VESPER-NET-FAILED" ;;   # no gateway (council COR-7)
+  esac
 fi
 if [ -n "$net" ] || [ -n "$sharenet" ]; then
   # vesper_probe_delay=N waits first, so a test can start its listeners after the launch returns.

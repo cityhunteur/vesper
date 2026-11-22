@@ -79,8 +79,8 @@ the System VM, and runc containers against `vesper` containers.
 ### 2. The network namespace and the holder
 
 - At `Create` the shim writes a record, then starts a holder: a re-exec of the shim binary in its `hold` mode,
-  started in new network, pid, ipc, uts, mount and cgroup namespaces, with `PR_SET_PDEATHSIG` set to SIGKILL, that
-  only waits. The shim binds the holder's network namespace at `/run/vesper/microvm/ctrns/<id>` (a new directory;
+  started in new network, pid, ipc, uts and cgroup namespaces (not a mount namespace, which would copy and pin every
+  other task's namespace bind), with `PR_SET_PDEATHSIG` set to SIGKILL, that only waits. The shim binds the holder's network namespace at `/run/vesper/microvm/ctrns/<id>` (a new directory;
   `/run/vesper/microvm/netns/` stays ADR 0009's share namespaces) and runs `vesper-microvm ctrns-up <id>`, which
   sets IPv6 off, `ip_forward` 0, strict reverse-path filtering, no redirects, `lo` up, and `iptables` `INPUT` and
   `FORWARD` policy `DROP` with `lo` accepted. Only then does `Create` report the holder's pid.
@@ -88,7 +88,10 @@ the System VM, and runc containers against `vesper` containers.
   that joined it would hold no capability over it, since its owner is the System VM's initial user namespace. A
   `container:` join to a `vesper` container is refused (section 1); a join that races the plugin lands in the
   holder's own pid and ipc namespaces, not the System VM's.
-- If the holder exits, the task fails. Its pid is never reused for a join, because the task is then stopped.
+- The holder's pid is the task's for its whole life, also after `Start` (reported by `Create`, `Connect`, `Start`
+  and `State`): containerd hands dockerd the pid through `Connect`, and a join that races the plugin's check (a rename
+  between create and start) lands in the holder's empty pid and ipc namespaces, not in Firecracker's, which are the
+  System VM's. If the holder exits, the shim stops the task, so its pid is never reused for a join.
 - The kernel sends `PR_SET_PDEATHSIG` when the forking thread exits, not the process, so the holder is forked from a
   goroutine locked to its thread for the shim's life (`runtime.LockOSThread`). dockerd uses the pid only to reach
   `/proc/<pid>/ns/net`, so the holder's own pid namespace is invisible to it; the jailer is given the bound file.
@@ -169,10 +172,12 @@ The table is kept in the shim's README with a test for each row.
   drive to the jail user through the link; that is right for a drive that belongs to one container, and is why a
   shared base (slice 6) must be linked after the `chown` or bound read-only instead.
 - Ownership: `mke2fs -d` runs in a user namespace with the spec's own mapping (`0 100000 65536`), so the image's
-  owners appear as the container's own (0 for 100000). It runs as host uid 100000, so the shim creates the output
-  file in the root-only `drives/` directory and passes it as an open descriptor; the directory never becomes
-  writable by 100000, which runc containers also run as. dockerd refuses to extract owners outside the mapping, so
-  an owner outside it fails the build with a message. To be shown in slice 2.
+  owners appear as the container's own (0 for 100000). It runs as host uid 100000 and writes by path (mke2fs resolves
+  its device path, so a descriptor does not serve): under a random name in `drives/.build`, which that uid owns only
+  while it builds, below `microvm/` and `drives/`, which can be passed through but not listed. The shim checks that
+  the published file is the one the build wrote, then gives it and `.build` back to root. A remapped runc container
+  reaches the directory only through a bind the Docker client made, and cannot learn the name. dockerd refuses to
+  extract owners outside the mapping, so such an owner fails the build. Shown in slice 2.
 - Size and admission: a drive is the image's size plus a fixed writable allowance (default 4 GiB, a shim option);
   it is admitted only when the data disk keeps a free-space reserve (as `vesperd`'s store does); `vesper-data trim`
   runs after removals. Drives are sparse, so drives admitted one by one can later together pass the reserve: a
@@ -184,8 +189,11 @@ The table is kept in the shim's README with a test for each row.
 
 - **Two cleanup scopes** in `vesper-microvm`: *launch* (Firecracker, jail, links, tc, the forwarder if any, the
   veth pair) and *task* (the holder, the namespace binding, the record). A failed `Start` undoes the launch scope
-  only; `Delete`, a failed `Create` and `manager.Stop` after a shim crash undo both. The holder is found from the
-  record and checked by its namespace inode, not by parentage.
+  only; `Delete`, a failed `Create` and `manager.Stop` after a shim crash undo both. The holder is found from its
+  record, checked by its start time, not by parentage; `ctrns-up` checks its namespace inode.
+- **Sweeps.** At boot `vesper-data mount` removes the data-disk jails and build files of the last boot; the reaper
+  removes a data-disk jail with no Firecracker, shim or namespace, and the drive of a container dockerd's active store
+  no longer has (never when no store can be read).
 - The reaper and `launch` learn the `ctrns` directory: a namespace with a live record is never a leftover.
 - `Pause`, `Resume`, `Checkpoint` and `Update` stay refused with their messages until slice 5 (`docker pause`
   fails clearly; `docker commit` is refused anyway). Slice 5 adds Pause and Resume by Firecracker's vCPU pause,
@@ -220,8 +228,8 @@ The table is kept in the shim's README with a test for each row.
 - Deviations, recorded in design-v0 and the tracker: `docker cp`, `diff`, `export`, `commit` and `network connect`
   until slice 5 (then refused); named volumes and `--read-only` refused; anonymous volumes are not shared; changes
   dockerd makes to `hosts` or `resolv.conf` after start do not reach the guest; IPv6 networks refused; `docker
-  pause` refused until slice 5; `docker stats` reports the microVM's cgroup; `docker top` shows the microVM's
-  process; `Update` refused; `linux/amd64` images do not run in a `vesper` container (the guest has no qemu-user);
+  pause` refused until slice 5; `docker stats` reports the microVM's cgroup; `docker top` and `docker inspect` show the
+  namespace holder's pid; `Update` refused; `linux/amd64` images do not run in a `vesper` container (the guest has no qemu-user);
   `crossarch-suite` runs on runc only.
 - SECURITY.md's threat table gains the rows the pre-review found missing: the Docker socket holder's daemon-wide
   authority, the `vesper` container as its own row apart from runc, and the guest's NIC.
