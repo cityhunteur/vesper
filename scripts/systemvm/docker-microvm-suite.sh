@@ -37,7 +37,10 @@ case "${rt}" in *vesper\ */vesper-runc) record runtime_registered true "${rt}" ;
 docker run -d --name vm-a --runtime vesper --hostname vm-a-host "${IMAGE}" sleep 600 >/dev/null 2>&1
 up vm-a; id="$(docker inspect -f '{{.Id}}' vm-a 2>/dev/null)"
 st="$(ctl microvm status "${id}" | head -1)"
-case "${st}" in "RUNNING ${id} "*) record runs_in_a_microvm true "${st}" ;; *) record runs_in_a_microvm false "${st:-no container}" ;; esac
+# docker stats reads the microVM's cgroup: its limit is the default microVM's 352 MiB ceiling (judge N1).
+ds="$(docker stats --no-stream --format '{{.MemUsage}}' vm-a 2>&1)"
+case "${st}|${ds}" in "RUNNING ${id} "*"|"*"/ 352MiB") record runs_in_a_microvm true "${st}; docker stats: ${ds}" ;;
+  *) record runs_in_a_microvm false "${st:-no container}; docker stats: ${ds}" ;; esac
 
 # --- 3. The image's owners are the container's own (dockerd's remap is shifted out of the drive) -------------------
 own="$(docker exec vm-a sh -c 'stat -c %u:%g /bin/busybox /etc/passwd /root | tr "\n" " "; id -u' 2>&1)"

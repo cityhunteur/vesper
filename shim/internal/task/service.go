@@ -308,8 +308,10 @@ func (s *Service) Start(ctx context.Context, r *taskAPI.StartRequest) (*taskAPI.
 	}
 	t.Session = session
 	if r.ExecID == "" && t.Docker {
-		// The holder's pid stays the task's: anything dockerd joins through it (a race past the plugin's check) lands
-		// in the holder's empty namespaces, not in Firecracker's, which are the System VM's (council SEC-1).
+		// The holder's pid stays the task's: a pid or ipc join that races the plugin's check lands in the holder's
+		// empty namespaces, not in Firecracker's, which are the System VM's (council SEC-1). The VMM's pid is kept
+		// for its cgroup (Stats, judge N1).
+		t.SetVMMPid(pid)
 		pid = t.Holder
 	}
 	if t.stdinClosed {
@@ -321,6 +323,10 @@ func (s *Service) Start(ctx context.Context, r *taskAPI.StartRequest) (*taskAPI.
 		// so the init watcher's child-wait (keyed on Session != nil) does not block on it forever.
 		t.Session = nil
 		return nil, errgrpc.ToGRPC(err)
+	}
+	if r.ExecID == "" && t.Docker && t.HolderDead() {
+		// The holder died while the microVM booted; holderGone saw the task created and left it (judge N2).
+		_ = s.backend.Stop(context.Background(), r.ID)
 	}
 	if r.ExecID == "" {
 		s.persist(ctx, t)

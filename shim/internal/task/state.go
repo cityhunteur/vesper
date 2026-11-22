@@ -49,6 +49,7 @@ type Task struct {
 	Docker      bool     // a dockerd task: its own drive and network namespace (ADR 0011)
 	Holder      int      // pid of the namespace holder of a Docker task
 	holderDead  bool
+	vmmPid      int // a Docker task's Firecracker pid; its pid is the holder's (ADR 0011 §2)
 	dockerSpec  *specs.Spec
 	dockerFiles []bundle.DockerFile
 	Port        uint32
@@ -80,6 +81,23 @@ func (t *Task) Phase() Phase {
 func (t *Task) Pid() int {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	return t.pid
+}
+
+// SetVMMPid records a Docker task's Firecracker pid.
+func (t *Task) SetVMMPid(pid int) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.vmmPid = pid
+}
+
+// CgroupPid is the pid whose cgroup is the microVM's: Firecracker's for a Docker task, else the task's pid.
+func (t *Task) CgroupPid() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.vmmPid > 0 {
+		return t.vmmPid
+	}
 	return t.pid
 }
 

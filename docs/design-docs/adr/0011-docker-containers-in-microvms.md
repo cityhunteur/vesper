@@ -91,7 +91,9 @@ the System VM, and runc containers against `vesper` containers.
 - The holder's pid is the task's for its whole life, also after `Start` (reported by `Create`, `Connect`, `Start`
   and `State`): containerd hands dockerd the pid through `Connect`, and a join that races the plugin's check (a rename
   between create and start) lands in the holder's empty pid and ipc namespaces, not in Firecracker's, which are the
-  System VM's. If the holder exits, the shim stops the task, so its pid is never reused for a join.
+  System VM's. A network join that wins that race is in the container's namespace and can send from `eth0`, past
+  the tap's allow-list (a recorded residual, TD-086). If the holder exits, the shim stops the task, so its pid is
+  never reused for a join. `docker stats` reads Firecracker's cgroup, through the pid the shim keeps for it.
 - The kernel sends `PR_SET_PDEATHSIG` when the forking thread exits, not the process, so the holder is forked from a
   goroutine locked to its thread for the shim's life (`runtime.LockOSThread`). dockerd uses the pid only to reach
   `/proc/<pid>/ns/net`, so the holder's own pid namespace is invisible to it; the jailer is given the bound file.
