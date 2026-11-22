@@ -73,6 +73,11 @@ Both send the agent's `MICROVM stage`. `SRC` is one of:
 
 The store is shared by every `vesperd` microVM of the macOS user, which is one trust domain. `vesperd store
 list|rm` lists and removes its files. Each copy into the store first checks a free-space reserve on the data disk.
+Firecracker's own writes into a jail (`PUT /snapshot/create`) are not seen by the relay, which stays opaque; they are
+bounded by the data disk's root-reserved blocks instead (D-076): Firecracker runs as a non-root uid, so at the reserve
+the kernel refuses its write with ENOSPC and the client gets Firecracker's own `400`, while dockerd and containerd,
+which run as root, keep the reserve. `vesper-data` sets it on every boot to the larger of the System VM's memory and 5%
+of the disk.
 A tech-debt row for store growth is opened on acceptance. **Owner**: the staging interface and the shared store
 (item 2).
 
