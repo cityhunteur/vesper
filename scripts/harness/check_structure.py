@@ -61,6 +61,7 @@ RULES: Dict[str, Set[str]] = {
     "src/control/suites/shim.rs": set(),
     "src/control/suites/rootfs.rs": set(),
     "src/control/suites/snapshot.rs": set(),
+    "src/control/suites/snapshot_bounds.rs": {"control"},
     "src/control/suites/replay.rs": set(),
     "src/control/suites/egress.rs": set(),
     "src/control/suites/bounds.rs": set(),

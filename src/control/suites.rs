@@ -22,6 +22,7 @@ pub use replay::{ReplayResponse, ReplayRun, ReplaySession, ReplayStep, fixture_n
 mod sharenet;
 pub use sharenet::run_sharenet_suite;
 mod snapshot;
+mod snapshot_bounds;
 pub use snapshot::{
     DEFAULT_CEILING_MIB, MEASURE_FILL_MIB, MEASURE_GUEST_MIB, SnapshotRun, prepare_workdir,
     run_snapshot_suite,
