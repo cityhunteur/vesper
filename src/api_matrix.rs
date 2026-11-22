@@ -1,4 +1,4 @@
-use crate::api::RouteSpec;
+use crate::spec::Route as RouteSpec;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -757,13 +757,7 @@ mod tests {
     #[test]
     fn validates_repo_generated_matrix() {
         let routes = crate::spec::load_routes(DEFAULT_SWAGGER_PATH)
-            .unwrap()
-            .into_iter()
-            .map(|route| RouteSpec {
-                method: route.method,
-                path: route.path,
-            })
-            .collect::<Vec<_>>();
+            .unwrap();
         let lock = crate::baseline::load(DEFAULT_BASELINE_LOCK_PATH).unwrap();
         let firecracker_revision = lock.baselines.get("firecracker").unwrap().revision.clone();
         let firecracker_version = crate::spec::load_info_version(DEFAULT_SWAGGER_PATH).unwrap();

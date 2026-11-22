@@ -80,11 +80,9 @@ impl VmState {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct RouteSpec {
-    pub method: String,
-    pub path: String,
-}
+/// A pinned route. The type is `spec::Route` (TD-020); this name is kept for one release for callers outside the
+/// crate.
+pub use crate::spec::Route as RouteSpec;
 
 #[derive(Debug, Clone)]
 struct RouteTemplate {
@@ -1072,9 +1070,6 @@ async fn handle_all(
         }
         ("PUT", "/snapshot/load") => {
             return handle_put_snapshot_load_stub(&state, &method, &route_match, body);
-        }
-        ("PATCH", "/vm") => {
-            return handle_patch_vm(&state, &method, &route_match.template.template, body);
         }
         ("GET", "/vm/config") => return full_vm_config_response(&state),
         _ => {}

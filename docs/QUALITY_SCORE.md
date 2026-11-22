@@ -51,8 +51,7 @@ or CI coverage. Read it together with the [parity matrix](specs/firecracker-feat
 ## Current debt anchors
 
 - `src/api.rs` is under its warning budget since TD-001 (2026-11-21); the families still inline are listed in
-  [ARCHITECTURE.md](../ARCHITECTURE.md#hotspots-and-decomposition-queue), and their tests are in one file (TD-015).
+  [ARCHITECTURE.md](../ARCHITECTURE.md#hotspots-and-decomposition-queue).
 - Expand behaviour-level parity tests beyond dispatch presence and make a regression to a stub fail CI (TD-003).
 - Add runtime evidence paths for System VM and proxy work (TD-004, TD-005).
 - Add structured logging and request logging so bundles carry API and proxy evidence (TD-007, TD-011).
-- Bring `src/api/tests.rs` under a line budget (TD-015).

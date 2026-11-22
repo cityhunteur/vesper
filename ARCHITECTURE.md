@@ -129,26 +129,26 @@ the System VM's initramfs.
 allowlist of [scripts/harness/check_structure.py](scripts/harness/check_structure.py), which CI checks: the 14
 top-level `src/*.rs` modules, the nine modules under `src/api/` (eight route families and the error surface), `src/baseline/upstream.rs`,
 `src/control/launchapi.rs`, `src/control/stage.rs`, `src/control/suites.rs` and its ten children,
-`src/proxy/relay.rs` and the five `src/systemvm/` children. That is every library file but `src/api/tests.rs`. The
+`src/proxy/relay.rs`, the five `src/systemvm/` children, `src/api_behavior_matrix/validate.rs`, `src/baseline/upstream/tests.rs`
+and the twelve files of the API handler tests under `src/api/tests/` (TD-015, TD-023). That is every library file. The
 allowlist is a fixed list, not a glob: a new module is unchecked, and has no line budget, until a `RULES` row is
 added. Grouped `use crate::{..}` imports, `super::super` paths, the binaries and `tests/` are not checked, and
-`src/lib.rs` has a row for its line budget only (TD-018); `src/api/tests.rs` is outside both the allowlist and the
-line budgets (TD-015). The Go module in `shim/` and the Swift launcher are outside this check.
+`src/lib.rs` has a row for its line budget only (TD-018). The Go module in `shim/` and the Swift launcher are outside this check.
 
 | Layer | Purpose | Modules | May reference | Enforced |
 |---|---|---|---|---|
 | 0. Leaf modules | Pinned upstream contract, parity metadata, build metadata | `spec`, `baseline` (+ `baseline/upstream`, the upstream-suite pins and comparator), `compat`, `buildinfo` | nothing local | mechanical |
 | 1. Platform policy | Host capability and entitlement rules; nested-virtualization probe and backend selection (GH #17) | `platform` | nothing local | mechanical |
 | 2. Control plane: `api` | State machine, dispatch, deterministic errors | `api` | `api_matrix`, `baseline`, `buildinfo`, `compat`, `platform`, `spec` | mechanical |
-| 2. Control plane: matrices | Generated route matrices; the behaviour-matrix replay (scripts, judge) | `api_matrix`, `api_behavior_matrix`, `api_replay` | `api`, `baseline`, `spec`; `api_behavior_matrix` also `api_matrix`; `api_replay` only `api_behavior_matrix` | mechanical |
+| 2. Control plane: matrices | Generated route matrices; the behaviour-matrix replay (scripts, judge) | `api_matrix`, `api_behavior_matrix`, `api_replay` | `baseline`, `spec`; `api_behavior_matrix` also `api_matrix`; `api_replay` only `api_behavior_matrix` (none of them `api` since TD-020) | mechanical |
 | 2. Control plane: families | Extracted route-family handlers | `api/*` | `super` only (no `crate::` references) | mechanical |
 | 3. Runtime adapters | Socket proxying, published ports, System VM artifacts, guest control channel | `proxy`, `ports`, `systemvm` (+ `systemvm/boot_check`, `systemvm/image_lock`, `systemvm/packages`, `super` only; `systemvm/bridge` and `systemvm/data_disk`, which also name `crate::systemvm` in their tests), `control` (+ `control/launchapi`, `control/suites`, `control/suites/{bundle,restart,exec,launchapi,vesperd,snapshot,replay,egress,bounds,sharenet}`, `control/stage`, `super` only); `proxy` also has `proxy/relay` (`super` only) | `proxy` and `systemvm`: `buildinfo`, `platform`; `ports` and `control`: nothing local | mechanical |
 | 4. Entry points | `clap` binaries | `src/bin/*` | any library layer | review |
-| 5. Tests and harness | Contract tests, sensors (CI scripts that detect drift), docs, Symphony templates | `tests/`, `src/api/tests.rs`, `scripts/harness/`, `harness/`, `.github/workflows/`, `docs/`, `.symphony/templates/` | may import the library; nothing imports them | review |
+| 5. Tests and harness | Contract tests, sensors (CI scripts that detect drift), docs, Symphony templates | `tests/`, `src/api/tests/`, `scripts/harness/`, `harness/`, `.github/workflows/`, `docs/`, `.symphony/templates/` | may import the library; nothing imports them | review |
 
-`api_matrix` imports `api::RouteSpec`, and `api` imports the matrix types from `api_matrix`. `RouteSpec` duplicates
-`spec::Route`, forcing hand conversions in `vesperd`, `baselinectl`, `tests/api_contract.rs` and the two
-`validates_repo_generated_*` unit tests, and `tests/api_replay.rs`; TD-020 removes them by moving the type to `spec`.
+The pinned route type is `spec::Route`; `api::RouteSpec` is an alias kept for one release (TD-020, 2026-11-22). The
+matrices import it from `spec`, so `api` and `api_matrix` no longer reference each other, and no caller converts
+one route type into another.
 
 The diagram below is a simplified view; the table is authoritative. An arrow points from the referenced module to
 the module that references it. Solid edges are references that exist today (including test-only references, which
@@ -293,8 +293,8 @@ The state machine has three states: `PreBoot`, `Running`, `Paused`. `PUT /action
 `PUT /pmem/{id}` bypass it too: they parse the body first and then apply `reject_runtime_hotplug`, as Firecracker
 does. Every other route is gated first by its matrix semantics: `PreBoot` rejects
 after boot, `PostBoot` rejects before boot, and `Any` and `PreBootRuntime` (allowed in both phases, the latter with
-runtime effects) never reject. The guard does not distinguish `Running` from `Paused`. A duplicate `("PATCH", "/vm")`
-arm near the end of the dispatch table (second to last) is shadowed by the early bypass and is dead code (TD-022).
+runtime effects) never reject. The guard does not distinguish `Running` from `Paused`. `PATCH /vm` has only its early bypass; the shadowed duplicate
+arm at the end of the dispatch table was removed (TD-022).
 
 State is held in `AppState` behind `std::sync::RwLock` fields on a multi-thread tokio runtime. There is no state
 persistence and no background work. Handlers open caller-supplied host files synchronously with `std::fs` on the
@@ -512,7 +512,7 @@ or parity documents.
 | 5 | Generated surface stub and behavior matrices are complete and fresh | Verified | `baselinectl --mode validate-api-matrix` and `validate-api-behavior-matrix` in `rust-tests.yml`; the `validates_repo_generated_*` unit tests also fail under `cargo test` | `make surface-matrix-check`, `make behavior-matrix-check` | [docs/process/baseline-governance.md](docs/process/baseline-governance.md) |
 | 6 | Compat exceptions carry required fields, and none is open past expiry | Verified | On change only: `compatexctl` in `compat-exceptions.yml` when the registry or its code changes; no scheduled run (TD-016) | `cargo run --bin compatexctl -- --registry docs/specs/compat-exceptions.yaml` | [docs/process/compat-exceptions.md](docs/process/compat-exceptions.md) |
 | 7 | Inputs are parsed into typed structs once where they enter the crate (request bodies, registries, lock file, proxy targets, launch config); internal code never re-probes raw JSON or YAML. Exceptions: the MMDS data store is schemaless JSON by contract and is handled as `serde_json::Value`; `spec` probes the swagger as untyped `serde_yaml::Value` at load ([src/README.md](src/README.md)) | Verified | Per module: unit tests in each module; no cross-cutting lint (TD-008) | `cargo test --lib` | [src/README.md](src/README.md), [core beliefs](docs/design-docs/core-beliefs.md) |
-| 8 | Library modules stay under their error budgets; warn budgets are advisory and two are currently exceeded (`src/api_behavior_matrix.rs`, TD-023; `src/baseline/upstream.rs`, 889 lines) | Verified | Budgets in `check_structure.py` for the files with a `RULES` row (`src/api.rs` warn 2500 / error 3200; others warn 800 / error 1200; `src/api/tests.rs` unbudgeted, TD-015) and `janitor_scan.py` (top-level `src/*.rs` only, no 800 tier: `api.rs` over 2500 warns, any other file over 1200 errors) | `python3 scripts/harness/check_structure.py --root .` | [Hotspots](#hotspots-and-decomposition-queue) |
+| 8 | Library modules stay under their error budgets; warn budgets are advisory and none is exceeded (2026-11-22, TD-015, TD-023) | Verified | Budgets in `check_structure.py` for the files with a `RULES` row (`src/api.rs` warn 2500 / error 3200; others warn 800 / error 1200) and `janitor_scan.py` (top-level `src/*.rs` only, no 800 tier: `api.rs` over 2500 warns, any other file over 1200 errors) | `python3 scripts/harness/check_structure.py --root .` | [Hotspots](#hotspots-and-decomposition-queue) |
 | 9 | When started with `--entitlements-file`, `vesperd` refuses to start unless the plist contains `com.apple.security.virtualization`; without the flag no check runs | Verified | `platform::validate_entitlements_file` (substring match on the key, value not checked); `make validate-entitlements` lints the plists in `rust-tests.yml` | `make validate-entitlements` | [src/platform.rs](src/platform.rs) |
 | 10 | Having a dispatch arm in `src/api.rs`, or answering `501`, does not count as parity with upstream Firecracker at the pinned revision | Proposed | Review against the parity matrix; `scripts/harness/janitor_scan.py` only warns on routes with no arm | n/a | [docs/specs/firecracker-feature-parity.md](docs/specs/firecracker-feature-parity.md), TD-003 |
 | 11 | No container is root on the System VM: dockerd remaps users, and the authorisation plugin refuses the Docker API requests that would undo it | Verified | `vesper-authz` (allow-list), `userns-remap`, `vesper-containers prepare`; `go test ./internal/authz` in `shim-tests.yml` | `make systemvm-confine-suite` | [ADR 0010](docs/design-docs/adr/0010-no-container-is-systemvm-root.md), [docs/SECURITY.md](docs/SECURITY.md) |
@@ -564,10 +564,11 @@ warning budget (it was 3073 before TD-001). Eight route families and the error s
 `machine_config`, `boot_source` and `logger_metrics` (the WOR-105 slice), `pmem`, and, since TD-001, `vm_config`,
 `balloon`, `mmds` and `errors`. Still in `src/api.rs`: drives, network interfaces, memory hotplug, snapshots and
 the serial, entropy and vsock devices, with the types they share; move one of them when the file nears the budget
-again. `src/api_behavior_matrix.rs` (1066 lines by the same count; TD-023) and `src/baseline/upstream.rs` (889)
-trip the 800-line warning. Each extraction must preserve behavior, and
+again. No library file trips the 800-line warning since TD-023: the behaviour matrix's validation is in
+`src/api_behavior_matrix/validate.rs` and the comparator's tests in `src/baseline/upstream/tests.rs`. Each extraction must preserve behavior, and
 must leave the `("METHOD", "/path") =>` dispatch arms in `src/api.rs`, because both route-coverage sensors scan
-only that file (TD-003). The tests of every family are in `src/api/tests.rs` (TD-015).
+only that file (TD-003). The handler tests are under `src/api/tests/`, one file for each route family, with the
+shared helpers in `mod.rs` (TD-015).
 
 ## See also
 

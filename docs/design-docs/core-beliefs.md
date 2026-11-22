@@ -47,8 +47,8 @@ and the verification manifest template.
 
 ### Enforce invariants, not implementations
 
-**Verified.** Dependency direction and size budgets are checked mechanically for every library module except
-`src/api/tests.rs` (TD-015); how each module is written is not prescribed. *Enforced by:* the `RULES` allowlist and budgets in `scripts/harness/check_structure.py`
+**Verified.** Dependency direction and size budgets are checked mechanically for every library module (the API handler tests too
+since TD-015); how each module is written is not prescribed. *Enforced by:* the `RULES` allowlist and budgets in `scripts/harness/check_structure.py`
 ([ARCHITECTURE.md](../../ARCHITECTURE.md#invariants)).
 
 ### Parse at the boundary

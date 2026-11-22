@@ -16,10 +16,7 @@ fn router() -> axum::Router {
     let revision = lock.baselines.get("firecracker").unwrap().revision.clone();
     let version = vesper::spec::load_info_version("third_party/firecracker/firecracker.yaml").unwrap();
     let routes = vesper::spec::load_routes("third_party/firecracker/firecracker.yaml")
-        .unwrap()
-        .into_iter()
-        .map(|route| vesper::api::RouteSpec { method: route.method, path: route.path })
-        .collect::<Vec<_>>();
+        .unwrap();
     let stubs = vesper::api_matrix::load_surface_stub_matrix(vesper::api_matrix::DEFAULT_SURFACE_STUB_MATRIX_PATH).unwrap();
     vesper::api::AppState::new_with_matrix(&routes, revision, version, &stubs).unwrap().router()
 }
