@@ -1,9 +1,9 @@
 {
  "schema_version": 1,
- "generated_at": "2026-11-22T14:10:04Z",
+ "generated_at": "2026-11-22T14:14:32Z",
  "host": {
   "description": "macOS 27.0.1 / Apple M3 Pro",
-  "commit": "3454b8d"
+  "commit": "8f5fd53"
  },
  "baseline": {
   "firecracker": {
@@ -134,7 +134,7 @@
    {
     "name": "launch",
     "ok": true,
-    "detail": "LAUNCHED vesper-parity pid=10021 boot_ms=2030"
+    "detail": "LAUNCHED vesper-parity pid=3600 boot_ms=1760"
    },
    {
     "name": "version",
@@ -231,23 +231,23 @@
  "performance": {
   "runs": [
    {
-    "boot_p50_ms": 1760.0,
-    "boot_p95_ms": 2020.0,
-    "boot_max_ms": 2020.0,
-    "cycle_p50_ms": 1890.0,
-    "create_rate_per_min": 30.8,
-    "wall_ms": 38910.0,
+    "boot_p50_ms": 1770.0,
+    "boot_p95_ms": 1770.0,
+    "boot_max_ms": 1770.0,
+    "cycle_p50_ms": 1910.0,
+    "create_rate_per_min": 31.3,
+    "wall_ms": 38330.0,
     "failures": 0.0,
     "n": 20,
     "ok": true
    },
    {
-    "boot_p50_ms": 1760.0,
-    "boot_p95_ms": 1770.0,
-    "boot_max_ms": 1770.0,
-    "cycle_p50_ms": 1890.0,
-    "create_rate_per_min": 31.3,
-    "wall_ms": 38350.0,
+    "boot_p50_ms": 1770.0,
+    "boot_p95_ms": 2290.0,
+    "boot_max_ms": 2290.0,
+    "cycle_p50_ms": 1940.0,
+    "create_rate_per_min": 28.4,
+    "wall_ms": 42250.0,
     "failures": 0.0,
     "n": 20,
     "ok": true
