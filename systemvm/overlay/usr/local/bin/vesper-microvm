@@ -2,7 +2,7 @@
 # Vesper microVM manager (GH #18): stock Firecracker under the jailer inside the System VM.
 # usage: vesper-microvm prepare
 #        vesper-microvm launch ID [--exit] [--rootfs PATH] [--cmd BASE64] [--vsock] [--share-net]
-#                                      [--mem-mib N] [--vcpus N] [--cpu-quota QUOTA:PERIOD] [--snapshot-room]
+#                                      [--mem-mib N] [--vcpus N] [--cpu-quota QUOTA:PERIOD] [--snapshot-room] [--test-crash]
 #                                             boot a microVM (kernel + busybox initramfs); --exit powers off after the
 #                                             marker; --rootfs attaches an ext4 image as /dev/vda, mounts it, prints
 #                                             VESPER-ROOTFS-OK <source digest> from its provenance and switches root;
@@ -148,6 +148,8 @@ LIBDIR=$(dirname "$0")/../lib/vesper; [ -r "$LIBDIR/netns.sh" ] || LIBDIR=/usr/l
 # shellcheck source=/dev/null
 . "$LIBDIR/netns.sh"
 LAUNCHING=""                       # the id whose launch must be undone if this script is interrupted
+JAILER_PID=""                      # that launch's jailer, which becomes Firecracker when it execs (TD-060)
+LOG_KEEP_S=600                     # the reaper removes the console log of a microVM gone this long (TD-060)
 
 digits() { case "${1:-}" in ''|*[!0-9]*) return 1 ;; esac; }
 valid_id() { case "${1:-}" in ''|*[!A-Za-z0-9-]*) return 1 ;; esac; [ "${#1}" -le 64 ]; }
@@ -165,6 +167,11 @@ proc_stat() { # PID -> "<state> <starttime>" from /proc/PID/stat (fields 3 and 2
   # shellcheck disable=SC2086
   set -- $ps_s
   echo "$1 ${20}"
+}
+proc_running() { # PID -> 0 when PID exists and is not a zombie (a child this shell has not reaped is one)
+  digits "${1:-}" || return 1
+  pr=$(proc_stat "$1") || return 1
+  [ "${pr% *}" != Z ]
 }
 proc_alive() { # PID START -> 0 when PID runs and started at START (a reused pid or a zombie is not alive)
   pa=$(proc_stat "${1:-}") || return 1
@@ -272,6 +279,19 @@ reap() { # one pass under the lock launch takes
     [ -n "$(shim_for "$jid")" ] && continue
     [ -e "$CTRNS/$jid" ] && continue
     rm -rf "$j" && { echo "REAPED $jid data-disk jail"; reaped=$((reaped + 1)); }
+  done
+  # Console logs of microVMs gone for LOG_KEEP_S: cleanup without --logs keeps them for diagnosis (TD-060).
+  for lf in /var/log/vesper-microvm-*.log; do
+    [ -f "$lf" ] || continue
+    lid=${lf#/var/log/vesper-microvm-}; lid=${lid%.log}
+    valid_id "$lid" || continue
+    [ -f "$REC/$lid" ] && continue
+    [ -n "$(fcpid "$lid")" ] && continue
+    [ -n "$(shim_for "$lid")" ] && continue
+    age=$((now - $(stat -c %Y "$lf" 2>/dev/null || echo "$now")))
+    [ "$age" -ge "$LOG_KEEP_S" ] || continue
+    rm -f "$lf" "$lf.1" "/var/log/vesper-unfs-$lid.log" "/var/log/vesper-unfs-$lid.log.1"
+    echo "PRUNED $lid log age=$age"
   done
   unlock
   drives_sweep
@@ -781,7 +801,7 @@ disk_sweep() {
 launch() {
   id=$1; shift
   mode=""; rootfs=""; cmd64=""; vsock=0; runc_smoke=0; guestexec=0; sharenet=0; probe=""
-  unfs_spec=""; unfs_srcs=""; unfs_mounts=""; unfs_squash=0; mem=$MEM_MIB; vcpus=$VCPUS; cpumax=""; snaproom=0; ctrns=0
+  unfs_spec=""; unfs_srcs=""; unfs_mounts=""; unfs_squash=0; mem=$MEM_MIB; vcpus=$VCPUS; cpumax=""; snaproom=0; ctrns=0; extra_crash=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --exit) mode=--exit ;;
@@ -817,6 +837,7 @@ launch() {
         number "$cq" && number "$cp" && [ "${#cq}" -le 9 ] && [ "${#cp}" -le 7 ] && [ "$cq" -ge 1000 ] && [ "$cp" -ge 1000 ] && [ "$cp" -le 1000000 ] \
           || { echo "ERR bad --cpu-quota (QUOTA:PERIOD in microseconds)"; return 2; }
         cpumax=$(cpu_max_of "$cq" "$cp"); shift ;;
+      --test-crash) extra_crash=1 ;;   # a test hook: the guest powers off before its marker (TD-060)
       *) echo "ERR unknown launch option $1"; return 2 ;;
     esac
     shift
@@ -944,6 +965,7 @@ launch() {
     # A Docker task's drive outlives the task: the guest's flushes reach the data disk (council REL-7).
     [ "$ctrns" = 1 ] && drives='[{"drive_id":"rootfs","path_on_host":"/rootfs.ext4","is_root_device":true,"is_read_only":false,"cache_type":"Writeback"}]'
   fi
+  [ "$extra_crash" = 1 ] && extra="$extra vesper_crash=1"
   if [ "$sharenet" = 1 ]; then
     extra="$extra vesper_share_net=$SHARE_GUEST/$SHARE_PREFIX"
     [ -n "$probe" ] && extra="$extra vesper_probe_delay=${probe%%:*} vesper_probe=${probe#*:}"
@@ -968,16 +990,19 @@ launch() {
     ${cpumax:+--cgroup "cpu.max=$cpumax"} \
     -- --config-file /vm.json --api-sock /run/firecracker.socket \
     > "$pipe" 2>&1 < /dev/null &
+  JAILER_PID=$!
   # With a share network the guest must also report its interface up (it prints that after the marker).
   ready() { grep -q "$MARKER" "$lf" && { [ "$sharenet" = 0 ] || grep -q "VESPER-SHARE-NET-OK" "$lf"; }; }
   for _ in $(seq 1 120); do
     ready && break
     grep -q "VESPER-SHARE-NET-FAILED" "$lf" && break
+    # The jailer, or the Firecracker it became, is gone: no marker can come (TD-060).
+    proc_running "$JAILER_PID" || { sleep 0.25; ready; break; }
     sleep 0.25
   done
   if ready; then
     end=$(now_ms)
-    LAUNCHING=""
+    LAUNCHING=""; JAILER_PID=""
     echo "LAUNCHED $id pid=$(fcpid "$id") boot_ms=$((end - start))"
   else
     echo "FAILED $id"
@@ -985,7 +1010,7 @@ launch() {
     # A launch that never became ready gives back what it took: the process, the jail and the memory admission.
     # The console log stays for diagnosis; cleanup --logs removes it.
     cleanup "$id" > /dev/null
-    LAUNCHING=""
+    LAUNCHING=""; JAILER_PID=""
     return 1
   fi
 }
@@ -1066,6 +1091,8 @@ cleanup() { # ID [--logs]: under the lifecycle lock, taken here unless the calle
 }
 cleanup_locked() {
   id=$1; pid=$(fcpid "$id")
+  # A jailer this script started that has not exec'd Firecracker yet is no fcpid match (TD-060).
+  [ -z "$pid" ] && [ "$LAUNCHING" = "$id" ] && proc_running "$JAILER_PID" && pid=$JAILER_PID
   [ -n "$pid" ] && { kill -KILL "$pid" 2>/dev/null; sleep 0.5; }
   unfs_stop "$id"
   ctrns_links_down "$id"   # the data link only; the namespace is the task's until ctrns-down (ADR 0011 §6)
