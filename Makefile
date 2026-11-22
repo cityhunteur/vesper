@@ -5,7 +5,7 @@ CYCLES ?= 50
 .PHONY: lint build systemvm-upstream-suite third-party-notices third-party-notices-check test contract-generate contract-check contract-test surface-matrix-generate \
 	surface-matrix-check behavior-matrix-generate behavior-matrix-check \
 	validate-entitlements dev-up dev-down vmlauncher-build systemvm-fetch systemvm-overlay systemvm-prepare systemvm-build systemvm-launch-config \
-	systemvm-boot-smoke systemvm-up systemvm-down systemvm-control-suite systemvm-services-suite systemvm-trivial-image docker-up docker-down docker-smoke docker-conformance ports-suite binds-suite data-disk-suite share-notify-selftest share-watch-selftest systemvm-up-shares dns-suite workflow-suite crossarch-suite ctr-conformance ctr-conformance-check ctr-conformance-loop systemvm-reliability systemvm-microvm-suite systemvm-rootfs-suite systemvm-workload-suite systemvm-parity-baseline parity-baseline-check shim-build shim-test systemvm-exec-suite systemvm-shim-suite systemvm-bundle-suite systemvm-restart-suite systemvm-launchapi-suite systemvm-vesperd-suite systemvm-up-snapshot systemvm-snapshot-suite systemvm-replay-suite systemvm-replay-publish behavior-replay-check systemvm-egress-suite systemvm-bounds-suite systemvm-sharenet-suite systemvm-confine-suite systemvm-unfs-suite systemvm-microvm-shares-suite systemvm-microvm-binds-suite systemvm-microvm-size-suite
+	systemvm-boot-smoke systemvm-up systemvm-down systemvm-control-suite systemvm-services-suite systemvm-trivial-image docker-up docker-down docker-smoke docker-conformance ports-suite binds-suite data-disk-suite share-notify-selftest share-watch-selftest systemvm-up-shares dns-suite workflow-suite crossarch-suite ctr-conformance ctr-conformance-check ctr-conformance-loop systemvm-reliability systemvm-microvm-suite systemvm-rootfs-suite systemvm-workload-suite systemvm-parity-baseline parity-baseline-check shim-build shim-test systemvm-exec-suite systemvm-shim-suite systemvm-bundle-suite systemvm-restart-suite systemvm-launchapi-suite systemvm-vesperd-suite systemvm-up-snapshot systemvm-snapshot-suite systemvm-replay-suite systemvm-replay-publish behavior-replay-check systemvm-egress-suite systemvm-bounds-suite systemvm-sharenet-suite systemvm-confine-suite systemvm-unfs-suite systemvm-microvm-shares-suite systemvm-microvm-binds-suite systemvm-microvm-size-suite systemvm-docker-microvm-suite
 
 build:
 	$(CARGO) build --bins
@@ -210,6 +210,10 @@ systemvm-microvm-binds-suite:
 # TD-048: a shim microVM sized by the task's memory and CPU limits.
 systemvm-microvm-size-suite:
 	bash scripts/systemvm/microvm-size-suite.sh
+
+# ADR 0011 slice 2: docker run --runtime vesper on the default bridge (needs make systemvm-up && make docker-up).
+systemvm-docker-microvm-suite:
+	bash scripts/systemvm/docker-microvm-suite.sh
 
 # Path policy of the guest's share notification sink (GH #150); runs without a System VM.
 share-notify-selftest:

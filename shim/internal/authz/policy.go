@@ -144,11 +144,20 @@ func (d *driverConfig) problem() string {
 // without regard to case, and the last of several equal keys wins.
 type createBody struct {
 	HostConfig *struct {
-		UsernsMode   string
-		Runtime      string
-		VolumeDriver string
-		Binds        []string
-		Mounts       []struct {
+		UsernsMode     string
+		Runtime        string
+		VolumeDriver   string
+		Binds          []string
+		Privileged     bool
+		ReadonlyRootfs bool
+		NetworkMode    string
+		PidMode        string
+		IpcMode        string
+		UTSMode        string
+		VolumesFrom    []string
+		Devices        []json.RawMessage
+		DeviceRequests []json.RawMessage
+		Mounts         []struct {
 			Type          string
 			Source        string
 			VolumeOptions *struct {
@@ -156,6 +165,54 @@ type createBody struct {
 			}
 		}
 	}
+	NetworkingConfig *struct {
+		EndpointsConfig map[string]json.RawMessage
+	}
+}
+
+func denyVesper(format string, a ...any) Decision {
+	return Decision{Reason: "vesper: " + fmt.Sprintf(format, a...) + " (ADR 0011)"}
+}
+
+// checkVesperCreate refuses what a vesper container cannot honour (ADR 0011 §1). Until slice 3 only the default
+// bridge and no network are made, and until slice 4 no bind or mount at all.
+func checkVesperCreate(c *createBody) Decision {
+	h := c.HostConfig
+	switch {
+	case h.Privileged:
+		return denyVesper("--privileged is refused for the vesper runtime: the microVM is the boundary")
+	case len(h.Devices) > 0 || len(h.DeviceRequests) > 0:
+		return denyVesper("--device and --gpus are refused for the vesper runtime: no host device reaches a microVM")
+	case h.ReadonlyRootfs:
+		return denyVesper("--read-only is refused for the vesper runtime")
+	case len(h.VolumesFrom) > 0:
+		return denyVesper("--volumes-from is refused for the vesper runtime")
+	case len(h.Binds) > 0 || len(h.Mounts) > 0:
+		return denyVesper("-v and --mount are refused for the vesper runtime until shares reach its microVMs (ADR 0011 slice 4)")
+	}
+	switch h.NetworkMode {
+	case "", "default", "bridge", "none":
+	default:
+		return denyVesper("--network=%s is refused for the vesper runtime: only the default bridge and none, until user-defined networks (ADR 0011 slice 3)", h.NetworkMode)
+	}
+	for _, m := range []struct{ name, value string }{{"--pid", h.PidMode}, {"--ipc", h.IpcMode}, {"--uts", h.UTSMode}} {
+		if m.value != "" && m.value != "private" {
+			return denyVesper("%s=%s is refused for the vesper runtime: its namespaces are its own", m.name, m.value)
+		}
+	}
+	if c.NetworkingConfig != nil {
+		if len(c.NetworkingConfig.EndpointsConfig) > 1 {
+			return denyVesper("a vesper container gets one network at create")
+		}
+		for name := range c.NetworkingConfig.EndpointsConfig {
+			switch name {
+			case "bridge", "default", "none":
+			default:
+				return denyVesper("network %q is refused for the vesper runtime: only the default bridge and none, until user-defined networks (ADR 0011 slice 3)", name)
+			}
+		}
+	}
+	return allow
 }
 
 const unreadable = "its body is not visible to the authorisation plugin (dockerd passes only a JSON body with a declared length under 1 MiB)"
@@ -175,9 +232,21 @@ func checkCreate(_ *url.URL, body []byte) Decision {
 	if h.UsernsMode != "" {
 		return deny("--userns=%s is refused: every container runs in the remapped user namespace", h.UsernsMode)
 	}
-	// vesper-runc is the default (TD-062); runc is the same runtime without the share-ownership refresh.
-	if h.Runtime != "" && h.Runtime != "vesper-runc" && h.Runtime != "runc" {
-		return deny("--runtime=%s is refused: only vesper-runc and runc are known to stay in the remapped user namespace", h.Runtime)
+	// vesper-runc is the default (TD-062); runc is the same runtime without the share-ownership refresh; vesper runs
+	// the container in a microVM (ADR 0011).
+	if h.Runtime != "" && h.Runtime != "vesper-runc" && h.Runtime != "runc" && h.Runtime != VesperRuntime {
+		return deny("--runtime=%s is refused: only vesper-runc, runc and vesper are known to stay in the remapped user namespace", h.Runtime)
+	}
+	// Any runtime: joining a vesper container's namespaces reaches past its microVM (ADR 0011 §1).
+	for _, m := range []struct{ name, value string }{{"--network", h.NetworkMode}, {"--pid", h.PidMode}, {"--ipc", h.IpcMode}} {
+		if why := joinsVesper(m.name, m.value); why != "" {
+			return denyVesper("%s", why)
+		}
+	}
+	if h.Runtime == VesperRuntime {
+		if d := checkVesperCreate(&c); !d.Allow {
+			return d
+		}
 	}
 	if h.VolumeDriver != "" && h.VolumeDriver != "local" {
 		return deny("volume driver %q is not allowed", h.VolumeDriver)

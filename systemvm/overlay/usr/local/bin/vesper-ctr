@@ -238,7 +238,9 @@ leftovers() {
   # uid 10000: the shim's microVMs only; vesperd microVMs run as uid 20000 (ADR 0007).
   n=$(pgrep -u 10000 -f "firecracker --id " 2>/dev/null | wc -l | tr -d ' '); [ "$n" = 0 ] || what="$what firecracker=$n"
   n=$(pgrep -f containerd-shim-vesper-v2 2>/dev/null | wc -l | tr -d ' '); [ "$n" = 0 ] || what="$what shims=$n"
-  n=$(ls -d /srv/jailer/firecracker/*/ 2>/dev/null | wc -l | tr -d ' '); [ "$n" = 0 ] || what="$what jails=$n"
+  n=$(ls -d /srv/jailer/firecracker/*/ /var/lib/vesper/state/microvm/jailer/firecracker/*/ 2>/dev/null | wc -l | tr -d ' '); [ "$n" = 0 ] || what="$what jails=$n"
+  # Docker tasks (ADR 0011): a bound namespace or a holder record with no task is a leak.
+  n=$(ls /run/vesper/microvm/ctrns 2>/dev/null | wc -l | tr -d ' '); [ "$n" = 0 ] || what="$what ctrns=$n"
   # Share networks (ADR 0009): a namespace or a launch record with no microVM left is a leak.
   n=$(ls /run/vesper/microvm/netns 2>/dev/null | wc -l | tr -d ' '); [ "$n" = 0 ] || what="$what sharenets=$n"
   n=$(ls /run/vesper/microvm/records 2>/dev/null | wc -l | tr -d ' '); [ "$n" = 0 ] || what="$what sharerecords=$n"

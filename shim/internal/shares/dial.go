@@ -1,20 +1,46 @@
 package shares
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 )
 
-// JailSocket is the host side of a shim microVM's vsock device.
-func JailSocket(id string) string { return "/srv/jailer/firecracker/" + id + "/root/v.sock" }
+// JailSocket is the host side of a shim microVM's vsock device. A Docker task, which has a bound network namespace,
+// has its jail on the data disk (ADR 0011 §5); every other one in tmpfs. vesper-microvm's jail_base is the same rule.
+func JailSocket(id string) string {
+	root := "/srv/jailer"
+	if _, err := os.Stat("/run/vesper/microvm/ctrns/" + id); err == nil {
+		root = "/var/lib/vesper/state/microvm/jailer"
+	}
+	return root + "/firecracker/" + id + "/root/v.sock"
+}
+
+// DialUnix connects to a Unix socket. A path longer than sun_path allows (a Docker task's jail on the data disk,
+// ADR 0011 §5) is reached through its directory: /proc/self/fd/N/<name>.
+func DialUnix(ctx context.Context, path string) (net.Conn, error) {
+	if len(path) < 100 {
+		return (&net.Dialer{}).DialContext(ctx, "unix", path)
+	}
+	dir, err := os.Open(filepath.Dir(path))
+	if err != nil {
+		return nil, err
+	}
+	defer dir.Close()
+	return (&net.Dialer{}).DialContext(ctx, "unix", fmt.Sprintf("/proc/self/fd/%d/%s", dir.Fd(), filepath.Base(path)))
+}
 
 // DialGuest connects to a guest vsock port through Firecracker's Unix socket ("CONNECT <port>", then "OK <n>").
 func DialGuest(sock string, port int, timeout time.Duration) (net.Conn, error) {
-	c, err := net.DialTimeout("unix", sock, timeout)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	c, err := DialUnix(ctx, sock)
 	if err != nil {
 		return nil, err
 	}

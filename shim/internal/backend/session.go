@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"github.com/cityhunteur/vesper/shim/internal/shares"
 	"io"
 	"net"
 	"strconv"
@@ -33,12 +34,12 @@ type Session struct {
 	cancel  context.CancelFunc
 }
 
-func (m *MicroVM) socket(id string) string { return "/srv/jailer/firecracker/" + id + "/root/v.sock" }
+func (m *MicroVM) socket(id string) string { return shares.JailSocket(id) }
 
 func dialPort(ctx context.Context, path string, port uint32) (*net.UnixConn, error) {
 	var last error
 	for {
-		c, err := (&net.Dialer{}).DialContext(ctx, "unix", path)
+		c, err := shares.DialUnix(ctx, path)
 		if err == nil {
 			u := c.(*net.UnixConn)
 			_ = u.SetDeadline(time.Now().Add(2 * time.Second))

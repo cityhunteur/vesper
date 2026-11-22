@@ -41,9 +41,14 @@ if [ -n "$sharenet" ] && [ -z "$net" ]; then
   # The NFS client for the task's shares (GH #160 M4); vesper-console mounts them when the session starts.
   /bin/busybox modprobe -a nfsv3 >/dev/null 2>&1 && echo "VESPER-NFS-CLIENT-OK" || echo "VESPER-NFS-CLIENT-FAILED"
 fi
+mtu=$(/bin/busybox sed -n 's/.*vesper_mtu=\([0-9]*\).*/\1/p' /proc/cmdline)
 if [ -n "$net" ]; then
-  ip link set dev eth0 up && ip addr add "${net%,*}" dev eth0 && ip route add default via "${net#*,}" \
-    && mkdir -p /etc && echo "nameserver ${net#*,}" > /etc/resolv.conf && echo "VESPER-NET-OK ${net}" || echo "VESPER-NET-FAILED"
+  [ -n "$mtu" ] && ip link set dev eth0 mtu "$mtu"
+  case "$net" in
+    *,*) ip link set dev eth0 up && ip addr add "${net%,*}" dev eth0 && ip route add default via "${net#*,}" \
+           && mkdir -p /etc && echo "nameserver ${net#*,}" > /etc/resolv.conf && echo "VESPER-NET-OK ${net}" || echo "VESPER-NET-FAILED" ;;
+    *) ip link set dev eth0 up && ip addr add "$net" dev eth0 && echo "VESPER-NET-OK ${net}" || echo "VESPER-NET-FAILED" ;;   # no gateway (council COR-7)
+  esac
 fi
 if [ -n "$net" ] || [ -n "$sharenet" ]; then
   # vesper_probe_delay=N waits first, so a test can start its listeners after the launch returns.

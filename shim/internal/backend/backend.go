@@ -17,6 +17,7 @@ import (
 
 	"github.com/cityhunteur/vesper/shim/internal/bundle"
 	"github.com/containerd/containerd/v2/core/mount"
+	specs "github.com/opencontainers/runtime-spec/specs-go"
 )
 
 // RootfsImageName is the ext4 image built from the bundle rootfs, next to config.json.
@@ -36,6 +37,9 @@ type Backend interface {
 	// chain was built before, else by building it from the mounted bundle rootfs. The record describes
 	// what happened.
 	Prepare(ctx context.Context, task, bundleDir string, mounts []mount.Mount) (image string, meta bundle.Meta, err error)
+	// PrepareDocker returns a Docker container's own drive, built from dockerd's rootfs on its first start and kept
+	// across its starts (ADR 0011 §5); built is false for a reused drive.
+	PrepareDocker(ctx context.Context, id, root string, uids, gids []specs.LinuxIDMapping) (image string, built bool, err error)
 	// Launch boots the microVM and its private guest control listener; returns the VMM pid. extra are further
 	// vesper-microvm launch arguments: the share network and server of a task with host shares (GH #160 M5).
 	Launch(ctx context.Context, id, image string, extra []string) (pid int, err error)

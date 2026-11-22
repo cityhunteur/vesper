@@ -105,7 +105,7 @@ func (s *Service) Stats(ctx context.Context, r *taskAPI.StatsRequest) (*taskAPI.
 	if err != nil {
 		return nil, err
 	}
-	pid := t.Pid()
+	pid := t.CgroupPid()
 	if t.Phase() != PhaseRunning || pid == 0 {
 		return nil, errgrpc.ToGRPCf(errdefs.ErrNotFound, "task %s has no running microVM", t.ID)
 	}

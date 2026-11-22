@@ -15,9 +15,8 @@ macOS. Each Docker command that cannot be honest about a microVM is refused with
 
 - [x] Slice 1: `iproute2-tc` with `libelf` and `zstd-libs` in the package lock, no other pin moved; the boot probe
   checks `tc` (2026-11-22, `run/B3/s1-*.log`)
-- [ ] Slice 2: the default bridge (`daemon.json`, plugin allow and create refusals, holder and namespace, root drive
-  with ownership shift on the data disk, data link with allow-list, `resolv.conf`/`hosts`/`hostname`, spec table,
-  cleanup scopes, sweep; `make systemvm-docker-microvm-suite`)
+- [x] Slice 2: the default bridge (2026-11-22; `make systemvm-docker-microvm-suite` 9 of 9, eleven regression suites
+  pass, `run/B3/s2-*`; council and judge `run/B3/s2-council.md`; D-071)
 - [ ] Slice 3: user-defined networks (the DNS link); `dns-suite` and compose steps with `VESPER_DOCKER_RUNTIME=vesper`
 - [ ] Slice 4: shares for `vesper` containers and `ctr` tasks; the Phase 4 suites with the runtime forced; latency,
   density and restart measurements
@@ -27,11 +26,20 @@ macOS. Each Docker command that cannot be honest about a microVM is refused with
 
 ## Surprises & Discoveries
 
+- Slice 2: containerd takes a task's pid from the shim's `Connect`, not from `Create`'s reply; `mke2fs` resolves its
+  device path, so a `/proc/self/fd` path does not serve; the process that creates a user namespace keeps its host uid
+  and loses its capabilities at exec unless it becomes the namespace's root first; a Unix socket path is limited to
+  108 bytes, so the data-disk jail's socket is dialled through its directory; dockerd writes `hosts` after `Create`;
+  a microVM stopped without a shutdown loses the guest's unwritten pages, so the guest syncs when its task exits.
+
 - Slice 1: a full re-resolve of the package lock would also have moved `runc` from 1.3.4 to 1.3.7, so the three new
   packages were added by hand from Alpine's signed index, with their digests; `zlib` and `libcap2` are on the boot
   image and are not pinned, as the resolver treats them.
 
 ## Decision Log
+
+- 2026-11-22 (D-071): slice 2's choices: per-task data-disk jails, runc `--no-pivot` in the guest, sysfs bound and
+  net sysctls set by the guest, the holder's pid kept for the task's life, the drive built by path.
 
 - 2026-11-22: slice order as ADR 0011 states (the scope review's order): every create refusal lands with slice 2,
   so the runtime is never on before its refusals.

@@ -77,6 +77,7 @@ mount_() {
   chmod 0711 /var/lib/vesper/state
   # Boot sweep (ADR 0007 section 4): vesperd jails on the disk never outlive a boot; only the store does.
   /usr/local/bin/vesper-vesperd sweep > /dev/null 2>&1
+  /usr/local/bin/vesper-microvm disk-sweep > /dev/null 2>&1   # Docker tasks' jails and builds of the last boot (ADR 0011)
   record "$how" "$dev"
 }
 
