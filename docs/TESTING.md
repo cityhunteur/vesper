@@ -86,8 +86,10 @@ CI workflows and what each runs. All run on Linux except the `launcher-build` jo
 runs on `macos-15`; all are reproducible locally:
 
 - `rust-tests.yml` (any `src/**`, `tests/**`, `Cargo.*`, `Makefile`, `third_party/**`, `docs/generated/**`,
-  `docs/specs/*.yaml`, `packaging/**`, `scripts/ci/**` change): `make build`, `cargo test`,
-  `make surface-matrix-check`, `make behavior-matrix-check`, `make validate-entitlements`.
+  `docs/specs/*.yaml`, `packaging/**`, `scripts/ci/**`, `scripts/licenses/**`, `rust-toolchain.toml`,
+  `THIRD_PARTY_NOTICES.md`, `shim/go.mod`, `shim/go.sum` or `.github/workflows/**` change): `make build`,
+  `cargo test` (including `tests/toolchain_pin.rs`, TD-009), `make surface-matrix-check`,
+  `make behavior-matrix-check`, `make validate-entitlements`, `make third-party-notices-check`.
 - `contract-tests.yml` (swagger, `src/spec.rs`, `src/api.rs`, `contractgen`, golden file): golden check, `make contract-test`.
 - `systemvm-image.yml` (image and packages locks, `systemvm/**`, `scripts/systemvm/**`, `launcher/**`,
   `scripts/macos/build-vmlauncher.sh`, `scripts/macos/share-watch-selftest.sh`, the launcher entitlements,

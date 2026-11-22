@@ -13,7 +13,12 @@ on:
       - docs/specs/*.yaml
       - packaging/**
       - scripts/ci/**
-      - .github/workflows/rust-tests.yml
+      - scripts/licenses/**
+      - rust-toolchain.toml
+      - THIRD_PARTY_NOTICES.md
+      - shim/go.mod
+      - shim/go.sum
+      - .github/workflows/**
   push:
     branches: [main]
     paths:
@@ -27,7 +32,12 @@ on:
       - docs/specs/*.yaml
       - packaging/**
       - scripts/ci/**
-      - .github/workflows/rust-tests.yml
+      - scripts/licenses/**
+      - rust-toolchain.toml
+      - THIRD_PARTY_NOTICES.md
+      - shim/go.mod
+      - shim/go.sum
+      - .github/workflows/**
 
 jobs:
   test:
@@ -37,10 +47,19 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.100.0" # keep equal to rust-toolchain.toml (TD-009)
+          components: rustfmt, clippy
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+
+      - name: Setup Go (the notices list the shim's modules)
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: shim/go.mod
+          cache-dependency-path: shim/go.sum
 
       - name: Build all binaries
         run: make build
@@ -56,3 +75,6 @@ jobs:
 
       - name: Entitlement plists are valid
         run: make validate-entitlements
+
+      - name: Third-party notices list every linked crate and Go module
+        run: make third-party-notices-check

@@ -26,7 +26,7 @@ guide is short; the detail lives in the documents it links.
    cargo run --bin compatexctl -- --registry docs/specs/compat-exceptions.yaml
    python3 harness/check_docs.py
    python3 scripts/harness/check_structure.py --root .
-   make third-party-notices-check     # if Cargo.lock or shim/go.sum changed
+   make third-party-notices-check     # if Cargo.lock or shim/go.sum changed (CI: rust-tests.yml)
    ```
 
    Runtime-sensitive changes (the System VM, the shim, the proxy) also need the matching `make systemvm-*`,
