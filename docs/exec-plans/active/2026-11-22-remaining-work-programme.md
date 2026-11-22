@@ -24,8 +24,8 @@ harness (GH #87) and a design of the shim boundary (D-017), are not met.
 ## Progress
 
 - [x] P0 EGM review, council, judge and owner sign-off (2026-11-22; D-065, D-066, D-067)
-- [ ] A Foundation: toolchain pin, notices check in CI, file splits, formatting, lint
-- [ ] B Docker containers in microVMs: B1 spike, B2 ADR 0011, B3 its ExecPlan and slices
+- [ ] A Foundation: A1 toolchain pin (#234), A2 notices check in CI (#234), A3 file splits (#235) done; A4 formatting and lint, A5 checks open
+- [ ] B Docker containers in microVMs: B1 spike done (`run/B1/findings.md`), B2 ADR 0011 accepted (D-068); B3 its ExecPlan and slices open
 - [ ] C API and proxy fixes
 - [ ] D Runtime fixes and smaller decisions
 - [ ] E Sandbox and signing (ADR 0012)
@@ -48,6 +48,9 @@ harness (GH #87) and a design of the shim boundary (D-017), are not met.
   (`launcher/Sources/vesper-vmlauncher/main.swift:238`).
 
 ## Decision Log
+
+- 2026-11-22: A2 found that the notices check passed only on macOS: `cargo tree` and `go list` resolved for the host, and CI's `CARGO_TERM_COLOR=always` coloured cargo's repeat marker. The script now lists the shipped targets (aarch64-apple-darwin for Rust, linux/arm64 for the shim) with colour off; that added three Go modules the old file missed.
+- 2026-11-22 (D-068): ADR 0011 accepted after the B1 spike, EGM, a council, a Codex pre-review and a judge. The spike's main surprise: the shim reports its own pid from `Create`, so dockerd would have wired every veth into the System VM's root namespace.
 
 - 2026-11-22 (D-065): this programme, as recommended by EGM, the council and the judge. Order: A1 and A2 first
   (they guard everything after), then B (the largest unknown and the highest value), with the rest of A, C and D as
