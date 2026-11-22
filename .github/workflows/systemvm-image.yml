@@ -172,8 +172,9 @@ jobs:
           cargo test -q --test proxy_sandbox --no-run
           bash scripts/macos/sign.sh debug
           cargo test -q --test proxy_sandbox
-          codesign --display --verbose target/debug/vesper-proxy 2>&1 | grep -q 'flags=.*runtime' \
-            || { echo "vesper-proxy is not signed with the hardened runtime"; exit 1; }
+          # Read whole first: with pipefail, grep -q closing the pipe early would fail codesign with SIGPIPE.
+          sig="$(codesign --display --verbose target/debug/vesper-proxy 2>&1)"
+          case "$sig" in *flags=*runtime*) echo "vesper-proxy: hardened runtime" ;; *) echo "not signed with the hardened runtime: $sig"; exit 1 ;; esac
 
       - name: Entitlement plists are valid and hold exactly the approved keys (TD-010)
         run: make validate-entitlements
