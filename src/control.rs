@@ -153,6 +153,12 @@ impl Session {
         Ok(line.trim_end_matches(['\r', '\n']).to_string())
     }
 
+    /// Sends one command line and returns the first reply line, for verbs without a typed method (TD-026 suite).
+    pub fn request_line(&mut self, line: &str) -> Result<String, String> {
+        self.send(line)?;
+        self.read_line()
+    }
+
     fn expect(&mut self, command: &str, reply: &str) -> Result<Duration, String> {
         let started = Instant::now();
         self.send(command)?;
@@ -373,11 +379,22 @@ mod tests {
     /// A bridge plus agent in one thread: expects the CONNECT preface, greets, speaks protocol 1.
     fn fake_bridge(path: &Path, greeting: &'static str, drop_after_greeting: bool) {
         let listener = UnixListener::bind(path).unwrap();
+        // The open connections, as the agent counts its handlers (TD-026).
+        let open = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
         thread::spawn(move || {
             for stream in listener.incoming() {
                 let Ok(stream) = stream else { break };
                 let greeting = greeting;
+                let open = open.clone();
+                open.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 thread::spawn(move || {
+                    struct Closed(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+                    impl Drop for Closed {
+                        fn drop(&mut self) {
+                            self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                        }
+                    }
+                    let _closed = Closed(open.clone());
                     let mut reader = BufReader::new(stream.try_clone().unwrap());
                     let mut writer = stream;
                     let mut line = String::new();
@@ -405,26 +422,50 @@ mod tests {
                                 reader.read_exact(&mut buf).unwrap();
                                 writer.write_all(&buf).unwrap();
                             }
-                            Some("HEALTH") => writer
-                                .write_all(b"HEALTH {\"packages_ready\":true,\"services\":{\"vesper-agent\":\"started\",\"containerd\":\"started\",\"docker\":\"started\"},\"containerd_ok\":true,\"docker_ok\":true,\"tun\":true}\n")
-                                .unwrap(),
+                            Some("HEALTH") => {
+                                let n = open.load(std::sync::atomic::Ordering::SeqCst);
+                                writer
+                                    .write_all(format!("HEALTH {{\"packages_ready\":true,\"services\":{{\"vesper-agent\":\"started\",\"containerd\":\"started\",\"docker\":\"started\"}},\"containerd_ok\":true,\"docker_ok\":true,\"tun\":true,\"handlers\":{n},\"handlers_max\":64}}\n").as_bytes())
+                                    .unwrap()
+                            }
+                            Some("LAUNCHAPI") => {
+                                let n = open.load(std::sync::atomic::Ordering::SeqCst);
+                                let reply = if n > 56 {
+                                    format!(
+                                        "ERR full: {n} of 64 handlers open; 8 are kept for control commands\n"
+                                    )
+                                } else {
+                                    "ERR bad id\n".to_string()
+                                };
+                                writer.write_all(reply.as_bytes()).unwrap();
+                                return;
+                            }
                             Some("MICROVM") => {
                                 let sub = parts.next().unwrap_or("");
                                 let body: &str = match sub {
                                     "cleanup" => "CLEAN demo\n",
                                     "prepare" => "PREPARED kernel=1 initrd=1\n",
                                     "launch" => "LAUNCHED demo pid=77 boot_ms=400\n",
-                                    "isolation" => "{\"id\":\"demo\",\"pid\":77,\"uid\":10000,\"root\":\"/srv/jailer/firecracker/demo/root\",\"cgroup\":\"/firecracker/demo\",\"seccomp_mode\":2,\"uid_ok\":true,\"chroot_ok\":true,\"cgroup_ok\":true,\"seccomp_ok\":true}\n",
+                                    "isolation" => {
+                                        "{\"id\":\"demo\",\"pid\":77,\"uid\":10000,\"root\":\"/srv/jailer/firecracker/demo/root\",\"cgroup\":\"/firecracker/demo\",\"seccomp_mode\":2,\"uid_ok\":true,\"chroot_ok\":true,\"cgroup_ok\":true,\"seccomp_ok\":true}\n"
+                                    }
                                     "stop" => "STOPPED demo\n",
                                     "crash" => "CRASHED demo pid=77\n",
                                     "status" => "EXITED demo\n",
                                     _ => "ERR usage\n",
                                 };
-                                writer.write_all(format!("MICROVM 0 {}\n{body}", body.lines().count()).as_bytes()).unwrap();
+                                writer
+                                    .write_all(
+                                        format!("MICROVM 0 {}\n{body}", body.lines().count())
+                                            .as_bytes(),
+                                    )
+                                    .unwrap();
                             }
                             Some("KILL") => {
                                 let name = parts.next().unwrap_or("");
-                                writer.write_all(format!("KILL {name} 4242\n").as_bytes()).unwrap();
+                                writer
+                                    .write_all(format!("KILL {name} 4242\n").as_bytes())
+                                    .unwrap();
                             }
                             Some("LOGS") => {
                                 let name = parts.next().unwrap_or("");
@@ -433,7 +474,11 @@ mod tests {
                                 } else {
                                     "level=info msg=\"starting containerd\"\nlevel=info msg=\"Starting up\"\n"
                                 };
-                                writer.write_all(format!("LOGS {}\n{body}", body.lines().count()).as_bytes()).unwrap();
+                                writer
+                                    .write_all(
+                                        format!("LOGS {}\n{body}", body.lines().count()).as_bytes(),
+                                    )
+                                    .unwrap();
                             }
                             Some("DROP") => {
                                 writer.write_all(b"DROP\n").unwrap();
@@ -503,7 +548,13 @@ mod tests {
         let names: Vec<&str> = report.steps.iter().map(|s| s.name.as_str()).collect();
         assert_eq!(
             names,
-            ["handshake", "keepalive", "reconnect", "large_payload"]
+            [
+                "handshake",
+                "keepalive",
+                "reconnect",
+                "large_payload",
+                "control_slots_reserved"
+            ]
         );
         assert!(report.passed, "{:?}", report.steps);
         let out = dir.path().join("control-report.json");
