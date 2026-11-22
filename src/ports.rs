@@ -13,6 +13,8 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, UnixStream};
 use tokio::task::JoinHandle;
 
+pub mod udp;
+
 /// Publisher settings.
 #[derive(Debug, Clone)]
 pub struct PortsConfig {
@@ -59,7 +61,8 @@ pub struct Mapping {
     pub host_port: u16,
     pub container_port: u16,
     pub target: String,
-    /// `listening`, `conflict` (the host port is taken) or `unsupported` (UDP, non-loopback host ip).
+    /// `listening`, `conflict` (the host port is taken) or `unsupported` (a non-loopback host ip, a protocol other
+    /// than TCP and UDP).
     pub state: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
@@ -129,9 +132,10 @@ pub fn parse_event(event: &serde_json::Value) -> Option<(String, String, String)
 
 /// Decides how a binding is published: `Ok(addr)` to listen on, or the unsupported reason.
 pub fn plan_binding(bind_ip: IpAddr, b: &Binding) -> Result<SocketAddr, String> {
-    if b.proto != "tcp" {
+    // UDP on loopback only, as TCP (TD-037, owner-approved in D-066); SCTP is not forwarded.
+    if b.proto != "tcp" && b.proto != "udp" {
         return Err(format!(
-            "{} is not forwarded (only TCP is published to the host)",
+            "{} is not forwarded (only TCP and UDP are published to the host)",
             b.proto
         ));
     }
@@ -411,10 +415,15 @@ impl Publisher {
         let mut entries = Vec::new();
         for b in parse_bindings(&inspect) {
             let target = format!(
-                "vsock:{}:{} -> 127.0.0.1:{}",
+                "vsock:{}:{} -> 127.0.0.1:{}{}",
                 self.config.bridge_path.display(),
                 self.config.relay_port,
-                b.host_port
+                b.host_port,
+                if b.proto == "udp" {
+                    " (udp, one framed stream)"
+                } else {
+                    ""
+                }
             );
             let mut mapping = Mapping {
                 container: id.chars().take(12).collect(),
@@ -432,6 +441,33 @@ impl Publisher {
                     mapping.state = "unsupported".into();
                     mapping.error = Some(reason);
                     None
+                }
+                Ok(addr) if b.proto == "udp" => {
+                    mapping.host = addr.to_string();
+                    match udp::bind(addr) {
+                        Ok(socket) => {
+                            eprintln!(
+                                "ports: {name} {addr} -> {target} ({}/udp)",
+                                b.container_port
+                            );
+                            Some(tokio::spawn(udp::forward(
+                                socket,
+                                self.config.bridge_path.clone(),
+                                self.config.relay_port,
+                                b.host_port,
+                                std::sync::Arc::new(udp::Counters::default()),
+                            )))
+                        }
+                        Err(err) => {
+                            mapping.state = "conflict".into();
+                            mapping.error = Some(format!(
+                                "cannot bind {addr}/udp: {err}; the container port is reachable only inside the System VM on 127.0.0.1:{}",
+                                b.host_port
+                            ));
+                            eprintln!("ports: {name}: {}", mapping.error.as_deref().unwrap_or(""));
+                            None
+                        }
+                    }
                 }
                 Ok(addr) => {
                     mapping.host = addr.to_string();
@@ -605,7 +641,25 @@ mod tests {
             host_ip: "0.0.0.0".into(),
             host_port: 1053,
         };
-        assert!(plan_binding(lo, &udp).unwrap_err().contains("only TCP"));
+        // TD-037: UDP on loopback is published, as TCP; elsewhere it is refused the same way.
+        assert_eq!(
+            plan_binding(lo, &udp).unwrap().to_string(),
+            "127.0.0.1:1053"
+        );
+        let far = Binding {
+            host_ip: "10.0.0.5".into(),
+            ..udp.clone()
+        };
+        assert!(plan_binding(lo, &far).unwrap_err().contains("not loopback"));
+        let sctp = Binding {
+            proto: "sctp".into(),
+            ..udp
+        };
+        assert!(
+            plan_binding(lo, &sctp)
+                .unwrap_err()
+                .contains("only TCP and UDP")
+        );
     }
 
     #[test]

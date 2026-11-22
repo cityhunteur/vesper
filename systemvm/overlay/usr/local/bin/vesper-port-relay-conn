@@ -1,14 +1,20 @@
 #!/bin/sh
 # One port-relay connection (spawned by socat EXEC from vesper-port-relay): the first line is
-# "PORT <n>"; the rest of the stream is forwarded to the published port on the guest loopback,
-# where dockerd's own mapping reaches the container. Only ports dockerd published answer there.
+# "PORT <n>" or "UDP <n>"; the rest of the stream is forwarded to the published port on the guest loopback,
+# where dockerd's own mapping reaches the container. Only ports dockerd published answer there. A UDP stream carries
+# framed datagrams of many flows (TD-037, D-077) and is relayed by vesper-udp-relay.
 . "$(dirname "$0")/../lib/vesper/vsock-peer.sh"
 vsock_host_only
 read -r line
-port=${line#PORT }
+case "$line" in
+  "PORT "*) proto=tcp; port=${line#PORT } ;;
+  "UDP "*) proto=udp; port=${line#UDP } ;;
+  *) exit 1 ;;
+esac
 case "$port" in
   ''|*[!0-9]*) exit 1 ;;
 esac
 [ "$port" -ge 1 ] && [ "$port" -le 65535 ] || exit 1
+[ "$proto" = udp ] && exec /usr/bin/vesper-udp-relay "$port"
 # -t: see vesper-port-relay; a half-closed client still receives the whole response (GH #167).
 exec /usr/bin/socat -t 86400 STDIO "TCP:127.0.0.1:$port"

@@ -25,3 +25,6 @@ GOOS=linux GOARCH=arm64 CGO_ENABLED=0 GOFLAGS=-mod=mod go build -trimpath \
 # The sandbox and test probe of the per-microVM share server (ADR 0009, GH #160 M3).
 GOOS=linux GOARCH=arm64 CGO_ENABLED=0 GOFLAGS=-mod=mod go build -trimpath \
   -ldflags="-s -w -buildid=" -o "${ROOT_DIR}/build/shim/vesper-unfs" ./cmd/vesper-unfs
+# The guest side of UDP published ports (TD-037, D-077); vesper-port-relay-conn runs it.
+GOOS=linux GOARCH=arm64 CGO_ENABLED=0 GOFLAGS=-mod=mod go build -trimpath \
+  -ldflags="-s -w -buildid=" -o "${ROOT_DIR}/build/shim/vesper-udp-relay" ./cmd/vesper-udp-relay

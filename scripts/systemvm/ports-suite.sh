@@ -9,6 +9,8 @@ SOCKET="${DOCKER_SOCKET:-${ROOT_DIR}/run/vesper/docker.sock}"
 STATUS="${ROOT_DIR}/run/vesper/ports.json"
 REPORT="${ROOT_DIR}/run/systemvm/ports-report.json"
 IMAGE="${PORTS_IMAGE:-alpine:3.22}"
+# A UDP echo server (TD-037): socat answers each datagram from the published port.
+UDP_IMAGE="${PORTS_UDP_IMAGE:-alpine/socat:1.8.0.3}"
 DOCKER="${DOCKER_BIN:-docker}"
 export DOCKER_HOST="unix://${SOCKET}"
 cd "${ROOT_DIR}"; mkdir -p "$(dirname "${REPORT}")"
@@ -26,7 +28,7 @@ for m in s["mappings"]:
     print(m["name"], m["host"], m["state"], m.get("error", ""))
 PY
 }
-cleanup() { "${DOCKER}" rm -f pp1 pp2 pp3 pp4 >/dev/null 2>&1; [ -n "${NCPID:-}" ] && kill "${NCPID}" 2>/dev/null; }
+cleanup() { "${DOCKER}" rm -f pp1 pp2 pp3 pp4 pp6 >/dev/null 2>&1; [ -n "${NCPID:-}" ] && kill "${NCPID}" 2>/dev/null; }
 cleanup
 [ -S "${SOCKET}" ] || { echo "ports-suite: ${SOCKET} missing; run 'make docker-up'" >&2; exit 2; }
 "${DOCKER}" image inspect "${IMAGE}" >/dev/null 2>&1 || "${DOCKER}" pull -q "${IMAGE}" >/dev/null 2>&1 || { echo "ports-suite: cannot pull ${IMAGE}" >&2; exit 2; }
@@ -73,6 +75,50 @@ sleep 2
 out="$(printf 'hello\n' | python3 -c 'import socket,sys; s=socket.create_connection(("127.0.0.1",18095),5); s.sendall(sys.stdin.buffer.read()); s.shutdown(socket.SHUT_WR); s.settimeout(10); print(s.recv(100).decode().strip())' 2>&1)"
 [ "${out}" = late-reply ] && record half_closed_client_gets_late_reply true "reply 2 s after the client shut its write side: ${out}" || record half_closed_client_gets_late_reply false "got '${out}'"
 "${DOCKER}" rm -f pp5 >/dev/null 2>&1
+
+# UDP on loopback (TD-037, D-077): datagrams of 1, 1,500 and 65,507 bytes come back whole; 1,100 client sockets in
+# turn, more than the 1,024-flow table holds, each get their reply; the mapping is listed and goes with the container.
+udp_client() {
+  python3 - "$@" <<'PY'
+import socket, sys
+port, mode = int(sys.argv[1]), sys.argv[2]
+if mode == "sizes":
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.settimeout(5); s.connect(("127.0.0.1", port))
+    # macOS refuses a datagram larger than the send buffer (9,216 bytes by default).
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 70000); s.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 140000)
+    out = []
+    for n in (1, 1500, 65507):
+        data = bytes((i * 7) % 251 for i in range(n)); s.send(data)
+        out.append(f"{n}:{'ok' if s.recv(70000) == data else 'differs'}")
+    print(" ".join(out))
+else:
+    ok = 0
+    for i in range(int(mode)):
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.settimeout(3); s.connect(("127.0.0.1", port))
+        msg = f"flow-{i}".encode(); s.send(msg)
+        try:
+            ok += s.recv(100) == msg
+        except OSError:
+            pass
+        s.close()
+    print(f"replies={ok}")
+PY
+}
+if "${DOCKER}" image inspect "${UDP_IMAGE}" >/dev/null 2>&1 || "${DOCKER}" pull -q "${UDP_IMAGE}" >/dev/null 2>&1; then
+  "${DOCKER}" run -d --name pp6 -p 18096:9/udp "${UDP_IMAGE}" -b 65536 UDP-RECVFROM:9,fork EXEC:cat >/dev/null 2>&1
+  for _ in $(seq 1 40); do mappings | grep -q '^pp6 .* listening' && break; sleep 0.25; done
+  listed="$(mappings | grep '^pp6' | tr '\n' ';')"
+  sizes=""; for _ in 1 2 3 4 5 6 7 8; do sizes="$(udp_client 18096 sizes 2>&1)"; case "${sizes}" in "1:ok 1500:ok 65507:ok") break ;; esac; sleep 1; done
+  [ "${sizes}" = "1:ok 1500:ok 65507:ok" ] && case "${listed}" in *"127.0.0.1:18096 listening"*) true ;; *) false ;; esac \
+    && record udp_datagrams_whole true "${sizes}; ${listed}" || record udp_datagrams_whole false "${sizes}; ${listed}"
+  many="$(udp_client 18096 1100 2>&1)"
+  [ "${many}" = "replies=1100" ] && record udp_flows_past_the_table_cap true "1,100 client sockets in turn, ${many} (table cap 1,024)" || record udp_flows_past_the_table_cap false "${many}"
+  "${DOCKER}" rm -f pp6 >/dev/null 2>&1
+  for _ in $(seq 1 40); do mappings | grep -q '^pp6' || break; sleep 0.25; done
+  mappings | grep -q '^pp6' && record udp_mapping_cleared false "$(mappings | tr '\n' ';')" || record udp_mapping_cleared true "no pp6 mapping after docker rm -f"
+else
+  record udp_datagrams_whole false "cannot pull ${UDP_IMAGE}"
+fi
 
 cleanup
 passed=true; for s in "${steps[@]}"; do case "$s" in *'"ok":false'*) passed=false;; esac; done

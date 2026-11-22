@@ -21,6 +21,8 @@ url = "2.5"
 chrono = { version = "0.4", features = ["serde"] }
 # Structured logs (TD-007; the owner approved tracing-subscriber, D-066). tracing is already linked through axum.
 tracing = { version = "0.1", default-features = false, features = ["std"] }
+# Already built through tokio; used directly for a UDP socket's send buffer (TD-037: macOS limits a datagram to it).
+socket2 = "0.6"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "std"] }
 
 [dev-dependencies]
