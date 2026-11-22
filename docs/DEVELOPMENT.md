@@ -14,7 +14,7 @@ otherwise.
 
 | Tool | Version | Pinned in |
 |---|---|---|
-| Rust toolchain (`cargo`, `rustc`) | stable; CI uses `dtolnay/rust-toolchain@stable`, edition 2024 in `Cargo.toml` | **Not pinned**: no `rust-toolchain.toml` (tech debt TD-009) |
+| Rust toolchain (`cargo`, `rustc`) | 1.100.0 with `rustfmt` and `clippy`, pinned in `rust-toolchain.toml` (rustup installs it on the first `cargo` command); every CI job names the same version; edition 2024 in `Cargo.toml` | Pinned (TD-009). Bump it every third stable release (about 18 weeks), or sooner when a dependency needs it: one PR that changes `rust-toolchain.toml` and every `toolchain:` line in `.github/workflows/`; `tests/toolchain_pin.rs` fails if they differ |
 | Python 3 | 3.11+ for `harness/`; CI uses 3.12 (`docs.yml`) and `3.x` (`harness-*.yml`) | `.github/workflows/docs.yml` |
 | GNU make, bash | any recent | `Makefile`, `scripts/**/*.sh` |
 | Docker CLI (`docker`) | any recent; verified with 29.8 | only for `make docker-smoke` (client only; the daemon runs in the System VM) |

@@ -1,0 +1,5 @@
+[toolchain]
+# The Rust release CI and local builds use (TD-009). Bump it in one PR with the workflows; see docs/DEVELOPMENT.md.
+channel = "1.100.0"
+components = ["rustfmt", "clippy"]
+profile = "minimal"
