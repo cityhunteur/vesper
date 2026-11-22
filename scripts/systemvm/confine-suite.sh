@@ -193,6 +193,16 @@ fi
 
 # --- 7b. An old volume is imported with its owners shifted into the container range (ADR 0010 point 8) ----------
 planted="$(ctl data test-import plant)"
+# TD-064: a file hard-linked in from outside the volume refuses the whole import, and nothing is created.
+outside="$(ctl data test-import plant-outside; ctl data test-import import)"
+made="$("${DOCKER}" volume ls -q --filter name=^vesper-legacy-test\$ 2>&1)"
+ctl data test-import unplant-outside >/dev/null
+if case "${outside}" in *"IMPORT-TEST planted-outside"*"ERR volume vesper-legacy-test has 1 file(s) hard-linked from outside it; nothing was copied"*) true ;; *) false ;; esac \
+  && [ -z "${made}" ]; then
+  record outside_hard_link_refused true "$(printf '%s' "${outside}" | tail -1); no volume made"
+else
+  record outside_hard_link_refused false "${outside}; volumes: ${made}"
+fi
 imported="$(ctl data test-import import)"
 again="$(ctl data test-import import)"
 badname="$(ctl data legacy import-volume ../etc)"
