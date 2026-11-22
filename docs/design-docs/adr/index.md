@@ -46,7 +46,7 @@ written for them; the people who made them should.
   [harness-engineering.md](../../process/harness-engineering.md). Why: unknown.
 - **Retiring optimistic issue-promotion workflows** (`eval-on-review.yml`, `promote-implemented-issues.yml`). The
   files are gone; the decision is recorded only in the tech-debt tracker (TD-002), while
-  `docs/specs/firecracker-feature-parity.md` and `docs/references/install.md` still describe `eval-on-review.yml` as present.
+  `docs/specs/firecracker-feature-parity.md` and `docs/references/archive/install.md` still describe `eval-on-review.yml` as present.
 
 ## Writing an ADR
 

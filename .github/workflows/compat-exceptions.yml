@@ -16,6 +16,8 @@ on:
       - src/bin/compatexctl.rs
       - Cargo.toml
       - .github/workflows/compat-exceptions.yml
+  schedule:
+    - cron: "23 6 * * 1" # weekly, so an exception that expires without a change is caught (TD-016)
   workflow_dispatch:
     inputs:
       require_zero_open:
