@@ -4,6 +4,9 @@ from __future__ import annotations
 import argparse
 import json
 import re
+
+# An early bypass before the dispatch match, as PUT /actions and PATCH /vm have (TD-003, TD-022).
+BYPASS_RE = re.compile(r'route_match\.template\.method == "([A-Z]+)" && route_match\.template\.template == "([^"]+)"')
 from pathlib import Path
 from typing import Dict, List, Tuple
 
@@ -68,6 +71,7 @@ def compute_route_coverage(root: Path) -> Tuple[int, int, List[str]]:
         or 'if route_match.template.method == "PUT" && route_match.template.template == "/actions"' in api_text
     ):
         handled.add(("PUT", "/actions"))
+    handled.update(BYPASS_RE.findall(api_text))
     missing = sorted(f"{method} {path}" for method, path in total - handled)
     return len(handled), len(total), missing
 
