@@ -204,6 +204,15 @@ import_volume() {
   exec 9>"$LOCK" && flock -n 9 || { echo "ERR another import is running"; return 1; }
   trap 'rm -rf "${STAGE:?}"' EXIT
   trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
+  # A regular file with a link outside the volume (hard-linked in from elsewhere on the data disk) would become the
+  # container's when its owner is shifted: refuse the volume, naming how many (TD-064). Links inside it are copied.
+  outside=$(find "$src/_data" -xdev -type f -exec stat -c '%i %h' {} + 2>/dev/null \
+    | awk '$2 > 1 { n[$1]++; h[$1] = $2 } END { c = 0; for (i in n) if (n[i] < h[i]) c++; print c }')
+  case "$outside" in
+    0) ;;
+    ''|*[!0-9]*) echo "ERR could not count the links of volume $name"; return 1 ;;
+    *) echo "ERR volume $name has $outside file(s) hard-linked from outside it; nothing was copied"; return 1 ;;
+  esac
   need=$(du -sk "$src/_data" | awk '{print $1}')
   avail=$(df -k "$NEW/volumes" | awk 'NR==2 {print $4}')
   [ "$((need + need / 10 + 1024))" -le "${avail:-0}" ] || { echo "ERR not enough space: need ${need} KiB, ${avail:-0} KiB free"; return 1; }
@@ -291,6 +300,12 @@ test_import() {
       # What an import that died leaves behind; the next import must clear it.
       mkdir -p "$STAGE/data/left-over" || { echo "ERR plant"; return 1; }
       echo "IMPORT-TEST planted" ;;
+    plant-outside)   # a root-only file outside the volume, hard-linked into it (TD-064)
+      [ -d "$d" ] || { echo "ERR plant first"; return 1; }
+      echo secret > "$TEST_STORE/secret" && chown 0:0 "$TEST_STORE/secret" && chmod 0600 "$TEST_STORE/secret" &&
+      ln "$TEST_STORE/secret" "$d/borrowed" || { echo "ERR plant-outside"; return 1; }
+      echo "IMPORT-TEST planted-outside" ;;
+    unplant-outside) rm -f "$d/borrowed" "$TEST_STORE/secret"; echo "IMPORT-TEST unplanted-outside" ;;
     import) import_volume "$v" "$TEST_STORE" ;;
     check)
       t="$NEW/volumes/$v/_data"
@@ -310,7 +325,7 @@ test_import() {
       docker volume rm "$v" > /dev/null 2>&1
       rm -rf "${TEST_STORE:?}"
       echo "IMPORT-TEST clean" ;;
-    *) echo "ERR usage: vesper-data test-import plant|import|check|clean"; return 2 ;;
+    *) echo "ERR usage: vesper-data test-import plant|plant-outside|unplant-outside|import|check|clean"; return 2 ;;
   esac
 }
 
@@ -350,5 +365,5 @@ case "${1:-}" in
   mount) mount_ ;;
   status) status ;;
   stop) stop ;;
-  *) echo "ERR usage: vesper-data mount|status|stop|trim|binds|label|test-relabel LABEL|legacy status|legacy import-volume NAME|legacy delete [--yes]|test-import plant|import|check|clean|test-delete plant|delete|check|clean"; exit 2 ;;
+  *) echo "ERR usage: vesper-data mount|status|stop|trim|binds|label|test-relabel LABEL|legacy status|legacy import-volume NAME|legacy delete [--yes]|test-import plant|plant-outside|unplant-outside|import|check|clean|test-delete plant|delete|check|clean"; exit 2 ;;
 esac
