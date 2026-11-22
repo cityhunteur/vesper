@@ -20,6 +20,7 @@ RULES: Dict[str, Set[str]] = {
     "src/buildinfo.rs": set(),
     "src/compat.rs": set(),
     "src/platform.rs": set(),
+    "src/sandbox.rs": set(),
     "src/spec.rs": set(),
     "src/api.rs": {"api_matrix", "baseline", "buildinfo", "compat", "platform", "spec"},
     "src/api_matrix.rs": {"baseline", "spec"},

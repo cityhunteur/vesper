@@ -44,6 +44,18 @@ const ALLOWED: &[(&str, &str, usize, &str)] = &[
         1,
         "published container ports, loopback only (ADR 0005)",
     ),
+    (
+        "src/ports/udp.rs",
+        "sock.bind(",
+        1,
+        "published UDP container ports, loopback only (ADR 0005 amendment, D-077)",
+    ),
+    (
+        "src/bin/vesper-proxy.rs",
+        "UdpSocket::bind",
+        1,
+        "the --sandbox-probe test hook's bind to 0.0.0.0, which the seatbelt profile must refuse (ADR 0012)",
+    ),
 ];
 
 const PATTERNS: &[&str] = &[
@@ -53,6 +65,8 @@ const PATTERNS: &[&str] = &[
     "UnixListener::bind",
     "TcpListener::bind",
     "UdpSocket::bind",
+    // socket2 binds (the UDP published socket raises its buffers first).
+    "sock.bind(",
 ];
 
 /// The text of a file without its test code: a `#[cfg(test)] mod tests { … }` block at the end, or a whole test file.

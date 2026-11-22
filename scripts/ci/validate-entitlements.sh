@@ -21,7 +21,8 @@ from pathlib import Path
 paths = [Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3])]
 expected_keys = {
     paths[0]: {"com.apple.security.app-sandbox", "com.apple.security.virtualization"},
-    paths[1]: {"com.apple.security.app-sandbox"},
+    # vesper-proxy needs no key: it applies its own seatbelt profile (ADR 0012); the App Sandbox would stop it.
+    paths[1]: set(),
     paths[2]: {"com.apple.security.virtualization"},
 }
 

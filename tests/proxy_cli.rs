@@ -1,4 +1,5 @@
-//! TD-017: vesper-proxy checks its entitlements file before it listens, as vesperd does.
+//! TD-017: vesper-proxy checks its entitlements file before it listens, as vesperd does. ADR 0012: on macOS it
+//! runs under its own seatbelt profile, which refuses what the proxy never needs.
 
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -8,14 +9,9 @@ fn proxy() -> Command {
 }
 
 #[test]
-fn an_entitlements_file_without_the_sandbox_is_refused_before_listening() {
+fn an_entitlements_file_that_cannot_be_read_is_refused_before_listening() {
     let dir = tempfile::tempdir().unwrap();
-    let plist = dir.path().join("bad.entitlements");
-    std::fs::write(
-        &plist,
-        "<?xml version=\"1.0\"?><plist version=\"1.0\"><dict></dict></plist>",
-    )
-    .unwrap();
+    let plist = dir.path().join("missing.entitlements");
     let sock = dir.path().join("docker.sock");
     let out = proxy()
         .args([
@@ -28,9 +24,12 @@ fn an_entitlements_file_without_the_sandbox_is_refused_before_listening() {
         ])
         .output()
         .unwrap();
-    assert_eq!(out.status.code(), Some(1));
-    let err = String::from_utf8_lossy(&out.stderr);
-    assert!(err.contains("com.apple.security.app-sandbox"), "{err}");
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     assert!(
         !sock.exists(),
         "the proxy listened before it checked its entitlements"

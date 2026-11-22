@@ -40,13 +40,33 @@ Vesper’s security model is part of its parity contract. Treat this file as the
 
 ## Entitlements
 
-- Plists: `packaging/macos/vesperd.entitlements` (`com.apple.security.app-sandbox`, `com.apple.security.virtualization`)
-  and `packaging/macos/vesper-proxy.entitlements` (`com.apple.security.app-sandbox`). `make validate-entitlements`
-  lints them; with `plutil` present it checks syntax only, and the required-key check runs on the Python path
-  (`VALIDATE_ENTITLEMENTS_FORCE_PYTHON=1`). CI runs it in `rust-tests.yml`.
+- Plists: `packaging/macos/vesperd.entitlements` (`com.apple.security.app-sandbox`, `com.apple.security.virtualization`;
+  changes in ADR 0012 slice 2), `packaging/macos/vesper-proxy.entitlements` (no key: the App Sandbox stops an
+  unbundled binary at start, ADR 0012) and `packaging/macos/vesper-vmlauncher.entitlements`
+  (`com.apple.security.virtualization`). `make validate-entitlements` lints them with `plutil` where present, then
+  checks that each holds exactly its approved keys, on every host (TD-010). CI runs it in `rust-tests.yml` and on
+  macOS in `systemvm-image.yml`.
 - `vesperd --entitlements-file <plist>` checks only that the literal `<key>com.apple.security.virtualization</key>`
-  appears (`src/platform.rs`); the value is not inspected, and without the flag no check runs. `vesper-proxy` has no
-  entitlements flag.
+  appears (`src/platform.rs`); the value is not inspected, and without the flag no check runs. `vesper-proxy
+  --entitlements-file` only reads the file before it starts (TD-017).
+
+## Seatbelt profiles (ADR 0012)
+
+- `vesper-proxy` applies a deny-by-default seatbelt profile to itself with `sandbox_init` before any thread starts
+  (`src/sandbox.rs`): it may use its socket's directory, its socket, the bridge socket, the ports status file and,
+  with `--publish-ports`, loopback ports inbound and UDP replies to loopback. It refuses to start if the profile
+  cannot be applied (for example under a parent that is already sandboxed) or if its self-check, listing `$HOME`,
+  succeeds. `--no-sandbox` runs without it for diagnosis and warns on every start. `cargo test --test proxy_sandbox`
+  (macOS) shows six refusals: reading `~/.ssh`, writing in `$HOME`, starting `/bin/sh`, binding `0.0.0.0`, connecting
+  to a loopback TCP port and to a Unix socket it does not name, each of which works with `--no-sandbox`.
+- The limit is not narrow: through the Docker socket and the bridge, an attacker in the proxy still reaches every
+  share and the System VM (TD-089). The profile's base, `system.sb`, also allows Mach lookups of XPC services,
+  writes to `/dev/null` and `/dev/fd`, and logging; that base is accepted as it is.
+- A file rule resolves the file's directory, not the file, so a symlink at the socket path cannot choose what is
+  granted; a socket directory that is a symlink is refused, and a directory that would cover `$HOME` is refused with
+  that reason. A `tcp://` upstream must be loopback. Missing directories are made, mode 0700, before the profile.
+- `make sign` (and `make docker-up`) signs the proxy ad hoc with the hardened runtime. `vesperd` and the launcher
+  follow in slices 2 and 3.
 
 ## Security-sensitive changes
 

@@ -9,5 +9,6 @@ pub mod control;
 pub mod platform;
 pub mod ports;
 pub mod proxy;
+pub mod sandbox;
 pub mod spec;
 pub mod systemvm;
