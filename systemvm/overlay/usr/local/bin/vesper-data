@@ -46,6 +46,39 @@ probe() {
   echo "${t:-unknown} ${l:-}"
 }
 
+# The blocks only root may use (TD-053, D-076): Firecracker and every jail-side write run as a non-root uid, so the
+# kernel stops their writes (a snapshot into a jail) at this reserve with ENOSPC, while dockerd and containerd, which
+# run as root, keep it. The larger of the System VM's memory (vesper-vesperd's free-space reserve) and 5% of the disk;
+# set on every boot, because the memory follows the launch config.
+root_reserve() { # DEV [NONROOT_BYTES]: with NONROOT_BYTES, leave exactly that much to non-root (a test hook)
+  rinfo=$(tune2fs -l "$1" 2>&1) || { echo "tune2fs -l: $(printf '%s' "$rinfo" | tail -1)" >&2; return 1; }
+  rbs=$(printf '%s\n' "$rinfo" | sed -n 's/^Block size: *//p')
+  rcount=$(printf '%s\n' "$rinfo" | sed -n 's/^Block count: *//p')
+  rfree=$(printf '%s\n' "$rinfo" | sed -n 's/^Free blocks: *//p')
+  case "$rbs:$rcount:$rfree" in *[!0-9:]*|:*|*::*|*:) echo "tune2fs -l: no sizes ($rbs:$rcount:$rfree)" >&2; return 1 ;; esac
+  if [ -n "${2:-}" ]; then
+    # Mounted: the superblock's free count is stale until unmount, so the kernel's own count is used.
+    rfree=$(stat -f -c '%f' "$MNT" 2>/dev/null); case "$rfree" in ''|*[!0-9]*) return 1 ;; esac
+    rblocks=$((rfree - ${2} / rbs)); [ "$rblocks" -ge 0 ] || rblocks=0
+    # tune2fs takes at most half the disk: a test on a nearly empty disk fills the rest as root first, with
+    # allocated but unwritten blocks, so the sparse image on macOS does not grow.
+    rhalf=$((rcount / 2))
+    if [ "$rblocks" -gt "$rhalf" ]; then
+      fallocate -l $(( (rblocks - rhalf + 1) * rbs )) "$MNT/.root-reserve-fill" 2>/dev/null \
+        || { echo "fallocate of the filler failed" >&2; return 1; }
+      sync
+      rfree=$(stat -f -c '%f' "$MNT" 2>/dev/null); case "$rfree" in ''|*[!0-9]*) return 1 ;; esac
+      rblocks=$((rfree - ${2} / rbs)); [ "$rblocks" -ge 0 ] || rblocks=0
+    fi
+  else
+    rmem=$(awk '/^MemTotal:/{print $2 * 1024}' /proc/meminfo)
+    rpct=$((rcount / 100 * 5))
+    rblocks=$(( ${rmem:-0} / rbs )); [ "$rblocks" -ge "$rpct" ] || rblocks=$rpct
+  fi
+  rerr=$(tune2fs -r "$rblocks" "$1" 2>&1) || { echo "tune2fs -r $rblocks: $(printf '%s' "$rerr" | tail -1)" >&2; return 1; }
+  echo "$rblocks"
+}
+
 mount_() {
   dev=$(device)
   [ -n "$dev" ] || { record absent; return 0; }
@@ -64,6 +97,7 @@ mount_() {
     "ext4 $LABEL") ;;
     *) record refused "$dev" "foreign:$1:${2:-}"; return 1 ;;
   esac
+  root_reserve "$dev" > /dev/null || echo "vesper-data: could not set the root reserve of $dev" >&2
   mkdir -p "$MNT"
   mount -t ext4 -o noatime "$dev" "$MNT" || { record refused "$dev" mount-failed; return 1; }
   for d in $DIRS; do
@@ -354,7 +388,24 @@ test_delete() {
   esac
 }
 
+# Suite hook (TD-053): BYTES leaves that much free space to non-root writers; default puts the boot sizing back;
+# rootwrite shows root can still write 1 MiB.
+test_root_reserve() {
+  dev=$(device); [ -b "$dev" ] && grep -q " $MNT " /proc/mounts || { echo "ERR data disk not mounted"; return 1; }
+  case "${1:-}" in
+    default) rm -f "$MNT/.root-reserve-fill"; sync
+             b=$(root_reserve "$dev" 2>&1) || { echo "ERR $b"; return 1; }; echo "ROOT-RESERVE blocks=$b (boot sizing)" ;;
+    rootwrite)
+      if dd if=/dev/zero of="$MNT/.root-reserve-probe" bs=1M count=1 2>/dev/null && sync; then r=ok; else r=failed; fi
+      rm -f "$MNT/.root-reserve-probe"; echo "ROOT-RESERVE rootwrite=$r" ;;
+    *) case "${1:-}" in ''|*[!0-9]*) echo "ERR usage: vesper-data test-root-reserve BYTES|default|rootwrite"; return 2 ;; esac
+       b=$(root_reserve "$dev" "$1" 2>&1) || { echo "ERR $b"; return 1; }
+       echo "ROOT-RESERVE blocks=$b nonroot_avail=$(df -k "$MNT" | awk 'NR==2 {print $4 * 1024}')" ;;
+  esac
+}
+
 case "${1:-}" in
+  test-root-reserve) test_root_reserve "${2:-}" ;;
   legacy) legacy "${2:-}" "${3:-}" ;;
   test-import) test_import "${2:-}" ;;
   test-delete) test_delete "${2:-}" ;;
@@ -365,5 +416,5 @@ case "${1:-}" in
   mount) mount_ ;;
   status) status ;;
   stop) stop ;;
-  *) echo "ERR usage: vesper-data mount|status|stop|trim|binds|label|test-relabel LABEL|legacy status|legacy import-volume NAME|legacy delete [--yes]|test-import plant|plant-outside|unplant-outside|import|check|clean|test-delete plant|delete|check|clean"; exit 2 ;;
+  *) echo "ERR usage: vesper-data mount|status|stop|trim|binds|label|test-relabel LABEL|test-root-reserve BYTES|default|rootwrite|legacy status|legacy import-volume NAME|legacy delete [--yes]|test-import plant|plant-outside|unplant-outside|import|check|clean|test-delete plant|delete|check|clean"; exit 2 ;;
 esac
