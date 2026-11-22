@@ -25,6 +25,7 @@ new ADR, and the old ADR then links forward to it. The repository had no ADR ser
 | [0009](0009-shares-into-microvms-over-nfs.md) | Host shares into shim microVMs: one `unfs3` server per microVM, inside that microVM's network namespace | accepted | 2026-11-13 | none |
 | [0010](0010-no-container-is-systemvm-root.md) | No container is root on the System VM: dockerd remaps every container to an unprivileged user namespace | accepted | 2026-11-14 | none |
 | [0011](0011-docker-containers-in-microvms.md) | Docker containers in microVMs: an opt-in `vesper` runtime that takes over dockerd's network namespace | accepted | 2026-11-22 | none |
+| [0012](0012-sandbox-and-signing.md) | Host binaries apply a seatbelt profile to themselves at start (`sandbox_init`), fail closed, and are ad-hoc signed with the hardened runtime | accepted | 2026-11-22 | none |
 
 ## Candidates
 
