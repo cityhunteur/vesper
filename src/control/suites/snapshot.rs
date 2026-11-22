@@ -10,6 +10,7 @@
 //! Needs a launch config with a share (`make systemvm-snapshot-suite` names `run/vesperd-share`).
 
 use super::launchapi::{first, wait_absent};
+use super::snapshot_bounds::{jail_write_stops_at_root_reserve, uffd_load_refused};
 use super::vesperd::{BOOT_ARGS, Client, TEARDOWN_TIMEOUT, Vesperd, signal, state_of, wait_exit};
 use super::{
     ControlEndpoint, Session, SuiteReport, SuiteStep, VESPERD_REQUEST_CEILING, VesperdRun, connect,
@@ -26,7 +27,7 @@ pub const DEFAULT_CEILING_MIB: u64 = 640;
 /// The largest guest the measurement step boots under the default ceiling, and how much of it the guest dirties.
 pub const MEASURE_GUEST_MIB: u64 = 640;
 pub const MEASURE_FILL_MIB: u64 = 512;
-const STEPS: usize = 25;
+const STEPS: usize = 26;
 const DRIVE_BYTES: usize = 1024 * 1024;
 
 /// Where the suite works: the `vesperd` runner and an absolute directory inside a configured share.
@@ -217,8 +218,9 @@ pub fn run_snapshot_suite(endpoint: &ControlEndpoint, run: &SnapshotRun, id: &st
         format!("{id}-b"),
         format!("{id}-c"),
         format!("{id}-m"),
+        format!("{id}-u"),
     ];
-    let [a, b, c, m] = &ids;
+    let [a, b, c, m, u] = &ids;
     let names = [
         format!("{id}.mem"),
         format!("{id}.vmstate"),
@@ -517,6 +519,12 @@ pub fn run_snapshot_suite(endpoint: &ControlEndpoint, run: &SnapshotRun, id: &st
         .iter()
         .flat_map(|(name, dest)| ["--stage".to_string(), format!("store:{name}:{dest}")])
         .collect();
+        // CE-0011: the System VM's kernel has no userfaultfd (CONFIG_USERFAULTFD is not set), so a load with the Uffd
+        // memory backend gets Firecracker's own refusal. Firecracker ends after a failed load, so this runs in a
+        // vesperd of its own.
+        step(&mut steps, "uffd_load_refused", || {
+            uffd_load_refused(v, u, &flags)
+        });
         let restored = step(&mut steps, "new_vesperd_stages_by_link", || {
             let (vb, line, took) = v.start_with(b, "b.sock", &flags)?;
             let memf = jail_file(&mut control, b, "/snap.mem")?;
@@ -607,35 +615,7 @@ pub fn run_snapshot_suite(endpoint: &ControlEndpoint, run: &SnapshotRun, id: &st
             // TD-053 (D-076): Firecracker writes as a non-root uid, so the data disk's root-reserved blocks stop its
             // snapshot with its own ENOSPC, while root (dockerd) can still write. 64 MiB is left to non-root.
             step(&mut steps, "jail_write_stops_at_root_reserve", || {
-                let mut api = Client::connect(&vb.socket)?;
-                let (_, set) = control.data(&["test-root-reserve", "67108864"])?;
-                let full = api.call("PUT", "/snapshot/create", Some(r#"{"snapshot_type":"Full","snapshot_path":"/snap3.vmstate","mem_file_path":"/snap3.mem"}"#));
-                let (_, root) = control.data(&["test-root-reserve", "rootwrite"])?;
-                let (_, back) = control.data(&["test-root-reserve", "default"])?;
-                let full = full?;
-                if full.status != 400 || !full.body.contains("No space left on device") {
-                    return Err(format!(
-                        "{}; create past the reserve: {} {}",
-                        first(&set),
-                        full.status,
-                        full.body
-                    ));
-                }
-                if first(&root) != "ROOT-RESERVE rootwrite=ok"
-                    || !first(&back).starts_with("ROOT-RESERVE blocks=")
-                {
-                    return Err(format!("{}; {}", first(&root), first(&back)));
-                }
-                Ok((
-                    (),
-                    format!(
-                        "{}; PUT /snapshot/create -> 400 {}; {}; {}",
-                        first(&set),
-                        full.body,
-                        first(&root),
-                        first(&back)
-                    ),
-                ))
+                jail_write_stops_at_root_reserve(&mut control, &vb.socket)
             });
             step(&mut steps, "stop_restored", || {
                 let done = stop(&mut control, &mut vb, b)?;
