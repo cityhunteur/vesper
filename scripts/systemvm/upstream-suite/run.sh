@@ -357,7 +357,7 @@ echo "rc=$RC wall_s=$(( $(date +%s) - START )) collected=$COLLECTED stopped=${ST
   gzip -dc "$OUT/pytest.log.gz" | awk '/short test summary info/{f=1} f'; } > "$OUT/pytest-progress.log" || true
 if [ -s "$RES/report.json" ]; then
   python3 -I "$HERE/collect.py" "$OUT/results.json" --collected "$OUT/collected.txt" --meta "$OUT/meta.json" \
-    --exitcode "$RC" --log "$OUT/pytest-progress.log" "$RES/report.json"
+    --exitcode "$RC" --log "$OUT/pytest-progress.log" --junit "$RES/junit.xml" "$RES/report.json"
   gzip -c "$RES/report.json" > "$OUT/report.json.gz"
 else
   say "no JSON report (the run was stopped); recovering finished tests from the progress log"
@@ -396,14 +396,16 @@ if [ "$N_UNMATCHED" -gt 0 ] && [ -z "$STOPPED" ] && [ -s "$RES/report.json" ]; t
     docker rm -f "$NAME" >/dev/null 2>&1 || true
     docker run -d --name "$NAME" "${common[@]}" "$CONTAINER" "${INSRV[@]}" ./tools/test.sh --binary-dir "$BIN" -rA \
       -n 1 --timeout "$TEST_TIMEOUT_S" --timeout-method=thread \
-      --json-report-file=/results/alone.json -- "${AGAIN[@]}" >/dev/null
+      --junitxml=/results/alone-junit.xml --json-report-file=/results/alone.json -- "${AGAIN[@]}" >/dev/null
     with_timeout $(( (TEST_TIMEOUT_S + 60) * N_UNMATCHED + 600 )) docker wait "$NAME" >/dev/null 2>&1 || docker kill "$NAME" >/dev/null 2>&1 || true
     docker logs "$NAME" 2>&1 | gzip -6 > "$OUT/pytest-alone.log.gz"
     docker rm -f "$NAME" >/dev/null 2>&1 || true
     if [ -s "$RES/alone.json" ]; then
       python3 -I "$HERE/collect.py" "$OUT/results.json" --collected "$OUT/collected.txt" --meta "$OUT/meta.json" \
-        --exitcode "$RC" --log "$OUT/pytest-progress.log" --alone "$RES/alone.json" "$RES/report.json"
+        --exitcode "$RC" --log "$OUT/pytest-progress.log" --junit "$RES/junit.xml" --alone "$RES/alone.json" \
+        --alone-junit "$RES/alone-junit.xml" "$RES/report.json"
       gzip -c "$RES/alone.json" > "$OUT/alone.json.gz"
+      [ -f "$RES/alone-junit.xml" ] && gzip -9 -c "$RES/alone-junit.xml" > "$OUT/alone-junit.xml.gz"
       judge
     else
       say "the isolated rerun wrote no report; the first verdict stands"
