@@ -2,6 +2,8 @@ package task
 
 import (
 	"fmt"
+	"github.com/cityhunteur/vesper/shim/internal/bundle"
+	specs "github.com/opencontainers/runtime-spec/specs-go"
 	"sync"
 	"time"
 
@@ -44,6 +46,10 @@ type Task struct {
 	Config      []byte
 	LaunchArgs  []string // vesper-microvm launch arguments for the task's host shares (GH #160 M5)
 	SizeArgs    []string // vesper-microvm launch arguments for the machine the spec's resources ask for (TD-048)
+	Docker      bool     // a dockerd task: its own drive and network namespace (ADR 0011)
+	Holder      int      // pid of the namespace holder of a Docker task
+	dockerSpec  *specs.Spec
+	dockerFiles []bundle.DockerFile
 	Port        uint32
 	Session     *backend.Session
 	stdinClosed bool
@@ -74,6 +80,14 @@ func (t *Task) Pid() int {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.pid
+}
+
+// SetCreatedPid is the pid a created task reports until it starts: a Docker task's namespace holder, which
+// containerd hands dockerd through Connect to wire the network (ADR 0011 §2).
+func (t *Task) SetCreatedPid(pid int) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.pid = pid
 }
 
 // MarkRunning records the VMM pid; only valid from created.

@@ -40,7 +40,7 @@ committed() {
     name=${e##*/}; owner=${name%%.*}; id=${name#*.}
     bytes=$(cat "$e" 2>/dev/null)
     age=$(( t - $(stat -c %Y "$e" 2>/dev/null || echo 0) ))
-    if digits "$bytes" && { [ -d "$(cgroup_of "$owner" "$id")" ] || [ -d "$(jail_of "$owner" "$id")" ] || [ "$age" -lt "$PENDING_S" ]; }; then
+    if digits "$bytes" && { [ -d "$(cgroup_of "$owner" "$id")" ] || [ -d "$(jail_of "$owner" "$id")" ] || { [ "$owner" = shim ] && [ -d "$R/var/lib/vesper/state/microvm/jailer/firecracker/$id" ]; } || [ "$age" -lt "$PENDING_S" ]; }; then
       sum=$((sum + bytes)); n=$((n + 1))
     else
       rm -f "$e"

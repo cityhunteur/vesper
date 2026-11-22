@@ -65,6 +65,14 @@ head -c "$size" > "$dir/config.json"
 if [ "$op" = RUN ]; then
   why=$(/usr/bin/vesper-console shares mount "$dir" 2>/dev/ttyS0) || fail shares "$(printf '%s' "$why" | tr -d '"\\' | tr '\n' ' ' | head -c 300)"
 fi
+# A Docker task's resolv.conf, hosts and hostname, bound from files/ by its config (ADR 0011 §4).
+if [ "$op" = RUN ]; then
+  why=$(/usr/bin/vesper-console files "$dir" 2>/dev/ttyS0) || fail files "$(printf '%s' "$why" | tr -d '"\\' | tr '\n' ' ' | head -c 300)"
+fi
+# The guest's root is its initramfs, where pivot_root is refused: a task with its own mount namespace (a Docker
+# task, ADR 0011) is jailed by runc with a move and a chroot instead. The microVM is the boundary (CE-0004).
+nopivot=''
+grep -q '"type":"mount"' "$dir/config.json" && nopivot=--no-pivot
 mkfifo "$dir/in" "$dir/out" "$dir/err"
 socat -u VSOCK-LISTEN:$port,reuseaddr OPEN:$dir/in,wronly > /dev/null 2>/dev/ttyS0 & relays="$relays $!"
 socat -u OPEN:$dir/out,rdonly VSOCK-LISTEN:$((port+1)),reuseaddr > /dev/null 2>/dev/ttyS0 & relays="$relays $!"
@@ -77,11 +85,14 @@ echo "READY $port"
   if [ "$tty" = 1 ]; then
     /usr/bin/vesper-console "$op" "$dir"
   elif [ "$op" = RUN ]; then
-    /usr/bin/runc --root /run/runc --log "$dir/runc.log" --log-format json run --pid-file "$dir/pid" --bundle "$dir" workload
+    /usr/bin/runc --root /run/runc --log "$dir/runc.log" --log-format json run $nopivot --pid-file "$dir/pid" --bundle "$dir" workload
   else
     /usr/bin/runc --root /run/runc --log "$dir/runc.log" --log-format json exec --pid-file "$dir/pid" --process "$dir/config.json" workload
   fi
   rc=$?
+  # The microVM is stopped without a shutdown once its task has exited, so what the workload wrote is put on the
+  # drive first: a Docker task's drive outlives the task (ADR 0011 §5).
+  sync
   echo "$rc" > "$dir/status"
   echo "VESPER-WORKLOAD-EXIT $rc p$port" > /dev/ttyS0
 ) < "$dir/in" > "$dir/out" 2> "$dir/err" &

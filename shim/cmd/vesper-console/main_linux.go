@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/containerd/console"
@@ -60,6 +61,15 @@ func main() {
 		shares.ReplayStall = 20 * time.Second
 		t, m, r := shares.Replay(os.Stdin, "/run/sessions/p1028", "/newroot")
 		fmt.Fprintf(os.Stderr, "VESPER-SHARE-REPLAY touched=%d missing=%d rejected=%d\n", t, m, r)
+		return
+	}
+	// files SESSION-DIR: the files dockerd binds into a Docker task, from its config, under SESSION-DIR/files
+	// (ADR 0011 §4). A failure prints one line on stdout, which vesper-guest-session passes on.
+	if len(os.Args) == 3 && os.Args[1] == "files" {
+		if err := writeDockerFiles(os.Args[2]); err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
 		return
 	}
 	if len(os.Args) == 5 && os.Args[1] == "resize" {
@@ -119,6 +129,9 @@ func run(op, dir string) (int, error) {
 	defer cancel()
 	args := []string{"--root", "/run/runc", "--log", filepath.Join(dir, "runc.log"), "--log-format", "json"}
 	action := []string{"create", "--bundle", dir}
+	if raw, err := os.ReadFile(filepath.Join(dir, "config.json")); err == nil && strings.Contains(string(raw), `"type":"mount"`) {
+		action = append(action, "--no-pivot") // the guest's root is its initramfs (ADR 0011; see vesper-guest-session)
+	}
 	if op == "EXEC" {
 		action = []string{"exec", "--detach", "--process", filepath.Join(dir, "config.json")}
 	}

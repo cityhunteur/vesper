@@ -118,7 +118,7 @@ prepare() {
   done
   # vesper-runc is runc plus one step after create: it asks each bind source on a macOS share for its owner again as
   # the container's uid, so a container does not see its binds owned by "nobody" in its first second (TD-062).
-  printf '{"userns-remap":"default","authorization-plugins":["vesper-authz"],"runtimes":{"vesper-runc":{"path":"/usr/bin/vesper-runc"}},"default-runtime":"vesper-runc"}\n' > "$CONF.new" \
+  printf '{"userns-remap":"default","authorization-plugins":["vesper-authz"],"runtimes":{"vesper-runc":{"path":"/usr/bin/vesper-runc"},"vesper":{"runtimeType":"io.containerd.vesper.v2"}},"default-runtime":"vesper-runc"}\n' > "$CONF.new" \
     && mv -f "$CONF.new" "$CONF" || refuse write-daemon-json
   legacy_store > "$RUN.legacy" # counted once a boot; HEALTH reads it on every poll
   finish mapped

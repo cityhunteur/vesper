@@ -15,6 +15,7 @@ import (
 
 	"github.com/cityhunteur/vesper/shim/internal/backend"
 	"github.com/cityhunteur/vesper/shim/internal/bundle"
+	"github.com/cityhunteur/vesper/shim/internal/ctrns"
 	"github.com/cityhunteur/vesper/shim/internal/shares"
 	eventstypes "github.com/containerd/containerd/api/events"
 	taskAPI "github.com/containerd/containerd/api/runtime/task/v3"
@@ -109,6 +110,9 @@ func (s *Service) Create(ctx context.Context, r *taskAPI.CreateTaskRequest) (_ *
 		return nil, errgrpc.ToGRPCf(errdefs.ErrInvalidArgument, "%v", err)
 	}
 	spec.Process.Terminal = r.Terminal
+	if root, ok := bundle.DockerRoot(spec); ok && len(mounts) == 0 {
+		return s.createDocker(ctx, r, spec, root)
+	}
 	// Bind mounts from macOS shares become NFS mounts from the microVM's own server (ADR 0009, GH #160 M5); other
 	// bind mounts keep today's behaviour.
 	procMounts, _ := os.ReadFile("/proc/mounts")
@@ -169,6 +173,61 @@ func (s *Service) Create(ctx context.Context, r *taskAPI.CreateTaskRequest) (_ *
 	return &taskAPI.CreateTaskResponse{Pid: uint32(os.Getpid())}, nil
 }
 
+// The namespace holder, replaceable in tests.
+var (
+	startNetns   = ctrns.Start
+	releaseNetns = ctrns.Release
+)
+
+// createDocker is Create for a dockerd task (ADR 0011): the spec is checked against the field table, the
+// container's own drive is built or reused, and a network namespace is made for dockerd to wire; Create reports the
+// holder's pid, through which dockerd finds that namespace.
+func (s *Service) createDocker(ctx context.Context, r *taskAPI.CreateTaskRequest, spec *specs.Spec, root string) (*taskAPI.CreateTaskResponse, error) {
+	files, err := bundle.CheckDocker(spec, r.ID)
+	if err != nil {
+		return nil, errgrpc.ToGRPCf(errdefs.ErrInvalidArgument, "%v", err)
+	}
+	size, err := bundle.SizeOf(spec, bundle.SystemCPUs())
+	if err != nil {
+		return nil, errgrpc.ToGRPCf(errdefs.ErrInvalidArgument, "%v", err)
+	}
+	t := newTask(r.ID, r.Bundle)
+	t.Port = 1028
+	// The guest config is built at Start: dockerd writes the container's address into its hosts file while it wires
+	// the namespace, after Create. Built here once with no files, it proves the spec converts.
+	if _, err := bundle.GuestDockerConfig(spec, nil, bundle.GuestResources(spec), fmt.Sprintf("/run/sessions/p%d", t.Port)); err != nil {
+		return nil, errgrpc.ToGRPCf(errdefs.ErrInvalidArgument, "%v", err)
+	}
+	t.dockerSpec, t.dockerFiles = spec, files
+	var uids, gids []specs.LinuxIDMapping
+	if spec.Linux != nil {
+		uids, gids = spec.Linux.UIDMappings, spec.Linux.GIDMappings
+	}
+	image, built, err := s.backend.PrepareDocker(ctx, r.ID, root, uids, gids)
+	if err != nil {
+		return nil, errgrpc.ToGRPCf(errdefs.ErrFailedPrecondition, "%v", err)
+	}
+	log.G(ctx).WithFields(log.Fields{"task": r.ID, "drive": image, "built": built}).Info("docker drive ready")
+	holder, err := startNetns(ctx, r.ID)
+	if err != nil {
+		return nil, errgrpc.ToGRPCf(errdefs.ErrFailedPrecondition, "%v", err)
+	}
+	t.Image, t.Docker, t.Holder = image, true, holder
+	t.SetCreatedPid(holder)
+	t.LaunchArgs, t.SizeArgs = []string{"--ctrns"}, size.LaunchArgs()
+	t.Stdin, t.Stdout, t.Stderr, t.Terminal = r.Stdin, r.Stdout, r.Stderr, r.Terminal
+	s.task = t
+	s.persist(ctx, t)
+	s.publish(ctx, runtime.TaskCreateEventTopic, &eventstypes.TaskCreate{
+		ContainerID: r.ID,
+		Bundle:      r.Bundle,
+		Rootfs:      r.Rootfs,
+		IO:          &eventstypes.TaskIO{Stdin: r.Stdin, Stdout: r.Stdout, Stderr: r.Stderr, Terminal: r.Terminal},
+		Pid:         uint32(holder),
+	})
+	return &taskAPI.CreateTaskResponse{Pid: uint32(holder)}, nil
+}
+
 // Start boots the microVM for init, then starts a runc process with connected streams.
 func (s *Service) Start(ctx context.Context, r *taskAPI.StartRequest) (*taskAPI.StartResponse, error) {
 	t, err := s.getProcess(r.ID, r.ExecID)
@@ -181,6 +240,15 @@ func (s *Service) Start(ctx context.Context, r *taskAPI.StartRequest) (*taskAPI.
 		return nil, errgrpc.ToGRPCf(errdefs.ErrFailedPrecondition, "process %s is %s, not created", t.ID, t.Phase())
 	}
 	pid := 0
+	if r.ExecID == "" && t.Docker && t.dockerSpec != nil {
+		contents, err := backend.ReadDockerFiles(t.dockerFiles)
+		if err != nil {
+			return nil, errgrpc.ToGRPCf(errdefs.ErrFailedPrecondition, "%v", err)
+		}
+		if t.Config, err = bundle.GuestDockerConfig(t.dockerSpec, contents, bundle.GuestResources(t.dockerSpec), fmt.Sprintf("/run/sessions/p%d", t.Port)); err != nil {
+			return nil, errgrpc.ToGRPCf(errdefs.ErrInvalidArgument, "%v", err)
+		}
+	}
 	if r.ExecID == "" {
 		pid, err = s.backend.Launch(ctx, t.ID, t.Image, append(append([]string(nil), t.LaunchArgs...), t.SizeArgs...))
 		if err != nil {
@@ -385,7 +453,14 @@ func (s *Service) Delete(ctx context.Context, r *taskAPI.DeleteRequest) (*taskAP
 	if err := s.backend.Cleanup(ctx, t.ID, true); err != nil {
 		log.G(ctx).WithError(err).Warn("microVM cleanup on delete")
 	}
-	_ = os.Remove(t.Image)
+	if t.Docker {
+		// The drive is the container's own and outlives the task (ADR 0011 §5); the namespace goes with it.
+		if err := releaseNetns(ctx, t.ID); err != nil {
+			log.G(ctx).WithError(err).Warn("network namespace release on delete")
+		}
+	} else {
+		_ = os.Remove(t.Image)
+	}
 	_ = mount.UnmountAll(filepath.Join(t.Bundle, "rootfs"), 0)
 	status, at := t.Exit()
 	s.publish(ctx, runtime.TaskDeleteEventTopic, &eventstypes.TaskDelete{ContainerID: t.ID, ID: t.ID, Pid: uint32(t.Pid()), ExitStatus: status, ExitedAt: protobuf.ToTimestamp(at)})

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/cityhunteur/vesper/shim/internal/backend"
+	"github.com/cityhunteur/vesper/shim/internal/ctrns"
 	"github.com/cityhunteur/vesper/shim/internal/task"
 	"github.com/containerd/containerd/api/types"
 	"github.com/containerd/containerd/v2/core/mount"
@@ -147,6 +148,10 @@ func (m manager) Stop(ctx context.Context, id string) (shim.StopStatus, error) {
 	b := backend.NewMicroVM()
 	if err := b.Cleanup(ctx, id, true); err != nil {
 		log.G(ctx).WithError(err).Warn("microVM cleanup during shim delete")
+	}
+	// A Docker task's namespace and holder (ADR 0011 §6); nothing to do for a ctr task.
+	if err := ctrns.Release(ctx, id); err != nil {
+		log.G(ctx).WithError(err).Warn("network namespace release during shim delete")
 	}
 	if err := mount.UnmountRecursive(filepath.Join(bundle, "rootfs"), 0); err != nil {
 		log.G(ctx).WithError(err).Warn("rootfs unmount during shim delete")

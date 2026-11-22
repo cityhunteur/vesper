@@ -100,7 +100,11 @@ func Validate(bundle string, mounts []mount.Mount) (*specs.Spec, error) {
 		return fail("root.path is unexpected: "+spec.Root.Path, "the shim mounts the snapshot at <bundle>/rootfs")
 	}
 	if len(mounts) == 0 {
-		entries, err := os.ReadDir(filepath.Join(bundle, "rootfs"))
+		rootDir := filepath.Join(bundle, "rootfs")
+		if root, ok := DockerRoot(&spec); ok {
+			rootDir = root // dockerd mounts the rootfs itself and passes no mounts (ADR 0011 gap 3)
+		}
+		entries, err := os.ReadDir(rootDir)
 		if err != nil || len(entries) == 0 {
 			return fail("no rootfs mounts and <bundle>/rootfs is empty", "the snapshotter returned no mounts; check the image was unpacked (ctr images ls shows unpacked)")
 		}

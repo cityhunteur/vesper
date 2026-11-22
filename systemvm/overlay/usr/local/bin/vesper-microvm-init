@@ -41,7 +41,9 @@ if [ -n "$sharenet" ] && [ -z "$net" ]; then
   # The NFS client for the task's shares (GH #160 M4); vesper-console mounts them when the session starts.
   /bin/busybox modprobe -a nfsv3 >/dev/null 2>&1 && echo "VESPER-NFS-CLIENT-OK" || echo "VESPER-NFS-CLIENT-FAILED"
 fi
+mtu=$(/bin/busybox sed -n 's/.*vesper_mtu=\([0-9]*\).*/\1/p' /proc/cmdline)
 if [ -n "$net" ]; then
+  [ -n "$mtu" ] && ip link set dev eth0 mtu "$mtu"
   ip link set dev eth0 up && ip addr add "${net%,*}" dev eth0 && ip route add default via "${net#*,}" \
     && mkdir -p /etc && echo "nameserver ${net#*,}" > /etc/resolv.conf && echo "VESPER-NET-OK ${net}" || echo "VESPER-NET-FAILED"
 fi

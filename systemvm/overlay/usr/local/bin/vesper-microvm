@@ -108,6 +108,9 @@ LOG_MAX=1048576                    # console log bound: the log plus one previou
 # and its reaper never looks here, because the two backends may use the same id.
 STATE=/run/vesper/microvm
 NETNS=$STATE/netns
+CTRNS=$STATE/ctrns                 # a Docker task's network namespace, bound by the shim (ADR 0011 §2); records <id>.holder
+DISK_JAIL=/var/lib/vesper/state/microvm/jailer   # a Docker task's jail, on the data disk beside its drive (ADR 0011 §5)
+DRIVES=/var/lib/vesper/state/microvm/drives      # one drive per Docker container, swept when dockerd has forgotten it
 REC=$STATE/records                 # records/<id>: "pid=<launch pid> start=<its start time> t=<epoch>"
 LOCK=$STATE/lock                   # serialises record and namespace creation with the reaper
 JUSER=vesper-shim-jail             # the uid 10000 user: the tap owner is given by name (netns.sh)
@@ -249,7 +252,19 @@ reap() { # one pass under the lock launch takes
     if [ -e "$f" ]; then echo "KEPT $nid namespace without a record, still bound"
     else echo "REAPED $nid namespace without a record"; reaped=$((reaped + 1)); fi
   done
+  # A Docker task's namespace whose shim is gone (ADR 0011 §6): containerd's shim delete normally takes it down.
+  for f in "$CTRNS"/*; do
+    [ -e "$f" ] || continue
+    case "$f" in *.holder) continue ;; esac
+    nid=${f##*/}
+    valid_id "$nid" || continue
+    [ -n "$(shim_for "$nid")" ] && continue
+    [ -n "$(fcpid "$nid")" ] && continue
+    out=$(ctrns_down "$nid" | head -1)
+    case "$out" in "CTRNS $nid down") echo "REAPED $nid namespace of a gone task"; reaped=$((reaped + 1)) ;; *) echo "KEPT $nid $out" ;; esac
+  done
   unlock
+  drives_sweep
   echo "REAP $reaped"
 }
 # ---- test hooks for the share network (make systemvm-sharenet-suite) ----
@@ -605,10 +620,97 @@ test_unfs_probe() { # ID [probe flags]
   return $rc
 }
 
+# The jail root of microVM ID: a Docker task's is on the data disk (ADR 0011 §5), every other one in tmpfs.
+jail_base() { if [ -e "$CTRNS/$1" ]; then echo "$DISK_JAIL"; else echo "$JAIL"; fi; }
+
+# ctrns_links ID: the data link of a Docker task in its namespace (ADR 0011 §3). Prints the Firecracker network
+# config fragment on its first line and the boot arguments on its second; prints nothing with no interface but lo;
+# fails with a reason otherwise.
+ctrns_links() {
+  cl_f="$CTRNS/$1"
+  cl_ifs=$(nsenter --net="$cl_f" ip -o link 2>/dev/null | awk -F': ' '{print $2}' | sed 's/@.*//' | grep -v '^lo$' | tr '\n' ' ' | sed 's/ $//')
+  [ -z "$cl_ifs" ] && return 0
+  [ "$cl_ifs" = eth0 ] || { echo "the container's namespace holds $cl_ifs; a vesper container has one network (ADR 0011)"; return 1; }
+  cl_addr=$(nsenter --net="$cl_f" ip -o -4 addr show dev eth0 | awk '{print $4}')
+  [ "$(printf '%s\n' "$cl_addr" | grep -c .)" = 1 ] || { echo "eth0 needs exactly one IPv4 address, it has: ${cl_addr:-none}"; return 1; }
+  [ -z "$(nsenter --net="$cl_f" ip -o -6 addr show dev eth0 scope global 2>/dev/null)" ] || { echo "IPv6 networks are refused for the vesper runtime (ADR 0011)"; return 1; }
+  cl_mac=$(nsenter --net="$cl_f" cat /sys/class/net/eth0/address); cl_mtu=$(nsenter --net="$cl_f" cat /sys/class/net/eth0/mtu)
+  cl_gw=$(nsenter --net="$cl_f" ip route | awk '/^default/ {print $3; exit}')
+  cl_ip=${cl_addr%/*}
+  # The tap carries the guest's frames; eth0's are redirected to it before the namespace's stack sees them, and the
+  # guest's are passed to eth0 only from the container's MAC and address (an allow-list, council SEC-5).
+  nsenter --net="$cl_f" sh -c '
+    set -e
+    tunctl -t vd0 -u "$1" >/dev/null
+    ip link set dev vd0 mtu "$2" up
+    tc qdisc add dev eth0 ingress
+    tc filter add dev eth0 parent ffff: prio 1 matchall action mirred egress redirect dev vd0
+    tc qdisc add dev vd0 ingress
+    tc filter add dev vd0 parent ffff: prio 1 protocol ip flower src_mac "$3" src_ip "$4" action mirred egress redirect dev eth0
+    tc filter add dev vd0 parent ffff: prio 2 protocol arp flower src_mac "$3" arp_sip "$4" arp_sha "$3" action mirred egress redirect dev eth0
+    tc filter add dev vd0 parent ffff: prio 9 matchall action drop' sh "$JUSER" "$cl_mtu" "$cl_mac" "$cl_ip" 2>&1 \
+    || { echo "data link: tc failed"; return 1; }
+  echo ",\"network-interfaces\":[{\"iface_id\":\"eth0\",\"host_dev_name\":\"vd0\",\"guest_mac\":\"$cl_mac\"}]"
+  cl_boot=" vesper_net=$cl_addr${cl_gw:+,$cl_gw}"
+  [ "$cl_mtu" = 1500 ] || cl_boot="$cl_boot vesper_mtu=$cl_mtu"
+  echo "$cl_boot"
+}
+ctrns_links_down() { [ -e "$CTRNS/$1" ] && nsenter --net="$CTRNS/$1" sh -c 'tc qdisc del dev eth0 ingress 2>/dev/null; ip link del vd0 2>/dev/null' ; return 0; }
+
+# ctrns-up ID HOLDER: make the bound namespace default-deny before dockerd wires it (ADR 0011 §2).
+ctrns_up() {
+  cu_id=${1:-}; cu_pid=${2:-}
+  valid_id "$cu_id" && digits "$cu_pid" || { echo "ERR usage: ctrns-up ID HOLDER-PID"; return 2; }
+  cu_f="$CTRNS/$cu_id"
+  grep -q " $cu_f nsfs " /proc/mounts || { echo "ERR $cu_f is not a bound network namespace"; return 1; }
+  [ "$(stat -L -c %i "/proc/$cu_pid/ns/net" 2>/dev/null)" = "$(stat -L -c %i "$cu_f")" ] || { echo "ERR holder $cu_pid is not in $cu_f"; return 1; }
+  echo "pid=$cu_pid start=$(proc_stat "$cu_pid" | cut -d' ' -f2)" > "$cu_f.holder" || { echo "ERR holder record"; return 1; }
+  # shellcheck disable=SC2016
+  nsenter --net="$cu_f" sh -c '
+    set -e
+    for k in all default lo; do
+      echo 1 > /proc/sys/net/ipv6/conf/$k/disable_ipv6; echo 1 > /proc/sys/net/ipv4/conf/$k/rp_filter
+      echo 0 > /proc/sys/net/ipv4/conf/$k/accept_redirects; echo 0 > /proc/sys/net/ipv4/conf/$k/send_redirects
+    done
+    echo 0 > /proc/sys/net/ipv4/ip_forward
+    ip link set dev lo up
+    iptables -w -P INPUT DROP; iptables -w -P FORWARD DROP; iptables -w -A INPUT -i lo -j ACCEPT' 2>&1 || { echo "ERR namespace setup"; return 1; }
+  echo "CTRNS $cu_id up holder=$cu_pid"
+}
+
+# ctrns-down ID: stop the holder, take the links down and unbind the namespace; ABSENT if there is none.
+ctrns_down() {
+  cd_id=${1:-}; valid_id "$cd_id" || { echo "ERR bad id"; return 2; }
+  cd_f="$CTRNS/$cd_id"
+  [ -e "$cd_f" ] || [ -e "$cd_f.holder" ] || { echo "CTRNS $cd_id absent"; return 0; }
+  cd_pid=$(sed -n 's/^pid=\([0-9]*\) .*/\1/p' "$cd_f.holder" 2>/dev/null); cd_start=$(sed -n 's/.* start=\([0-9]*\)$/\1/p' "$cd_f.holder" 2>/dev/null)
+  ctrns_links_down "$cd_id"
+  if digits "$cd_pid" && proc_alive "$cd_pid" "$cd_start"; then kill -KILL "$cd_pid" 2>/dev/null; fi
+  umount "$cd_f" 2>/dev/null
+  rm -f "$cd_f" "$cd_f.holder"
+  if [ -e "$cd_f" ]; then echo "DIRTY $cd_id ctrns"; return 1; fi
+  echo "CTRNS $cd_id down"
+}
+
+# drives-sweep: remove the drive of each Docker container dockerd no longer has, unless a microVM of it runs.
+drives_sweep() {
+  ds_n=0
+  for d in "$DRIVES"/*.ext4; do
+    [ -f "$d" ] || continue
+    ds_id=${d##*/}; ds_id=${ds_id%.ext4}
+    valid_id "$ds_id" || continue
+    ls -d /var/lib/docker/*/containers/"$ds_id" /var/lib/docker/containers/"$ds_id" >/dev/null 2>&1 && continue
+    [ -n "$(fcpid "$ds_id")" ] && continue
+    rm -f "$d" && ds_n=$((ds_n + 1))
+  done
+  [ "$ds_n" -gt 0 ] && fstrim /var/lib/vesper/state 2>/dev/null
+  echo "SWEPT drives=$ds_n"
+}
+
 launch() {
   id=$1; shift
   mode=""; rootfs=""; cmd64=""; vsock=0; runc_smoke=0; guestexec=0; sharenet=0; probe=""
-  unfs_spec=""; unfs_srcs=""; unfs_mounts=""; unfs_squash=0; mem=$MEM_MIB; vcpus=$VCPUS; cpumax=""; snaproom=0
+  unfs_spec=""; unfs_srcs=""; unfs_mounts=""; unfs_squash=0; mem=$MEM_MIB; vcpus=$VCPUS; cpumax=""; snaproom=0; ctrns=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --exit) mode=--exit ;;
@@ -626,6 +728,7 @@ launch() {
         unfs_srcs="$unfs_srcs${unfs_srcs:+$NL}$2"; unfs_spec="$unfs_spec${unfs_spec:+$NL}src $2"; shift ;;
       --unfs-squash) unfs_squash=1 ;;
       --snapshot-room) snaproom=1 ;;
+      --ctrns) ctrns=1 ;;   # a Docker task: its namespace at $CTRNS/ID, its jail on the data disk (ADR 0011)
       --rootfs) rootfs=$2; shift ;;
       --cmd) cmd64=$2; shift ;;
       --mem-mib)   # at most 7 digits keeps the byte arithmetic in range; the memory budget decides what fits
@@ -648,6 +751,9 @@ launch() {
     shift
   done
   # The room loosens the ceiling that holds a hostile workload, so it is for the busybox guest only (council SEC-2).
+  if [ "$ctrns" = 1 ]; then
+    { [ -e "$CTRNS/$id" ] && [ "$sharenet" = 0 ]; } || { echo "ERR --ctrns needs the task's bound namespace and excludes --share-net"; return 2; }
+  fi
   if [ "$snaproom" = 1 ] && [ -n "$rootfs" ]; then echo "ERR --snapshot-room is for the parity conformance check and excludes --rootfs"; return 2; fi
   prep=$(prepare) || { echo "$prep"; return 1; }
   if [ -n "$rootfs" ] && [ ! -f "$rootfs" ]; then echo "ERR rootfs $rootfs missing"; return 1; fi
@@ -686,7 +792,10 @@ launch() {
   # The jail lives on the tmpfs root, so the kernel, initrd and rootfs copied into it use System VM memory outside
   # the cgroup: book them with the ceiling.
   copies=0
-  for f in "$MVM/Image" "$MVM/initrd.gz" ${rootfs:+"$rootfs"}; do s=$(stat -c %s "$f" 2>/dev/null) && copies=$((copies + s)); done
+  jb=$(jail_base "$id")
+  if [ "$jb" = "$JAIL" ]; then
+    for f in "$MVM/Image" "$MVM/initrd.gz" ${rootfs:+"$rootfs"}; do s=$(stat -c %s "$f" 2>/dev/null) && copies=$((copies + s)); done
+  fi
   # From here to the namespace the launch holds the lifecycle lock, so a reaper pass or a cleanup of the same id
   # cannot run in between and give back this launch's admission or remove its jail.
   trap launch_abort INT TERM HUP
@@ -729,8 +838,8 @@ launch() {
     netcfg=",\"network-interfaces\":[{\"iface_id\":\"$SHARE_TAP\",\"host_dev_name\":\"$SHARE_TAP\",\"guest_mac\":\"06:00:a9:fe:4d:02\",\"rx_rate_limiter\":$rl,\"tx_rate_limiter\":$rl}]"
   fi
   unlock
-  root="$JAIL/firecracker/$id/root"
-  rm -rf "$JAIL/firecracker/$id"
+  root="$jb/firecracker/$id/root"
+  rm -rf "$jb/firecracker/$id"
   mkdir -p "$root"
   cp "$MVM/Image" "$root/Image"
   cp "$MVM/initrd.gz" "$root/initrd.gz"
@@ -746,8 +855,14 @@ launch() {
   if [ -n "$cmd64" ]; then
     extra="$extra vesper_cmd=$cmd64"
   fi
+  if [ "$ctrns" = 1 ]; then
+    links=$(ctrns_links "$id") || { echo "ERR network: $links"; ctrns_links_down "$id"; cleanup "$id" > /dev/null; LAUNCHING=""; return 1; }
+    netcfg=$(printf '%s\n' "$links" | sed -n 1p); extra="$extra$(printf '%s\n' "$links" | sed -n 2p)"
+    nsarg="--netns $CTRNS/$id"
+  fi
   if [ -n "$rootfs" ]; then
-    cp "$rootfs" "$root/rootfs.ext4"
+    # The drive of a Docker task is on the same disk as its jail and is linked; anything else is copied.
+    ln "$rootfs" "$root/rootfs.ext4" 2>/dev/null || cp "$rootfs" "$root/rootfs.ext4"
     extra="$extra vesper_rootfs=1"
     drives='[{"drive_id":"rootfs","path_on_host":"/rootfs.ext4","is_root_device":true,"is_read_only":false}]'
   fi
@@ -761,7 +876,7 @@ launch() {
     vsockcfg=',"vsock":{"guest_cid":3,"uds_path":"/v.sock"}'
   fi
   printf '{"boot-source":{"kernel_image_path":"/Image","initrd_path":"/initrd.gz","boot_args":"console=ttyS0 reboot=k panic=1 pci=off rdinit=/init%s"},"drives":%s,"machine-config":{"vcpu_count":%s,"mem_size_mib":%s}%s%s}\n' "$extra" "$drives" "$vcpus" "$mem" "$vsockcfg" "$netcfg" > "$root/vm.json"
-  chown -R "$JUID:$JGID" "$JAIL/firecracker/$id"
+  chown -R "$JUID:$JGID" "$jb/firecracker/$id"
   lf=$(logfile "$id"); pipe="/var/log/.vesper-microvm-$id.pipe"
   rm -f "$lf" "$lf.1" "$pipe"
   mkfifo -m 0600 "$pipe" || { echo "ERR console pipe"; cleanup "$id" > /dev/null; LAUNCHING=""; return 1; }
@@ -771,7 +886,7 @@ launch() {
   start=$(now_ms)
   # shellcheck disable=SC2086
   setsid "$FC_DIR/jailer" --id "$id" --exec-file "$FC_DIR/firecracker" --uid "$JUID" --gid "$JGID" $nsarg \
-    --chroot-base-dir "$JAIL" --cgroup-version 2 --cgroup pids.max=256 --cgroup "memory.max=$ceiling" \
+    --chroot-base-dir "$jb" --cgroup-version 2 --cgroup pids.max=256 --cgroup "memory.max=$ceiling" \
     ${cpumax:+--cgroup "cpu.max=$cpumax"} \
     -- --config-file /vm.json --api-sock /run/firecracker.socket \
     > "$pipe" 2>&1 < /dev/null &
@@ -800,7 +915,7 @@ launch() {
 status() {
   id=$1; pid=$(fcpid "$id")
   if [ -n "$pid" ]; then
-    vs="absent"; [ -S "$JAIL/firecracker/$id/root/v.sock" ] && vs="present"
+    vs="absent"; [ -S "$(jail_base "$id")/firecracker/$id/root/v.sock" ] && vs="present"
     sn=""; vnetns_mounted "$NETNS" "$id" && sn=" sharenet=present"
     [ -e "$UNFS/$id.pid" ] && sn="$sn unfs=$(unfs_state "$id")"
     echo "RUNNING $id pid=$pid vsock=$vs$sn"
@@ -875,7 +990,8 @@ cleanup_locked() {
   id=$1; pid=$(fcpid "$id")
   [ -n "$pid" ] && { kill -KILL "$pid" 2>/dev/null; sleep 0.5; }
   unfs_stop "$id"
-  rm -rf "$JAIL/firecracker/$id"
+  ctrns_links_down "$id"   # the data link only; the namespace is the task's until ctrns-down (ADR 0011 §6)
+  rm -rf "$JAIL/firecracker/$id" "$DISK_JAIL/firecracker/$id"
   rm -f "/var/log/.vesper-microvm-$id.pipe"
   [ "${2:-}" = --logs ] && rm -f "$(logfile "$id")" "$(logfile "$id").1" "/var/log/vesper-unfs-$id.log" "/var/log/vesper-unfs-$id.log.1"
   # A microVM killed at its memory ceiling looks like any other kill to its task (exit 137). The count goes with
@@ -897,7 +1013,7 @@ cleanup_locked() {
   dirty=""
   [ -e "$NETNS/$id" ] && dirty="$dirty netns"
   [ -n "$(fcpid "$id")" ] && dirty="$dirty process"
-  [ -e "$JAIL/firecracker/$id" ] && dirty="$dirty chroot"
+  { [ -e "$JAIL/firecracker/$id" ] || [ -e "$DISK_JAIL/firecracker/$id" ]; } && dirty="$dirty chroot"
   [ -d "/sys/fs/cgroup/firecracker/$id" ] && dirty="$dirty cgroup"
   [ -d "$UNFS_CG/$id" ] && dirty="$dirty unfs-cgroup"
   [ -e "$UNFS/$id.pid" ] && dirty="$dirty unfs"
@@ -926,6 +1042,10 @@ case "$cmd" in
   stop) stop "$@" ;;
   crash) crash "$@" ;;
   cleanup) cleanup "$@" ;;
+  ctrns-up) ctrns_up "$@" ;;
+  ctrns-down) lock || { echo "ERR lifecycle lock"; exit 1; }; ctrns_down "$@"; rc=$?; unlock; exit $rc ;;
+  drives-sweep) drives_sweep ;;
+  drives-list) for d in "$DRIVES"/*.ext4; do [ -f "$d" ] && echo "DRIVE $(basename "$d" .ext4) bytes=$(stat -c %s "$d") used=$(du -k "$d" | cut -f1)K"; done; echo "DRIVES" ;;
   log) mlog "$@" ;;
   sharenet) sharenet "$@" ;;
   unfs) unfs "$@" ;;
