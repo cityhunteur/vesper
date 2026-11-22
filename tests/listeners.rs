@@ -8,12 +8,42 @@ use std::path::Path;
 
 /// (file, pattern) -> how many times it may appear outside test code, and why.
 const ALLOWED: &[(&str, &str, usize, &str)] = &[
-    ("src/bin/vesperd.rs", ".router()", 1, "the model backend's API router"),
-    ("src/bin/vesperd.rs", "axum::serve", 1, "serves that router on the owner-only socket"),
-    ("src/bin/vesperd.rs", "bind_owner_only(", 2, "the API socket, made owner-only before it listens (TD-050)"),
-    ("src/bin/vesperd/systemvm.rs", "bind_owner_only(", 1, "the API socket of the System VM backend (ADR 0007)"),
-    ("src/proxy.rs", "UnixListener::bind", 1, "vesper-proxy's listen socket (the Docker socket on the Mac)"),
-    ("src/ports.rs", "TcpListener::bind", 1, "published container ports, loopback only (ADR 0005)"),
+    (
+        "src/bin/vesperd.rs",
+        ".router()",
+        1,
+        "the model backend's API router",
+    ),
+    (
+        "src/bin/vesperd.rs",
+        "axum::serve",
+        1,
+        "serves that router on the owner-only socket",
+    ),
+    (
+        "src/bin/vesperd.rs",
+        "bind_owner_only(",
+        2,
+        "the API socket, made owner-only before it listens (TD-050)",
+    ),
+    (
+        "src/bin/vesperd/systemvm.rs",
+        "bind_owner_only(",
+        1,
+        "the API socket of the System VM backend (ADR 0007)",
+    ),
+    (
+        "src/proxy.rs",
+        "UnixListener::bind",
+        1,
+        "vesper-proxy's listen socket (the Docker socket on the Mac)",
+    ),
+    (
+        "src/ports.rs",
+        "TcpListener::bind",
+        1,
+        "published container ports, loopback only (ADR 0005)",
+    ),
 ];
 
 const PATTERNS: &[&str] = &[
@@ -65,7 +95,12 @@ fn only_the_listed_sockets_listen_and_only_vesperd_serves_the_api() {
             }
         }
     }
-    let allowed: BTreeMap<(String, &str), usize> =
-        ALLOWED.iter().map(|(f, p, n, _)| ((f.to_string(), *p), *n)).collect();
-    assert_eq!(found, allowed, "a listener or API server outside the list (tests/listeners.rs, TD-008)");
+    let allowed: BTreeMap<(String, &str), usize> = ALLOWED
+        .iter()
+        .map(|(f, p, n, _)| ((f.to_string(), *p), *n))
+        .collect();
+    assert_eq!(
+        found, allowed,
+        "a listener or API server outside the list (tests/listeners.rs, TD-008)"
+    );
 }
