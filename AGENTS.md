@@ -47,8 +47,7 @@ and `systemvmctl` keep governance honest. Backend A runs Firecracker microVMs in
 All verified on 2026-11-05; detail in [DEVELOPMENT.md](docs/DEVELOPMENT.md) and [TESTING.md](docs/TESTING.md).
 
 ```sh
-make build                                  # cargo build --bins
-make lint                                   # cargo fmt --check and cargo clippy -D warnings (CI: rust-tests.yml)
+make build && make lint                     # cargo build --bins; rustfmt and clippy -D warnings (CI)
 cargo test --test api_contract              # one suite; cargo test <name> for one test
 cargo test                                  # full suite
 make contract-check && make contract-test   # golden route contract + contract suites
