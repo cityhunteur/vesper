@@ -6,7 +6,7 @@ This file is a map, not a manual: read it first, then open only the documents yo
 ## Project overview
 
 Vesper is a Rust crate exposing a Firecracker-compatible control plane on macOS: `vesperd` serves the pinned OpenAPI
-routes with deterministic, baseline-stamped errors; `vesper-proxy` forwards sockets; `baselinectl`, `compatexctl`, `contractgen`
+routes by relaying to a jailed Firecracker (default) or from a model with deterministic, baseline-stamped errors (`--backend model`); `vesper-proxy` forwards sockets; `baselinectl`, `compatexctl`, `contractgen`
 and `systemvmctl` keep governance honest. Backend A runs Firecracker microVMs in an Alpine System VM behind the Go shim in `shim/`.
 
 ## Repository map

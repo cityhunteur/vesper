@@ -51,7 +51,7 @@ and replay the requests in each state, then copy the status and the body into `S
 
 ```sh
 cargo build --bin vesperd
-./target/debug/vesperd --socket run/viz/v.sock &
+./target/debug/vesperd --backend model --socket run/viz/v.sock &
 curl -s -w '\nHTTP %{http_code}\n' --unix-socket run/viz/v.sock -X PUT http://localhost/boot-source \
   -H 'Content-Type: application/json' -d '{"kernel_image_path":"<an existing file>"}'
 ```

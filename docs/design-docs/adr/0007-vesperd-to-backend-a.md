@@ -1,7 +1,7 @@
 ---
 status: accepted
 owner: cityhunteur
-last_reviewed: 2026-11-12
+last_reviewed: 2026-11-22
 ---
 
 # 0007. Connect `vesperd` to Backend A as a relay to one jailed Firecracker per socket
@@ -44,7 +44,7 @@ Every HTTP response on that socket comes from Firecracker, unchanged. When `vesp
 closes the connection and sends no body, as an unreachable Firecracker would.
 
 `--backend model` keeps the in-memory state machine and the contract tests. It stays the default until the relay
-is proven.
+is proven. (Amended 2026-11-22, D-063: the relay is proven, and `systemvm` is the default; see item 9.)
 
 Items marked **Owner** need the owner's confirmation before they are built.
 
@@ -214,6 +214,38 @@ Backend B keeps one socket per microVM and the same envelope rules, starts from 
 the Linux capture (D-014). A shim `backend.Backend` for it needs a new host-visible listener, left to the Phase 5
 ADR (GH #56).
 
+### 9. The default backend (amended 2026-11-22, D-063)
+
+This is an amendment, not a ninth question of GH #156. The Decision paragraph above kept `model` as the default
+until the relay was proven. Slices 4 to 6 give that proof (`make systemvm-vesperd-suite`,
+`make systemvm-snapshot-suite`, `make systemvm-replay-suite`), and the three suites were run again on the commit
+that changes the default (D-063). We will make the real backend the default:
+
+1. The default is the real backend for the Mac. Today that is `systemvm`, so `vesperd` with no `--backend` flag
+   starts a jailed Firecracker in the System VM. Nothing selects the model except `--backend model`. On a Mac
+   that cannot run Backend A (before M3, or nested virtualization off), the start fails with the System VM's own
+   error; when Backend B exists, it can become the default there (item 8), but the model never does.
+2. `--backend model` stays as an explicit choice. The model is a development and test surface outside GA: it
+   answers from memory and starts no microVM. `tests/api_contract.rs` and `tests/api_replay.rs` build it in the
+   test process; `tests/vesperd_socket.rs` and `make dev-up` start the binary and pass `--backend model`.
+   `tests/api_replay.rs` keeps it honest against the behaviour matrix in CI, as the base of Backend B.
+3. `--id` stays required on `systemvm`. The model's `anonymous-instance` default is not copied, because the id
+   names a jail in the System VM and all `vesperd` processes of the macOS user share one set of jails. Without
+   `--id`, `vesperd` exits 1 with `vesperd failed: --id ID is required: the default backend starts a microVM in
+   the System VM; pass --id ID, or --backend model for the in-memory model, which starts no microVM`.
+4. There is no fallback. When the launch config is missing, the bridge does not answer or the agent does not
+   greet, `vesperd` exits 1 with the error it gives today with `--backend systemvm`, and never falls back to the
+   model: a client would then believe that it drives a microVM when it does not.
+5. `--backend` is optional on the command line. When it is absent, the server takes the default;
+   `vesperd stage` and `vesperd store` still refuse a `--backend` flag, as before.
+
+This adds no socket, port, entitlement, dependency or package, and every flag keeps its meaning. The default
+socket path (TD-050) is the same, so a second microVM with no `--socket` is refused under `PATH.lock`, as two
+`--backend systemvm` processes are today. Two command lines change: one with no `--backend` that started the
+model now stops with the `--id` error, and one with `--id`, `--tap` or `--network` but no `--backend` now starts
+a microVM instead of being refused. Before GA, this is the cost of a default that matches the design. It closes
+TD-045; the model's snapshot routes stay stubs as a limit of the model, not of the product.
+
 ## Alternatives considered
 
 ### (a) Relay to one jailed Firecracker per `vesperd` socket (chosen)
@@ -242,6 +274,8 @@ no Linux cross-build (ADR 0004), and a compromised System VM would hold `vesperd
 | Added fields on Firecracker's errors; parsing HTTP in `vesperd` | Rejected | Errors would differ from the pinned behaviour; per-read bounds suffice without a parser. |
 | A relay listener on vsock 2402; `MICROVM launch-api` | Rejected | `FCAPI` needs no listener; `MICROVM` cannot reply before it exits. |
 | A uid allocator; shim pid files; an id prefix; tmpfs jails; a multiplexer | Rejected or deferred | One uid per owner and a uid filter suffice; `GET /` would change; snapshots would be lost; no need yet. |
+| A required `--backend` flag with no default; the model as a subcommand or its own binary | Rejected (D-063) | The design names one product behaviour, so it is the default; a required flag puts the same choice on every user and every script. A subcommand or binary moves the contract tests for no gain over a named flag. |
+| Choosing `systemvm` when the System VM answers and the model when it does not | Rejected (D-063) | The fallback hides from the client that no microVM runs. |
 
 ## Rationale and consequences
 
@@ -343,7 +377,7 @@ Not verified, with the slice that settles each one:
 
 ## References
 
-- GH #156, GH #167; D-008, D-011, D-013, D-014, D-016, D-017, D-018 ([decision log](../decision-log.md)).
+- GH #156, GH #167; D-008, D-011, D-013, D-014, D-016, D-017, D-018, D-063 ([decision log](../decision-log.md)).
 - [design-v0.md](../../specs/design-v0.md); [ADR 0003](0003-systemvm-control-channel.md),
   [ADR 0004](0004-containerd-shim-in-go.md), [ADR 0005](0005-published-ports-via-vsock-gateway.md),
   [ADR 0006](0006-guest-exec-via-runc-delegation.md).

@@ -89,7 +89,9 @@ pub fn bridge_and_port(args: &super::Args) -> Result<(PathBuf, u32), String> {
 
 impl Options {
     pub fn from_args(args: &super::Args) -> Result<Options, String> {
-        let id = args.id.clone().ok_or("--backend systemvm needs --id")?;
+        let id = args.id.clone().ok_or(
+            "--id ID is required: the default backend starts a microVM in the System VM; pass --id ID, or --backend model for the in-memory model, which starts no microVM",
+        )?;
         if !valid_microvm_id(&id) {
             return Err(format!("--id {id:?}: use 1 to 64 letters, digits and hyphens"));
         }

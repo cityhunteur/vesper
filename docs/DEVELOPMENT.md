@@ -129,7 +129,7 @@ Details: [scripts/macos/README.md](../scripts/macos/README.md).
 To run `vesperd` by hand with explicit inputs:
 
 ```sh
-cargo run --bin vesperd -- --socket run/vesperd.sock \
+cargo run --bin vesperd -- --backend model --socket run/vesperd.sock \
   --baseline-lock docs/specs/design-v0.baselines.lock.yaml \
   --swagger third_party/firecracker/firecracker.yaml \
   --surface-stub-matrix docs/generated/firecracker-api-surface-stub-matrix.json \

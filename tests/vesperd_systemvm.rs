@@ -304,11 +304,93 @@ fn bad_arguments_are_refused() {
         assert!(!out.status.success(), "{args:?} accepted");
         String::from_utf8_lossy(&out.stderr).into_owned()
     };
-    assert!(run(&["--backend", "systemvm", "--bridge", "x/3.sock"]).contains("needs --id"));
+    assert!(run(&["--backend", "systemvm", "--bridge", "x/3.sock"]).contains("--id ID is required"));
     assert!(run(&["--backend", "systemvm", "--id", "../x", "--bridge", "x/3.sock"]).contains("letters, digits and hyphens"));
-    assert!(run(&["--id", "vm-1"]).contains("apply to --backend systemvm"));
-    assert!(run(&["--tap", "tap0"]).contains("apply to --backend systemvm"));
-    assert!(run(&["--network", "nat"]).contains("apply to --backend systemvm"));
+    assert!(run(&["--backend", "model", "--id", "vm-1"]).contains("do not apply to --backend model"));
+    assert!(run(&["--backend", "model", "--tap", "tap0"]).contains("do not apply to --backend model"));
+    assert!(run(&["--backend", "model", "--network", "nat"]).contains("do not apply to --backend model"));
+}
+
+/// Runs `cmd` to its end; a `vesperd` still running after 10 s is killed and fails the test (a server that
+/// listens instead of stopping, such as the model started by mistake).
+fn output_within(mut cmd: Command) -> std::process::Output {
+    let mut child = cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().expect("spawn vesperd");
+    let started = Instant::now();
+    while child.try_wait().unwrap().is_none() {
+        if started.elapsed() > Duration::from_secs(10) {
+            let _ = child.kill();
+            let out = child.wait_with_output().unwrap();
+            panic!("vesperd still running after 10 s: {}", String::from_utf8_lossy(&out.stdout));
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    child.wait_with_output().unwrap()
+}
+
+/// D-063: with no `--backend` flag, `vesperd` is the System VM backend. Without `--id` it stops before it makes
+/// a socket or its directory, and the error names both ways out.
+#[test]
+fn no_flags_is_the_systemvm_backend_and_needs_an_id() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_vesperd"));
+    cmd.current_dir(env!("CARGO_MANIFEST_DIR")).env("XDG_RUNTIME_DIR", tmp.path());
+    let out = output_within(cmd);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(1), "{err}");
+    assert!(err.contains("--id ID is required") && err.contains("--backend model"), "{err}");
+    assert!(out.stdout.is_empty(), "nothing listens: {:?}", String::from_utf8_lossy(&out.stdout));
+    assert!(!tmp.path().join("vesper").exists(), "no socket directory before the id is known");
+}
+
+/// D-063: with no `--backend` flag, `--id` launches a microVM through the bridge, on the default socket, which is
+/// owner-only in an owner-only directory (TD-050) as on the model.
+#[test]
+fn the_default_backend_launches_on_the_default_socket() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (bridge, agent) = fake_agent(tmp.path(), "1.16.0");
+    std::fs::set_permissions(tmp.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    let runtime = tmp.path().join("rt");
+    let socket = runtime.join("vesper").join("vesperd.sock");
+    let child = Command::new(env!("CARGO_BIN_EXE_vesperd"))
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .env("XDG_RUNTIME_DIR", &runtime)
+        .args(["--id", "vm-1", "--bridge"])
+        .arg(&bridge)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn vesperd");
+    let mut v = Vesperd { child, socket };
+    wait_listening(&v);
+    assert_eq!(std::fs::metadata(runtime.join("vesper")).unwrap().permissions().mode() & 0o777, 0o700);
+    assert_eq!(std::fs::metadata(&v.socket).unwrap().permissions().mode() & 0o777, 0o600);
+    assert_eq!(request(&v.socket), FC_REPLY, "the default backend relays Firecracker's bytes");
+    assert_eq!(agent.lock().unwrap().launches, 1);
+    let pid = v.child.id().to_string();
+    assert!(Command::new("kill").args(["-TERM", &pid]).status().unwrap().success());
+    let (status, err) = wait_exit(&mut v, Duration::from_secs(10));
+    assert!(status.success(), "{status:?} {err}");
+}
+
+/// D-063, no fallback: when the bridge does not answer, the default backend exits non-zero and leaves no socket;
+/// it never starts the model.
+#[test]
+fn the_default_backend_never_falls_back_to_the_model() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::set_permissions(tmp.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    let socket = tmp.path().join("api.sock");
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_vesperd"));
+    cmd.current_dir(env!("CARGO_MANIFEST_DIR"))
+        .args(["--id", "vm-1", "--bridge"])
+        .arg(tmp.path().join("3.sock"))
+        .arg("--socket")
+        .arg(&socket);
+    let out = output_within(cmd);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(1), "{err}");
+    assert!(err.contains("dial vsock bridge"), "the error is the failed dial: {err}");
+    assert!(out.stdout.is_empty(), "nothing listens: {:?}", String::from_utf8_lossy(&out.stdout));
+    assert!(!socket.exists(), "no socket is left");
 }
 
 fn cli(dir: &Path, bridge: &Path, args: &[&str]) -> (i32, String, String) {
@@ -470,6 +552,7 @@ fn bad_stage_and_store_arguments_never_reach_the_agent() {
         (&["stage", "--id", "vm-1", "share:/a", "relative"][..], "bad DEST"),
         (&["store", "rm", ".partial.1"][..], "bad store name"),
         (&["--backend", "systemvm", "store", "list"][..], "do not apply here"),
+        (&["--backend", "model", "store", "list"][..], "do not apply here"),
         (&["--tap", "tap0", "store", "list"][..], "do not apply here"),
     ] {
         let (code, _, err) = cli(tmp.path(), &bridge, args);

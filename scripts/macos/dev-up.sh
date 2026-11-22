@@ -11,7 +11,9 @@ pushd "${ROOT_DIR}" >/dev/null
 
 cargo build --bin vesperd --bin vesper-proxy
 
+# The in-memory model (no System VM needed); the default backend is the System VM's (D-063).
 "${BIN_DIR}/vesperd" \
+  --backend model \
   --socket "${RUN_DIR}/vesperd.sock" \
   --baseline-lock "${ROOT_DIR}/docs/specs/design-v0.baselines.lock.yaml" \
   --swagger "${ROOT_DIR}/third_party/firecracker/firecracker.yaml" \
