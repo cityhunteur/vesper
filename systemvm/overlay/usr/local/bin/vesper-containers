@@ -118,7 +118,18 @@ prepare() {
   done
   # vesper-runc is runc plus one step after create: it asks each bind source on a macOS share for its owner again as
   # the container's uid, so a container does not see its binds owned by "nobody" in its first second (TD-062).
-  printf '{"userns-remap":"default","authorization-plugins":["vesper-authz"],"runtimes":{"vesper-runc":{"path":"/usr/bin/vesper-runc"},"vesper":{"runtimeType":"io.containerd.vesper.v2"}},"default-runtime":"vesper-runc"}\n' > "$CONF.new" \
+  # host-gateway (`--add-host host.docker.internal:host-gateway`, compose `extra_hosts`) names the NAT gateway, the
+  # macOS host as the System VM sees it, not docker0, which is the System VM itself (TD-039, D-074). The list form:
+  # dockerd 28 turns the single `host-gateway-ip` into an IPv4-mapped IPv6 address, which musl cannot use and which
+  # dockerd drops from a container whose namespace has IPv6 off (every `vesper` container).
+  hg=$(ip -4 route show default 2>/dev/null | awk '$1=="default"{print $3; exit}')
+  case "$hg" in
+    *[!0-9.]*|"") hg="" ;;
+    *.*.*.*) ;;
+    *) hg="" ;;
+  esac
+  [ -n "$hg" ] || echo "vesper-containers: no IPv4 default gateway; host-gateway stays docker0" >&2
+  printf '{"userns-remap":"default","authorization-plugins":["vesper-authz"],"runtimes":{"vesper-runc":{"path":"/usr/bin/vesper-runc"},"vesper":{"runtimeType":"io.containerd.vesper.v2"}},"default-runtime":"vesper-runc"%s}\n' "${hg:+,\"host-gateway-ips\":[\"$hg\"]}" > "$CONF.new" \
     && mv -f "$CONF.new" "$CONF" || refuse write-daemon-json
   legacy_store > "$RUN.legacy" # counted once a boot; HEALTH reads it on every poll
   finish mapped

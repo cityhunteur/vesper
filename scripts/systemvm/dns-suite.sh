@@ -39,6 +39,10 @@ out="$("${DOCKER}" run --rm "${RUN_ARGS[@]}" "${IMAGE}" sh -c "getent hosts ${EX
 [ -n "${out}" ] && record external_dns_default_bridge true "${EXTERNAL} -> ${out}" || record external_dns_default_bridge false "no answer for ${EXTERNAL}"
 out="$("${DOCKER}" run --rm "${RUN_ARGS[@]}" "${IMAGE}" sh -c "nc -zw5 ${EXTERNAL} 443 && echo connected" 2>&1)"
 [ "${out}" = "connected" ] && record external_tcp_egress true "${EXTERNAL}:443 reachable through the System VM NAT" || record external_tcp_egress false "${out}"
+# host-gateway is the NAT gateway, the macOS host (TD-039, D-074): the same address as the default-bridge resolver.
+gw="${rc_out#nameserver }"; gw="${gw%% *}"
+out="$("${DOCKER}" run --rm "${RUN_ARGS[@]}" --add-host host.docker.internal:host-gateway "${IMAGE}" sh -c "getent hosts host.docker.internal | awk '{print \$1}' | head -1" 2>&1)"
+[ -n "${gw}" ] && [ "${out}" = "${gw}" ] && record host_gateway_is_the_mac true "host.docker.internal -> ${out}, the NAT gateway" || record host_gateway_is_the_mac false "host.docker.internal -> ${out:-none}, NAT gateway ${gw:-unknown}"
 
 run_stack() { # suffix -> records web ip, subnet, resolver
   compose up -d >/dev/null 2>&1 || { echo "compose up failed"; return 1; }
