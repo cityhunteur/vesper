@@ -24,7 +24,7 @@ This repository includes a baseline packaging workflow for local macOS developme
    Python path, which CI uses on Linux (`rust-tests.yml`) and which `VALIDATE_ENTITLEMENTS_FORCE_PYTHON=1` forces locally.
 3. Start services:
    `make dev-up`
-   Runs `cargo build --bin vesperd --bin vesper-proxy`, starts `vesperd` on `run/vesperd.sock` with the baseline lock,
+   Runs `cargo build --bin vesperd --bin vesper-proxy`, starts `vesperd --backend model` (the in-memory model; the default backend needs the System VM, D-063) on `run/vesperd.sock` with the baseline lock,
    swagger and `--entitlements-file packaging/macos/vesperd.entitlements` (the surface stub matrix uses its default
    path), starts `vesper-proxy` on `run/docker.sock` with upstream `unix://run/vesperd.sock`, and writes
    `run/{vesperd,vesper-proxy}.{pid,log}`. Details: `scripts/macos/README.md`.

@@ -40,8 +40,9 @@ VM with a hand-built setup, and the behaviour they test against is not the behav
  └─────────────────────────────────────┘            └─────────────────────────────────────────────┘
 ```
 
-- `vesperd` is the only public control-plane endpoint. Today it answers from a deterministic in-memory model; with
-  `--backend systemvm` (in review, ADR 0007) it relays each API connection to a jailed Firecracker in the System VM.
+- `vesperd` is the only public control-plane endpoint. By default it relays each API connection to a jailed
+  Firecracker in the System VM (ADR 0007, D-063); `--backend model` answers from a deterministic in-memory model
+  for development and tests, and starts no microVM.
 - `vesper-proxy` exposes the System VM's Docker socket to the macOS Docker CLI.
 - `containerd-shim-vesper-v2` (Go) runs containerd tasks as jailed microVMs.
 - `vesper-vmlauncher` (Swift) boots the System VM and applies the nested-virtualisation policy.
@@ -56,7 +57,7 @@ VM with a hand-built setup, and the behaviour they test against is not the behav
 | System VM boot on Apple silicon | Done: 200 of 200 boots under 5 s | `make systemvm-boot-smoke`, `make systemvm-reliability` |
 | Docker from macOS (`docker run`, ports, binds, DNS, cross-arch) | Works, with containers on runc for now | `make docker-conformance` and the port, bind, DNS and workflow suites |
 | Jailed stock Firecracker microVMs in the System VM | Works | `make systemvm-microvm-suite`, `make systemvm-parity-baseline` |
-| `vesperd` driving real Firecracker (relay, snapshots, staging) | In review ([ADR 0007](docs/design-docs/adr/0007-vesperd-to-backend-a.md), GH #156) | `make systemvm-launchapi-suite`; the relay and snapshot suites land with it |
+| `vesperd` driving real Firecracker (relay, snapshots, staging) | Works, the default backend ([ADR 0007](docs/design-docs/adr/0007-vesperd-to-backend-a.md), D-063) | `make systemvm-vesperd-suite`, `make systemvm-snapshot-suite`, `make systemvm-replay-suite` |
 | containerd tasks as microVMs | Works with `ctr`, not yet with dockerd | `make ctr-conformance` (74 steps) |
 | Upstream Firecracker integration suite | Runs unmodified in the System VM: 755 of 980 pass; the rest are classified | [GH #166 report](docs/exec-plans/completed/2026-11-12-GH166-upstream-suite-trial.md) |
 | Backend B (no nested virtualisation, for M1 and M2) | Not started | GH #56 |

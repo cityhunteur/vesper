@@ -59,8 +59,9 @@ impl VesperdRun {
     /// `spawn` with more flags, for example `--stage`.
     pub(super) fn spawn_with(&self, id: &str, socket: &str, flags: &[String]) -> Result<Vesperd, String> {
         let socket = self.workdir.join(socket);
+        // No --backend flag: the vesperd, snapshot and replay suites run the default backend (D-063).
         let child = Command::new(&self.binary)
-            .args(["--backend", "systemvm", "--id", id, "--socket"])
+            .args(["--id", id, "--socket"])
             .arg(&socket)
             .args(&self.extra_args)
             .args(flags)

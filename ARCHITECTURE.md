@@ -36,16 +36,17 @@ applies that label to every row or bullet in it.
 ## Purpose
 
 **Verified.** Vesper exposes a Firecracker-compatible control plane on macOS. The `vesperd` binary serves the pinned
-Firecracker OpenAPI route set over a Unix socket from an in-memory VM state machine, and every response produced after
-request extraction is either a success or a deterministic envelope carrying the pinned Firecracker baseline
-revision (the pre-extraction exceptions are listed in Invariant 3; [src/api.rs](src/api.rs),
-[src/bin/vesperd.rs](src/bin/vesperd.rs)). The repository also contains governance
+Firecracker OpenAPI route set over a Unix socket. By default it relays the socket to one jailed Firecracker in the
+System VM (see below). With `--backend model` it answers from an in-memory VM state machine, a development and test
+surface that starts no microVM, and every response produced after request extraction is either a success or a
+deterministic envelope carrying the pinned Firecracker baseline revision (the pre-extraction exceptions are listed
+in Invariant 3; [src/api.rs](src/api.rs), [src/bin/vesperd.rs](src/bin/vesperd.rs)). The repository also contains governance
 tooling, a socket proxy, the System VM (its image lock, its guest overlay and its Swift launcher), and the Go
 containerd shim with its helper binaries ([shim/](shim/README.md)). Firecracker microVMs run in the System VM in two
 ways: the shim runs a containerd task of the runtime `io.containerd.vesper.v2` as one jailed microVM, and
-`vesperd --backend systemvm` relays its socket byte for byte to one jailed Firecracker
+`vesperd` (with no `--backend` flag, or `--backend systemvm`) relays its socket byte for byte to one jailed Firecracker
 ([ADR 0007](docs/design-docs/adr/0007-vesperd-to-backend-a.md) slice 4;
-[src/bin/vesperd/systemvm.rs](src/bin/vesperd/systemvm.rs)). That backend is not the default (TD-045); it stages
+[src/bin/vesperd/systemvm.rs](src/bin/vesperd/systemvm.rs)). That backend is the default (D-063, ADR 0007 item 9); it stages
 files and creates and loads snapshots (ADR 0007 slice 5). Docker containers run on runc.
 
 **Intended** (per [design-v0](docs/specs/design-v0.md#backends)): parity is reached through
@@ -59,7 +60,7 @@ Out of scope for this repository: any Docker Desktop UX.
 ## System context
 
 **Verified** for every edge, against the directory contracts named under [Components](#components). The edge from
-`vesperd` to the System VM exists only with `--backend systemvm` and is exercised by `make systemvm-vesperd-suite`; the three `reads` edges of the swagger's routes, the lock and the matrix
+`vesperd` to the System VM is the default backend's (absent with `--backend model`) and is exercised by `make systemvm-vesperd-suite`; the three `reads` edges of the swagger's routes, the lock and the matrix
 are the model backend's (the System VM backend reads only the swagger's `info.version` and the launch config).
 
 ```mermaid
@@ -105,7 +106,7 @@ the Rust binaries, then the Swift launcher, then what runs inside the System VM.
 
 | Component | Responsibility | Entry point | Owns data | Source |
 |---|---|---|---|---|
-| `vesperd` | Firecracker-compatible HTTP API: the in-memory VM state machine (`--backend model`, the default), or a byte relay to one jailed Firecracker in the System VM (`--backend systemvm`, ADR 0007), to which it also stages files (`--stage`, `vesperd stage`), whose snapshot store it manages (`vesperd store list\|rm`), and to which it can give taps and NAT egress (`--tap`, `--network nat`, ADR 0008) (contracts: [src/README.md](src/README.md), [src/bin/README.md](src/bin/README.md); route families in [src/api/README.md](src/api/README.md)) | [src/bin/vesperd.rs](src/bin/vesperd.rs), [src/bin/vesperd/systemvm.rs](src/bin/vesperd/systemvm.rs), [src/bin/vesperd/stage.rs](src/bin/vesperd/stage.rs) | Model: in-memory `AppState`; may create log and metrics files and open drive, pmem, kernel and initrd paths during validation. System VM: none on macOS beyond its socket and `<socket>.lock`; the microVM lives as long as the process | [src/api.rs](src/api.rs); [src/proxy.rs](src/proxy.rs) and [src/control.rs](src/control.rs) for the relay |
+| `vesperd` | Firecracker-compatible HTTP API: a byte relay to one jailed Firecracker in the System VM (`--backend systemvm`, the default, ADR 0007 and D-063), or the in-memory VM state machine (`--backend model`, for development and tests), to which it also stages files (`--stage`, `vesperd stage`), whose snapshot store it manages (`vesperd store list\|rm`), and to which it can give taps and NAT egress (`--tap`, `--network nat`, ADR 0008) (contracts: [src/README.md](src/README.md), [src/bin/README.md](src/bin/README.md); route families in [src/api/README.md](src/api/README.md)) | [src/bin/vesperd.rs](src/bin/vesperd.rs), [src/bin/vesperd/systemvm.rs](src/bin/vesperd/systemvm.rs), [src/bin/vesperd/stage.rs](src/bin/vesperd/stage.rs) | Model: in-memory `AppState`; may create log and metrics files and open drive, pmem, kernel and initrd paths during validation. System VM: none on macOS beyond its socket and `<socket>.lock`; the microVM lives as long as the process | [src/api.rs](src/api.rs); [src/proxy.rs](src/proxy.rs) and [src/control.rs](src/control.rs) for the relay |
 | `vesper-proxy` | Forward a Unix socket to a unix, tcp or vsock upstream; with `--publish-ports`, publish containers' `-p` ports on macOS loopback through guest vsock 2400 (ADR 0005) | [src/bin/vesper-proxy.rs](src/bin/vesper-proxy.rs) | The ports status file (`--ports-status`, `run/vesper/ports.json` under `make docker-up`) | [src/proxy.rs](src/proxy.rs), [src/ports.rs](src/ports.rs) |
 | `baselinectl` | Parity metadata, surface stub matrix, behavior matrix; the upstream-suite pins and the comparison of an upstream-suite run (`upstream-pins`, `upstream-compare`) | [src/bin/baselinectl.rs](src/bin/baselinectl.rs) | The two matrix files under `docs/generated/`, `artifacts/parity-metadata.json`, the `upstream-compare` report | [src/baseline.rs](src/baseline.rs) (+ `baseline/upstream`), [src/spec.rs](src/spec.rs), [src/api_matrix.rs](src/api_matrix.rs), [src/api_behavior_matrix.rs](src/api_behavior_matrix.rs) |
 | `compatexctl` | Compat exception registry validation | [src/bin/compatexctl.rs](src/bin/compatexctl.rs) | None | [src/compat.rs](src/compat.rs) |
@@ -542,7 +543,8 @@ or parity documents.
 - A shim microVM reaches at most 40 directories below a bind's root and no path longer than 1,024 bytes (TD-067). A
   directory bind stays with the directory that was bound when macOS replaces it, as on Docker on Linux, and gives
   "Stale file handle" after its share server started again (D-062, [RELIABILITY.md](docs/RELIABILITY.md)).
-- On the model backend error bodies carry four fields that Firecracker does not send (CE-0006); on the System VM
+- On the model backend error bodies carry four fields that Firecracker does not send (CE-0006, whose
+  resolution D-063 met: the model is no longer the default); on the System VM
   backend every path in an API request names a file in the microVM's jail (CE-0009).
 
 ## Guardrails for future work

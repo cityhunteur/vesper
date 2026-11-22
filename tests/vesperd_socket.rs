@@ -14,6 +14,8 @@ fn vesperd(socket: Option<&Path>, runtime_dir: &Path) -> Command {
         .env("XDG_RUNTIME_DIR", runtime_dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    // The model: the default backend is the System VM's (D-063), and these tests need no System VM.
+    cmd.args(["--backend", "model"]);
     if let Some(path) = socket {
         cmd.arg("--socket").arg(path);
     }

@@ -17,9 +17,9 @@ enum Network {
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
 enum Backend {
-    /// The in-memory state machine (the default; ADR 0007 keeps it until the relay is proven).
+    /// The in-memory model of the API: a development and test surface that starts no microVM (ADR 0007 item 9).
     Model,
-    /// A byte relay to one jailed Firecracker in the System VM (ADR 0007).
+    /// A byte relay to one jailed Firecracker in the System VM (ADR 0007); the default (D-063).
     Systemvm,
 }
 
@@ -56,8 +56,9 @@ enum StoreAction {
 struct Args {
     #[command(subcommand)]
     command: Option<Command>,
-    #[arg(long, value_enum, default_value_t = Backend::Model)]
-    backend: Backend,
+    /// The backend; default `systemvm` (D-063). `model` answers from memory and starts no microVM.
+    #[arg(long, value_enum)]
+    backend: Option<Backend>,
     /// The microVM id (`--backend systemvm`): 1 to 64 letters, digits and hyphens, as Firecracker's `--id`.
     #[arg(long)]
     id: Option<String>,
@@ -126,12 +127,13 @@ async fn run(args: Args) -> Result<(), String> {
         &["com.apple.security.virtualization"],
     )?;
 
-    if args.backend == Backend::Systemvm {
+    // No fallback (ADR 0007 item 9): without --backend model, a failed start is an error, never the model.
+    if args.backend.unwrap_or(Backend::Systemvm) == Backend::Systemvm {
         let options = systemvm::Options::from_args(&args)?;
         return systemvm::run(options, &socket_path(&args)?).await;
     }
     if args.id.is_some() || args.memory_max.is_some() || args.bridge.is_some() || args.agent_port.is_some() || !args.stage.is_empty() || !args.tap.is_empty() || args.network.is_some() {
-        return Err("--id, --memory-max, --stage, --tap, --network, --bridge and --agent-port apply to --backend systemvm".to_string());
+        return Err("--id, --memory-max, --stage, --tap, --network, --bridge and --agent-port do not apply to --backend model".to_string());
     }
 
     let lock = vesper::baseline::load(&args.baseline_lock)?;

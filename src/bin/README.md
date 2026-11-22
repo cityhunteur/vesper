@@ -14,7 +14,7 @@ errors to stderr and exits with code 1 on failure.
 
 - `vesperd.rs:main` (binary `vesperd`, `#[tokio::main]`). Flags: `--socket`
   (default `vesperd.sock` in `$XDG_RUNTIME_DIR/vesper`, `$TMPDIR/vesper` or `$HOME/.vesper/run`, mode 0700; socket 0600;
-  `default_socket`, `vesper::proxy::claim_socket`, `bind_owner_only`), `--backend model|systemvm` (default `model`),
+  `default_socket`, `vesper::proxy::claim_socket`, `bind_owner_only`), `--backend model|systemvm` (default `systemvm`, D-063; `--id` is then required),
   `--baseline-lock`
   (default `docs/specs/design-v0.baselines.lock.yaml`), `--swagger`
   (default `third_party/firecracker/firecracker.yaml`),
@@ -25,8 +25,8 @@ errors to stderr and exits with code 1 on failure.
   `vesper::spec::load_routes`, `vesper::spec::load_info_version`,
   `vesper::api_matrix::load_surface_stub_matrix`,
   `vesper::api::AppState::new_with_matrix`, and `AppState::router`.
-  `shutdown_signal` resolves on Ctrl-C or SIGTERM. `--id`, `--memory-max`, `--stage`, `--bridge` and `--agent-port`
-  are refused without `--backend systemvm`.
+  `shutdown_signal` resolves on Ctrl-C or SIGTERM. `--id`, `--memory-max`, `--stage`, `--tap`, `--network`, `--bridge`
+  and `--agent-port` are refused with `--backend model`; `vesperd stage` and `vesperd store` refuse any `--backend`.
 - `vesperd/stage.rs` (module `stage` of the `vesperd` binary, ADR 0007 slice 5): the subcommands `vesperd stage [--id
   ID] SRC DEST` and `vesperd store list|rm NAME`, with the global `--launch-config`, `--bridge` and `--agent-port`.
   `run` checks every form with `vesper::control` (`StageSource::parse`, `StageDest::parse`, `check_pair`,

@@ -1613,17 +1613,17 @@ mark { border-radius:2px; background:var(--mark-bg); color:var(--ink); padding:0
     vesperd: {
       name: "vesperd",
       category: "Runner · L2 / L4",
-      status: "Open · default backend (TD-045)",
+      status: "Verified · System VM backend is the default (D-063)",
       path: "src/bin/vesperd.rs, src/bin/vesperd/systemvm.rs -> src/api.rs",
       owns: "Model: in-memory AppState. System VM: its socket, <socket>.lock and the lease",
       invariant: "Invariant 3: on the model backend, every error from `handle_all` is an `ErrorEnvelope` with the pinned baseline revision.",
       ste: [
         "`vesperd` serves the Firecracker HTTP API on an owner-only Unix socket.",
-        "`--backend model` is the default. It answers every route from an in-memory state machine.",
-        "`--backend systemvm` starts one jailed Firecracker in the System VM and relays bytes to it.",
+        "By default it starts one jailed Firecracker in the System VM and relays bytes to it.",
+        "`--backend model` answers every route from memory, for development and tests.",
         "The microVM lives as long as the `vesperd` process. The end of the lease removes it.",
         "`--stage` and `vesperd store` put files into the jail and the snapshot store.",
-        "The System VM backend is not yet the default. See TD-045."
+        "No fallback: if the System VM does not answer, `vesperd` stops with an error."
       ]
     },
     docker_stack: {
