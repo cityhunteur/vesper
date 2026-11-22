@@ -173,6 +173,7 @@ pub async fn serve(
         .max_connections
         .map(|n| Arc::new(Semaphore::new(n)));
     let config = Arc::new(config);
+    let next_conn = std::sync::atomic::AtomicU64::new(1);
     let accept_loop = async {
         loop {
             let (client, _) = listener
@@ -184,6 +185,7 @@ pub async fn serve(
                     Ok(permit) => Some(permit),
                     // At the cap: close at once, with no bytes.
                     Err(_) => {
+                        tracing::warn!(upstream = %config.upstream_raw, "connection refused at the cap");
                         drop(client);
                         continue;
                     }
@@ -192,9 +194,22 @@ pub async fn serve(
             };
             let target = target.clone();
             let config = config.clone();
+            // One line when a connection is accepted and one when it ends, with an id that ties them (TD-007).
+            let conn = next_conn.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            tracing::info!(conn, upstream = %config.upstream_raw, "connection accepted");
             tokio::spawn(async move {
                 let _permit = permit;
-                let _ = handle_client(client, &target, &config).await;
+                let started = std::time::Instant::now();
+                match handle_client(client, &target, &config).await {
+                    Ok(()) => tracing::info!(
+                        conn,
+                        ms = started.elapsed().as_millis() as u64,
+                        "connection closed"
+                    ),
+                    Err(err) => {
+                        tracing::warn!(conn, ms = started.elapsed().as_millis() as u64, error = %err, "connection ended")
+                    }
+                }
             });
         }
     };
