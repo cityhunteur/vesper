@@ -166,6 +166,12 @@ jobs:
             echo "require policy refused with diagnostics (expected on M1/M2 runners)"
           fi
 
+      - name: vesper-proxy's seatbelt profile refuses what it never needs, signed with the hardened runtime (ADR 0012)
+        run: |
+          cargo build -q --bin vesper-proxy
+          bash scripts/macos/sign.sh debug
+          cargo test -q --test proxy_sandbox
+
       - name: Entitlement plists are valid and hold exactly the approved keys (TD-010)
         run: make validate-entitlements
 

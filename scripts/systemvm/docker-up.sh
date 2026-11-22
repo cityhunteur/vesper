@@ -65,6 +65,8 @@ fi
 containers_check || exit 1
 
 cargo build -q --bin vesper-proxy
+# Hardened runtime, ad hoc (ADR 0012); the proxy applies its own seatbelt profile at start.
+bash "${ROOT_DIR}/scripts/macos/sign.sh" debug >/dev/null
 # Published ports (GH #28): host loopback -> vesper-proxy -> bridge -> guest vesper-port-relay (vsock 2400).
 PORT_ARGS=(--publish-ports --relay-port "${VESPER_PORT_RELAY:-2400}" --ports-status "${RUN_DIR}/ports.json")
 : > "${LOG_FILE}"
