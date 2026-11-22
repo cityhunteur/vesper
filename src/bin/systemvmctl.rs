@@ -177,7 +177,9 @@ enum ControlAction {
     /// Ask the guest to power off.
     Shutdown,
     /// SIGKILL a supervised guest daemon (containerd or docker).
-    Kill { service: String },
+    Kill {
+        service: String,
+    },
     /// Tail a guest log: messages, containerd or docker.
     Logs {
         log: String,
@@ -353,7 +355,10 @@ enum ControlAction {
         publish: Option<String>,
         #[arg(long, default_value = vesper::api_replay::DEFAULT_REPLAY_SCRIPTS_PATH)]
         scripts: String,
-        #[arg(long, default_value = "docs/generated/firecracker-api-behavior-matrix.json")]
+        #[arg(
+            long,
+            default_value = "docs/generated/firecracker-api-behavior-matrix.json"
+        )]
         matrix: String,
         /// Only cases whose `METHOD PATH#id` key contains this text.
         #[arg(long)]
@@ -406,11 +411,15 @@ fn control_endpoint(
             (cfg.vsock_bridge_path, cfg.agent_port)
         }
         Err(_) if bridge.is_some() => (None, None),
-        Err(err) => return Err(format!("read launch config {config}: {err} (pass --bridge/--port or run make systemvm-launch-config)")),
+        Err(err) => {
+            return Err(format!(
+                "read launch config {config}: {err} (pass --bridge/--port or run make systemvm-launch-config)"
+            ));
+        }
     };
-    let bridge = bridge
-        .or(cfg_bridge)
-        .ok_or("no bridge socket: the launch config has no vsock_bridge_path and --bridge was not given")?;
+    let bridge = bridge.or(cfg_bridge).ok_or(
+        "no bridge socket: the launch config has no vsock_bridge_path and --bridge was not given",
+    )?;
     let port = port
         .or(cfg_port)
         .unwrap_or(vesper::control::DEFAULT_AGENT_PORT);
@@ -429,7 +438,10 @@ fn print_steps(result: &vesper::control::SuiteReport, width: usize) {
     }
 }
 
-fn run_control(endpoint: vesper::control::ControlEndpoint, action: ControlAction) -> Result<(), String> {
+fn run_control(
+    endpoint: vesper::control::ControlEndpoint,
+    action: ControlAction,
+) -> Result<(), String> {
     use vesper::control;
     match action {
         ControlAction::Handshake => {
@@ -545,7 +557,11 @@ fn run_control(endpoint: vesper::control::ControlEndpoint, action: ControlAction
                 return Err(format!("vesper-fcparity exited with {rc}"));
             }
         }
-        ControlAction::ParitySuite { report, id, perf_cycles } => {
+        ControlAction::ParitySuite {
+            report,
+            id,
+            perf_cycles,
+        } => {
             let result = control::run_parity_suite(&endpoint, &id, perf_cycles);
             control::write_report(&report, &result)?;
             for step in &result.steps {
@@ -584,7 +600,11 @@ fn run_control(endpoint: vesper::control::ControlEndpoint, action: ControlAction
                 return Err(format!("vesper-vesperd exited with {rc}"));
             }
         }
-        ControlAction::LaunchapiSuite { report, id, swagger } => {
+        ControlAction::LaunchapiSuite {
+            report,
+            id,
+            swagger,
+        } => {
             let version = vesper::spec::load_info_version(&swagger)?;
             let result = control::run_launchapi_suite(&endpoint, &id, &version);
             control::write_report(&report, &result)?;
@@ -594,7 +614,13 @@ fn run_control(endpoint: vesper::control::ControlEndpoint, action: ControlAction
             }
             println!("launchapi suite passed (report: {report})");
         }
-        ControlAction::VesperdSuite { report, id, swagger, vesperd, workdir } => {
+        ControlAction::VesperdSuite {
+            report,
+            id,
+            swagger,
+            vesperd,
+            workdir,
+        } => {
             let version = vesper::spec::load_info_version(&swagger)?;
             let run = control::VesperdRun {
                 binary: vesperd.into(),
@@ -616,7 +642,12 @@ fn run_control(endpoint: vesper::control::ControlEndpoint, action: ControlAction
             }
             println!("vesperd suite passed (report: {report})");
         }
-        ControlAction::BoundsSuite { report, id, vesperd, workdir } => {
+        ControlAction::BoundsSuite {
+            report,
+            id,
+            vesperd,
+            workdir,
+        } => {
             let run = control::VesperdRun {
                 binary: vesperd.into(),
                 workdir: workdir.clone().into(),
@@ -636,7 +667,12 @@ fn run_control(endpoint: vesper::control::ControlEndpoint, action: ControlAction
             }
             println!("bounds suite passed (report: {report})");
         }
-        ControlAction::EgressSuite { report, id, vesperd, workdir } => {
+        ControlAction::EgressSuite {
+            report,
+            id,
+            vesperd,
+            workdir,
+        } => {
             let run = control::VesperdRun {
                 binary: vesperd.into(),
                 workdir: workdir.clone().into(),
@@ -656,7 +692,17 @@ fn run_control(endpoint: vesper::control::ControlEndpoint, action: ControlAction
             }
             println!("egress suite passed (report: {report})");
         }
-        ControlAction::ReplaySuite { report, publish, scripts, matrix, filter, id, vesperd, workdir, share_dir } => {
+        ControlAction::ReplaySuite {
+            report,
+            publish,
+            scripts,
+            matrix,
+            filter,
+            id,
+            vesperd,
+            workdir,
+            share_dir,
+        } => {
             let run = control::ReplayRun {
                 vesperd: control::VesperdRun {
                     binary: vesperd.into(),
@@ -669,17 +715,36 @@ fn run_control(endpoint: vesper::control::ControlEndpoint, action: ControlAction
                     ],
                 },
                 share_dir: {
-                    std::fs::create_dir_all(&share_dir).map_err(|err| format!("create {share_dir}: {err}"))?;
-                    std::fs::canonicalize(&share_dir).map_err(|err| format!("{share_dir}: {err}"))?
+                    std::fs::create_dir_all(&share_dir)
+                        .map_err(|err| format!("create {share_dir}: {err}"))?;
+                    std::fs::canonicalize(&share_dir)
+                        .map_err(|err| format!("{share_dir}: {err}"))?
                 },
             };
             control::prepare_workdir(std::path::Path::new(&workdir))?;
-            replay::run(&endpoint, &run, &scripts, &matrix, filter.as_deref(), &id, &report, publish.as_deref())?;
+            replay::run(
+                &endpoint,
+                &run,
+                &scripts,
+                &matrix,
+                filter.as_deref(),
+                &id,
+                &report,
+                publish.as_deref(),
+            )?;
         }
-        ControlAction::SnapshotSuite { report, id, vesperd, workdir, share_dir } => {
+        ControlAction::SnapshotSuite {
+            report,
+            id,
+            vesperd,
+            workdir,
+            share_dir,
+        } => {
             control::prepare_workdir(std::path::Path::new(&workdir))?;
-            std::fs::create_dir_all(&share_dir).map_err(|err| format!("create {share_dir}: {err}"))?;
-            let share_dir = std::fs::canonicalize(&share_dir).map_err(|err| format!("{share_dir}: {err}"))?;
+            std::fs::create_dir_all(&share_dir)
+                .map_err(|err| format!("create {share_dir}: {err}"))?;
+            let share_dir =
+                std::fs::canonicalize(&share_dir).map_err(|err| format!("{share_dir}: {err}"))?;
             let run = control::SnapshotRun {
                 vesperd: control::VesperdRun {
                     binary: vesperd.into(),
@@ -793,7 +858,13 @@ fn run_control(endpoint: vesper::control::ControlEndpoint, action: ControlAction
             let result = control::run_sharenet_suite(&endpoint, &id);
             control::write_report(&report, &result)?;
             for step in &result.steps {
-                println!("{} {}: {} ({} ms)", if step.ok { "ok  " } else { "FAIL" }, step.name, step.detail.chars().take(200).collect::<String>(), step.elapsed_ms);
+                println!(
+                    "{} {}: {} ({} ms)",
+                    if step.ok { "ok  " } else { "FAIL" },
+                    step.name,
+                    step.detail.chars().take(200).collect::<String>(),
+                    step.elapsed_ms
+                );
             }
             if !result.passed {
                 return Err(format!("sharenet suite failed (report: {report})"));
@@ -909,7 +980,10 @@ fn run() -> Result<(), String> {
                 boot_media_path: boot_media,
             })?;
             vesper::systemvm::write_manifest(&out, &manifest)?;
-            println!("wrote image manifest: {out} (image_id={})", manifest.image_id);
+            println!(
+                "wrote image manifest: {out} (image_id={})",
+                manifest.image_id
+            );
             Ok(())
         }
         Commands::LaunchConfig {
@@ -960,7 +1034,11 @@ fn run() -> Result<(), String> {
                 config.cpu_count,
                 config.memory_mib,
                 config.shared_directories.len(),
-                if config.shared_directories.len() == 1 { "y" } else { "ies" }
+                if config.shared_directories.len() == 1 {
+                    "y"
+                } else {
+                    "ies"
+                }
             );
             Ok(())
         }
@@ -974,11 +1052,17 @@ fn run() -> Result<(), String> {
             print!("{}", vesper::systemvm::packages_list(&lock));
             Ok(())
         }
-        Commands::VerifyPackages { lock, dir, archives_dir } => {
+        Commands::VerifyPackages {
+            lock,
+            dir,
+            archives_dir,
+        } => {
             let lock = vesper::systemvm::load_packages_lock(&lock)?;
             let count = vesper::systemvm::verify_packages(&lock, &dir)?;
             let members = vesper::systemvm::verify_archives(&lock, &archives_dir)?;
-            println!("verified {count} pinned packages in {dir} and {members} archive members in {archives_dir}");
+            println!(
+                "verified {count} pinned packages in {dir} and {members} archive members in {archives_dir}"
+            );
             Ok(())
         }
         Commands::ArchiveList { lock } => {
@@ -1015,7 +1099,9 @@ fn run() -> Result<(), String> {
             let policy = match policy {
                 Some(value) => vesper::platform::NestedPolicy::parse(&value)?,
                 None => vesper::platform::NestedPolicy::parse(
-                    &vesper::systemvm::load_image_lock(&lock)?.boot.nested_virtualization,
+                    &vesper::systemvm::load_image_lock(&lock)?
+                        .boot
+                        .nested_virtualization,
                 )?,
             };
             let selection = vesper::platform::select_backend(&caps, policy)?;

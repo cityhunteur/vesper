@@ -47,29 +47,56 @@ impl UpstreamSuite {
                 return Err(format!("upstream_suite.{name} must be a non-blank word"));
             }
         }
-        for (name, image) in [("container", &self.container), ("helper_image", &self.helper_image)] {
-            let digest = image.split_once("@sha256:").map(|(_, d)| d).unwrap_or_default();
+        for (name, image) in [
+            ("container", &self.container),
+            ("helper_image", &self.helper_image),
+        ] {
+            let digest = image
+                .split_once("@sha256:")
+                .map(|(_, d)| d)
+                .unwrap_or_default();
             if digest.len() != 64 || !digest.bytes().all(|b| b.is_ascii_hexdigit()) {
-                return Err(format!("upstream_suite.{name} {image:?} must be pinned by digest (@sha256:<64 hex>)"));
+                return Err(format!(
+                    "upstream_suite.{name} {image:?} must be pinned by digest (@sha256:<64 hex>)"
+                ));
             }
         }
         if !self.artifacts_prefix.ends_with(&format!("/{arch}")) {
-            return Err(format!("upstream_suite.artifacts_prefix {:?} is not for {arch}", self.artifacts_prefix));
+            return Err(format!(
+                "upstream_suite.artifacts_prefix {:?} is not for {arch}",
+                self.artifacts_prefix
+            ));
         }
         if !self.release_asset.contains(arch) {
-            return Err(format!("upstream_suite.release_asset {:?} is not for {arch}", self.release_asset));
+            return Err(format!(
+                "upstream_suite.release_asset {:?} is not for {arch}",
+                self.release_asset
+            ));
         }
-        let word = |p: &str| !p.is_empty() && p.bytes().all(|b| b.is_ascii_alphanumeric() || b"_./-".contains(&b));
+        let word = |p: &str| {
+            !p.is_empty()
+                && p.bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b"_./-".contains(&b))
+        };
         if self.paths.is_empty()
-            || self.paths.iter().any(|p| !word(p) || p.starts_with('/') || p.starts_with('-') || p.contains(".."))
+            || self
+                .paths
+                .iter()
+                .any(|p| !word(p) || p.starts_with('/') || p.starts_with('-') || p.contains(".."))
         {
             return Err("upstream_suite.paths must be relative paths of [A-Za-z0-9_./-], not starting with - or /".to_string());
         }
         if !(1..=8).contains(&self.workers) {
-            return Err(format!("upstream_suite.workers {} is outside 1 to 8", self.workers));
+            return Err(format!(
+                "upstream_suite.workers {} is outside 1 to 8",
+                self.workers
+            ));
         }
         if !(60..=3600).contains(&self.test_timeout_s) {
-            return Err(format!("upstream_suite.test_timeout_s {} is outside 60 to 3600", self.test_timeout_s));
+            return Err(format!(
+                "upstream_suite.test_timeout_s {} is outside 60 to 3600",
+                self.test_timeout_s
+            ));
         }
         Ok(())
     }
@@ -172,8 +199,14 @@ pub struct ClassFile {
 impl ClassFile {
     pub fn validate(&self) -> Result<(), String> {
         let mut seen = std::collections::BTreeSet::new();
-        if self.never_pass_alone.iter().any(|m| m.trim().len() < MIN_ANY_MESSAGE) {
-            return Err(format!("never_pass_alone entries need at least {MIN_ANY_MESSAGE} characters"));
+        if self
+            .never_pass_alone
+            .iter()
+            .any(|m| m.trim().len() < MIN_ANY_MESSAGE)
+        {
+            return Err(format!(
+                "never_pass_alone entries need at least {MIN_ANY_MESSAGE} characters"
+            ));
         }
         if self.classes.iter().filter(|c| c.any_test).count() > 1 {
             return Err("at most one class may be any_test".to_string());
@@ -190,11 +223,16 @@ impl ClassFile {
             };
             if c.any_test {
                 if !c.nodeid.is_empty() || c.message.is_empty() || !c.message_glob.is_empty() {
-                    return Err(format!("class {}: any_test takes message substrings, and no nodeid or message_glob", c.id));
+                    return Err(format!(
+                        "class {}: any_test takes message substrings, and no nodeid or message_glob",
+                        c.id
+                    ));
                 }
                 // With no test names, the symptom and the outcomes are all that bound the class.
                 if c.message.iter().any(|m| m.trim().len() < MIN_ANY_MESSAGE)
-                    || c.outcomes.iter().any(|o| !matches!(o.as_str(), "failed" | "error"))
+                    || c.outcomes
+                        .iter()
+                        .any(|o| !matches!(o.as_str(), "failed" | "error"))
                 {
                     return Err(format!(
                         "class {}: any_test needs messages of at least {MIN_ANY_MESSAGE} characters and only failed or error outcomes",
@@ -207,26 +245,54 @@ impl ClassFile {
                     c.id
                 ));
             }
-            let blank = |v: &Vec<String>| v.iter().any(|m| m.trim().is_empty() || m.chars().all(|ch| ch == '*' || ch == ' '));
-            if (c.message.is_empty() && c.message_glob.is_empty()) || blank(&c.message) || blank(&c.message_glob) {
-                return Err(format!("class {}: message or message_glob needs at least one non-blank symptom", c.id));
+            let blank = |v: &Vec<String>| {
+                v.iter()
+                    .any(|m| m.trim().is_empty() || m.chars().all(|ch| ch == '*' || ch == ' '))
+            };
+            if (c.message.is_empty() && c.message_glob.is_empty())
+                || blank(&c.message)
+                || blank(&c.message_glob)
+            {
+                return Err(format!(
+                    "class {}: message or message_glob needs at least one non-blank symptom",
+                    c.id
+                ));
             }
             if c.max.is_none() {
-                return Err(format!("class {}: max is required, so a symptom that spreads fails the run", c.id));
+                return Err(format!(
+                    "class {}: max is required, so a symptom that spreads fails the run",
+                    c.id
+                ));
             }
             if c.vulnerable_allowed.iter().any(|v| v.trim().is_empty()) {
-                return Err(format!("class {}: vulnerable_allowed entries must not be blank", c.id));
+                return Err(format!(
+                    "class {}: vulnerable_allowed entries must not be blank",
+                    c.id
+                ));
             }
             if c.max == Some(0) {
                 return Err(format!("class {}: max must be at least 1", c.id));
             }
-            if c.outcomes.is_empty() || c.outcomes.iter().any(|o| is_pass(o) || !KNOWN.contains(&o.as_str())) {
-                return Err(format!("class {}: outcomes must be from failed, error, skipped, hung", c.id));
+            if c.outcomes.is_empty()
+                || c.outcomes
+                    .iter()
+                    .any(|o| is_pass(o) || !KNOWN.contains(&o.as_str()))
+            {
+                return Err(format!(
+                    "class {}: outcomes must be from failed, error, skipped, hung",
+                    c.id
+                ));
             }
             let t = c.tracked_by.as_str();
-            let ok = |p: &str, n: usize| t.strip_prefix(p).is_some_and(|d| d.len() == n && d.bytes().all(|b| b.is_ascii_digit()));
+            let ok = |p: &str, n: usize| {
+                t.strip_prefix(p)
+                    .is_some_and(|d| d.len() == n && d.bytes().all(|b| b.is_ascii_digit()))
+            };
             if !(ok("CE-", 4) || ok("TD-", 3)) {
-                return Err(format!("class {}: tracked_by {t:?} is not CE-nnnn or TD-nnn", c.id));
+                return Err(format!(
+                    "class {}: tracked_by {t:?} is not CE-nnnn or TD-nnn",
+                    c.id
+                ));
             }
             if c.reason.trim().is_empty() {
                 return Err(format!("class {}: reason must not be blank", c.id));
@@ -274,7 +340,10 @@ impl Class {
             return false;
         }
         let reported = reported_vulnerabilities(message);
-        !reported.is_empty() && reported.iter().all(|v| self.vulnerable_allowed.iter().any(|a| a == v))
+        !reported.is_empty()
+            && reported
+                .iter()
+                .all(|v| self.vulnerable_allowed.iter().any(|a| a == v))
     }
 }
 
@@ -294,7 +363,12 @@ pub fn reported_vulnerabilities(message: &str) -> std::collections::BTreeSet<Str
         let id = squeezed[..end]
             .rfind("\"CVE\":\"")
             .filter(|c| !squeezed[*c..end].contains('}'))
-            .map(|c| squeezed[c + 7..].chars().take_while(|ch| *ch != '"').collect::<String>())
+            .map(|c| {
+                squeezed[c + 7..]
+                    .chars()
+                    .take_while(|ch| *ch != '"')
+                    .collect::<String>()
+            })
             .filter(|id| !id.is_empty());
         out.insert(id.unwrap_or_else(|| "<a vulnerable entry with no CVE>".into()));
         at = end + 1;
@@ -303,7 +377,10 @@ pub fn reported_vulnerabilities(message: &str) -> std::collections::BTreeSet<Str
     let mut at = 0;
     while let Some(i) = message[at..].find(SYS) {
         let start = at + i + SYS.len();
-        let name: String = message[start..].chars().take_while(|ch| ch.is_ascii_alphanumeric() || *ch == '_').collect();
+        let name: String = message[start..]
+            .chars()
+            .take_while(|ch| ch.is_ascii_alphanumeric() || *ch == '_')
+            .collect();
         if !name.is_empty() {
             out.insert(name);
         }
@@ -393,32 +470,51 @@ impl Comparison {
             f.push("the run has no results".to_string());
         }
         if !self.unmatched.is_empty() {
-            f.push(format!("{} result(s) match no exception class", self.unmatched.len()));
+            f.push(format!(
+                "{} result(s) match no exception class",
+                self.unmatched.len()
+            ));
         }
         let settled = self.passed_alone.len() + self.explained_alone.len();
         if let Some(max) = self.max_passed_alone.filter(|m| settled > *m) {
             f.push(format!("{settled} tests were settled only by the isolated rerun, more than the cap of {max}"));
         }
         for o in &self.over_max {
-            f.push(format!("class {} explained {} tests, more than its max of {}", o.class, o.matched, o.max));
+            f.push(format!(
+                "class {} explained {} tests, more than its max of {}",
+                o.class, o.matched, o.max
+            ));
         }
         if let Some(m) = &self.meta {
             if m.exitcode.is_none() {
-                f.push("pytest's exit code is unknown: the run was stopped before pytest finished".to_string());
+                f.push(
+                    "pytest's exit code is unknown: the run was stopped before pytest finished"
+                        .to_string(),
+                );
             }
             if let Some(code) = m.exitcode.filter(|c| !matches!(c, 0 | 1)) {
                 f.push(format!("pytest exited {code} (interrupted, internal error, usage error or nothing collected)"));
             }
             if !m.collection_errors.is_empty() {
-                f.push(format!("{} module(s) failed to collect: {}", m.collection_errors.len(), m.collection_errors.join(", ")));
+                f.push(format!(
+                    "{} module(s) failed to collect: {}",
+                    m.collection_errors.len(),
+                    m.collection_errors.join(", ")
+                ));
             }
         }
         if !self.partial {
             if self.missing_from_run > 0 {
-                f.push(format!("{} reference test(s) are missing from the run", self.missing_from_run));
+                f.push(format!(
+                    "{} reference test(s) are missing from the run",
+                    self.missing_from_run
+                ));
             }
             if !self.stale_required.is_empty() {
-                f.push(format!("classes that explained nothing on a full run: {}", self.stale_required.join(", ")));
+                f.push(format!(
+                    "classes that explained nothing on a full run: {}",
+                    self.stale_required.join(", ")
+                ));
             }
         }
         f
@@ -437,7 +533,12 @@ pub fn compare(
     partial: bool,
 ) -> Comparison {
     let mut out = Comparison {
-        reference: if reference.is_some() { "linux" } else { "all-pass" }.to_string(),
+        reference: if reference.is_some() {
+            "linux"
+        } else {
+            "all-pass"
+        }
+        .to_string(),
         total: results.len(),
         partial,
         meta,
@@ -451,13 +552,21 @@ pub fn compare(
         if is_pass(&r.outcome) {
             match &r.under_load {
                 // A symptom that a pass alone never clears: the result under load stands, unmatched.
-                Some(l) if classes.never_pass_alone.iter().any(|m| l.message.contains(m.as_str())) => {
+                Some(l)
+                    if classes
+                        .never_pass_alone
+                        .iter()
+                        .any(|m| l.message.contains(m.as_str())) =>
+                {
                     *out.to_explain.entry(l.outcome.clone()).or_default() += 1;
                     out.unmatched.push(Unmatched {
                         nodeid: nodeid.clone(),
                         outcome: l.outcome.clone(),
                         message: head_and_tail(&l.message, 200, 200),
-                        alone: Some(Attempt { outcome: r.outcome.clone(), message: String::new() }),
+                        alone: Some(Attempt {
+                            outcome: r.outcome.clone(),
+                            message: String::new(),
+                        }),
                     });
                 }
                 Some(l) => {
@@ -488,13 +597,26 @@ pub fn compare(
         }
         // Unmatched under load but failed again alone: the isolated result stands in for the one under load when a
         // class explains it and the result under load is not a symptom a rerun never clears (D-039).
-        let alone_class = r.alone.as_ref().filter(|a| !is_pass(&a.outcome)).and_then(|a| {
-            if classes.never_pass_alone.iter().any(|m| r.message.contains(m.as_str())) {
-                return None;
-            }
-            let again = TestResult { outcome: a.outcome.clone(), message: a.message.clone(), under_load: None, alone: None };
-            classes.classes.iter().find(|c| c.matches(nodeid, &again))
-        });
+        let alone_class = r
+            .alone
+            .as_ref()
+            .filter(|a| !is_pass(&a.outcome))
+            .and_then(|a| {
+                if classes
+                    .never_pass_alone
+                    .iter()
+                    .any(|m| r.message.contains(m.as_str()))
+                {
+                    return None;
+                }
+                let again = TestResult {
+                    outcome: a.outcome.clone(),
+                    message: a.message.clone(),
+                    under_load: None,
+                    alone: None,
+                };
+                classes.classes.iter().find(|c| c.matches(nodeid, &again))
+            });
         match alone_class {
             Some(c) => {
                 *out.per_class.entry(c.id.clone()).or_default() += 1;
@@ -509,18 +631,33 @@ pub fn compare(
                 nodeid: nodeid.clone(),
                 outcome: r.outcome.clone(),
                 message: head_and_tail(&r.message, 200, 200),
-                alone: r.alone.as_ref().map(|a| Attempt { outcome: a.outcome.clone(), message: head_and_tail(&a.message, 200, 200) }),
+                alone: r.alone.as_ref().map(|a| Attempt {
+                    outcome: a.outcome.clone(),
+                    message: head_and_tail(&a.message, 200, 200),
+                }),
             }),
         }
     }
     if let Some(reference) = reference {
-        out.missing_from_run = reference.keys().filter(|k| !results.contains_key(*k)).count();
+        out.missing_from_run = reference
+            .keys()
+            .filter(|k| !results.contains_key(*k))
+            .count();
     }
-    out.stale_classes = out.per_class.iter().filter(|(_, n)| **n == 0).map(|(k, _)| k.clone()).collect();
+    out.stale_classes = out
+        .per_class
+        .iter()
+        .filter(|(_, n)| **n == 0)
+        .map(|(k, _)| k.clone())
+        .collect();
     for c in &classes.classes {
         let n = out.per_class.get(&c.id).copied().unwrap_or(0);
         if let Some(max) = c.max.filter(|m| n > *m) {
-            out.over_max.push(OverMax { class: c.id.clone(), matched: n, max });
+            out.over_max.push(OverMax {
+                class: c.id.clone(),
+                matched: n,
+                max,
+            });
         }
         // With a reference, a class may explain nothing because the reference exempts its tests; that is not stale.
         if n == 0 && !c.flaky && reference.is_none() {

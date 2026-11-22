@@ -468,7 +468,9 @@ async fn refuses_serial_after_start() {
         .await
         .unwrap();
     assert_eq!(serial_response.status(), StatusCode::BAD_REQUEST);
-    let body = to_bytes(serial_response.into_body(), usize::MAX).await.unwrap();
+    let body = to_bytes(serial_response.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let payload: ErrorEnvelope = serde_json::from_slice(&body).unwrap();
     assert_eq!(payload.code, "InvalidState");
     assert_eq!(payload.fault_message, ACTION_NOT_SUPPORTED_POSTBOOT_MESSAGE);

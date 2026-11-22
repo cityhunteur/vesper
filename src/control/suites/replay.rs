@@ -3,10 +3,10 @@
 //! `vesperd` socket, one connection per step, and the responses come back unjudged. This module knows nothing about
 //! the matrix; `systemvmctl control replay-suite` expands the scripts (`src/api_replay.rs`) and judges.
 
-use super::snapshot::cli;
-use super::vesperd::{signal, stderr, wait_exit, Client, Vesperd, VesperdRun, TEARDOWN_TIMEOUT};
 use super::launchapi::wait_absent;
-use super::{connect, ControlEndpoint, Session};
+use super::snapshot::cli;
+use super::vesperd::{Client, TEARDOWN_TIMEOUT, Vesperd, VesperdRun, signal, stderr, wait_exit};
+use super::{ControlEndpoint, Session, connect};
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -14,10 +14,18 @@ use std::time::{Duration, Instant};
 /// One step for the microVM: an API request, or a pause.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReplayStep {
-    Http { method: String, path: String, body: Option<String> },
-    Wait { ms: u64 },
+    Http {
+        method: String,
+        path: String,
+        body: Option<String>,
+    },
+    Wait {
+        ms: u64,
+    },
     /// Poll the microVM's console, at most `ms`, for the guest init's `VESPER-MICROVM-OK` marker.
-    GuestReady { ms: u64 },
+    GuestReady {
+        ms: u64,
+    },
 }
 
 /// The status and body of one step (`0` and empty for a `Wait`).
@@ -54,25 +62,48 @@ impl ReplayRun {
     /// directory is new each run because the System VM's view of a share file that was removed and written again
     /// under the same name can be stale (a staged copy read 0 bytes).
     /// Every case's microVM also gets a tap device for each of `taps`.
-    pub fn prepare(&self, endpoint: &ControlEndpoint, files: &[(String, u64)], taps: &[String]) -> Result<ReplaySession, String> {
+    pub fn prepare(
+        &self,
+        endpoint: &ControlEndpoint,
+        files: &[(String, u64)],
+        taps: &[String],
+    ) -> Result<ReplaySession, String> {
         if taps.len() > super::super::MAX_TAPS {
-            return Err(format!("{} taps exceed {}", taps.len(), super::super::MAX_TAPS));
+            return Err(format!(
+                "{} taps exceed {}",
+                taps.len(),
+                super::super::MAX_TAPS
+            ));
         }
         let control = connect(endpoint)?;
-        let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0);
         let dir = self.share_dir.join(format!("replay-{stamp}"));
         std::fs::create_dir_all(&dir).map_err(|err| format!("create {}: {err}", dir.display()))?;
         let mut stages = Vec::new();
         for (jail, bytes) in files {
             let name = jail.trim_start_matches('/').replace('/', "_");
             let host = dir.join(&name);
-            std::fs::write(&host, vec![0u8; *bytes as usize]).map_err(|err| format!("write {}: {err}", host.display()))?;
+            std::fs::write(&host, vec![0u8; *bytes as usize])
+                .map_err(|err| format!("write {}: {err}", host.display()))?;
             stages.push(format!("share:{}:{jail}", host.display()));
         }
         if stages.len() + 2 > super::super::stage::MAX_STAGES {
-            return Err(format!("{} files and the snapshot exceed {} stages", stages.len(), super::super::stage::MAX_STAGES));
+            return Err(format!(
+                "{} files and the snapshot exceed {} stages",
+                stages.len(),
+                super::super::stage::MAX_STAGES
+            ));
         }
-        Ok(ReplaySession { control, dir, stages, snapshot_stages: Vec::new(), taps: taps.to_vec() })
+        Ok(ReplaySession {
+            control,
+            dir,
+            stages,
+            snapshot_stages: Vec::new(),
+            taps: taps.to_vec(),
+        })
     }
 
     /// Runs `steps` (each must return 2xx) in a microVM `id`, copies the jail files `made` (state, memory) into the
@@ -102,9 +133,20 @@ impl ReplayRun {
                 }
             }
             for (src, name) in [(made.0, &state), (made.1, &mem)] {
-                let (code, out, err) = cli(v, &["stage", "--id", id, &format!("jail:{src}"), &format!("store:{name}")])?;
+                let (code, out, err) = cli(
+                    v,
+                    &[
+                        "stage",
+                        "--id",
+                        id,
+                        &format!("jail:{src}"),
+                        &format!("store:{name}"),
+                    ],
+                )?;
                 if code != 0 {
-                    return Err(format!("vesperd stage jail:{src} store:{name}: exit {code}: {out} {err}"));
+                    return Err(format!(
+                        "vesperd stage jail:{src} store:{name}: exit {code}: {out} {err}"
+                    ));
                 }
             }
             Ok(())
@@ -112,8 +154,15 @@ impl ReplayRun {
         if let Some(err) = failed {
             return Err(err);
         }
-        session.snapshot_stages = vec![format!("store:{state}:{}", staged.0), format!("store:{mem}:{}", staged.1)];
-        Ok(format!("{} steps, store {state} and {mem}, {} ms", steps.len(), started.elapsed().as_millis()))
+        session.snapshot_stages = vec![
+            format!("store:{state}:{}", staged.0),
+            format!("store:{mem}:{}", staged.1),
+        ];
+        Ok(format!(
+            "{} steps, store {state} and {mem}, {} ms",
+            steps.len(),
+            started.elapsed().as_millis()
+        ))
     }
 
     /// Runs one case: starts `vesperd --id ID` with the files (and the snapshot fixture if `snapshot`) staged and the
@@ -131,7 +180,11 @@ impl ReplayRun {
             return Err("the case needs the snapshot fixture, which was not made".to_string());
         }
         let mut flags = Vec::new();
-        let extra = if snapshot { &session.snapshot_stages[..] } else { &[][..] };
+        let extra = if snapshot {
+            &session.snapshot_stages[..]
+        } else {
+            &[][..]
+        };
         for stage in session.stages.iter().chain(extra) {
             flags.push("--stage".to_string());
             flags.push(stage.clone());
@@ -144,7 +197,8 @@ impl ReplayRun {
         let (mut v, _line, _took) = self.vesperd.start_with(id, &socket, &flags)?;
         let control = &mut session.control;
         let mut ready = |within: Duration| guest_ready(control, id, within);
-        let result = send_steps(&v.socket, steps, &mut ready).and_then(|responses| after(&self.vesperd, &responses).map(|_| responses));
+        let result = send_steps(&v.socket, steps, &mut ready)
+            .and_then(|responses| after(&self.vesperd, &responses).map(|_| responses));
         let stopped = stop(&mut session.control, &mut v, id);
         let _ = std::fs::remove_file(self.vesperd.workdir.join(&socket));
         let responses = result?;
@@ -158,7 +212,8 @@ impl ReplayRun {
         for name in [&state, &mem] {
             let _ = session.control.vesperd(&["store-rm", name]);
         }
-        std::fs::remove_dir_all(&session.dir).map_err(|err| format!("remove {}: {err}", session.dir.display()))
+        std::fs::remove_dir_all(&session.dir)
+            .map_err(|err| format!("remove {}: {err}", session.dir.display()))
     }
 }
 
@@ -172,7 +227,10 @@ fn guest_ready(control: &mut Session, id: &str, within: Duration) -> Result<(), 
             return Ok(());
         }
         if Instant::now() >= deadline {
-            return Err(format!("{id}: no VESPER-MICROVM-OK on the console within {} ms", within.as_millis()));
+            return Err(format!(
+                "{id}: no VESPER-MICROVM-OK on the console within {} ms",
+                within.as_millis()
+            ));
         }
         thread::sleep(Duration::from_millis(50));
     }
@@ -189,16 +247,25 @@ fn send_steps(
         match step {
             ReplayStep::GuestReady { ms } => {
                 ready(Duration::from_millis(*ms))?;
-                out.push(ReplayResponse { status: 0, body: String::new() });
+                out.push(ReplayResponse {
+                    status: 0,
+                    body: String::new(),
+                });
             }
             ReplayStep::Wait { ms } => {
                 thread::sleep(Duration::from_millis(*ms));
-                out.push(ReplayResponse { status: 0, body: String::new() });
+                out.push(ReplayResponse {
+                    status: 0,
+                    body: String::new(),
+                });
             }
             ReplayStep::Http { method, path, body } => {
                 let mut client = Client::connect(socket)?;
                 let r = client.call(method, path, body.as_deref())?;
-                out.push(ReplayResponse { status: r.status, body: r.body });
+                out.push(ReplayResponse {
+                    status: r.status,
+                    body: r.body,
+                });
             }
         }
     }
@@ -211,7 +278,8 @@ fn stop(control: &mut Session, v: &mut Vesperd, id: &str) -> Result<(), String> 
         signal(v, "TERM")?;
     }
     let (code, err, _) = wait_exit(v, TEARDOWN_TIMEOUT)?;
-    wait_absent(control, id, Duration::from_secs(10)).map_err(|e| format!("{id} not removed after exit {code:?}: {e}; {err}"))?;
+    wait_absent(control, id, Duration::from_secs(10))
+        .map_err(|e| format!("{id} not removed after exit {code:?}: {e}; {err}"))?;
     let _ = stderr(v);
     Ok(())
 }

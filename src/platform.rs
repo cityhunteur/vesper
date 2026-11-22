@@ -53,7 +53,12 @@ pub fn probe_host_capabilities(launcher: &Path) -> Result<HostCapabilities, Stri
     let output = Command::new(launcher)
         .arg("--host-capabilities")
         .output()
-        .map_err(|err| format!("run {} --host-capabilities: {err} (run `make vmlauncher-build`)", launcher.display()))?;
+        .map_err(|err| {
+            format!(
+                "run {} --host-capabilities: {err} (run `make vmlauncher-build`)",
+                launcher.display()
+            )
+        })?;
     if !output.status.success() {
         return Err(format!(
             "{} --host-capabilities exited with {}: {}",
@@ -81,7 +86,9 @@ impl NestedPolicy {
             "auto" => Ok(NestedPolicy::Auto),
             "require" => Ok(NestedPolicy::Require),
             "off" => Ok(NestedPolicy::Off),
-            other => Err(format!("nested virtualization policy must be auto, require or off, got {other:?}")),
+            other => Err(format!(
+                "nested virtualization policy must be auto, require or off, got {other:?}"
+            )),
         }
     }
 }
@@ -106,7 +113,10 @@ pub struct BackendSelection {
 
 /// Decides the backend from host facts and policy. Never panics; unsupported hosts get Backend B with
 /// diagnostics, `require` on an unsupported host is an error with the same diagnostics.
-pub fn select_backend(caps: &HostCapabilities, policy: NestedPolicy) -> Result<BackendSelection, String> {
+pub fn select_backend(
+    caps: &HostCapabilities,
+    policy: NestedPolicy,
+) -> Result<BackendSelection, String> {
     let mut diagnostics = vec![format!(
         "host: {} ({}), macOS {}",
         caps.chip.trim(),
@@ -114,30 +124,54 @@ pub fn select_backend(caps: &HostCapabilities, policy: NestedPolicy) -> Result<B
         caps.macos.trim()
     )];
     if !caps.virtualization_supported {
-        diagnostics.push("Virtualization.framework reports no support: no System VM can start on this host".to_string());
+        diagnostics.push(
+            "Virtualization.framework reports no support: no System VM can start on this host"
+                .to_string(),
+        );
     }
     let supported = caps.api_available && caps.nested_virtualization_supported;
     if !caps.api_available {
-        diagnostics.push("nested virtualization API unavailable: macOS 15 or later is required".to_string());
+        diagnostics.push(
+            "nested virtualization API unavailable: macOS 15 or later is required".to_string(),
+        );
     } else if !caps.nested_virtualization_supported {
-        diagnostics.push("nested virtualization unsupported by this chip: Backend A needs an Apple M3 or later".to_string());
+        diagnostics.push(
+            "nested virtualization unsupported by this chip: Backend A needs an Apple M3 or later"
+                .to_string(),
+        );
     } else {
         diagnostics.push("nested virtualization supported: Backend A (stock Firecracker in the System VM) is available".to_string());
     }
     match policy {
         NestedPolicy::Off => {
             diagnostics.push("policy off: Backend A not selected; the System VM runs without nested virtualization".to_string());
-            Ok(BackendSelection { backend: Backend::BackendB, nested_virtualization: false, implemented: false, diagnostics })
+            Ok(BackendSelection {
+                backend: Backend::BackendB,
+                nested_virtualization: false,
+                implemented: false,
+                diagnostics,
+            })
         }
         NestedPolicy::Require if !supported => {
-            diagnostics.push("policy require: refusing to run without nested virtualization".to_string());
+            diagnostics
+                .push("policy require: refusing to run without nested virtualization".to_string());
             Err(diagnostics.join("; "))
         }
         NestedPolicy::Auto if !supported => {
             diagnostics.push("fallback: Backend B (native macOS backend) is selected; it is designed but not implemented yet (design-v0 Phase 5)".to_string());
-            Ok(BackendSelection { backend: Backend::BackendB, nested_virtualization: false, implemented: false, diagnostics })
+            Ok(BackendSelection {
+                backend: Backend::BackendB,
+                nested_virtualization: false,
+                implemented: false,
+                diagnostics,
+            })
         }
-        _ => Ok(BackendSelection { backend: Backend::BackendA, nested_virtualization: true, implemented: true, diagnostics }),
+        _ => Ok(BackendSelection {
+            backend: Backend::BackendA,
+            nested_virtualization: true,
+            implemented: true,
+            diagnostics,
+        }),
     }
 }
 
@@ -174,11 +208,18 @@ mod tests {
 
     #[test]
     fn m3_host_selects_backend_a() {
-        let selection = select_backend(&caps(true, true, "Apple M3 Pro"), NestedPolicy::Auto).unwrap();
+        let selection =
+            select_backend(&caps(true, true, "Apple M3 Pro"), NestedPolicy::Auto).unwrap();
         assert_eq!(selection.backend, Backend::BackendA);
         assert!(selection.nested_virtualization && selection.implemented);
-        assert!(selection.diagnostics.iter().any(|d| d.contains("Backend A")));
-        let required = select_backend(&caps(true, true, "Apple M3 Pro"), NestedPolicy::Require).unwrap();
+        assert!(
+            selection
+                .diagnostics
+                .iter()
+                .any(|d| d.contains("Backend A"))
+        );
+        let required =
+            select_backend(&caps(true, true, "Apple M3 Pro"), NestedPolicy::Require).unwrap();
         assert_eq!(required.backend, Backend::BackendA);
     }
 
@@ -187,9 +228,20 @@ mod tests {
         let selection = select_backend(&caps(true, false, "Apple M1"), NestedPolicy::Auto).unwrap();
         assert_eq!(selection.backend, Backend::BackendB);
         assert!(!selection.nested_virtualization && !selection.implemented);
-        assert!(selection.diagnostics.iter().any(|d| d.contains("M3 or later")));
-        assert!(selection.diagnostics.iter().any(|d| d.contains("not implemented")));
-        let err = select_backend(&caps(true, false, "Apple M1"), NestedPolicy::Require).unwrap_err();
+        assert!(
+            selection
+                .diagnostics
+                .iter()
+                .any(|d| d.contains("M3 or later"))
+        );
+        assert!(
+            selection
+                .diagnostics
+                .iter()
+                .any(|d| d.contains("not implemented"))
+        );
+        let err =
+            select_backend(&caps(true, false, "Apple M1"), NestedPolicy::Require).unwrap_err();
         assert!(err.contains("refusing to run"));
         let old = select_backend(&caps(false, false, "Apple M2"), NestedPolicy::Auto).unwrap();
         assert!(old.diagnostics.iter().any(|d| d.contains("macOS 15")));
@@ -203,7 +255,10 @@ mod tests {
         let caps = parse_host_capabilities(json).unwrap();
         assert_eq!(caps.model, "Mac15,6");
         assert!(parse_host_capabilities("{\"nope\":1}").is_err());
-        assert_eq!(NestedPolicy::parse("Require").unwrap(), NestedPolicy::Require);
+        assert_eq!(
+            NestedPolicy::parse("Require").unwrap(),
+            NestedPolicy::Require
+        );
         assert!(NestedPolicy::parse("maybe").is_err());
         let err = probe_host_capabilities(Path::new("/nonexistent/vesper-vmlauncher")).unwrap_err();
         assert!(err.contains("make vmlauncher-build"));

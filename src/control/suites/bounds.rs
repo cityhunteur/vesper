@@ -5,10 +5,10 @@
 //! that exactly one default-size microVM fits beside whatever already runs, a second `vesperd` microVM is refused,
 //! a shim microVM counts against the same budget, and the budget is whole again afterwards.
 
-use super::launchapi::first;
-use super::vesperd::{signal, wait_exit, Client, Vesperd, BOOT_ARGS, TEARDOWN_TIMEOUT};
 use super::super::Session;
-use super::{connect, report, step, ControlEndpoint, SuiteReport, SuiteStep, VesperdRun};
+use super::launchapi::first;
+use super::vesperd::{BOOT_ARGS, Client, TEARDOWN_TIMEOUT, Vesperd, signal, wait_exit};
+use super::{ControlEndpoint, SuiteReport, SuiteStep, VesperdRun, connect, report, step};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -28,7 +28,9 @@ const SLACK: u64 = 64 << 20;
 
 /// `KEY=N` fields of a helper line.
 fn field(line: &str, key: &str) -> Option<u64> {
-    line.split_whitespace().find_map(|w| w.strip_prefix(key)?.strip_prefix('=')).and_then(|v| v.parse().ok())
+    line.split_whitespace()
+        .find_map(|w| w.strip_prefix(key)?.strip_prefix('='))
+        .and_then(|v| v.parse().ok())
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -63,10 +65,22 @@ fn stop(control: &mut Session, v: &mut Vesperd, id: &str) -> Result<(), String> 
 /// Boots `v`'s microVM with extra kernel arguments.
 fn boot(v: &Vesperd, extra: &str) -> Result<(), String> {
     let mut api = Client::connect(&v.socket)?;
-    api.expect("PUT", "/machine-config", Some(r#"{"vcpu_count":1,"mem_size_mib":256}"#), 204)?;
-    let boot = format!(r#"{{"kernel_image_path":"/Image","initrd_path":"/initrd.gz","boot_args":"{BOOT_ARGS} {extra}"}}"#);
+    api.expect(
+        "PUT",
+        "/machine-config",
+        Some(r#"{"vcpu_count":1,"mem_size_mib":256}"#),
+        204,
+    )?;
+    let boot = format!(
+        r#"{{"kernel_image_path":"/Image","initrd_path":"/initrd.gz","boot_args":"{BOOT_ARGS} {extra}"}}"#
+    );
     api.expect("PUT", "/boot-source", Some(&boot), 204)?;
-    api.expect("PUT", "/actions", Some(r#"{"action_type":"InstanceStart"}"#), 204)?;
+    api.expect(
+        "PUT",
+        "/actions",
+        Some(r#"{"action_type":"InstanceStart"}"#),
+        204,
+    )?;
     Ok(())
 }
 
@@ -81,7 +95,12 @@ fn refused(run: &VesperdRun, id: &str) -> Result<String, String> {
 
 pub fn run_bounds_suite(endpoint: &ControlEndpoint, run: &VesperdRun, id: &str) -> SuiteReport {
     let mut steps: Vec<SuiteStep> = Vec::new();
-    let [log_id, a, b, shim] = [format!("{id}-log"), format!("{id}-a"), format!("{id}-b"), format!("{id}-shim")];
+    let [log_id, a, b, shim] = [
+        format!("{id}-log"),
+        format!("{id}-a"),
+        format!("{id}-b"),
+        format!("{id}-shim"),
+    ];
     let control = step(&mut steps, "handshake", || {
         let session = connect(endpoint)?;
         Ok((session, "connected".to_string()))
@@ -109,19 +128,32 @@ pub fn run_bounds_suite(endpoint: &ControlEndpoint, run: &VesperdRun, id: &str) 
                     break;
                 }
                 if Instant::now() >= deadline {
-                    return Err(format!("no VESPER-FLOOD-DONE within {} s: {}", FLOOD_WAIT.as_secs(), tail.join(" | ")));
+                    return Err(format!(
+                        "no VESPER-FLOOD-DONE within {} s: {}",
+                        FLOOD_WAIT.as_secs(),
+                        tail.join(" | ")
+                    ));
                 }
                 thread::sleep(Duration::from_millis(500));
             }
             let (_, size) = control.vesperd(&["logsize", &log_id])?;
             let line = first(&size);
-            let (cur, prev, max) = (field(&line, "current"), field(&line, "previous"), field(&line, "max"));
-            let (Some(cur), Some(prev), Some(max)) = (cur, prev, max) else { return Err(format!("logsize: {line}")) };
+            let (cur, prev, max) = (
+                field(&line, "current"),
+                field(&line, "previous"),
+                field(&line, "max"),
+            );
+            let (Some(cur), Some(prev), Some(max)) = (cur, prev, max) else {
+                return Err(format!("logsize: {line}"));
+            };
             // One line of up to 4096 bytes may land past the limit before the file is rotated.
             if cur > max + 4097 || prev > max + 4097 || prev == 0 {
                 return Err(format!("{FLOOD} bytes written: {line}"));
             }
-            Ok(format!("{FLOOD} bytes written in {} s; {line}: rotated and bounded", started.elapsed().as_secs()))
+            Ok(format!(
+                "{FLOOD} bytes written in {} s; {line}: rotated and bounded",
+                started.elapsed().as_secs()
+            ))
         })();
         let stopped = stop(&mut control, &mut v, &log_id);
         let detail = checked?;
@@ -131,7 +163,10 @@ pub fn run_bounds_suite(endpoint: &ControlEndpoint, run: &VesperdRun, id: &str) 
 
     step(&mut steps, "log_pruned_after_keep_time", || {
         let (_, reap) = control.vesperd(&["reap"])?;
-        if reap.iter().any(|l| l.starts_with(&format!("PRUNED {log_id} "))) {
+        if reap
+            .iter()
+            .any(|l| l.starts_with(&format!("PRUNED {log_id} ")))
+        {
             return Err(format!("pruned at once: {}", reap.join(" | ")));
         }
         let (rc, aged) = control.vesperd(&["test-age-log", &log_id, "3600"])?;
@@ -139,11 +174,25 @@ pub fn run_bounds_suite(endpoint: &ControlEndpoint, run: &VesperdRun, id: &str) 
             return Err(format!("test-age-log: {}", first(&aged)));
         }
         let (_, reap) = control.vesperd(&["reap"])?;
-        let pruned = reap.iter().find(|l| l.starts_with(&format!("PRUNED {log_id} "))).cloned();
+        let pruned = reap
+            .iter()
+            .find(|l| l.starts_with(&format!("PRUNED {log_id} ")))
+            .cloned();
         let (rc, after) = control.vesperd(&["logsize", &log_id])?;
         match pruned {
-            Some(p) if rc != 0 => Ok(((), format!("kept while recent; after {}: {p}; {}", first(&aged), first(&after)))),
-            _ => Err(format!("reap: {}; logsize: {}", reap.join(" | "), first(&after))),
+            Some(p) if rc != 0 => Ok((
+                (),
+                format!(
+                    "kept while recent; after {}: {p}; {}",
+                    first(&aged),
+                    first(&after)
+                ),
+            )),
+            _ => Err(format!(
+                "reap: {}; logsize: {}",
+                reap.join(" | "),
+                first(&after)
+            )),
         }
     });
 
@@ -161,9 +210,21 @@ pub fn run_bounds_suite(endpoint: &ControlEndpoint, run: &VesperdRun, id: &str) 
         let during = during?;
         stopped?;
         if during.committed != base.committed + CEILING {
-            return Err(format!("committed {} with {a} running, expected {}", during.committed, base.committed + CEILING));
+            return Err(format!(
+                "committed {} with {a} running, expected {}",
+                during.committed,
+                base.committed + CEILING
+            ));
         }
-        Ok(((), format!("{}; {a} admitted (committed {}), {b} refused: {}", first(&r), during.committed, err.chars().take(200).collect::<String>())))
+        Ok((
+            (),
+            format!(
+                "{}; {a} admitted (committed {}), {b} refused: {}",
+                first(&r),
+                during.committed,
+                err.chars().take(200).collect::<String>()
+            ),
+        ))
     });
 
     step(&mut steps, "budget_counts_shim_microvms", || {
@@ -177,7 +238,15 @@ pub fn run_bounds_suite(endpoint: &ControlEndpoint, run: &VesperdRun, id: &str) 
         let err = second?;
         let (mut vb, _, _) = run.start_with(&b, &format!("{b}.sock"), &[])?;
         stop(&mut control, &mut vb, &b)?;
-        Ok(((), format!("{}; {b} refused while it ran ({}); {}; then {b} admitted", first(&launched), err.chars().take(120).collect::<String>(), first(&clean))))
+        Ok((
+            (),
+            format!(
+                "{}; {b} refused while it ran ({}); {}; then {b} admitted",
+                first(&launched),
+                err.chars().take(120).collect::<String>(),
+                first(&clean)
+            ),
+        ))
     });
 
     step(&mut steps, "failed_launches_give_the_budget_back", || {
@@ -186,11 +255,17 @@ pub fn run_bounds_suite(endpoint: &ControlEndpoint, run: &VesperdRun, id: &str) 
         let (rc, bad) = control.microvm(&["launch", &shim, "--cmd", "dHJ1ZQ=="])?;
         if rc == 0 || !first(&bad).contains("--cmd needs --rootfs") {
             let _ = control.microvm(&["cleanup", &shim, "--logs"]);
-            return Err(format!("shim launch with --cmd and no rootfs: rc {rc}: {}", bad.join(" | ")));
+            return Err(format!(
+                "shim launch with --cmd and no rootfs: rc {rc}: {}",
+                bad.join(" | ")
+            ));
         }
         // Refused after admission: vesperd stages before Firecracker starts, and a stage outside every share fails
         // the launch, whose teardown must give the memory back.
-        let flags = vec!["--stage".to_string(), "share:/etc/passwd:/passwd".to_string()];
+        let flags = vec![
+            "--stage".to_string(),
+            "share:/etc/passwd:/passwd".to_string(),
+        ];
         let err = match run.start_with(&b, &format!("{b}.sock"), &flags) {
             Ok(_) => return Err(format!("{b} started with a stage outside every share")),
             Err(e) if e.contains("not inside a configured share") => e,
@@ -207,7 +282,16 @@ pub fn run_bounds_suite(endpoint: &ControlEndpoint, run: &VesperdRun, id: &str) 
         if after != before {
             return Err(format!("before {before:?}, after {after:?}"));
         }
-        Ok(((), format!("{}; {b}: {}; committed {} in {} entries before and after", first(&bad), err.chars().take(120).collect::<String>(), after.committed, after.entries)))
+        Ok((
+            (),
+            format!(
+                "{}; {b}: {}; committed {} in {} entries before and after",
+                first(&bad),
+                err.chars().take(120).collect::<String>(),
+                after.committed,
+                after.entries
+            ),
+        ))
     });
 
     step(&mut steps, "budget_whole_again", || {
@@ -216,13 +300,28 @@ pub fn run_bounds_suite(endpoint: &ControlEndpoint, run: &VesperdRun, id: &str) 
         if after.committed != base.committed || after.entries != base.entries {
             return Err(format!("before {base:?}, after {after:?}"));
         }
-        Ok(((), format!("{}; committed {} in {} entries, as before", first(&r), after.committed, after.entries)))
+        Ok((
+            (),
+            format!(
+                "{}; committed {} in {} entries, as before",
+                first(&r),
+                after.committed,
+                after.entries
+            ),
+        ))
     });
 
     step(&mut steps, "nothing_left", || {
         let (_, list) = control.vesperd(&["list"])?;
-        let left: Vec<&String> = list.iter().filter(|l| [&log_id, &a, &b].iter().any(|i| l.contains(i.as_str()))).collect();
-        if left.is_empty() { Ok(((), "no record, jail or log of the suite's ids".to_string())) } else { Err(format!("left: {left:?}")) }
+        let left: Vec<&String> = list
+            .iter()
+            .filter(|l| [&log_id, &a, &b].iter().any(|i| l.contains(i.as_str())))
+            .collect();
+        if left.is_empty() {
+            Ok(((), "no record, jail or log of the suite's ids".to_string()))
+        } else {
+            Err(format!("left: {left:?}"))
+        }
     });
     let passed = steps.iter().all(|s| s.ok) && steps.len() == STEPS;
     report(endpoint, steps, passed)
@@ -235,10 +334,20 @@ mod tests {
     #[test]
     fn budget_and_size_lines_parse() {
         let b = parse_budget("MEMBUDGET total=2061000704 reserve=268435456 budget=1792565248 committed=671088640 entries=1").unwrap();
-        assert_eq!((b.total, b.committed, b.entries), (2061000704, 671088640, 1));
+        assert_eq!(
+            (b.total, b.committed, b.entries),
+            (2061000704, 671088640, 1)
+        );
         assert!(parse_budget("ERR x").is_none());
         let line = "LOGSIZE vm current=10 previous=1048600 max=1048576";
-        assert_eq!((field(line, "current"), field(line, "previous"), field(line, "max")), (Some(10), Some(1048600), Some(1048576)));
+        assert_eq!(
+            (
+                field(line, "current"),
+                field(line, "previous"),
+                field(line, "max")
+            ),
+            (Some(10), Some(1048600), Some(1048576))
+        );
         assert_eq!(field(line, "cur"), None);
     }
 }

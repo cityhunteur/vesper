@@ -14,23 +14,24 @@ pub(super) const ACTION_NOT_SUPPORTED_POSTBOOT_MESSAGE: &str =
 pub(super) const ACTION_NOT_SUPPORTED_PREBOOT_MESSAGE: &str =
     "The requested operation is not supported before starting the microVM.";
 
-pub(super) const SEND_CTRL_ALT_DEL_AARCH64_MESSAGE: &str = "SendCtrlAltDel does not supported on aarch64.";
+pub(super) const SEND_CTRL_ALT_DEL_AARCH64_MESSAGE: &str =
+    "SendCtrlAltDel does not supported on aarch64.";
 
-pub(super) const MISSING_KERNEL_CONFIG_MESSAGE: &str = "Start microvm error: Cannot start microvm without kernel configuration.";
+pub(super) const MISSING_KERNEL_CONFIG_MESSAGE: &str =
+    "Start microvm error: Cannot start microvm without kernel configuration.";
 
 pub(super) const METRICS_ALREADY_INITIALIZED_MESSAGE: &str = "Metrics error: Cannot initialize the metrics system due to bad user input: Reinitialization of metrics not allowed.";
 
-pub(super) const SNAPSHOT_CREATE_REQUIRES_PAUSED_MESSAGE: &str =
-    "Create snapshot error: Cannot save the microVM state: Operation not allowed: save/restore unavailable while running";
+pub(super) const SNAPSHOT_CREATE_REQUIRES_PAUSED_MESSAGE: &str = "Create snapshot error: Cannot save the microVM state: Operation not allowed: save/restore unavailable while running";
 
-pub(super) const SNAPSHOT_LOAD_RESOURCE_GUARD_MESSAGE: &str =
-    "Load snapshot error: Loading a microVM snapshot not allowed after configuring boot-specific resources.";
+pub(super) const SNAPSHOT_LOAD_RESOURCE_GUARD_MESSAGE: &str = "Load snapshot error: Loading a microVM snapshot not allowed after configuring boot-specific resources.";
 
 pub(super) const SNAPSHOT_LOAD_MISSING_MEMORY_SOURCE_MESSAGE: &str = "An error occurred when deserializing the json body of a request: missing field: either `mem_backend` or `mem_file_path` is required.";
 
 pub(super) const SNAPSHOT_LOAD_TOO_MANY_MEMORY_SOURCES_MESSAGE: &str = "An error occurred when deserializing the json body of a request: too many fields: either `mem_backend` or `mem_file_path` exclusively is required.";
 
-pub(super) const BALLOON_NOT_CONFIGURED_MESSAGE: &str = "Balloon config error: No balloon device found.";
+pub(super) const BALLOON_NOT_CONFIGURED_MESSAGE: &str =
+    "Balloon config error: No balloon device found.";
 
 pub(super) const BALLOON_RUNTIME_NOT_CONFIGURED_MESSAGE: &str =
     "Internal VMM error: Failed perform action on device: Device not found";
@@ -69,19 +70,21 @@ pub(super) const BALLOON_STATS_DISABLED_MESSAGE: &str =
 pub(super) const BALLOON_STATS_STATE_CHANGE_MESSAGE: &str =
     "Balloon update error: Balloon: Statistics cannot be enabled/disabled after activation.";
 
-pub(super) const MACHINE_CONFIG_INCOMPATIBLE_BALLOON_SIZE_MESSAGE: &str =
-    "Machine config error: The memory size (MiB) is smaller than the previously set balloon device target size.";
+pub(super) const MACHINE_CONFIG_INCOMPATIBLE_BALLOON_SIZE_MESSAGE: &str = "Machine config error: The memory size (MiB) is smaller than the previously set balloon device target size.";
 
-pub(super) const MEMORY_HOTPLUG_NOT_CONFIGURED_MESSAGE: &str = "Memory hotplug device is not configured.";
+pub(super) const MEMORY_HOTPLUG_NOT_CONFIGURED_MESSAGE: &str =
+    "Memory hotplug device is not configured.";
 
-pub(super) const MMDS_NOT_INITIALIZED_MESSAGE: &str = "MMDS error: The MMDS data store is not initialized.";
+pub(super) const MMDS_NOT_INITIALIZED_MESSAGE: &str =
+    "MMDS error: The MMDS data store is not initialized.";
 
-pub(super) const MMDS_DATA_STORE_LIMIT_EXCEEDED_MESSAGE: &str = "MMDS limit exceeded error: The MMDS patch request doesn't fit.";
+pub(super) const MMDS_DATA_STORE_LIMIT_EXCEEDED_MESSAGE: &str =
+    "MMDS limit exceeded error: The MMDS patch request doesn't fit.";
 
-pub(super) const MMDS_EMPTY_NETWORK_INTERFACE_LIST_MESSAGE: &str =
-    "MMMDS config error: The list of network interface IDs that allow forwarding MMDS requests is empty.";
+pub(super) const MMDS_EMPTY_NETWORK_INTERFACE_LIST_MESSAGE: &str = "MMMDS config error: The list of network interface IDs that allow forwarding MMDS requests is empty.";
 
-pub(super) const MMDS_INVALID_IPV4_ADDRESS_MESSAGE: &str = "MMMDS config error: The MMDS IPv4 address is not link local.";
+pub(super) const MMDS_INVALID_IPV4_ADDRESS_MESSAGE: &str =
+    "MMMDS config error: The MMDS IPv4 address is not link local.";
 
 pub(super) const MMDS_INVALID_NETWORK_INTERFACE_ID_MESSAGE: &str = "MMMDS config error: The list of network interface IDs provided contains at least one ID that does not correspond to any existing network interface.";
 

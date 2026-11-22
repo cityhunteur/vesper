@@ -1,7 +1,7 @@
-use crate::spec::Route as RouteSpec;
 use crate::api_matrix::{
     RouteSemantics, documented_route_semantics, route_uses_matrix_backed_placeholder,
 };
+use crate::spec::Route as RouteSpec;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -696,8 +696,7 @@ mod tests {
 
     #[test]
     fn validates_repo_generated_behavior_matrix() {
-        let routes = crate::spec::load_routes(DEFAULT_SWAGGER_PATH)
-            .unwrap();
+        let routes = crate::spec::load_routes(DEFAULT_SWAGGER_PATH).unwrap();
         let lock = crate::baseline::load(DEFAULT_BASELINE_LOCK_PATH).unwrap();
         let firecracker_revision = lock.baselines.get("firecracker").unwrap().revision.clone();
         let firecracker_version = crate::spec::load_info_version(DEFAULT_SWAGGER_PATH).unwrap();

@@ -83,7 +83,11 @@ struct Args {
     #[arg(long, value_enum)]
     network: Option<Network>,
     /// System VM launch config that names the bridge socket and agent port (`--backend systemvm`, `stage`, `store`).
-    #[arg(long, global = true, default_value = "build/systemvm/launch-config.json")]
+    #[arg(
+        long,
+        global = true,
+        default_value = "build/systemvm/launch-config.json"
+    )]
     launch_config: String,
     /// Bridge socket, overriding the launch config (`--backend systemvm`, `stage`, `store`).
     #[arg(long, global = true)]
@@ -121,7 +125,6 @@ async fn main() {
 }
 
 async fn run(args: Args) -> Result<(), String> {
-
     vesper::platform::validate_entitlements_file(
         args.entitlements_file.as_deref().map(Path::new),
         &["com.apple.security.virtualization"],
@@ -132,7 +135,14 @@ async fn run(args: Args) -> Result<(), String> {
         let options = systemvm::Options::from_args(&args)?;
         return systemvm::run(options, &socket_path(&args)?).await;
     }
-    if args.id.is_some() || args.memory_max.is_some() || args.bridge.is_some() || args.agent_port.is_some() || !args.stage.is_empty() || !args.tap.is_empty() || args.network.is_some() {
+    if args.id.is_some()
+        || args.memory_max.is_some()
+        || args.bridge.is_some()
+        || args.agent_port.is_some()
+        || !args.stage.is_empty()
+        || !args.tap.is_empty()
+        || args.network.is_some()
+    {
         return Err("--id, --memory-max, --stage, --tap, --network, --bridge and --agent-port do not apply to --backend model".to_string());
     }
 
@@ -181,14 +191,24 @@ fn socket_path(args: &Args) -> Result<PathBuf, String> {
 
 /// The default socket path: `vesperd.sock` in the first available runtime directory (TD-050).
 fn default_socket() -> Result<PathBuf, String> {
-    let base = [("XDG_RUNTIME_DIR", "vesper"), ("TMPDIR", "vesper"), ("HOME", ".vesper/run")]
-        .iter()
-        .find_map(|(var, sub)| {
-            std::env::var_os(var).filter(|v| !v.is_empty()).map(|v| PathBuf::from(v).join(sub))
-        })
-        .ok_or_else(|| "no XDG_RUNTIME_DIR, TMPDIR or HOME to place the default socket in; pass --socket".to_string())?;
+    let base = [
+        ("XDG_RUNTIME_DIR", "vesper"),
+        ("TMPDIR", "vesper"),
+        ("HOME", ".vesper/run"),
+    ]
+    .iter()
+    .find_map(|(var, sub)| {
+        std::env::var_os(var)
+            .filter(|v| !v.is_empty())
+            .map(|v| PathBuf::from(v).join(sub))
+    })
+    .ok_or_else(|| {
+        "no XDG_RUNTIME_DIR, TMPDIR or HOME to place the default socket in; pass --socket"
+            .to_string()
+    })?;
     if !base.exists() {
-        std::fs::create_dir_all(&base).map_err(|err| format!("create socket dir {}: {err}", base.display()))?;
+        std::fs::create_dir_all(&base)
+            .map_err(|err| format!("create socket dir {}: {err}", base.display()))?;
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&base, std::fs::Permissions::from_mode(0o700))
             .map_err(|err| format!("set socket dir permissions {}: {err}", base.display()))?;
@@ -205,10 +225,14 @@ fn bind_owner_only(socket: &Path) -> Result<tokio::net::UnixListener, String> {
     use std::os::unix::fs::PermissionsExt;
     let unbound = tokio::net::UnixSocket::new_stream()
         .map_err(|err| format!("make a unix socket for {}: {err}", socket.display()))?;
-    unbound.bind(socket).map_err(|err| format!("bind unix socket {}: {err}", socket.display()))?;
+    unbound
+        .bind(socket)
+        .map_err(|err| format!("bind unix socket {}: {err}", socket.display()))?;
     std::fs::set_permissions(socket, std::fs::Permissions::from_mode(0o600))
         .map_err(|err| format!("set socket permissions {}: {err}", socket.display()))?;
-    unbound.listen(1024).map_err(|err| format!("listen on unix socket {}: {err}", socket.display()))
+    unbound
+        .listen(1024)
+        .map_err(|err| format!("listen on unix socket {}: {err}", socket.display()))
 }
 
 async fn shutdown_signal() {

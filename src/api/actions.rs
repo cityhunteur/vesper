@@ -3,12 +3,12 @@ use axum::http::{Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 use std::sync::Arc;
 
+use super::pmem::validate_pmem_backing_files;
 use super::{
     ACTION_NOT_SUPPORTED_POSTBOOT_MESSAGE, ACTION_NOT_SUPPORTED_PREBOOT_MESSAGE, ActionRequest,
     ActionType, AppState, MISSING_KERNEL_CONFIG_MESSAGE, SEND_CTRL_ALT_DEL_AARCH64_MESSAGE,
     VmState, error_response,
 };
-use super::pmem::validate_pmem_backing_files;
 
 pub(super) fn handle_actions(
     state: &Arc<AppState>,

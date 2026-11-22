@@ -39,7 +39,10 @@ fn fake_agent(dir: &Path, version: &str) -> (PathBuf, Arc<Mutex<Agent>>) {
     std::fs::create_dir_all(&vsock).unwrap();
     let bridge = vsock.join("3.sock");
     let listener = UnixListener::bind(&bridge).unwrap();
-    let agent = Arc::new(Mutex::new(Agent { version: version.to_string(), ..Default::default() }));
+    let agent = Arc::new(Mutex::new(Agent {
+        version: version.to_string(),
+        ..Default::default()
+    }));
     let shared = agent.clone();
     thread::spawn(move || {
         for stream in listener.incoming() {
@@ -62,18 +65,30 @@ fn serve_one(stream: UnixStream, agent: Arc<Mutex<Agent>>) {
     if reader.read_line(&mut line).unwrap_or(0) == 0 {
         return;
     }
-    agent.lock().unwrap().requests.push(line.trim_end().to_string());
+    agent
+        .lock()
+        .unwrap()
+        .requests
+        .push(line.trim_end().to_string());
     if line == "DATA status\n" {
         let state = agent.lock().unwrap().data.clone();
-        let state = if state.is_empty() { "mounted /dev/vdb used=1 avail=2".to_string() } else { state };
+        let state = if state.is_empty() {
+            "mounted /dev/vdb used=1 avail=2".to_string()
+        } else {
+            state
+        };
         let _ = writer.write_all(format!("DATA 0 1\nDATA {state}\n").as_bytes());
         return;
     }
     if let Some(args) = line.trim_end().strip_prefix("VESPERD ") {
         let reply = match args.split(' ').collect::<Vec<_>>().as_slice() {
-            ["stage", "vm-1", src, dest] => format!("VESPERD 0 1\nSTAGED {src} {dest} copy bytes=7\n"),
+            ["stage", "vm-1", src, dest] => {
+                format!("VESPERD 0 1\nSTAGED {src} {dest} copy bytes=7\n")
+            }
             ["stage", _, _, _] => "VESPERD 1 1\nERR no vesperd microVM\n".to_string(),
-            ["store-list"] => "VESPERD 0 2\nSTORE a.mem bytes=7 links=1\nFREE avail=100 reserve=50\n".to_string(),
+            ["store-list"] => {
+                "VESPERD 0 2\nSTORE a.mem bytes=7 links=1\nFREE avail=100 reserve=50\n".to_string()
+            }
             ["store-rm", "a.mem"] => "VESPERD 0 1\nREMOVED a.mem\n".to_string(),
             _ => "VESPERD 1 1\nERR no store file\n".to_string(),
         };
@@ -92,8 +107,12 @@ fn serve_one(stream: UnixStream, agent: Arc<Mutex<Agent>>) {
             }
             a.version.clone()
         };
-        writer.write_all(format!("READY vm-1 pid=4242 firecracker_version={version}\n").as_bytes()).unwrap();
-        writer.set_read_timeout(Some(Duration::from_millis(50))).unwrap();
+        writer
+            .write_all(format!("READY vm-1 pid=4242 firecracker_version={version}\n").as_bytes())
+            .unwrap();
+        writer
+            .set_read_timeout(Some(Duration::from_millis(50)))
+            .unwrap();
         let mut buf = [0u8; 64];
         loop {
             match reader.read(&mut buf) {
@@ -102,7 +121,11 @@ fn serve_one(stream: UnixStream, agent: Arc<Mutex<Agent>>) {
                     return;
                 }
                 Ok(_) => {}
-                Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {}
+                Err(e)
+                    if matches!(
+                        e.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                    ) => {}
                 Err(_) => return,
             }
             if agent.lock().unwrap().end_lease {
@@ -182,10 +205,18 @@ fn wait_exit(v: &mut Vesperd, within: Duration) -> (ExitStatus, String) {
     loop {
         if let Some(status) = v.child.try_wait().unwrap() {
             let mut err = String::new();
-            v.child.stderr.take().unwrap().read_to_string(&mut err).unwrap();
+            v.child
+                .stderr
+                .take()
+                .unwrap()
+                .read_to_string(&mut err)
+                .unwrap();
             return (status, err);
         }
-        assert!(started.elapsed() < within, "vesperd still running after {within:?}");
+        assert!(
+            started.elapsed() < within,
+            "vesperd still running after {within:?}"
+        );
         thread::sleep(Duration::from_millis(50));
     }
 }
@@ -193,15 +224,22 @@ fn wait_exit(v: &mut Vesperd, within: Duration) -> (ExitStatus, String) {
 fn wait_for(what: &str, within: Duration, check: impl Fn() -> bool) {
     let started = Instant::now();
     while !check() {
-        assert!(started.elapsed() < within, "{what} not seen within {within:?}");
+        assert!(
+            started.elapsed() < within,
+            "{what} not seen within {within:?}"
+        );
         thread::sleep(Duration::from_millis(20));
     }
 }
 
 fn request(socket: &Path) -> Vec<u8> {
     let mut client = UnixStream::connect(socket).unwrap();
-    client.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
-    client.write_all(b"PUT /machine-config HTTP/1.1\r\nHost: localhost\r\n\r\n").unwrap();
+    client
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    client
+        .write_all(b"PUT /machine-config HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        .unwrap();
     let mut reply = vec![0u8; FC_REPLY.len()];
     client.read_exact(&mut reply).unwrap();
     reply
@@ -213,17 +251,33 @@ fn relays_firecracker_bytes_and_sigterm_closes_the_lease() {
     let (bridge, agent) = fake_agent(tmp.path(), "1.16.0");
     let mut v = spawn(tmp.path(), &bridge, &[]);
     wait_listening(&v);
-    assert_eq!(std::fs::metadata(&v.socket).unwrap().permissions().mode() & 0o777, 0o600);
-    assert_eq!(request(&v.socket), FC_REPLY, "the upstream's bytes must pass through unchanged");
+    assert_eq!(
+        std::fs::metadata(&v.socket).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    assert_eq!(
+        request(&v.socket),
+        FC_REPLY,
+        "the upstream's bytes must pass through unchanged"
+    );
     assert!(!agent.lock().unwrap().client_closed_lease);
 
     // A closed stdout must not turn the stop into a panic.
     drop(v.child.stdout.take());
     let pid = v.child.id().to_string();
-    assert!(Command::new("kill").args(["-TERM", &pid]).status().unwrap().success());
+    assert!(
+        Command::new("kill")
+            .args(["-TERM", &pid])
+            .status()
+            .unwrap()
+            .success()
+    );
     let (status, err) = wait_exit(&mut v, Duration::from_secs(10));
     assert!(status.success(), "SIGTERM should exit 0: {status:?} {err}");
-    assert!(agent.lock().unwrap().client_closed_lease, "SIGTERM must close the lease");
+    assert!(
+        agent.lock().unwrap().client_closed_lease,
+        "SIGTERM must close the lease"
+    );
     assert!(!v.socket.exists(), "the socket is removed on exit");
 }
 
@@ -234,9 +288,16 @@ fn a_version_other_than_the_pinned_swagger_is_refused() {
     let mut v = spawn(tmp.path(), &bridge, &[]);
     let (status, err) = wait_exit(&mut v, Duration::from_secs(10));
     assert!(!status.success());
-    assert!(err.contains("Firecracker 9.9.9") && err.contains("pinned swagger is 1.16.0"), "stderr: {err}");
+    assert!(
+        err.contains("Firecracker 9.9.9") && err.contains("pinned swagger is 1.16.0"),
+        "stderr: {err}"
+    );
     assert!(!v.socket.exists(), "no socket for a refused microVM");
-    wait_for("the lease closed by vesperd", Duration::from_secs(5), || agent.lock().unwrap().client_closed_lease);
+    wait_for(
+        "the lease closed by vesperd",
+        Duration::from_secs(5),
+        || agent.lock().unwrap().client_closed_lease,
+    );
 }
 
 #[test]
@@ -248,8 +309,14 @@ fn the_lease_closing_makes_vesperd_exit_non_zero() {
     agent.lock().unwrap().end_lease = true;
     let (status, err) = wait_exit(&mut v, Duration::from_secs(10));
     assert!(!status.success());
-    assert!(err.contains("the lease of microVM vm-1 closed"), "stderr: {err}");
-    assert!(!v.socket.exists(), "the socket is removed when the lease closes");
+    assert!(
+        err.contains("the lease of microVM vm-1 closed"),
+        "stderr: {err}"
+    );
+    assert!(
+        !v.socket.exists(),
+        "the socket is removed when the lease closes"
+    );
 }
 
 #[test]
@@ -263,9 +330,15 @@ fn busy_is_retried_and_a_refused_fcapi_closes_the_client_with_no_body() {
     }
     let v = spawn(tmp.path(), &bridge, &[]);
     wait_listening(&v);
-    assert_eq!(agent.lock().unwrap().launches, 3, "two ERR busy, then READY");
+    assert_eq!(
+        agent.lock().unwrap().launches,
+        3,
+        "two ERR busy, then READY"
+    );
     let mut client = UnixStream::connect(&v.socket).unwrap();
-    client.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+    client
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .unwrap();
     client.write_all(b"GET / HTTP/1.1\r\n\r\n").unwrap();
     // "Closed with no bytes": macOS reports end of file; Linux resets a socket closed with the request unread.
     let mut rest = Vec::new();
@@ -274,7 +347,11 @@ fn busy_is_retried_and_a_refused_fcapi_closes_the_client_with_no_body() {
         Err(e) if e.kind() == std::io::ErrorKind::ConnectionReset => {}
         Err(e) => panic!("read: {e}"),
     }
-    assert!(rest.is_empty(), "vesperd sent {:?}", String::from_utf8_lossy(&rest));
+    assert!(
+        rest.is_empty(),
+        "vesperd sent {:?}",
+        String::from_utf8_lossy(&rest)
+    );
 }
 
 #[test]
@@ -287,7 +364,11 @@ fn a_second_vesperd_on_the_socket_launches_nothing() {
     let (status, err) = wait_exit(&mut second, Duration::from_secs(10));
     assert!(!status.success());
     assert!(err.contains("another vesperd holds"), "stderr: {err}");
-    assert_eq!(agent.lock().unwrap().launches, 1, "the refused vesperd must not launch a microVM");
+    assert_eq!(
+        agent.lock().unwrap().launches,
+        1,
+        "the refused vesperd must not launch a microVM"
+    );
     assert_eq!(request(&first.socket), FC_REPLY);
 }
 
@@ -304,23 +385,49 @@ fn bad_arguments_are_refused() {
         assert!(!out.status.success(), "{args:?} accepted");
         String::from_utf8_lossy(&out.stderr).into_owned()
     };
-    assert!(run(&["--backend", "systemvm", "--bridge", "x/3.sock"]).contains("--id ID is required"));
-    assert!(run(&["--backend", "systemvm", "--id", "../x", "--bridge", "x/3.sock"]).contains("letters, digits and hyphens"));
-    assert!(run(&["--backend", "model", "--id", "vm-1"]).contains("do not apply to --backend model"));
-    assert!(run(&["--backend", "model", "--tap", "tap0"]).contains("do not apply to --backend model"));
-    assert!(run(&["--backend", "model", "--network", "nat"]).contains("do not apply to --backend model"));
+    assert!(
+        run(&["--backend", "systemvm", "--bridge", "x/3.sock"]).contains("--id ID is required")
+    );
+    assert!(
+        run(&[
+            "--backend",
+            "systemvm",
+            "--id",
+            "../x",
+            "--bridge",
+            "x/3.sock"
+        ])
+        .contains("letters, digits and hyphens")
+    );
+    assert!(
+        run(&["--backend", "model", "--id", "vm-1"]).contains("do not apply to --backend model")
+    );
+    assert!(
+        run(&["--backend", "model", "--tap", "tap0"]).contains("do not apply to --backend model")
+    );
+    assert!(
+        run(&["--backend", "model", "--network", "nat"])
+            .contains("do not apply to --backend model")
+    );
 }
 
 /// Runs `cmd` to its end; a `vesperd` still running after 10 s is killed and fails the test (a server that
 /// listens instead of stopping, such as the model started by mistake).
 fn output_within(mut cmd: Command) -> std::process::Output {
-    let mut child = cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().expect("spawn vesperd");
+    let mut child = cmd
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn vesperd");
     let started = Instant::now();
     while child.try_wait().unwrap().is_none() {
         if started.elapsed() > Duration::from_secs(10) {
             let _ = child.kill();
             let out = child.wait_with_output().unwrap();
-            panic!("vesperd still running after 10 s: {}", String::from_utf8_lossy(&out.stdout));
+            panic!(
+                "vesperd still running after 10 s: {}",
+                String::from_utf8_lossy(&out.stdout)
+            );
         }
         thread::sleep(Duration::from_millis(50));
     }
@@ -333,13 +440,24 @@ fn output_within(mut cmd: Command) -> std::process::Output {
 fn no_flags_is_the_systemvm_backend_and_needs_an_id() {
     let tmp = tempfile::tempdir().unwrap();
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_vesperd"));
-    cmd.current_dir(env!("CARGO_MANIFEST_DIR")).env("XDG_RUNTIME_DIR", tmp.path());
+    cmd.current_dir(env!("CARGO_MANIFEST_DIR"))
+        .env("XDG_RUNTIME_DIR", tmp.path());
     let out = output_within(cmd);
     let err = String::from_utf8_lossy(&out.stderr);
     assert_eq!(out.status.code(), Some(1), "{err}");
-    assert!(err.contains("--id ID is required") && err.contains("--backend model"), "{err}");
-    assert!(out.stdout.is_empty(), "nothing listens: {:?}", String::from_utf8_lossy(&out.stdout));
-    assert!(!tmp.path().join("vesper").exists(), "no socket directory before the id is known");
+    assert!(
+        err.contains("--id ID is required") && err.contains("--backend model"),
+        "{err}"
+    );
+    assert!(
+        out.stdout.is_empty(),
+        "nothing listens: {:?}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    assert!(
+        !tmp.path().join("vesper").exists(),
+        "no socket directory before the id is known"
+    );
 }
 
 /// D-063: with no `--backend` flag, `--id` launches a microVM through the bridge, on the default socket, which is
@@ -362,12 +480,32 @@ fn the_default_backend_launches_on_the_default_socket() {
         .expect("spawn vesperd");
     let mut v = Vesperd { child, socket };
     wait_listening(&v);
-    assert_eq!(std::fs::metadata(runtime.join("vesper")).unwrap().permissions().mode() & 0o777, 0o700);
-    assert_eq!(std::fs::metadata(&v.socket).unwrap().permissions().mode() & 0o777, 0o600);
-    assert_eq!(request(&v.socket), FC_REPLY, "the default backend relays Firecracker's bytes");
+    assert_eq!(
+        std::fs::metadata(runtime.join("vesper"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777,
+        0o700
+    );
+    assert_eq!(
+        std::fs::metadata(&v.socket).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    assert_eq!(
+        request(&v.socket),
+        FC_REPLY,
+        "the default backend relays Firecracker's bytes"
+    );
     assert_eq!(agent.lock().unwrap().launches, 1);
     let pid = v.child.id().to_string();
-    assert!(Command::new("kill").args(["-TERM", &pid]).status().unwrap().success());
+    assert!(
+        Command::new("kill")
+            .args(["-TERM", &pid])
+            .status()
+            .unwrap()
+            .success()
+    );
     let (status, err) = wait_exit(&mut v, Duration::from_secs(10));
     assert!(status.success(), "{status:?} {err}");
 }
@@ -388,8 +526,15 @@ fn the_default_backend_never_falls_back_to_the_model() {
     let out = output_within(cmd);
     let err = String::from_utf8_lossy(&out.stderr);
     assert_eq!(out.status.code(), Some(1), "{err}");
-    assert!(err.contains("dial vsock bridge"), "the error is the failed dial: {err}");
-    assert!(out.stdout.is_empty(), "nothing listens: {:?}", String::from_utf8_lossy(&out.stdout));
+    assert!(
+        err.contains("dial vsock bridge"),
+        "the error is the failed dial: {err}"
+    );
+    assert!(
+        out.stdout.is_empty(),
+        "nothing listens: {:?}",
+        String::from_utf8_lossy(&out.stdout)
+    );
     assert!(!socket.exists(), "no socket is left");
 }
 
@@ -402,7 +547,11 @@ fn cli(dir: &Path, bridge: &Path, args: &[&str]) -> (i32, String, String) {
         .env("XDG_RUNTIME_DIR", dir)
         .output()
         .unwrap();
-    (out.status.code().unwrap_or(-1), String::from_utf8_lossy(&out.stdout).into_owned(), String::from_utf8_lossy(&out.stderr).into_owned())
+    (
+        out.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
 }
 
 #[test]
@@ -413,9 +562,16 @@ fn a_data_disk_not_in_use_is_refused_before_any_launch() {
     let mut v = spawn(tmp.path(), &bridge, &[]);
     let (status, err) = wait_exit(&mut v, Duration::from_secs(10));
     assert!(!status.success());
-    assert!(err.contains("data disk is not in use (DATA absent)"), "stderr: {err}");
+    assert!(
+        err.contains("data disk is not in use (DATA absent)"),
+        "stderr: {err}"
+    );
     let a = agent.lock().unwrap();
-    assert_eq!((a.launches, a.requests.as_slice()), (0, &["DATA status".to_string()][..]), "no LAUNCHAPI without the data disk");
+    assert_eq!(
+        (a.launches, a.requests.as_slice()),
+        (0, &["DATA status".to_string()][..]),
+        "no LAUNCHAPI without the data disk"
+    );
     assert!(!v.socket.exists());
 }
 
@@ -426,32 +582,70 @@ fn stage_flags_ride_on_launchapi_in_order() {
     let v = spawn(
         tmp.path(),
         &bridge,
-        &["--memory-max", "268435456", "--stage", "store:a.mem:/snap.mem", "--stage", "share:/Users/me/vm/d.img:/d.img"],
+        &[
+            "--memory-max",
+            "268435456",
+            "--stage",
+            "store:a.mem:/snap.mem",
+            "--stage",
+            "share:/Users/me/vm/d.img:/d.img",
+        ],
     );
     wait_listening(&v);
     let a = agent.lock().unwrap();
     assert_eq!(a.requests[0], "DATA status");
-    assert_eq!(a.requests[1], "LAUNCHAPI vm-1 268435456 stage=store:a.mem:/snap.mem stage=share:/Users/me/vm/d.img:/d.img");
+    assert_eq!(
+        a.requests[1],
+        "LAUNCHAPI vm-1 268435456 stage=store:a.mem:/snap.mem stage=share:/Users/me/vm/d.img:/d.img"
+    );
 }
 
 #[test]
 fn tap_flags_ride_on_launchapi_after_the_stages() {
     let tmp = tempfile::tempdir().unwrap();
     let (bridge, agent) = fake_agent(tmp.path(), "1.16.0");
-    let v = spawn(tmp.path(), &bridge, &["--tap", "tap0", "--stage", "store:a.mem:/snap.mem", "--tap", "tap1"]);
+    let v = spawn(
+        tmp.path(),
+        &bridge,
+        &[
+            "--tap",
+            "tap0",
+            "--stage",
+            "store:a.mem:/snap.mem",
+            "--tap",
+            "tap1",
+        ],
+    );
     wait_listening(&v);
     let a = agent.lock().unwrap();
-    assert_eq!(a.requests[1], "LAUNCHAPI vm-1 stage=store:a.mem:/snap.mem tap=tap0 tap=tap1");
+    assert_eq!(
+        a.requests[1],
+        "LAUNCHAPI vm-1 stage=store:a.mem:/snap.mem tap=tap0 tap=tap1"
+    );
 }
 
 #[test]
 fn network_nat_rides_on_launchapi_with_tap_gateways() {
     let tmp = tempfile::tempdir().unwrap();
     let (bridge, agent) = fake_agent(tmp.path(), "1.16.0");
-    let v = spawn(tmp.path(), &bridge, &["--network", "nat", "--tap", "tap0:172.16.0.1/30", "--tap", "tap1"]);
+    let v = spawn(
+        tmp.path(),
+        &bridge,
+        &[
+            "--network",
+            "nat",
+            "--tap",
+            "tap0:172.16.0.1/30",
+            "--tap",
+            "tap1",
+        ],
+    );
     wait_listening(&v);
     let a = agent.lock().unwrap();
-    assert_eq!(a.requests[1], "LAUNCHAPI vm-1 tap=tap0 tapaddr=tap0:172.16.0.1/30 tap=tap1 net=nat");
+    assert_eq!(
+        a.requests[1],
+        "LAUNCHAPI vm-1 tap=tap0 tapaddr=tap0:172.16.0.1/30 tap=tap1 net=nat"
+    );
 }
 
 #[test]
@@ -460,18 +654,43 @@ fn a_bad_network_flag_launches_nothing() {
     let (bridge, agent) = fake_agent(tmp.path(), "1.16.0");
     for (flags, why) in [
         (vec!["--tap", "tap0:172.16.0.1/30"], "needs --network nat"),
-        (vec!["--network", "nat", "--tap", "tap0"], "needs a --tap NAME:ADDR/PREFIX"),
-        (vec!["--network", "nat", "--tap", "tap0:8.8.8.1/24"], "RFC 1918"),
-        (vec!["--network", "nat", "--tap", "tap0:198.18.0.1/24"], "RFC 1918"),
-        (vec!["--network", "nat", "--tap", "tap0:172.17.5.1/24"], "overlaps 172.17.0.0/16"),
-        (vec!["--network", "nat", "--tap", "a:10.1.0.1/16", "--tap", "b:10.1.9.1/24"], "overlaps"),
+        (
+            vec!["--network", "nat", "--tap", "tap0"],
+            "needs a --tap NAME:ADDR/PREFIX",
+        ),
+        (
+            vec!["--network", "nat", "--tap", "tap0:8.8.8.1/24"],
+            "RFC 1918",
+        ),
+        (
+            vec!["--network", "nat", "--tap", "tap0:198.18.0.1/24"],
+            "RFC 1918",
+        ),
+        (
+            vec!["--network", "nat", "--tap", "tap0:172.17.5.1/24"],
+            "overlaps 172.17.0.0/16",
+        ),
+        (
+            vec![
+                "--network",
+                "nat",
+                "--tap",
+                "a:10.1.0.1/16",
+                "--tap",
+                "b:10.1.9.1/24",
+            ],
+            "overlaps",
+        ),
         (vec!["--network", "open"], "invalid value"),
     ] {
         let mut v = spawn(tmp.path(), &bridge, &flags);
         let (status, err) = wait_exit(&mut v, Duration::from_secs(10));
         assert!(!status.success() && err.contains(why), "{flags:?}: {err}");
     }
-    assert!(agent.lock().unwrap().requests.is_empty(), "nothing reaches the agent");
+    assert!(
+        agent.lock().unwrap().requests.is_empty(),
+        "nothing reaches the agent"
+    );
 }
 
 #[test]
@@ -494,7 +713,10 @@ fn a_bad_tap_flag_launches_nothing() {
     let mut v = spawn(tmp.path(), &bridge, &many);
     let (status, err) = wait_exit(&mut v, Duration::from_secs(10));
     assert!(!status.success() && err.contains("at most 8"), "{err}");
-    assert!(agent.lock().unwrap().requests.is_empty(), "nothing reaches the agent");
+    assert!(
+        agent.lock().unwrap().requests.is_empty(),
+        "nothing reaches the agent"
+    );
 }
 
 #[test]
@@ -511,31 +733,61 @@ fn a_bad_stage_flag_launches_nothing() {
         let (status, err) = wait_exit(&mut v, Duration::from_secs(10));
         assert!(!status.success() && err.contains(why), "{flag}: {err}");
     }
-    let many: Vec<&str> = std::iter::repeat(["--stage", "store:a.mem:/a.mem"]).take(17).flatten().collect();
+    let many: Vec<&str> = std::iter::repeat(["--stage", "store:a.mem:/a.mem"])
+        .take(17)
+        .flatten()
+        .collect();
     let mut v = spawn(tmp.path(), &bridge, &many);
     let (status, err) = wait_exit(&mut v, Duration::from_secs(10));
     assert!(!status.success() && err.contains("at most 16"), "{err}");
-    assert!(agent.lock().unwrap().requests.is_empty(), "nothing reaches the agent");
+    assert!(
+        agent.lock().unwrap().requests.is_empty(),
+        "nothing reaches the agent"
+    );
 }
 
 #[test]
 fn stage_and_store_subcommands_send_one_vesperd_line() {
     let tmp = tempfile::tempdir().unwrap();
     let (bridge, agent) = fake_agent(tmp.path(), "1.16.0");
-    let (code, out, err) = cli(tmp.path(), &bridge, &["stage", "--id", "vm-1", "jail:/snap.mem", "store:a.mem"]);
-    assert_eq!((code, out.as_str()), (0, "STAGED jail:/snap.mem store:a.mem copy bytes=7\n"), "{err}");
-    let (code, _, err) = cli(tmp.path(), &bridge, &["stage", "--id", "vm-2", "store:a.mem", "/a.mem"]);
+    let (code, out, err) = cli(
+        tmp.path(),
+        &bridge,
+        &["stage", "--id", "vm-1", "jail:/snap.mem", "store:a.mem"],
+    );
+    assert_eq!(
+        (code, out.as_str()),
+        (0, "STAGED jail:/snap.mem store:a.mem copy bytes=7\n"),
+        "{err}"
+    );
+    let (code, _, err) = cli(
+        tmp.path(),
+        &bridge,
+        &["stage", "--id", "vm-2", "store:a.mem", "/a.mem"],
+    );
     assert_eq!(code, 1, "a refusal in the System VM exits 1");
     assert!(err.contains("vesperd stage: no vesperd microVM"), "{err}");
     let (code, out, _) = cli(tmp.path(), &bridge, &["store", "list"]);
-    assert_eq!((code, out.as_str()), (0, "STORE a.mem bytes=7 links=1\nFREE avail=100 reserve=50\n"));
+    assert_eq!(
+        (code, out.as_str()),
+        (
+            0,
+            "STORE a.mem bytes=7 links=1\nFREE avail=100 reserve=50\n"
+        )
+    );
     let (code, out, _) = cli(tmp.path(), &bridge, &["store", "rm", "a.mem"]);
     assert_eq!((code, out.as_str()), (0, "REMOVED a.mem\n"));
     let (code, _, err) = cli(tmp.path(), &bridge, &["store", "rm", "b"]);
     assert!(code == 1 && err.contains("no store file"), "{err}");
     assert_eq!(
         agent.lock().unwrap().requests,
-        ["VESPERD stage vm-1 jail:/snap.mem store:a.mem", "VESPERD stage vm-2 store:a.mem /a.mem", "VESPERD store-list", "VESPERD store-rm a.mem", "VESPERD store-rm b"]
+        [
+            "VESPERD stage vm-1 jail:/snap.mem store:a.mem",
+            "VESPERD stage vm-2 store:a.mem /a.mem",
+            "VESPERD store-list",
+            "VESPERD store-rm a.mem",
+            "VESPERD store-rm b"
+        ]
     );
 }
 
@@ -545,18 +797,42 @@ fn bad_stage_and_store_arguments_never_reach_the_agent() {
     let (bridge, agent) = fake_agent(tmp.path(), "1.16.0");
     for (args, why) in [
         (&["stage", "store:a.mem", "/a.mem"][..], "pass --id"),
-        (&["stage", "--id", "../x", "store:a", "/a"][..], "letters, digits and hyphens"),
-        (&["stage", "--id", "vm-1", "store:a", "store:b"][..], "store to store"),
-        (&["stage", "--id", "vm-1", "jail:/a", "/b"][..], "jail to jail"),
-        (&["stage", "--id", "vm-1", "share:/a b", "/b"][..], "bad SRC"),
-        (&["stage", "--id", "vm-1", "share:/a", "relative"][..], "bad DEST"),
+        (
+            &["stage", "--id", "../x", "store:a", "/a"][..],
+            "letters, digits and hyphens",
+        ),
+        (
+            &["stage", "--id", "vm-1", "store:a", "store:b"][..],
+            "store to store",
+        ),
+        (
+            &["stage", "--id", "vm-1", "jail:/a", "/b"][..],
+            "jail to jail",
+        ),
+        (
+            &["stage", "--id", "vm-1", "share:/a b", "/b"][..],
+            "bad SRC",
+        ),
+        (
+            &["stage", "--id", "vm-1", "share:/a", "relative"][..],
+            "bad DEST",
+        ),
         (&["store", "rm", ".partial.1"][..], "bad store name"),
-        (&["--backend", "systemvm", "store", "list"][..], "do not apply here"),
-        (&["--backend", "model", "store", "list"][..], "do not apply here"),
+        (
+            &["--backend", "systemvm", "store", "list"][..],
+            "do not apply here",
+        ),
+        (
+            &["--backend", "model", "store", "list"][..],
+            "do not apply here",
+        ),
         (&["--tap", "tap0", "store", "list"][..], "do not apply here"),
     ] {
         let (code, _, err) = cli(tmp.path(), &bridge, args);
-        assert!(code == 2 && err.contains(why), "{args:?}: exit {code}: {err}");
+        assert!(
+            code == 2 && err.contains(why),
+            "{args:?}: exit {code}: {err}"
+        );
     }
     assert!(agent.lock().unwrap().requests.is_empty());
 }
@@ -565,7 +841,10 @@ fn bad_stage_and_store_arguments_never_reach_the_agent() {
 /// `tap=` token before it touches anything, and agrees with `vesper::control::valid_tap_name`.
 #[test]
 fn the_guest_helper_refuses_the_tap_names_vesperd_refuses() {
-    let script = concat!(env!("CARGO_MANIFEST_DIR"), "/systemvm/overlay/usr/local/bin/vesper-vesperd");
+    let script = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/systemvm/overlay/usr/local/bin/vesper-vesperd"
+    );
     let launch = |tokens: &[&str]| {
         // The System VM's eth0 and resolver, not this host's (honoured only when the script is not root).
         let out = Command::new("sh")
@@ -578,42 +857,113 @@ fn the_guest_helper_refuses_the_tap_names_vesperd_refuses() {
             .unwrap();
         String::from_utf8_lossy(&out.stdout).into_owned()
     };
-    for name in ["", "lo", "-", "-tap0", "veth0", "vpd1", "tap 0", "tap.0", "tap/0", "a-name-of-16-chr"] {
+    for name in [
+        "",
+        "lo",
+        "-",
+        "-tap0",
+        "veth0",
+        "vpd1",
+        "tap 0",
+        "tap.0",
+        "tap/0",
+        "a-name-of-16-chr",
+    ] {
         let out = launch(&[&format!("tap={name}")]);
         assert!(out.starts_with("ERR bad tap name"), "{name:?}: {out}");
-        assert!(!vesper::control::valid_tap_name(name), "{name:?} accepted by vesperd");
+        assert!(
+            !vesper::control::valid_tap_name(name),
+            "{name:?} accepted by vesperd"
+        );
     }
     for name in ["tap0", "up", "dev", "t-", &"t".repeat(15)] {
         let out = launch(&[&format!("tap={name}")]);
         // Past the token checks the helper stops at the first System VM requirement (memory, Firecracker).
-        assert!(out.starts_with("ERR") && !out.contains("tap"), "{name:?}: {out}");
-        assert!(vesper::control::valid_tap_name(name), "{name:?} refused by vesperd");
+        assert!(
+            out.starts_with("ERR") && !out.contains("tap"),
+            "{name:?}: {out}"
+        );
+        assert!(
+            vesper::control::valid_tap_name(name),
+            "{name:?} refused by vesperd"
+        );
     }
     assert!(launch(&["tap=tap0", "tap=tap0"]).starts_with("ERR tap tap0 given twice"));
     let nine: Vec<String> = (0..9).map(|i| format!("tap=tap{i}")).collect();
     let nine: Vec<&str> = nine.iter().map(String::as_str).collect();
-    assert!(launch(&nine).starts_with("ERR at most 8 tap= tokens"), "{}", launch(&nine));
+    assert!(
+        launch(&nine).starts_with("ERR at most 8 tap= tokens"),
+        "{}",
+        launch(&nine)
+    );
     // ADR 0008: the guest checks every network token again, before it touches anything.
     for (tokens, why) in [
-        (&["tap=tap0", "tapaddr=tap0:172.16.0.1/30"][..], "ERR tapaddr= needs net=nat"),
+        (
+            &["tap=tap0", "tapaddr=tap0:172.16.0.1/30"][..],
+            "ERR tapaddr= needs net=nat",
+        ),
         (&["tap=tap0", "net=nat"][..], "ERR net=nat needs a tapaddr="),
-        (&["tap=tap0", "tapaddr=tap1:172.16.0.1/30", "net=nat"][..], "ERR tapaddr= names tap1, which is not a tap= token"),
-        (&["tap=tap0", "tapaddr=tap0:8.8.8.1/24", "net=nat"][..], "not inside RFC 1918"),
-        (&["tap=tap0", "tapaddr=tap0:172.16.0.0/30", "net=nat"][..], "host address"),
-        (&["tap=tap0", "tapaddr=tap0:172.16.0.1/31", "net=nat"][..], "prefix length of 16 to 30"),
-        (&["tap=tap0", "tapaddr=tap0:172.17.0.9/24", "net=nat"][..], "overlaps 172.17.0.0/16"),
-        (&["tap=tap0", "tapaddr=tap0:192.168.64.9/24", "net=nat"][..], "overlaps 192.168.64.0/24"),
-        (&["tap=a", "tap=b", "tapaddr=a:10.1.0.1/16", "tapaddr=b:10.1.7.1/24", "net=nat"][..], "overlaps 10.1.0.1/16"),
-        (&["tap=tap0", "tapaddr=tap0:172.16.0.1/30", "tapaddr=tap0:172.16.1.1/30", "net=nat"][..], "gives tap0 twice"),
+        (
+            &["tap=tap0", "tapaddr=tap1:172.16.0.1/30", "net=nat"][..],
+            "ERR tapaddr= names tap1, which is not a tap= token",
+        ),
+        (
+            &["tap=tap0", "tapaddr=tap0:8.8.8.1/24", "net=nat"][..],
+            "not inside RFC 1918",
+        ),
+        (
+            &["tap=tap0", "tapaddr=tap0:172.16.0.0/30", "net=nat"][..],
+            "host address",
+        ),
+        (
+            &["tap=tap0", "tapaddr=tap0:172.16.0.1/31", "net=nat"][..],
+            "prefix length of 16 to 30",
+        ),
+        (
+            &["tap=tap0", "tapaddr=tap0:172.17.0.9/24", "net=nat"][..],
+            "overlaps 172.17.0.0/16",
+        ),
+        (
+            &["tap=tap0", "tapaddr=tap0:192.168.64.9/24", "net=nat"][..],
+            "overlaps 192.168.64.0/24",
+        ),
+        (
+            &[
+                "tap=a",
+                "tap=b",
+                "tapaddr=a:10.1.0.1/16",
+                "tapaddr=b:10.1.7.1/24",
+                "net=nat",
+            ][..],
+            "overlaps 10.1.0.1/16",
+        ),
+        (
+            &[
+                "tap=tap0",
+                "tapaddr=tap0:172.16.0.1/30",
+                "tapaddr=tap0:172.16.1.1/30",
+                "net=nat",
+            ][..],
+            "gives tap0 twice",
+        ),
         (&["net=open"][..], "ERR bad network policy open"),
         (&["net=nat", "net=nat"][..], "ERR net= given twice"),
         (&["net=none", "net=nat"][..], "ERR net= given twice"),
-        (&["tap=tap0", "tapaddr=tap0:172.016.0.1/30", "net=nat"][..], "bad address"),
-        (&["tap=tap0", "tapaddr=tap0:172.16.0.1/030", "net=nat"][..], "prefix length of 16 to 30"),
+        (
+            &["tap=tap0", "tapaddr=tap0:172.016.0.1/30", "net=nat"][..],
+            "bad address",
+        ),
+        (
+            &["tap=tap0", "tapaddr=tap0:172.16.0.1/030", "net=nat"][..],
+            "prefix length of 16 to 30",
+        ),
     ] {
         let out = launch(tokens);
         assert!(out.contains(why), "{tokens:?}: {out}");
     }
     let ok = launch(&["tap=tap0", "tapaddr=tap0:172.16.0.1/30", "net=nat"]);
-    assert!(ok.starts_with("ERR") && !ok.contains("tap") && !ok.contains("net"), "{ok}");
+    assert!(
+        ok.starts_with("ERR") && !ok.contains("tap") && !ok.contains("net"),
+        "{ok}"
+    );
 }

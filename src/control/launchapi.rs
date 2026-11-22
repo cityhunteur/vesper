@@ -44,7 +44,9 @@ pub fn valid_tap_name(name: &str) -> bool {
         && !name.starts_with('-')
         && !name.starts_with("veth")
         && !name.starts_with("vpd")
-        && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
 }
 
 /// One `vesperd --tap NAME[:ADDR/PREFIX]`: a tap device, and under `--network nat` the gateway address its guest
@@ -57,11 +59,17 @@ pub struct TapSpec {
 
 /// Networks a tap gateway may not touch: Docker's bridge and the veth pool (`198.18.0.0/15`). The guest also checks
 /// the System VM's `eth0` subnet and resolver, which only it knows.
-const RESERVED_NETS: [(std::net::Ipv4Addr, u8); 2] =
-    [(std::net::Ipv4Addr::new(172, 17, 0, 0), 16), (std::net::Ipv4Addr::new(198, 18, 0, 0), 15)];
+const RESERVED_NETS: [(std::net::Ipv4Addr, u8); 2] = [
+    (std::net::Ipv4Addr::new(172, 17, 0, 0), 16),
+    (std::net::Ipv4Addr::new(198, 18, 0, 0), 15),
+];
 
 fn mask(prefix: u8) -> u32 {
-    if prefix == 0 { 0 } else { u32::MAX << (32 - u32::from(prefix)) }
+    if prefix == 0 {
+        0
+    } else {
+        u32::MAX << (32 - u32::from(prefix))
+    }
 }
 
 /// Whether two IPv4 networks share an address.
@@ -76,12 +84,20 @@ impl TapSpec {
     pub fn parse(text: &str) -> Result<TapSpec, String> {
         let (name, gateway) = match text.split_once(':') {
             None => (text, None),
-            Some((name, cidr)) => (name, Some(parse_gateway(cidr).map_err(|err| format!("--tap {text:?}: {err}"))?)),
+            Some((name, cidr)) => (
+                name,
+                Some(parse_gateway(cidr).map_err(|err| format!("--tap {text:?}: {err}"))?),
+            ),
         };
         if !valid_tap_name(name) {
-            return Err(format!("--tap {text:?}: use 1 to 15 letters, digits, _ and -, not starting with - or veth or vpd, not lo"));
+            return Err(format!(
+                "--tap {text:?}: use 1 to 15 letters, digits, _ and -, not starting with - or veth or vpd, not lo"
+            ));
         }
-        Ok(TapSpec { name: name.to_string(), gateway })
+        Ok(TapSpec {
+            name: name.to_string(),
+            gateway,
+        })
     }
 
     /// The `LAUNCHAPI` tokens: `tap=NAME`, and `tapaddr=NAME:ADDR/PREFIX` when it has a gateway.
@@ -95,17 +111,30 @@ impl TapSpec {
 }
 
 fn parse_gateway(cidr: &str) -> Result<(std::net::Ipv4Addr, u8), String> {
-    let (addr, prefix) = cidr.split_once('/').ok_or("give the gateway as ADDR/PREFIX")?;
-    let addr: std::net::Ipv4Addr = addr.parse().map_err(|_| format!("{addr:?} is not an IPv4 address"))?;
-    let prefix: u8 = prefix.parse().ok().filter(|p| (16..=30).contains(p)).ok_or("the prefix length must be 16 to 30")?;
+    let (addr, prefix) = cidr
+        .split_once('/')
+        .ok_or("give the gateway as ADDR/PREFIX")?;
+    let addr: std::net::Ipv4Addr = addr
+        .parse()
+        .map_err(|_| format!("{addr:?} is not an IPv4 address"))?;
+    let prefix: u8 = prefix
+        .parse()
+        .ok()
+        .filter(|p| (16..=30).contains(p))
+        .ok_or("the prefix length must be 16 to 30")?;
     let host = u32::from(addr) & !mask(prefix);
     if host == 0 || host == !mask(prefix) {
-        return Err(format!("{addr}/{prefix}: the gateway must be a host address"));
+        return Err(format!(
+            "{addr}/{prefix}: the gateway must be a host address"
+        ));
     }
     if !addr.is_private() {
         return Err(format!("{addr}/{prefix}: not inside RFC 1918"));
     }
-    if let Some((net, p)) = RESERVED_NETS.iter().find(|n| nets_overlap((addr, prefix), **n)) {
+    if let Some((net, p)) = RESERVED_NETS
+        .iter()
+        .find(|n| nets_overlap((addr, prefix), **n))
+    {
         return Err(format!("{addr}/{prefix} overlaps {net}/{p}"));
     }
     Ok((addr, prefix))
@@ -123,10 +152,19 @@ pub fn check_network(nat: bool, taps: &[TapSpec]) -> Result<(), String> {
         }
         if let Some(g) = tap.gateway {
             if !nat {
-                return Err(format!("--tap {}:{}/{}: a gateway address needs --network nat", tap.name, g.0, g.1));
+                return Err(format!(
+                    "--tap {}:{}/{}: a gateway address needs --network nat",
+                    tap.name, g.0, g.1
+                ));
             }
-            if let Some(other) = taps[..i].iter().find(|t| t.gateway.is_some_and(|o| nets_overlap(g, o))) {
-                return Err(format!("--tap {}: its subnet overlaps the one of --tap {}", tap.name, other.name));
+            if let Some(other) = taps[..i]
+                .iter()
+                .find(|t| t.gateway.is_some_and(|o| nets_overlap(g, o)))
+            {
+                return Err(format!(
+                    "--tap {}: its subnet overlaps the one of --tap {}",
+                    tap.name, other.name
+                ));
             }
         }
     }
@@ -162,7 +200,11 @@ pub fn parse_ready(line: &str, id: &str) -> Result<Ready, String> {
         .strip_prefix("firecracker_version=")
         .filter(|v| !v.is_empty() && v.bytes().all(|b| b.is_ascii_digit() || b == b'.'))
         .ok_or_else(|| format!("LAUNCHAPI {id}: bad firecracker_version in {line:?}"))?;
-    Ok(Ready { id: id.to_string(), pid, firecracker_version: version.to_string() })
+    Ok(Ready {
+        id: id.to_string(),
+        pid,
+        firecracker_version: version.to_string(),
+    })
 }
 
 /// An HTTP/1.1 request with a JSON body (empty when `None`), as the System VM suites send it.
@@ -185,10 +227,14 @@ fn read_raw_line<R: BufRead>(reader: &mut R, out: &mut Vec<u8>) -> Result<String
         return Err("closed before a response".to_string());
     }
     if buf.last() != Some(&b'\n') {
-        return Err(format!("response line longer than {MAX_LINE} bytes or cut short"));
+        return Err(format!(
+            "response line longer than {MAX_LINE} bytes or cut short"
+        ));
     }
     out.extend_from_slice(&buf);
-    Ok(String::from_utf8_lossy(&buf).trim_end_matches(['\r', '\n']).to_string())
+    Ok(String::from_utf8_lossy(&buf)
+        .trim_end_matches(['\r', '\n'])
+        .to_string())
 }
 
 /// Reads one HTTP response (status line, headers and a `Content-Length` body of at most `MAX_BODY` bytes) and
@@ -204,7 +250,10 @@ pub fn read_http_response<R: BufRead>(reader: &mut R) -> Result<Vec<u8>, String>
         }
         if let Some((name, value)) = header.split_once(':') {
             if name.eq_ignore_ascii_case("content-length") {
-                length = value.trim().parse().map_err(|_| format!("bad {header:?}"))?;
+                length = value
+                    .trim()
+                    .parse()
+                    .map_err(|_| format!("bad {header:?}"))?;
             }
         }
     }
@@ -213,7 +262,9 @@ pub fn read_http_response<R: BufRead>(reader: &mut R) -> Result<Vec<u8>, String>
     }
     let start = raw.len();
     raw.resize(start + length, 0);
-    reader.read_exact(&mut raw[start..]).map_err(|err| format!("body: {err}"))?;
+    reader
+        .read_exact(&mut raw[start..])
+        .map_err(|err| format!("body: {err}"))?;
     Ok(raw)
 }
 
@@ -228,7 +279,10 @@ pub fn parse_http_response(raw: &[u8]) -> Result<HttpResponse, String> {
         .and_then(|rest| rest.get(..3))
         .and_then(|code| code.parse().ok())
         .ok_or_else(|| format!("bad status line {status_line:?}"))?;
-    Ok(HttpResponse { status, body: body.to_string() })
+    Ok(HttpResponse {
+        status,
+        body: body.to_string(),
+    })
 }
 
 impl Session {
@@ -249,8 +303,16 @@ impl Session {
         Ok(line.trim_end_matches(['\r', '\n']).to_string())
     }
 
-    fn with_read_timeout<T>(&mut self, timeout: Duration, run: impl FnOnce(&mut Self) -> T) -> Result<T, String> {
-        let previous = self.reader.get_ref().read_timeout().map_err(|err| format!("read timeout: {err}"))?;
+    fn with_read_timeout<T>(
+        &mut self,
+        timeout: Duration,
+        run: impl FnOnce(&mut Self) -> T,
+    ) -> Result<T, String> {
+        let previous = self
+            .reader
+            .get_ref()
+            .read_timeout()
+            .map_err(|err| format!("read timeout: {err}"))?;
         self.reader
             .get_ref()
             .set_read_timeout(Some(timeout))
@@ -262,7 +324,12 @@ impl Session {
 
     /// Sends `LAUNCHAPI <id> [ceiling]` and waits up to `timeout` for `READY`. On success this session is the
     /// lease: dropping it stops the microVM.
-    pub fn launch_api(&mut self, id: &str, ceiling: Option<u64>, timeout: Duration) -> Result<Ready, String> {
+    pub fn launch_api(
+        &mut self,
+        id: &str,
+        ceiling: Option<u64>,
+        timeout: Duration,
+    ) -> Result<Ready, String> {
         if !valid_microvm_id(id) {
             return Err(format!("LAUNCHAPI: invalid id {id:?}"));
         }
@@ -289,7 +356,12 @@ impl Session {
     }
 
     /// One HTTP/1.1 request on a relayed (`FCAPI`) connection; the connection stays open for the next one.
-    pub fn http(&mut self, method: &str, path: &str, body: Option<&str>) -> Result<HttpResponse, String> {
+    pub fn http(
+        &mut self,
+        method: &str,
+        path: &str,
+        body: Option<&str>,
+    ) -> Result<HttpResponse, String> {
         let raw = self.http_raw(&http_request(method, path, body))?;
         parse_http_response(&raw).map_err(|err| format!("{method} {path}: {err}"))
     }
@@ -310,15 +382,28 @@ impl Session {
         // macOS refuses SO_RCVTIMEO (EINVAL) on a socket the peer has already shut down; the read below then
         // returns end of file at once, and otherwise the connection's own I/O timeout still bounds it.
         let previous = self.reader.get_ref().read_timeout().ok().flatten();
-        let _ = self.reader.get_ref().set_read_timeout(Some(Duration::from_secs(1)));
+        let _ = self
+            .reader
+            .get_ref()
+            .set_read_timeout(Some(Duration::from_secs(1)));
         let result = loop {
             if Instant::now() >= deadline {
-                break Err(format!("connection still open after {} s", timeout.as_secs()));
+                break Err(format!(
+                    "connection still open after {} s",
+                    timeout.as_secs()
+                ));
             }
             match self.reader.read(&mut buf) {
                 Ok(0) => break Ok(started.elapsed()),
                 Ok(_) => continue,
-                Err(err) if matches!(err.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => continue,
+                Err(err)
+                    if matches!(
+                        err.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                    ) =>
+                {
+                    continue;
+                }
                 Err(_) => break Ok(started.elapsed()), // a reset is a close too
             }
         };
@@ -334,8 +419,8 @@ impl Session {
 
 #[cfg(test)]
 mod tests {
+    use super::super::{ControlEndpoint, DEFAULT_AGENT_PORT, connect};
     use super::*;
-    use super::super::{connect, ControlEndpoint, DEFAULT_AGENT_PORT};
     use std::io::BufReader;
     use std::os::unix::net::UnixListener;
     use std::thread;
@@ -344,7 +429,14 @@ mod tests {
     #[test]
     fn ready_is_parsed_against_its_fixed_form() {
         let ok = parse_ready("READY vm-1 pid=42 firecracker_version=1.16.0", "vm-1").unwrap();
-        assert_eq!(ok, Ready { id: "vm-1".into(), pid: 42, firecracker_version: "1.16.0".into() });
+        assert_eq!(
+            ok,
+            Ready {
+                id: "vm-1".into(),
+                pid: 42,
+                firecracker_version: "1.16.0".into()
+            }
+        );
         let err = parse_ready("ERR busy vm-1", "vm-1").unwrap_err();
         assert!(err.ends_with("busy vm-1"), "{err}");
         for bad in [
@@ -373,8 +465,17 @@ mod tests {
     #[test]
     fn tap_specs_check_gateways() {
         let t = TapSpec::parse("tap0:172.16.0.1/30").unwrap();
-        assert_eq!(t.tokens(), vec!["tap=tap0".to_string(), "tapaddr=tap0:172.16.0.1/30".to_string()]);
-        assert_eq!(TapSpec::parse("tap1").unwrap().tokens(), vec!["tap=tap1".to_string()]);
+        assert_eq!(
+            t.tokens(),
+            vec![
+                "tap=tap0".to_string(),
+                "tapaddr=tap0:172.16.0.1/30".to_string()
+            ]
+        );
+        assert_eq!(
+            TapSpec::parse("tap1").unwrap().tokens(),
+            vec!["tap=tap1".to_string()]
+        );
         for (bad, why) in [
             ("tap0:172.16.0.1", "ADDR/PREFIX"),
             ("tap0:172.16.0.0/30", "host address"),
@@ -391,9 +492,21 @@ mod tests {
         }
         let a = TapSpec::parse("a:10.1.0.1/16").unwrap();
         let b = TapSpec::parse("b:10.1.2.1/24").unwrap();
-        assert!(check_network(true, &[a.clone(), b]).unwrap_err().contains("overlaps"));
-        assert!(check_network(false, &[a.clone()]).unwrap_err().contains("needs --network nat"));
-        assert!(check_network(true, &[TapSpec::parse("c").unwrap()]).unwrap_err().contains("needs a --tap NAME:ADDR"));
+        assert!(
+            check_network(true, &[a.clone(), b])
+                .unwrap_err()
+                .contains("overlaps")
+        );
+        assert!(
+            check_network(false, &[a.clone()])
+                .unwrap_err()
+                .contains("needs --network nat")
+        );
+        assert!(
+            check_network(true, &[TapSpec::parse("c").unwrap()])
+                .unwrap_err()
+                .contains("needs a --tap NAME:ADDR")
+        );
         assert!(check_network(true, &[a]).is_ok());
     }
 
@@ -404,7 +517,22 @@ mod tests {
         assert!(valid_tap_name(&"t".repeat(15)));
         // ip keywords are names like any other: the guest always passes them after `dev`.
         assert!(valid_tap_name("up") && valid_tap_name("dev") && valid_tap_name("t-"));
-        for bad in ["", "lo", "-", "-tap0", "veth0", "vpd3", "vethx", "tap 0", "tap/0", "tap.0", "tap:0", "tap=0", "../x", &"t".repeat(16)] {
+        for bad in [
+            "",
+            "lo",
+            "-",
+            "-tap0",
+            "veth0",
+            "vpd3",
+            "vethx",
+            "tap 0",
+            "tap/0",
+            "tap.0",
+            "tap:0",
+            "tap=0",
+            "../x",
+            &"t".repeat(16),
+        ] {
             assert!(!valid_tap_name(bad), "accepted {bad:?}");
         }
     }
@@ -424,7 +552,9 @@ mod tests {
                     line.clear();
                     reader.read_line(&mut line).unwrap();
                     if line.starts_with("LAUNCHAPI") {
-                        writer.write_all(format!("{launch_reply}\n").as_bytes()).unwrap();
+                        writer
+                            .write_all(format!("{launch_reply}\n").as_bytes())
+                            .unwrap();
                         // Hold the lease until the client closes, then close too.
                         let mut sink = Vec::new();
                         let _ = reader.read_to_end(&mut sink);
@@ -450,7 +580,10 @@ mod tests {
                             reader.read_exact(&mut body).unwrap();
                             let reply = if head.starts_with("GET / ") {
                                 let body = "{\"id\":\"vm-1\",\"state\":\"Not started\"}";
-                                format!("HTTP/1.1 200 \r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}", body.len())
+                                format!(
+                                    "HTTP/1.1 200 \r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+                                    body.len()
+                                )
                             } else {
                                 "HTTP/1.1 204 \r\n\r\n".to_string()
                             };
@@ -471,18 +604,42 @@ mod tests {
         fake(&path, "READY vm-1 pid=77 firecracker_version=1.16.0");
         let endpoint = ControlEndpoint::new(&path, DEFAULT_AGENT_PORT);
         let mut lease = connect(&endpoint).unwrap();
-        let ready = lease.launch_api("vm-1", None, Duration::from_secs(5)).unwrap();
-        assert_eq!((ready.pid, ready.firecracker_version.as_str()), (77, "1.16.0"));
+        let ready = lease
+            .launch_api("vm-1", None, Duration::from_secs(5))
+            .unwrap();
+        assert_eq!(
+            (ready.pid, ready.firecracker_version.as_str()),
+            (77, "1.16.0")
+        );
         let mut api = connect(&endpoint).unwrap();
         api.fcapi("vm-1").unwrap();
         let root = api.http("GET", "/", None).unwrap();
         assert_eq!(root.status, 200);
-        assert!(root.body.contains("\"state\":\"Not started\""), "{}", root.body);
-        let put = api.http("PUT", "/actions", Some("{\"action_type\":\"InstanceStart\"}")).unwrap();
+        assert!(
+            root.body.contains("\"state\":\"Not started\""),
+            "{}",
+            root.body
+        );
+        let put = api
+            .http(
+                "PUT",
+                "/actions",
+                Some("{\"action_type\":\"InstanceStart\"}"),
+            )
+            .unwrap();
         assert_eq!((put.status, put.body.as_str()), (204, ""));
         let mut other = connect(&endpoint).unwrap();
-        assert!(other.fcapi("vm-2").unwrap_err().contains("no vesperd microVM"));
-        assert!(lease.launch_api("../x", None, Duration::from_secs(1)).is_err());
+        assert!(
+            other
+                .fcapi("vm-2")
+                .unwrap_err()
+                .contains("no vesperd microVM")
+        );
+        assert!(
+            lease
+                .launch_api("../x", None, Duration::from_secs(1))
+                .is_err()
+        );
     }
 
     #[test]
@@ -492,7 +649,9 @@ mod tests {
         fake(&path, "ERR busy vm-1");
         let endpoint = ControlEndpoint::new(&path, DEFAULT_AGENT_PORT);
         let mut lease = connect(&endpoint).unwrap();
-        let err = lease.launch_api("vm-1", Some(134217728), Duration::from_secs(5)).unwrap_err();
+        let err = lease
+            .launch_api("vm-1", Some(134217728), Duration::from_secs(5))
+            .unwrap_err();
         assert!(err.contains("busy"), "{err}");
         // The fake keeps reading until the client closes; shut our side and the fake closes too.
         lease.writer.shutdown(std::net::Shutdown::Write).unwrap();

@@ -252,8 +252,14 @@ fn firecracker_revision(lock: &vesper::baseline::Lock) -> Result<String, String>
 
 /// Prints the upstream-suite pins as `KEY=value` lines for `scripts/systemvm/upstream-suite/run.sh`.
 fn upstream_pins(lock: &vesper::baseline::Lock) -> Result<(), String> {
-    let fc = lock.baselines.get("firecracker").ok_or("baseline lock has no firecracker baseline")?;
-    let s = fc.upstream_suite.as_ref().ok_or("baselines.firecracker.upstream_suite is not pinned")?;
+    let fc = lock
+        .baselines
+        .get("firecracker")
+        .ok_or("baseline lock has no firecracker baseline")?;
+    let s = fc
+        .upstream_suite
+        .as_ref()
+        .ok_or("baselines.firecracker.upstream_suite is not pinned")?;
     let pins = [
         ("FC_REPO", fc.repo.clone()),
         ("FC_REVISION", fc.revision.clone()),
@@ -280,49 +286,90 @@ fn read_results(path: &str) -> Result<vesper::baseline::upstream::Results, Strin
 
 /// Explains every Backend A result that needs it, or exits 1 naming the tests no class explains.
 fn upstream_compare(args: &Args) -> Result<(), String> {
-    use vesper::baseline::upstream::{compare, ClassFile, RunMeta};
+    use vesper::baseline::upstream::{ClassFile, RunMeta, compare};
     if args.results.is_empty() {
         return Err("upstream-compare needs --results".to_string());
     }
     let results = read_results(&args.results)?;
-    let reference = if args.reference.is_empty() { None } else { Some(read_results(&args.reference)?) };
-    let text = fs::read_to_string(&args.classes).map_err(|err| format!("read classes {}: {err}", args.classes))?;
-    let classes: ClassFile = serde_yaml::from_str(&text).map_err(|err| format!("parse classes {}: {err}", args.classes))?;
+    let reference = if args.reference.is_empty() {
+        None
+    } else {
+        Some(read_results(&args.reference)?)
+    };
+    let text = fs::read_to_string(&args.classes)
+        .map_err(|err| format!("read classes {}: {err}", args.classes))?;
+    let classes: ClassFile = serde_yaml::from_str(&text)
+        .map_err(|err| format!("parse classes {}: {err}", args.classes))?;
     classes.validate()?;
     let meta: Option<RunMeta> = if args.meta.is_empty() {
         None
     } else {
-        let text = fs::read_to_string(&args.meta).map_err(|err| format!("read meta {}: {err}", args.meta))?;
-        Some(serde_json::from_str(&text).map_err(|err| format!("parse meta {}: {err}", args.meta))?)
+        let text = fs::read_to_string(&args.meta)
+            .map_err(|err| format!("read meta {}: {err}", args.meta))?;
+        Some(
+            serde_json::from_str(&text)
+                .map_err(|err| format!("parse meta {}: {err}", args.meta))?,
+        )
     };
     let c = compare(&results, reference.as_ref(), &classes, meta, args.partial);
     if !args.report.is_empty() {
-        let json = serde_json::to_string_pretty(&c).map_err(|err| format!("serialize comparison: {err}"))?;
-        fs::write(&args.report, json + "\n").map_err(|err| format!("write {}: {err}", args.report))?;
+        let json = serde_json::to_string_pretty(&c)
+            .map_err(|err| format!("serialize comparison: {err}"))?;
+        fs::write(&args.report, json + "\n")
+            .map_err(|err| format!("write {}: {err}", args.report))?;
     }
     println!(
         "reference={} partial={} total={} passed={} to_explain={:?} not_passing_on_reference={} missing_from_run={}",
-        c.reference, c.partial, c.total, c.passed, c.to_explain, c.not_passing_on_reference, c.missing_from_run
+        c.reference,
+        c.partial,
+        c.total,
+        c.passed,
+        c.to_explain,
+        c.not_passing_on_reference,
+        c.missing_from_run
     );
     for (id, n) in c.per_class.iter().filter(|(_, n)| **n > 0) {
         println!("class {id}: {n}");
     }
     if !c.stale_classes.is_empty() {
-        println!("classes that explained nothing in this run: {}", c.stale_classes.join(", "));
+        println!(
+            "classes that explained nothing in this run: {}",
+            c.stale_classes.join(", ")
+        );
     }
     for u in &c.passed_alone {
-        println!("PASSED-ALONE {} under load: {} {}", u.nodeid, u.outcome, u.message.replace('\n', " "));
+        println!(
+            "PASSED-ALONE {} under load: {} {}",
+            u.nodeid,
+            u.outcome,
+            u.message.replace('\n', " ")
+        );
     }
     for u in &c.explained_alone {
-        println!("EXPLAINED-ALONE {} as {} alone; under load: {} {}", u.nodeid, u.class, u.outcome, u.message.replace('\n', " "));
+        println!(
+            "EXPLAINED-ALONE {} as {} alone; under load: {} {}",
+            u.nodeid,
+            u.class,
+            u.outcome,
+            u.message.replace('\n', " ")
+        );
     }
     if c.ok() {
         println!("upstream-compare: every result is explained");
         return Ok(());
     }
     for u in &c.unmatched {
-        let alone = u.alone.as_ref().map(|a| format!(" [alone: {}]", a.outcome)).unwrap_or_default();
-        println!("UNMATCHED {} {}{alone} {}", u.nodeid, u.outcome, u.message.replace('\n', " "));
+        let alone = u
+            .alone
+            .as_ref()
+            .map(|a| format!(" [alone: {}]", a.outcome))
+            .unwrap_or_default();
+        println!(
+            "UNMATCHED {} {}{alone} {}",
+            u.nodeid,
+            u.outcome,
+            u.message.replace('\n', " ")
+        );
     }
     Err(format!("upstream-compare: {}", c.failures().join("; ")))
 }

@@ -9,8 +9,8 @@
 //! one oracle serves both.
 
 use crate::api_behavior_matrix::{
-    ApiBehaviorMatrix, BehaviorArch, BehaviorBodyAssertion, BehaviorBodyAssertionKind, BehaviorCase,
-    BehaviorJsonType, BehaviorOutcome,
+    ApiBehaviorMatrix, BehaviorArch, BehaviorBodyAssertion, BehaviorBodyAssertionKind,
+    BehaviorCase, BehaviorJsonType, BehaviorOutcome,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -73,12 +73,20 @@ pub struct ReplayScripts {
 /// One step a backend performs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Step {
-    Http { method: String, path: String, body: Option<String> },
-    Wait { ms: u64 },
+    Http {
+        method: String,
+        path: String,
+        body: Option<String>,
+    },
+    Wait {
+        ms: u64,
+    },
     /// Wait, at most `ms`, until the booted guest's init has loaded its device drivers (on Backend A, its
     /// `VESPER-MICROVM-OK` console marker, printed after `modprobe virtio_balloon virtio_mem`); the model has no
     /// guest, so it continues at once.
-    GuestReady { ms: u64 },
+    GuestReady {
+        ms: u64,
+    },
 }
 
 /// What a backend saw for one `Step::Http` (a `Wait` returns status 0 and no body).
@@ -130,7 +138,8 @@ pub fn case_key(method: &str, path: &str, id: &str) -> String {
 
 pub fn load_replay_scripts(path: impl AsRef<Path>) -> Result<ReplayScripts, String> {
     let path = path.as_ref();
-    let text = std::fs::read_to_string(path).map_err(|err| format!("read {}: {err}", path.display()))?;
+    let text =
+        std::fs::read_to_string(path).map_err(|err| format!("read {}: {err}", path.display()))?;
     serde_yaml::from_str(&text).map_err(|err| format!("parse {}: {err}", path.display()))
 }
 
@@ -149,7 +158,10 @@ pub fn validate_replay_scripts(scripts: &ReplayScripts, matrix: &ApiBehaviorMatr
     let mut paths = BTreeSet::new();
     for file in &scripts.files {
         if !valid_root_path(&file.path) {
-            errors.push(format!("file {:?}: want an absolute path of plain components", file.path));
+            errors.push(format!(
+                "file {:?}: want an absolute path of plain components",
+                file.path
+            ));
         }
         if !paths.insert(file.path.clone()) {
             errors.push(format!("file {:?} listed twice", file.path));
@@ -163,9 +175,13 @@ pub fn validate_replay_scripts(scripts: &ReplayScripts, matrix: &ApiBehaviorMatr
         let ok = !tap.is_empty()
             && tap.len() <= 15
             && !tap.starts_with('-')
-            && tap.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-');
+            && tap
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-');
         if !ok || tap == "lo" {
-            errors.push(format!("tap {tap:?}: want 1 to 15 letters, digits, _ and -, not starting with -, not lo"));
+            errors.push(format!(
+                "tap {tap:?}: want 1 to 15 letters, digits, _ and -, not starting with -, not lo"
+            ));
         }
         if !taps.insert(tap.clone()) {
             errors.push(format!("tap {tap:?} listed twice"));
@@ -174,7 +190,11 @@ pub fn validate_replay_scripts(scripts: &ReplayScripts, matrix: &ApiBehaviorMatr
     let keys: BTreeSet<String> = matrix
         .operations
         .iter()
-        .flat_map(|op| op.cases.iter().map(move |case| case_key(&op.method, &op.path, &case.id)))
+        .flat_map(|op| {
+            op.cases
+                .iter()
+                .map(move |case| case_key(&op.method, &op.path, &case.id))
+        })
         .collect();
     for key in &keys {
         if !scripts.cases.contains_key(key) {
@@ -201,11 +221,14 @@ pub fn validate_replay_scripts(scripts: &ReplayScripts, matrix: &ApiBehaviorMatr
             Ok(steps) if !steps.is_empty() => {
                 for name in host_dev_names(&steps) {
                     if !taps.contains(&name) {
-                        errors.push(format!("snapshot_fixture: host_dev_name {name:?} is not in taps"));
+                        errors.push(format!(
+                            "snapshot_fixture: host_dev_name {name:?} is not in taps"
+                        ));
                     }
                 }
             }
-            Ok(_) => errors.push("cases need the snapshot fixture, but snapshot_fixture is empty".to_string()),
+            Ok(_) => errors
+                .push("cases need the snapshot fixture, but snapshot_fixture is empty".to_string()),
             Err(err) => errors.push(format!("snapshot_fixture: {err}")),
         }
     }
@@ -231,7 +254,10 @@ fn host_dev_names(steps: &[Step]) -> Vec<String> {
     }
     let mut out = Vec::new();
     for step in steps {
-        if let Step::Http { body: Some(body), .. } = step {
+        if let Step::Http {
+            body: Some(body), ..
+        } = step
+        {
             if let Ok(value) = serde_json::from_str::<serde_json::Value>(body) {
                 walk(&value, &mut out);
             }
@@ -242,7 +268,10 @@ fn host_dev_names(steps: &[Step]) -> Vec<String> {
 
 fn valid_root_path(path: &str) -> bool {
     path.strip_prefix('/').is_some_and(|rest| {
-        !rest.is_empty() && rest.split('/').all(|c| !c.is_empty() && c != "." && c != "..")
+        !rest.is_empty()
+            && rest
+                .split('/')
+                .all(|c| !c.is_empty() && c != "." && c != "..")
     })
 }
 
@@ -252,12 +281,18 @@ pub fn expand_fixture(scripts: &ReplayScripts, root: &str) -> Result<Vec<Step>, 
     for line in &scripts.snapshot_fixture {
         expand_line(scripts, line, 0, &mut lines)?;
     }
-    lines.iter().map(|line| parse_step(&expand_pads(&line.replace("{root}", root))?)).collect()
+    lines
+        .iter()
+        .map(|line| parse_step(&expand_pads(&line.replace("{root}", root))?))
+        .collect()
 }
 
 /// The case's steps with `{root}` replaced; the last step is the request under test.
 pub fn expand(scripts: &ReplayScripts, key: &str, root: &str) -> Result<Vec<Step>, String> {
-    let script = scripts.cases.get(key).ok_or_else(|| format!("no script for {key}"))?;
+    let script = scripts
+        .cases
+        .get(key)
+        .ok_or_else(|| format!("no script for {key}"))?;
     let mut lines = Vec::new();
     for line in &script.setup {
         expand_line(scripts, line, 0, &mut lines)?;
@@ -266,15 +301,32 @@ pub fn expand(scripts: &ReplayScripts, key: &str, root: &str) -> Result<Vec<Step
         return Err("the request must be one HTTP step".to_string());
     }
     lines.push(script.request.clone());
-    let (method, path) = key.split_once('#').map(|(op, _)| op).and_then(|op| op.split_once(' ')).ok_or("bad key")?;
-    let steps = lines.iter().map(|line| parse_step(&expand_pads(&line.replace("{root}", root))?)).collect::<Result<Vec<_>, _>>()?;
+    let (method, path) = key
+        .split_once('#')
+        .map(|(op, _)| op)
+        .and_then(|op| op.split_once(' '))
+        .ok_or("bad key")?;
+    let steps = lines
+        .iter()
+        .map(|line| parse_step(&expand_pads(&line.replace("{root}", root))?))
+        .collect::<Result<Vec<_>, _>>()?;
     match steps.last() {
-        Some(Step::Http { method: m, path: p, .. }) if m == method && path_matches(path, p) => Ok(steps),
-        _ => Err(format!("the request {:?} is not {method} {path}", script.request)),
+        Some(Step::Http {
+            method: m, path: p, ..
+        }) if m == method && path_matches(path, p) => Ok(steps),
+        _ => Err(format!(
+            "the request {:?} is not {method} {path}",
+            script.request
+        )),
     }
 }
 
-fn expand_line(scripts: &ReplayScripts, line: &str, depth: usize, out: &mut Vec<String>) -> Result<(), String> {
+fn expand_line(
+    scripts: &ReplayScripts,
+    line: &str,
+    depth: usize,
+    out: &mut Vec<String>,
+) -> Result<(), String> {
     let Some(name) = line.strip_prefix('@') else {
         out.push(line.to_string());
         return Ok(());
@@ -282,7 +334,10 @@ fn expand_line(scripts: &ReplayScripts, line: &str, depth: usize, out: &mut Vec<
     if depth >= MAX_MACRO_DEPTH {
         return Err(format!("macro @{name} nests deeper than {MAX_MACRO_DEPTH}"));
     }
-    let body = scripts.macros.get(name).ok_or_else(|| format!("unknown macro @{name}"))?;
+    let body = scripts
+        .macros
+        .get(name)
+        .ok_or_else(|| format!("unknown macro @{name}"))?;
     for each in body {
         expand_line(scripts, each, depth + 1, out)?;
     }
@@ -306,7 +361,9 @@ fn expand_pads(line: &str) -> Result<String, String> {
         let (count, text) = if rest[at..].starts_with("{pad:") {
             (&tail[..end], "a")
         } else {
-            tail[..end].split_once(':').ok_or_else(|| format!("bad {{rep:{}}}", &tail[..end]))?
+            tail[..end]
+                .split_once(':')
+                .ok_or_else(|| format!("bad {{rep:{}}}", &tail[..end]))?
         };
         let n: usize = count.parse().map_err(|_| format!("bad count {count:?}"))?;
         if n.saturating_mul(text.len()) > MAX_PAD {
@@ -323,20 +380,28 @@ fn expand_pads(line: &str) -> Result<String, String> {
 pub fn parse_step(line: &str) -> Result<Step, String> {
     let line = line.trim();
     if let Some(ms) = line.strip_prefix("GUEST_READY ") {
-        let ms: u64 = ms.trim().parse().map_err(|_| format!("bad GUEST_READY {line:?}"))?;
+        let ms: u64 = ms
+            .trim()
+            .parse()
+            .map_err(|_| format!("bad GUEST_READY {line:?}"))?;
         if ms > MAX_WAIT_MS {
             return Err(format!("GUEST_READY {ms} exceeds {MAX_WAIT_MS} ms"));
         }
         return Ok(Step::GuestReady { ms });
     }
     if let Some(ms) = line.strip_prefix("WAIT ") {
-        let ms: u64 = ms.trim().parse().map_err(|_| format!("bad WAIT {line:?}"))?;
+        let ms: u64 = ms
+            .trim()
+            .parse()
+            .map_err(|_| format!("bad WAIT {line:?}"))?;
         if ms > MAX_WAIT_MS {
             return Err(format!("WAIT {ms} exceeds {MAX_WAIT_MS} ms"));
         }
         return Ok(Step::Wait { ms });
     }
-    let (method, rest) = line.split_once(' ').ok_or_else(|| format!("bad step {line:?}"))?;
+    let (method, rest) = line
+        .split_once(' ')
+        .ok_or_else(|| format!("bad step {line:?}"))?;
     if !matches!(method, "GET" | "PUT" | "PATCH") {
         return Err(format!("bad method in {line:?}"));
     }
@@ -348,16 +413,24 @@ pub fn parse_step(line: &str) -> Result<Step, String> {
         return Err(format!("bad path in {line:?}"));
     }
     if let Some(body) = &body {
-        serde_json::from_str::<serde_json::Value>(body).map_err(|err| format!("body of {line:?} is not JSON: {err}"))?;
+        serde_json::from_str::<serde_json::Value>(body)
+            .map_err(|err| format!("body of {line:?} is not JSON: {err}"))?;
     }
-    Ok(Step::Http { method: method.to_string(), path: path.to_string(), body })
+    Ok(Step::Http {
+        method: method.to_string(),
+        path: path.to_string(),
+        body,
+    })
 }
 
 /// `/drives/{drive_id}` matches `/drives/rootfs`.
 fn path_matches(template: &str, path: &str) -> bool {
     let t: Vec<&str> = template.split('/').collect();
     let p: Vec<&str> = path.split('/').collect();
-    t.len() == p.len() && t.iter().zip(&p).all(|(t, p)| (t.starts_with('{') && t.ends_with('}') && !p.is_empty()) || t == p)
+    t.len() == p.len()
+        && t.iter()
+            .zip(&p)
+            .all(|(t, p)| (t.starts_with('{') && t.ends_with('}') && !p.is_empty()) || t == p)
 }
 
 /// Whether the case applies on `arch` (`std::env::consts::ARCH`).
@@ -371,10 +444,23 @@ pub fn applies(case: &BehaviorCase, arch: &str) -> bool {
 
 /// Judges one case from the responses to its steps. `root` is removed from bodies; `check_code` also compares the
 /// model's `code` field, which Firecracker does not send.
-pub fn judge(case: &BehaviorCase, steps: &[Step], responses: &[Response], root: &str, check_code: bool) -> (Verdict, String) {
-    let http: Vec<(usize, &Step)> = steps.iter().enumerate().filter(|(_, s)| matches!(s, Step::Http { .. })).collect();
+pub fn judge(
+    case: &BehaviorCase,
+    steps: &[Step],
+    responses: &[Response],
+    root: &str,
+    check_code: bool,
+) -> (Verdict, String) {
+    let http: Vec<(usize, &Step)> = steps
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| matches!(s, Step::Http { .. }))
+        .collect();
     if responses.len() != steps.len() || http.is_empty() {
-        return (Verdict::BackendError, format!("{} responses for {} steps", responses.len(), steps.len()));
+        return (
+            Verdict::BackendError,
+            format!("{} responses for {} steps", responses.len(), steps.len()),
+        );
     }
     let last = steps.len() - 1;
     for (i, step) in &http {
@@ -383,8 +469,17 @@ pub fn judge(case: &BehaviorCase, steps: &[Step], responses: &[Response], root: 
         }
         let r = &responses[*i];
         if !(200..300).contains(&r.status) {
-            let Step::Http { method, path, .. } = step else { unreachable!() };
-            return (Verdict::SetupFailed, format!("setup {method} {path}: {} {}", r.status, strip_root(&r.body, root)));
+            let Step::Http { method, path, .. } = step else {
+                unreachable!()
+            };
+            return (
+                Verdict::SetupFailed,
+                format!(
+                    "setup {method} {path}: {} {}",
+                    r.status,
+                    strip_root(&r.body, root)
+                ),
+            );
         }
     }
     let r = &responses[last];
@@ -396,20 +491,41 @@ pub fn judge(case: &BehaviorCase, steps: &[Step], responses: &[Response], root: 
 }
 
 fn strip_root(body: &str, root: &str) -> String {
-    if root.is_empty() { body.to_string() } else { body.replace(root, "") }
+    if root.is_empty() {
+        body.to_string()
+    } else {
+        body.replace(root, "")
+    }
 }
 
-fn judge_response(case: &BehaviorCase, status: u16, body: &str, check_code: bool) -> Result<String, String> {
+fn judge_response(
+    case: &BehaviorCase,
+    status: u16,
+    body: &str,
+    check_code: bool,
+) -> Result<String, String> {
     if status != case.status_code {
-        return Err(format!("status {status} (want {}): {}", case.status_code, clip(body)));
+        return Err(format!(
+            "status {status} (want {}): {}",
+            case.status_code,
+            clip(body)
+        ));
     }
     match case.outcome {
         BehaviorOutcome::NoContent => {
-            if body.trim().is_empty() { Ok(format!("{status}")) } else { Err(format!("{status} with body {}", clip(body))) }
+            if body.trim().is_empty() {
+                Ok(format!("{status}"))
+            } else {
+                Err(format!("{status} with body {}", clip(body)))
+            }
         }
         BehaviorOutcome::ErrorEnvelope => {
-            let json: serde_json::Value = serde_json::from_str(body).map_err(|_| format!("{status} body is not JSON: {}", clip(body)))?;
-            let got = json.get("fault_message").and_then(|v| v.as_str()).ok_or_else(|| format!("no fault_message: {}", clip(body)))?;
+            let json: serde_json::Value = serde_json::from_str(body)
+                .map_err(|_| format!("{status} body is not JSON: {}", clip(body)))?;
+            let got = json
+                .get("fault_message")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| format!("no fault_message: {}", clip(body)))?;
             let want = case.message.as_deref().unwrap_or_default();
             if got != want {
                 return Err(format!("fault_message {got:?} (want {want:?})"));
@@ -423,11 +539,16 @@ fn judge_response(case: &BehaviorCase, status: u16, body: &str, check_code: bool
             Ok(format!("{status} {got:?}"))
         }
         BehaviorOutcome::SuccessBody => {
-            let json: serde_json::Value = serde_json::from_str(body).map_err(|_| format!("{status} body is not JSON: {}", clip(body)))?;
+            let json: serde_json::Value = serde_json::from_str(body)
+                .map_err(|_| format!("{status} body is not JSON: {}", clip(body)))?;
             for assertion in &case.body_assertions {
-                check_assertion(&json, assertion).map_err(|e| format!("{e}; body {}", clip(body)))?;
+                check_assertion(&json, assertion)
+                    .map_err(|e| format!("{e}; body {}", clip(body)))?;
             }
-            Ok(format!("{status}, {} assertions", case.body_assertions.len()))
+            Ok(format!(
+                "{status}, {} assertions",
+                case.body_assertions.len()
+            ))
         }
     }
 }
@@ -441,7 +562,12 @@ fn check_assertion(json: &serde_json::Value, a: &BehaviorBodyAssertion) -> Resul
         },
         BehaviorBodyAssertionKind::Exact => match (found, &a.value) {
             (Some(v), Some(want)) if v == want => Ok(()),
-            (v, want) => Err(format!("{} is {} (want {})", a.pointer, show(v), show(want.as_ref()))),
+            (v, want) => Err(format!(
+                "{} is {} (want {})",
+                a.pointer,
+                show(v),
+                show(want.as_ref())
+            )),
         },
         BehaviorBodyAssertionKind::Type => {
             let ok = match (found, a.value_type) {
@@ -455,7 +581,16 @@ fn check_assertion(json: &serde_json::Value, a: &BehaviorBodyAssertion) -> Resul
                 },
                 _ => false,
             };
-            if ok { Ok(()) } else { Err(format!("{} is {} (want type {:?})", a.pointer, show(found), a.value_type)) }
+            if ok {
+                Ok(())
+            } else {
+                Err(format!(
+                    "{} is {} (want type {:?})",
+                    a.pointer,
+                    show(found),
+                    a.value_type
+                ))
+            }
         }
     }
 }
@@ -495,13 +630,25 @@ pub fn replay(
                 continue;
             }
             if !applies(case, arch) {
-                results.push(CaseResult { key, verdict: Verdict::NotApplicable, detail: format!("{:?} case on {arch}", case.arch), status: None, body: None });
+                results.push(CaseResult {
+                    key,
+                    verdict: Verdict::NotApplicable,
+                    detail: format!("{:?} case on {arch}", case.arch),
+                    status: None,
+                    body: None,
+                });
                 continue;
             }
             let steps = match expand(scripts, &key, root) {
                 Ok(steps) => steps,
                 Err(err) => {
-                    results.push(CaseResult { key, verdict: Verdict::BackendError, detail: err, status: None, body: None });
+                    results.push(CaseResult {
+                        key,
+                        verdict: Verdict::BackendError,
+                        detail: err,
+                        status: None,
+                        body: None,
+                    });
                     continue;
                 }
             };
@@ -518,7 +665,9 @@ pub fn replay(
                 verdict,
                 detail,
                 status: last.as_ref().map(|r| r.status),
-                body: last.map(|r| clip(&strip_root(&r.body, root))).filter(|b| !b.is_empty()),
+                body: last
+                    .map(|r| clip(&strip_root(&r.body, root)))
+                    .filter(|b| !b.is_empty()),
             });
         }
     }
@@ -538,86 +687,4 @@ pub fn summarize(results: &[CaseResult]) -> ReplaySummary {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn case(outcome: BehaviorOutcome, status: u16) -> BehaviorCase {
-        BehaviorCase {
-            id: "c".into(),
-            arch: BehaviorArch::Any,
-            when: String::new(),
-            status_code: status,
-            outcome,
-            code: Some("InvalidState".into()),
-            message: Some("nope".into()),
-            body_assertions: vec![],
-            evidence_files: vec![],
-        }
-    }
-
-    fn scripts(setup: &[&str], request: &str) -> ReplayScripts {
-        let mut cases = BTreeMap::new();
-        cases.insert("PUT /drives/{drive_id}#c".to_string(), CaseScript { setup: setup.iter().map(|s| s.to_string()).collect(), request: request.into(), snapshot: false });
-        let mut macros = BTreeMap::new();
-        macros.insert("boot".to_string(), vec!["PUT /boot-source {\"kernel_image_path\":\"{root}/Image\"}".to_string(), "@start".to_string()]);
-        macros.insert("start".to_string(), vec!["PUT /actions {\"action_type\":\"InstanceStart\"}".to_string()]);
-        macros.insert("loop".to_string(), vec!["@loop".to_string()]);
-        ReplayScripts { version: 1, firecracker_revision: "r".into(), files: vec![], taps: vec![], macros, cases, snapshot_fixture: vec![] }
-    }
-
-    #[test]
-    fn expands_macros_and_root() {
-        let s = scripts(&["@boot", "WAIT 5"], "PUT /drives/rootfs {\"path_on_host\":\"{root}/tmp/r\"}");
-        let steps = expand(&s, "PUT /drives/{drive_id}#c", "/t").unwrap();
-        assert_eq!(steps.len(), 4);
-        assert_eq!(steps[0], Step::Http { method: "PUT".into(), path: "/boot-source".into(), body: Some("{\"kernel_image_path\":\"/t/Image\"}".into()) });
-        assert_eq!(steps[2], Step::Wait { ms: 5 });
-        assert_eq!(parse_step("GUEST_READY 10000"), Ok(Step::GuestReady { ms: 10000 }));
-        assert!(parse_step("GUEST_READY 10001").is_err() && parse_step("GUEST_READY x").is_err());
-        assert!(matches!(&steps[3], Step::Http { body: Some(b), .. } if b.contains("/t/tmp/r")));
-    }
-
-    #[test]
-    fn refuses_bad_scripts() {
-        assert!(expand(&scripts(&["@loop"], "PUT /drives/x {}"), "PUT /drives/{drive_id}#c", "").unwrap_err().contains("deeper"));
-        assert!(expand(&scripts(&["@nope"], "PUT /drives/x {}"), "PUT /drives/{drive_id}#c", "").unwrap_err().contains("unknown macro"));
-        assert!(expand(&scripts(&[], "PUT /pmem/x {}"), "PUT /drives/{drive_id}#c", "").unwrap_err().contains("is not PUT"));
-        assert!(expand(&scripts(&[], "PUT /drives/x {nope"), "PUT /drives/{drive_id}#c", "").unwrap_err().contains("not JSON"));
-        assert!(parse_step("WAIT 999999").is_err());
-        assert!(parse_step("DELETE /x").is_err());
-        assert_eq!(expand_pads("{\"a\":\"{pad:3}\"}").unwrap(), "{\"a\":\"aaa\"}");
-        assert!(expand_pads("{pad:x}").is_err());
-        assert_eq!(expand_pads("[{rep:3:1e2,}0]").unwrap(), "[1e2,1e2,1e2,0]");
-        assert!(expand_pads("{rep:3}").is_err());
-    }
-
-    #[test]
-    fn judges_outcomes() {
-        let steps = vec![parse_step("PUT /actions {}").unwrap(), parse_step("PUT /drives/x {}").unwrap()];
-        let ok = |status, body: &str| vec![Response { status: 204, body: String::new() }, Response { status, body: body.into() }];
-        let err = case(BehaviorOutcome::ErrorEnvelope, 400);
-        assert_eq!(judge(&err, &steps, &ok(400, r#"{"fault_message":"nope"}"#), "", false).0, Verdict::Match);
-        assert_eq!(judge(&err, &steps, &ok(400, r#"{"fault_message":"nope"}"#), "", true).0, Verdict::Mismatch);
-        assert_eq!(judge(&err, &steps, &ok(500, r#"{"fault_message":"nope"}"#), "", false).0, Verdict::Mismatch);
-        let none = case(BehaviorOutcome::NoContent, 204);
-        assert_eq!(judge(&none, &steps, &ok(204, ""), "", false).0, Verdict::Match);
-        let failed = vec![Response { status: 400, body: "{}".into() }, Response { status: 204, body: String::new() }];
-        assert_eq!(judge(&none, &steps, &failed, "", false).0, Verdict::SetupFailed);
-        assert_eq!(judge(&none, &steps, &failed[..1], "", false).0, Verdict::BackendError);
-    }
-
-    #[test]
-    fn judges_assertions_after_stripping_root() {
-        let mut c = case(BehaviorOutcome::SuccessBody, 200);
-        c.body_assertions = vec![
-            BehaviorBodyAssertion { pointer: "/p".into(), kind: BehaviorBodyAssertionKind::Exact, value: Some(serde_json::json!("/tmp/x")), value_type: None },
-            BehaviorBodyAssertion { pointer: "/n".into(), kind: BehaviorBodyAssertionKind::Type, value: None, value_type: Some(BehaviorJsonType::Null) },
-            BehaviorBodyAssertion { pointer: "/gone".into(), kind: BehaviorBodyAssertionKind::Absent, value: None, value_type: None },
-        ];
-        let steps = vec![parse_step("GET /vm/config").unwrap()];
-        let r = |b: &str| vec![Response { status: 200, body: b.into() }];
-        assert_eq!(judge(&c, &steps, &r(r#"{"p":"/root/tmp/x","n":null}"#), "/root", false).0, Verdict::Match);
-        assert_eq!(judge(&c, &steps, &r(r#"{"p":"/tmp/x","n":null,"gone":1}"#), "", false).0, Verdict::Mismatch);
-        assert_eq!(judge(&c, &steps, &r(r#"{"p":"/tmp/x","n":0}"#), "", false).0, Verdict::Mismatch);
-    }
-}
+mod tests;

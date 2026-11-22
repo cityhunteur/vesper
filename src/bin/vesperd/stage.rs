@@ -32,7 +32,14 @@ pub fn run(args: &super::Args, command: &Command) -> i32 {
 }
 
 fn run_inner(args: &super::Args, command: &Command) -> Result<Vec<String>, (i32, String)> {
-    if args.backend.is_some() || args.socket.is_some() || args.id.is_some() || args.memory_max.is_some() || !args.stage.is_empty() || !args.tap.is_empty() || args.network.is_some() {
+    if args.backend.is_some()
+        || args.socket.is_some()
+        || args.id.is_some()
+        || args.memory_max.is_some()
+        || !args.stage.is_empty()
+        || !args.tap.is_empty()
+        || args.network.is_some()
+    {
         return Err((2, "--backend, --socket, --id, --memory-max, --stage, --tap and --network do not apply here; use vesperd stage --id ID".to_string()));
     }
     // Every form is checked before a connection is made.
@@ -42,14 +49,25 @@ fn run_inner(args: &super::Args, command: &Command) -> Result<Vec<String>, (i32,
             let dest = StageDest::parse(dest).map_err(|e| (2, e))?;
             control::check_pair(&src, &dest).map_err(|e| (2, e))?;
             match id {
-                Some(id) if !control::valid_microvm_id(id) => return Err((2, format!("--id {id:?}: use 1 to 64 letters, digits and hyphens"))),
-                None if control::needs_id(&src, &dest) => return Err((2, "SRC or DEST is in the jail: pass --id".to_string())),
+                Some(id) if !control::valid_microvm_id(id) => {
+                    return Err((
+                        2,
+                        format!("--id {id:?}: use 1 to 64 letters, digits and hyphens"),
+                    ));
+                }
+                None if control::needs_id(&src, &dest) => {
+                    return Err((2, "SRC or DEST is in the jail: pass --id".to_string()));
+                }
                 _ => {}
             }
             Request::Stage(id.clone(), src, dest)
         }
-        Command::Store { action: StoreAction::List } => Request::List,
-        Command::Store { action: StoreAction::Rm { name } } => {
+        Command::Store {
+            action: StoreAction::List,
+        } => Request::List,
+        Command::Store {
+            action: StoreAction::Rm { name },
+        } => {
             if !control::valid_store_name(name) {
                 return Err((2, format!("bad store name {name:?}")));
             }
@@ -62,7 +80,10 @@ fn run_inner(args: &super::Args, command: &Command) -> Result<Vec<String>, (i32,
     let mut session = control::connect(&endpoint).map_err(|e| (1, e))?;
     let guest = |(rc, reason): (i32, String)| (if rc == 2 { 2 } else { 1 }, reason);
     match request {
-        Request::Stage(id, src, dest) => session.stage(id.as_deref(), &src, &dest).map(|l| vec![l]).map_err(guest),
+        Request::Stage(id, src, dest) => session
+            .stage(id.as_deref(), &src, &dest)
+            .map(|l| vec![l])
+            .map_err(guest),
         Request::List => session.store_list().map_err(guest),
         Request::Rm(name) => session.store_rm(&name).map(|l| vec![l]).map_err(guest),
     }

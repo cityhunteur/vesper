@@ -166,7 +166,11 @@ async fn network_put_validates_mtu_bounds() {
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(payload["fault_message"], "invalid JSON payload");
-    assert!(get_json(&router, "/vm/config").await["network-interfaces"].as_array().is_some_and(Vec::is_empty));
+    assert!(
+        get_json(&router, "/vm/config").await["network-interfaces"]
+            .as_array()
+            .is_some_and(Vec::is_empty)
+    );
 
     for (iface, tap, mtu) in [("eth0", "tap0", 68), ("eth1", "tap1", 65535)] {
         let (status, _) = send_json(

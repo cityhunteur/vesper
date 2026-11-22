@@ -18,16 +18,16 @@ mod logger_metrics;
 mod machine_config;
 mod mmds;
 mod pmem;
-mod vm_config;
 #[cfg(test)]
 mod tests;
+mod vm_config;
 
 use self::actions::handle_actions;
 use self::balloon::*;
 use self::boot_source::handle_put_boot_source;
-use self::logger_metrics::{handle_put_cpu_config, handle_put_logger, handle_put_metrics};
 pub use self::errors::ErrorEnvelope;
 use self::errors::*;
+use self::logger_metrics::{handle_put_cpu_config, handle_put_logger, handle_put_metrics};
 use self::machine_config::{
     handle_patch_machine_config, handle_put_machine_config, machine_config_response,
 };
@@ -1888,11 +1888,20 @@ fn validate_memory_hotplug_config(config: &MemoryHotplugConfig) -> Result<(), St
     } else if config.slot_size_mib < DEFAULT_MEMORY_HOTPLUG_SLOT_SIZE_MIB {
         format!("Slot size must not be lower than {DEFAULT_MEMORY_HOTPLUG_SLOT_SIZE_MIB} MiB")
     } else if config.slot_size_mib % config.block_size_mib != 0 {
-        format!("Slot size must be a multiple of block size ({} MiB)", config.block_size_mib)
+        format!(
+            "Slot size must be a multiple of block size ({} MiB)",
+            config.block_size_mib
+        )
     } else if config.total_size_mib < config.slot_size_mib {
-        format!("Total size must not be lower than slot size ({} MiB)", config.slot_size_mib)
+        format!(
+            "Total size must not be lower than slot size ({} MiB)",
+            config.slot_size_mib
+        )
     } else if config.total_size_mib % config.slot_size_mib != 0 {
-        format!("Total size must be a multiple of slot size ({} MiB)", config.slot_size_mib)
+        format!(
+            "Total size must be a multiple of slot size ({} MiB)",
+            config.slot_size_mib
+        )
     } else {
         return Ok(());
     };
@@ -1905,7 +1914,9 @@ fn validate_memory_hotplug_size_update(
     config: &MemoryHotplugConfig,
     payload: &MemoryHotplugSizeUpdate,
 ) -> Result<(), String> {
-    if payload.requested_size_mib % config.block_size_mib != 0 || payload.requested_size_mib > config.total_size_mib {
+    if payload.requested_size_mib % config.block_size_mib != 0
+        || payload.requested_size_mib > config.total_size_mib
+    {
         let bytes = (payload.requested_size_mib as u64) << 20;
         return Err(format!(
             "Memory hotplug update error: Failed to create memory hotplug device: Size {bytes} is invalid: it must be a multiple of block size and less than the total size"

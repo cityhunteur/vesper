@@ -50,7 +50,11 @@ pub struct Bounds {
 
 impl Bounds {
     pub(super) fn line_limit(&self) -> usize {
-        if self.max_line == 0 { DEFAULT_MAX_LINE } else { self.max_line }
+        if self.max_line == 0 {
+            DEFAULT_MAX_LINE
+        } else {
+            self.max_line
+        }
     }
 
     pub(super) fn plain(&self) -> bool {
@@ -69,21 +73,34 @@ pub enum RelayEnd {
     Ceiling,
 }
 
-async fn within<T>(limit: Option<Duration>, what: &str, run: impl Future<Output = Result<T, String>>) -> Result<T, String> {
+async fn within<T>(
+    limit: Option<Duration>,
+    what: &str,
+    run: impl Future<Output = Result<T, String>>,
+) -> Result<T, String> {
     match limit {
-        Some(d) => timeout(d, run).await.map_err(|_| format!("{what}: no answer within {} ms", d.as_millis()))?,
+        Some(d) => timeout(d, run)
+            .await
+            .map_err(|_| format!("{what}: no answer within {} ms", d.as_millis()))?,
         None => run.await,
     }
 }
 
 /// Reads one line of at most `max` bytes, one byte at a time so that nothing after the newline is consumed.
 /// The newline and a trailing carriage return are removed.
-pub async fn read_line_bounded<R: AsyncRead + Unpin>(reader: &mut R, max: usize, limit: Option<Duration>) -> Result<String, String> {
+pub async fn read_line_bounded<R: AsyncRead + Unpin>(
+    reader: &mut R,
+    max: usize,
+    limit: Option<Duration>,
+) -> Result<String, String> {
     within(limit, "read line", async {
         let mut line = Vec::new();
         loop {
             let mut byte = [0u8; 1];
-            let n = reader.read(&mut byte).await.map_err(|err| format!("read line: {err}"))?;
+            let n = reader
+                .read(&mut byte)
+                .await
+                .map_err(|err| format!("read line: {err}"))?;
             if n == 0 {
                 return Err("read line: closed before a full line".to_string());
             }
@@ -104,16 +121,30 @@ pub async fn read_line_bounded<R: AsyncRead + Unpin>(reader: &mut R, max: usize,
 }
 
 /// Writes `line` and a newline, then flushes.
-pub async fn write_line<W: AsyncWrite + Unpin>(writer: &mut W, line: &str, limit: Option<Duration>) -> Result<(), String> {
+pub async fn write_line<W: AsyncWrite + Unpin>(
+    writer: &mut W,
+    line: &str,
+    limit: Option<Duration>,
+) -> Result<(), String> {
     within(limit, "write line", async {
-        writer.write_all(format!("{line}\n").as_bytes()).await.map_err(|err| format!("write line: {err}"))?;
-        writer.flush().await.map_err(|err| format!("write line: {err}"))
+        writer
+            .write_all(format!("{line}\n").as_bytes())
+            .await
+            .map_err(|err| format!("write line: {err}"))?;
+        writer
+            .flush()
+            .await
+            .map_err(|err| format!("write line: {err}"))
     })
     .await
 }
 
 /// Runs `preface` on a freshly dialled upstream.
-pub(super) async fn run_preface<S>(stream: &mut S, preface: &Preface, bounds: &Bounds) -> Result<(), String>
+pub(super) async fn run_preface<S>(
+    stream: &mut S,
+    preface: &Preface,
+    bounds: &Bounds,
+) -> Result<(), String>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
@@ -137,7 +168,14 @@ struct Clock {
     last: Instant,
 }
 
-async fn pump<R, W>(mut from: R, mut to: W, size: usize, clock: &Mutex<Clock>, turn: &Notify, client: bool) -> io::Result<()>
+async fn pump<R, W>(
+    mut from: R,
+    mut to: W,
+    size: usize,
+    clock: &Mutex<Clock>,
+    turn: &Notify,
+    client: bool,
+) -> io::Result<()>
 where
     R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
@@ -170,9 +208,17 @@ where
     C: AsyncRead + AsyncWrite + Unpin,
     U: AsyncRead + AsyncWrite + Unpin,
 {
-    let size = if bounds.read_buffer == 0 { DEFAULT_READ_BUFFER } else { bounds.read_buffer };
+    let size = if bounds.read_buffer == 0 {
+        DEFAULT_READ_BUFFER
+    } else {
+        bounds.read_buffer
+    };
     let now = Instant::now();
-    let clock = Mutex::new(Clock { client_last: false, since: now, last: now });
+    let clock = Mutex::new(Clock {
+        client_last: false,
+        since: now,
+        last: now,
+    });
     let turn = Notify::new();
     let (client_read, client_write) = tokio::io::split(client);
     let (upstream_read, upstream_write) = tokio::io::split(upstream);
@@ -187,7 +233,10 @@ where
             let (deadline, end) = {
                 let c = clock.lock().expect("relay clock");
                 if c.client_last {
-                    (bounds.request_ceiling.map(|d| c.since + d), RelayEnd::Ceiling)
+                    (
+                        bounds.request_ceiling.map(|d| c.since + d),
+                        RelayEnd::Ceiling,
+                    )
                 } else {
                     (bounds.idle_timeout.map(|d| c.last + d), RelayEnd::Idle)
                 }
@@ -211,7 +260,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::super::{run_server, ServerConfig};
+    use super::super::{ServerConfig, run_server};
     use super::*;
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
@@ -241,13 +290,23 @@ mod tests {
     async fn line_reads_are_bounded_and_stop_at_the_newline() {
         let (mut a, mut b) = duplex(4096);
         b.write_all(b"VESPER-AGENT 1 vesper\r\nnext").await.unwrap();
-        assert_eq!(read_line_bounded(&mut a, 64, None).await.unwrap(), "VESPER-AGENT 1 vesper");
+        assert_eq!(
+            read_line_bounded(&mut a, 64, None).await.unwrap(),
+            "VESPER-AGENT 1 vesper"
+        );
         let mut rest = [0u8; 4];
         a.read_exact(&mut rest).await.unwrap();
         assert_eq!(&rest, b"next");
         b.write_all(&[b'x'; 65]).await.unwrap();
-        assert!(read_line_bounded(&mut a, 64, None).await.unwrap_err().contains("longer than 64"));
-        let err = read_line_bounded(&mut a, 64, Some(Duration::from_millis(50))).await.unwrap_err();
+        assert!(
+            read_line_bounded(&mut a, 64, None)
+                .await
+                .unwrap_err()
+                .contains("longer than 64")
+        );
+        let err = read_line_bounded(&mut a, 64, Some(Duration::from_millis(50)))
+            .await
+            .unwrap_err();
         assert!(err.contains("no answer within 50 ms"), "{err}");
     }
 
@@ -255,17 +314,28 @@ mod tests {
     async fn the_idle_timeout_applies_between_requests() {
         let (client, mut client_peer) = duplex(4096);
         let (upstream, mut upstream_peer) = duplex(4096);
-        let relay = tokio::spawn(async move { bounded(client, upstream, &bounds(150, 5_000)).await });
+        let relay =
+            tokio::spawn(async move { bounded(client, upstream, &bounds(150, 5_000)).await });
         // One request and its reply, then silence: the relay ends after the idle timeout.
-        client_peer.write_all(b"GET / HTTP/1.1\r\n\r\n").await.unwrap();
+        client_peer
+            .write_all(b"GET / HTTP/1.1\r\n\r\n")
+            .await
+            .unwrap();
         let mut got = [0u8; 18];
         upstream_peer.read_exact(&mut got).await.unwrap();
-        upstream_peer.write_all(b"HTTP/1.1 200 \r\n\r\n").await.unwrap();
+        upstream_peer
+            .write_all(b"HTTP/1.1 200 \r\n\r\n")
+            .await
+            .unwrap();
         let mut reply = [0u8; 17];
         client_peer.read_exact(&mut reply).await.unwrap();
         let started = Instant::now();
         assert_eq!(relay.await.unwrap(), RelayEnd::Idle);
-        assert!(started.elapsed() >= Duration::from_millis(100), "{:?}", started.elapsed());
+        assert!(
+            started.elapsed() >= Duration::from_millis(100),
+            "{:?}",
+            started.elapsed()
+        );
         // The client sees end of file and no bytes.
         let mut rest = Vec::new();
         client_peer.read_to_end(&mut rest).await.unwrap();
@@ -277,27 +347,41 @@ mod tests {
         let (client, mut client_peer) = duplex(4096);
         let (upstream, mut upstream_peer) = duplex(4096);
         let relay = tokio::spawn(async move { bounded(client, upstream, &bounds(100, 400)).await });
-        client_peer.write_all(b"PUT /snapshot/create HTTP/1.1\r\n\r\n").await.unwrap();
+        client_peer
+            .write_all(b"PUT /snapshot/create HTTP/1.1\r\n\r\n")
+            .await
+            .unwrap();
         let mut got = [0u8; 8];
         upstream_peer.read_exact(&mut got).await.unwrap();
         // A slow operation that answers after three idle timeouts but inside the ceiling still gets through.
         tokio::time::sleep(Duration::from_millis(300)).await;
-        upstream_peer.write_all(b"HTTP/1.1 204 \r\n\r\n").await.unwrap();
+        upstream_peer
+            .write_all(b"HTTP/1.1 204 \r\n\r\n")
+            .await
+            .unwrap();
         let mut reply = [0u8; 17];
         client_peer.read_exact(&mut reply).await.unwrap();
         assert_eq!(&reply, b"HTTP/1.1 204 \r\n\r\n");
         // The next request never gets an answer: the ceiling ends the connection.
-        client_peer.write_all(b"PUT /snapshot/create HTTP/1.1\r\n\r\n").await.unwrap();
+        client_peer
+            .write_all(b"PUT /snapshot/create HTTP/1.1\r\n\r\n")
+            .await
+            .unwrap();
         let started = Instant::now();
         assert_eq!(relay.await.unwrap(), RelayEnd::Ceiling);
-        assert!(started.elapsed() >= Duration::from_millis(350), "{:?}", started.elapsed());
+        assert!(
+            started.elapsed() >= Duration::from_millis(350),
+            "{:?}",
+            started.elapsed()
+        );
     }
 
     #[tokio::test]
     async fn large_transfers_and_half_close_pass_through() {
         let (client, mut client_peer) = duplex(64 * 1024);
         let (upstream, mut upstream_peer) = duplex(64 * 1024);
-        let relay = tokio::spawn(async move { bounded(client, upstream, &bounds(2_000, 2_000)).await });
+        let relay =
+            tokio::spawn(async move { bounded(client, upstream, &bounds(2_000, 2_000)).await });
         // Four MiB from the upstream, far more than one read buffer: no total byte limit.
         let payload: Vec<u8> = (0..4 * 1024 * 1024).map(|i| (i % 251) as u8).collect();
         let sent = payload.clone();
@@ -339,9 +423,14 @@ mod tests {
         let listener = UnixListener::bind(vsock.join("3.sock")).unwrap();
         tokio::spawn(async move {
             loop {
-                let Ok((mut socket, _)) = listener.accept().await else { break };
+                let Ok((mut socket, _)) = listener.accept().await else {
+                    break;
+                };
                 tokio::spawn(async move {
-                    assert_eq!(read_line_bounded(&mut socket, 64, None).await.unwrap(), "CONNECT 1024");
+                    assert_eq!(
+                        read_line_bounded(&mut socket, 64, None).await.unwrap(),
+                        "CONNECT 1024"
+                    );
                     match agent {
                         Agent::Silent => {
                             let mut sink = Vec::new();
@@ -349,7 +438,11 @@ mod tests {
                             return;
                         }
                         Agent::LongGreeting => {
-                            let _ = socket.write_all(format!("VESPER-AGENT 1 {}\n", "x".repeat(2048)).as_bytes()).await;
+                            let _ = socket
+                                .write_all(
+                                    format!("VESPER-AGENT 1 {}\n", "x".repeat(2048)).as_bytes(),
+                                )
+                                .await;
                             let mut sink = Vec::new();
                             let _ = socket.read_to_end(&mut sink).await;
                             return;
@@ -357,7 +450,9 @@ mod tests {
                         Agent::Firecracker => {}
                     }
                     socket.write_all(b"VESPER-AGENT 1 vesper\n").await.unwrap();
-                    let Ok(request) = read_line_bounded(&mut socket, 64, None).await else { return };
+                    let Ok(request) = read_line_bounded(&mut socket, 64, None).await else {
+                        return;
+                    };
                     if request != "FCAPI vm-1" {
                         let _ = socket.write_all(b"ERR no vesperd microVM vm-2\n").await;
                         return;
@@ -365,7 +460,9 @@ mod tests {
                     socket.write_all(b"OK\n").await.unwrap();
                     loop {
                         // One request: a request line and headers with no body.
-                        let Ok(head) = read_line_bounded(&mut socket, 1024, None).await else { return };
+                        let Ok(head) = read_line_bounded(&mut socket, 1024, None).await else {
+                            return;
+                        };
                         while let Ok(line) = read_line_bounded(&mut socket, 1024, None).await {
                             if line.is_empty() {
                                 break;
@@ -433,7 +530,10 @@ mod tests {
     async fn read_until_closed(client: &mut UnixStream, limit: Duration) -> (Vec<u8>, Duration) {
         let started = std::time::Instant::now();
         let mut rest = Vec::new();
-        timeout(limit, client.read_to_end(&mut rest)).await.expect("connection still open").unwrap_or(0);
+        timeout(limit, client.read_to_end(&mut rest))
+            .await
+            .expect("connection still open")
+            .unwrap_or(0);
         (rest, started.elapsed())
     }
 
@@ -441,7 +541,12 @@ mod tests {
     async fn the_preface_runs_and_an_upstream_error_passes_through_byte_for_byte() {
         let dir = tempdir().unwrap();
         let vsock = fake_agent(dir.path(), Agent::Firecracker);
-        let (done, listen) = start(fcapi_config(&dir.path().join("api.sock"), &vsock, short_bounds())).await;
+        let (done, listen) = start(fcapi_config(
+            &dir.path().join("api.sock"),
+            &vsock,
+            short_bounds(),
+        ))
+        .await;
         let mut client = UnixStream::connect(&listen).await.unwrap();
         let request = b"PUT /machine-config HTTP/1.1\r\nHost: localhost\r\n\r\n";
         assert_eq!(exchange(&mut client, request).await, ERROR_REPLY);
@@ -465,9 +570,16 @@ mod tests {
             let mut client = UnixStream::connect(&listen).await.unwrap();
             client.write_all(b"GET / HTTP/1.1\r\n\r\n").await.unwrap();
             let (rest, took) = read_until_closed(&mut client, within).await;
-            assert!(rest.is_empty(), "{request}: got {:?}", String::from_utf8_lossy(&rest));
+            assert!(
+                rest.is_empty(),
+                "{request}: got {:?}",
+                String::from_utf8_lossy(&rest)
+            );
             if matches!(agent, Agent::Silent) {
-                assert!(took >= Duration::from_millis(250), "the greeting timeout ended it early: {took:?}");
+                assert!(
+                    took >= Duration::from_millis(250),
+                    "the greeting timeout ended it early: {took:?}"
+                );
             }
             done.notify_waiters();
         }
@@ -477,19 +589,36 @@ mod tests {
     async fn idle_connections_and_unanswered_requests_are_closed() {
         let dir = tempdir().unwrap();
         let vsock = fake_agent(dir.path(), Agent::Firecracker);
-        let (done, listen) = start(fcapi_config(&dir.path().join("api.sock"), &vsock, short_bounds())).await;
+        let (done, listen) = start(fcapi_config(
+            &dir.path().join("api.sock"),
+            &vsock,
+            short_bounds(),
+        ))
+        .await;
 
         let mut idle = UnixStream::connect(&listen).await.unwrap();
-        assert_eq!(exchange(&mut idle, b"GET / HTTP/1.1\r\n\r\n").await, ERROR_REPLY);
+        assert_eq!(
+            exchange(&mut idle, b"GET / HTTP/1.1\r\n\r\n").await,
+            ERROR_REPLY
+        );
         let (rest, took) = read_until_closed(&mut idle, Duration::from_secs(3)).await;
         assert!(rest.is_empty());
-        assert!(took >= Duration::from_millis(350) && took < Duration::from_millis(800), "idle close after {took:?}");
+        assert!(
+            took >= Duration::from_millis(350) && took < Duration::from_millis(800),
+            "idle close after {took:?}"
+        );
 
         let mut waiting = UnixStream::connect(&listen).await.unwrap();
-        waiting.write_all(b"PUT /slow HTTP/1.1\r\n\r\n").await.unwrap();
+        waiting
+            .write_all(b"PUT /slow HTTP/1.1\r\n\r\n")
+            .await
+            .unwrap();
         let (rest, took) = read_until_closed(&mut waiting, Duration::from_secs(3)).await;
         assert!(rest.is_empty());
-        assert!(took >= Duration::from_millis(750), "a waiting request got the idle timeout: {took:?}");
+        assert!(
+            took >= Duration::from_millis(750),
+            "a waiting request got the idle timeout: {took:?}"
+        );
         done.notify_waiters();
     }
 
@@ -499,15 +628,26 @@ mod tests {
         let vsock = fake_agent(dir.path(), Agent::Firecracker);
         let mut bounds = short_bounds();
         bounds.idle_timeout = Some(Duration::from_secs(10));
-        let (done, listen) = start(fcapi_config(&dir.path().join("api.sock"), &vsock, bounds)).await;
+        let (done, listen) =
+            start(fcapi_config(&dir.path().join("api.sock"), &vsock, bounds)).await;
         let mut first = UnixStream::connect(&listen).await.unwrap();
         let mut second = UnixStream::connect(&listen).await.unwrap();
-        assert_eq!(exchange(&mut first, b"GET / HTTP/1.1\r\n\r\n").await, ERROR_REPLY);
-        assert_eq!(exchange(&mut second, b"GET / HTTP/1.1\r\n\r\n").await, ERROR_REPLY);
+        assert_eq!(
+            exchange(&mut first, b"GET / HTTP/1.1\r\n\r\n").await,
+            ERROR_REPLY
+        );
+        assert_eq!(
+            exchange(&mut second, b"GET / HTTP/1.1\r\n\r\n").await,
+            ERROR_REPLY
+        );
         let mut third = UnixStream::connect(&listen).await.unwrap();
         let _ = third.write_all(b"GET / HTTP/1.1\r\n\r\n").await;
         let (rest, _) = read_until_closed(&mut third, Duration::from_secs(2)).await;
-        assert!(rest.is_empty(), "a client over the cap got {:?}", String::from_utf8_lossy(&rest));
+        assert!(
+            rest.is_empty(),
+            "a client over the cap got {:?}",
+            String::from_utf8_lossy(&rest)
+        );
         // A slot frees when a relayed connection ends.
         drop(first);
         let mut fourth = None;
@@ -516,7 +656,11 @@ mod tests {
             let mut next = UnixStream::connect(&listen).await.unwrap();
             next.write_all(b"GET / HTTP/1.1\r\n\r\n").await.unwrap();
             let mut reply = vec![0u8; ERROR_REPLY.len()];
-            if timeout(Duration::from_millis(500), next.read_exact(&mut reply)).await.map(|r| r.is_ok()).unwrap_or(false) {
+            if timeout(Duration::from_millis(500), next.read_exact(&mut reply))
+                .await
+                .map(|r| r.is_ok())
+                .unwrap_or(false)
+            {
                 fourth = Some(reply);
                 break;
             }

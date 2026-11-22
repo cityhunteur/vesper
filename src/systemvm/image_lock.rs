@@ -2,9 +2,9 @@
 //! shell export, verification of fetched artifacts, and the launch config derived from it.
 
 use super::{
-    artifact_path, build_manifest, check_digest, default_launch_config, is_sha256_hex,
-    ImageBuildConfig, ImageManifest, LaunchConfig, LaunchInputs, ProbeSettings,
-    IMAGE_LOCK_SCHEMA_VERSION,
+    IMAGE_LOCK_SCHEMA_VERSION, ImageBuildConfig, ImageManifest, LaunchConfig, LaunchInputs,
+    ProbeSettings, artifact_path, build_manifest, check_digest, default_launch_config,
+    is_sha256_hex,
 };
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -133,7 +133,10 @@ impl ImageArtifact {
     pub fn file_name(&self) -> Result<&str, String> {
         let name = self.file.trim();
         if name.is_empty() || name.contains('/') {
-            return Err(format!("artifact file {:?} must be a bare file name", self.file));
+            return Err(format!(
+                "artifact file {:?} must be a bare file name",
+                self.file
+            ));
         }
         Ok(name)
     }
@@ -141,8 +144,8 @@ impl ImageArtifact {
 
 pub fn load_image_lock(path: impl AsRef<Path>) -> Result<ImageLock, String> {
     let path = path.as_ref();
-    let content =
-        fs::read_to_string(path).map_err(|err| format!("read image lock {}: {err}", path.display()))?;
+    let content = fs::read_to_string(path)
+        .map_err(|err| format!("read image lock {}: {err}", path.display()))?;
     let lock: ImageLock = serde_yaml::from_str(&content)
         .map_err(|err| format!("parse image lock {}: {err}", path.display()))?;
     validate_image_lock(&lock)?;
@@ -179,14 +182,20 @@ pub fn validate_image_lock(lock: &ImageLock) -> Result<(), String> {
         return Err("image lock boot.max_boot_ms must be > 0".to_string());
     }
     if let Some(probe) = &lock.boot.probe {
-        probe.validate().map_err(|err| format!("image lock boot.probe: {err}"))?;
+        probe
+            .validate()
+            .map_err(|err| format!("image lock boot.probe: {err}"))?;
     }
     if let Some(control) = &lock.control {
         if control.bridge_dir.trim().is_empty() || control.bridge_dir.contains("..") {
-            return Err("image lock control.bridge_dir must be a non-blank relative path".to_string());
+            return Err(
+                "image lock control.bridge_dir must be a non-blank relative path".to_string(),
+            );
         }
         if control.cid < 3 || control.agent_port == 0 {
-            return Err("image lock control.cid must be >= 3 and control.agent_port > 0".to_string());
+            return Err(
+                "image lock control.cid must be >= 3 and control.agent_port > 0".to_string(),
+            );
         }
     }
     if let Some(overlay) = &lock.overlay {
@@ -196,18 +205,31 @@ pub fn validate_image_lock(lock: &ImageLock) -> Result<(), String> {
             ("overlay.file", &overlay.file),
         ] {
             if value.trim().is_empty() || value.contains("..") {
-                return Err(format!("image lock field {name} must be a non-blank relative path"));
+                return Err(format!(
+                    "image lock field {name} must be a non-blank relative path"
+                ));
             }
         }
         if overlay.file.contains('/') {
             return Err("image lock overlay.file must be a bare file name".to_string());
         }
-        if !overlay.apkovl_path.starts_with('/') || !overlay.apkovl_path.ends_with(".apkovl.tar.gz") {
-            return Err("image lock overlay.apkovl_path must be an absolute *.apkovl.tar.gz path".to_string());
+        if !overlay.apkovl_path.starts_with('/') || !overlay.apkovl_path.ends_with(".apkovl.tar.gz")
+        {
+            return Err(
+                "image lock overlay.apkovl_path must be an absolute *.apkovl.tar.gz path"
+                    .to_string(),
+            );
         }
         let expected = format!("apkovl={}", overlay.apkovl_path);
-        if !lock.boot.kernel_cmdline.split_whitespace().any(|arg| arg == expected) {
-            return Err(format!("image lock boot.kernel_cmdline must contain {expected}"));
+        if !lock
+            .boot
+            .kernel_cmdline
+            .split_whitespace()
+            .any(|arg| arg == expected)
+        {
+            return Err(format!(
+                "image lock boot.kernel_cmdline must contain {expected}"
+            ));
         }
     }
     if !lock.source.url.starts_with("https://") {
@@ -218,9 +240,15 @@ pub fn validate_image_lock(lock: &ImageLock) -> Result<(), String> {
     }
     let mut digests = vec![
         ("source.sha256", &lock.source.sha256),
-        ("artifacts.kernel.member_sha256", &lock.artifacts.kernel.member_sha256),
+        (
+            "artifacts.kernel.member_sha256",
+            &lock.artifacts.kernel.member_sha256,
+        ),
         ("artifacts.kernel.sha256", &lock.artifacts.kernel.sha256),
-        ("artifacts.initrd.member_sha256", &lock.artifacts.initrd.member_sha256),
+        (
+            "artifacts.initrd.member_sha256",
+            &lock.artifacts.initrd.member_sha256,
+        ),
         ("artifacts.initrd.sha256", &lock.artifacts.initrd.sha256),
         ("expected_image_id", &lock.expected_image_id),
     ];
@@ -229,7 +257,9 @@ pub fn validate_image_lock(lock: &ImageLock) -> Result<(), String> {
     }
     for (name, value) in digests {
         if !is_sha256_hex(value) {
-            return Err(format!("image lock field {name} must be 64 lowercase hex characters"));
+            return Err(format!(
+                "image lock field {name} must be 64 lowercase hex characters"
+            ));
         }
     }
     for artifact in [&lock.artifacts.kernel, &lock.artifacts.initrd] {
@@ -240,7 +270,10 @@ pub fn validate_image_lock(lock: &ImageLock) -> Result<(), String> {
             ));
         }
     }
-    let mut names = vec![lock.artifacts.kernel.file_name()?, lock.artifacts.initrd.file_name()?];
+    let mut names = vec![
+        lock.artifacts.kernel.file_name()?,
+        lock.artifacts.initrd.file_name()?,
+    ];
     if let Some(overlay) = &lock.overlay {
         names.push(overlay.file.as_str());
     }
@@ -250,7 +283,10 @@ pub fn validate_image_lock(lock: &ImageLock) -> Result<(), String> {
             return Err("boot_media.file must be a bare file name".to_string());
         }
         if media.sha256 != lock.source.sha256 {
-            return Err("boot_media.sha256 must equal source.sha256 (the source file is attached as is)".to_string());
+            return Err(
+                "boot_media.sha256 must equal source.sha256 (the source file is attached as is)"
+                    .to_string(),
+            );
         }
         names.push(name);
     }
@@ -266,43 +302,111 @@ pub fn validate_image_lock(lock: &ImageLock) -> Result<(), String> {
 /// Shell-sourceable `KEY=VALUE` lines for `scripts/systemvm/fetch-image.sh`.
 pub fn image_lock_env(lock: &ImageLock) -> String {
     let max_boot_ms = lock.boot.max_boot_ms.to_string();
-    let control_cid = lock.control.as_ref().map(|c| c.cid.to_string()).unwrap_or_default();
-    let control_port = lock.control.as_ref().map(|c| c.agent_port.to_string()).unwrap_or_default();
+    let control_cid = lock
+        .control
+        .as_ref()
+        .map(|c| c.cid.to_string())
+        .unwrap_or_default();
+    let control_port = lock
+        .control
+        .as_ref()
+        .map(|c| c.agent_port.to_string())
+        .unwrap_or_default();
     let pairs = [
         ("VESPER_IMAGE_DISTRIBUTION", lock.distribution.as_str()),
         ("VESPER_IMAGE_RELEASE", lock.release.as_str()),
         ("VESPER_IMAGE_ARCH", lock.arch.as_str()),
         ("VESPER_IMAGE_URL", lock.source.url.as_str()),
         ("VESPER_IMAGE_SHA256", lock.source.sha256.as_str()),
-        ("VESPER_IMAGE_KERNEL_MEMBER", lock.artifacts.kernel.member.as_str()),
-        ("VESPER_IMAGE_KERNEL_MEMBER_SHA256", lock.artifacts.kernel.member_sha256.as_str()),
-        ("VESPER_IMAGE_KERNEL_UNPACK", unpack_name(lock.artifacts.kernel.unpack)),
-        ("VESPER_IMAGE_KERNEL_FILE", lock.artifacts.kernel.file.as_str()),
-        ("VESPER_IMAGE_KERNEL_SHA256", lock.artifacts.kernel.sha256.as_str()),
-        ("VESPER_IMAGE_INITRD_MEMBER", lock.artifacts.initrd.member.as_str()),
-        ("VESPER_IMAGE_INITRD_MEMBER_SHA256", lock.artifacts.initrd.member_sha256.as_str()),
-        ("VESPER_IMAGE_INITRD_UNPACK", unpack_name(lock.artifacts.initrd.unpack)),
-        ("VESPER_IMAGE_INITRD_FILE", lock.artifacts.initrd.file.as_str()),
-        ("VESPER_IMAGE_INITRD_SHA256", lock.artifacts.initrd.sha256.as_str()),
+        (
+            "VESPER_IMAGE_KERNEL_MEMBER",
+            lock.artifacts.kernel.member.as_str(),
+        ),
+        (
+            "VESPER_IMAGE_KERNEL_MEMBER_SHA256",
+            lock.artifacts.kernel.member_sha256.as_str(),
+        ),
+        (
+            "VESPER_IMAGE_KERNEL_UNPACK",
+            unpack_name(lock.artifacts.kernel.unpack),
+        ),
+        (
+            "VESPER_IMAGE_KERNEL_FILE",
+            lock.artifacts.kernel.file.as_str(),
+        ),
+        (
+            "VESPER_IMAGE_KERNEL_SHA256",
+            lock.artifacts.kernel.sha256.as_str(),
+        ),
+        (
+            "VESPER_IMAGE_INITRD_MEMBER",
+            lock.artifacts.initrd.member.as_str(),
+        ),
+        (
+            "VESPER_IMAGE_INITRD_MEMBER_SHA256",
+            lock.artifacts.initrd.member_sha256.as_str(),
+        ),
+        (
+            "VESPER_IMAGE_INITRD_UNPACK",
+            unpack_name(lock.artifacts.initrd.unpack),
+        ),
+        (
+            "VESPER_IMAGE_INITRD_FILE",
+            lock.artifacts.initrd.file.as_str(),
+        ),
+        (
+            "VESPER_IMAGE_INITRD_SHA256",
+            lock.artifacts.initrd.sha256.as_str(),
+        ),
         (
             "VESPER_IMAGE_BOOT_MEDIA_FILE",
-            lock.boot_media.as_ref().map(|media| media.file.as_str()).unwrap_or(""),
+            lock.boot_media
+                .as_ref()
+                .map(|media| media.file.as_str())
+                .unwrap_or(""),
         ),
-        ("VESPER_IMAGE_KERNEL_CMDLINE", lock.boot.kernel_cmdline.as_str()),
-        ("VESPER_IMAGE_READY_PATTERN", lock.boot.ready_pattern.as_str()),
+        (
+            "VESPER_IMAGE_KERNEL_CMDLINE",
+            lock.boot.kernel_cmdline.as_str(),
+        ),
+        (
+            "VESPER_IMAGE_READY_PATTERN",
+            lock.boot.ready_pattern.as_str(),
+        ),
         ("VESPER_IMAGE_MAX_BOOT_MS", &max_boot_ms),
-        ("VESPER_IMAGE_NESTED_VIRTUALIZATION", lock.boot.nested_virtualization.as_str()),
-        ("VESPER_IMAGE_OVERLAY_DIR", lock.overlay.as_ref().map(|o| o.dir.as_str()).unwrap_or("")),
+        (
+            "VESPER_IMAGE_NESTED_VIRTUALIZATION",
+            lock.boot.nested_virtualization.as_str(),
+        ),
+        (
+            "VESPER_IMAGE_OVERLAY_DIR",
+            lock.overlay.as_ref().map(|o| o.dir.as_str()).unwrap_or(""),
+        ),
         (
             "VESPER_IMAGE_OVERLAY_PACKAGES_LOCK",
-            lock.overlay.as_ref().map(|o| o.packages_lock.as_str()).unwrap_or(""),
+            lock.overlay
+                .as_ref()
+                .map(|o| o.packages_lock.as_str())
+                .unwrap_or(""),
         ),
         (
             "VESPER_IMAGE_OVERLAY_APKOVL_PATH",
-            lock.overlay.as_ref().map(|o| o.apkovl_path.as_str()).unwrap_or(""),
+            lock.overlay
+                .as_ref()
+                .map(|o| o.apkovl_path.as_str())
+                .unwrap_or(""),
         ),
-        ("VESPER_IMAGE_OVERLAY_FILE", lock.overlay.as_ref().map(|o| o.file.as_str()).unwrap_or("")),
-        ("VESPER_IMAGE_CONTROL_BRIDGE_DIR", lock.control.as_ref().map(|c| c.bridge_dir.as_str()).unwrap_or("")),
+        (
+            "VESPER_IMAGE_OVERLAY_FILE",
+            lock.overlay.as_ref().map(|o| o.file.as_str()).unwrap_or(""),
+        ),
+        (
+            "VESPER_IMAGE_CONTROL_BRIDGE_DIR",
+            lock.control
+                .as_ref()
+                .map(|c| c.bridge_dir.as_str())
+                .unwrap_or(""),
+        ),
         ("VESPER_IMAGE_CONTROL_CID", &control_cid),
         ("VESPER_IMAGE_CONTROL_AGENT_PORT", &control_port),
         ("VESPER_IMAGE_EXPECTED_ID", lock.expected_image_id.as_str()),
@@ -393,7 +497,10 @@ pub fn launch_config_from_lock(
     console_log_path: &str,
 ) -> Result<LaunchConfig, String> {
     let dir = dir.as_ref();
-    let kernel = dir.join(lock.artifacts.kernel.file_name()?).display().to_string();
+    let kernel = dir
+        .join(lock.artifacts.kernel.file_name()?)
+        .display()
+        .to_string();
     let initrd_name = match &lock.overlay {
         Some(overlay) => {
             let derived = dir.join(overlay.file.trim());
@@ -412,7 +519,10 @@ pub fn launch_config_from_lock(
         .boot_media
         .as_ref()
         .map(|media| dir.join(media.file.trim()).display().to_string());
-    let bridge = lock.control.as_ref().map(|c| c.bridge_path().display().to_string());
+    let bridge = lock
+        .control
+        .as_ref()
+        .map(|c| c.bridge_path().display().to_string());
     let mut config = default_launch_config(&LaunchInputs {
         kernel_path: &kernel,
         rootfs_path: None,
@@ -433,11 +543,14 @@ pub fn launch_config_from_lock(
 
 #[cfg(test)]
 mod tests {
+    use super::super::{DEFAULT_READY_PATTERN, digest_file, image_id};
     use super::*;
-    use super::super::{digest_file, image_id, DEFAULT_READY_PATTERN};
     use tempfile::tempdir;
 
-    const REPO_LOCK: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/docs/specs/systemvm-image.lock.yaml");
+    const REPO_LOCK: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/docs/specs/systemvm-image.lock.yaml"
+    );
 
     fn sample_lock() -> ImageLock {
         load_image_lock(REPO_LOCK).unwrap()
@@ -458,18 +571,38 @@ mod tests {
         assert_eq!(lock.boot.ready_pattern, DEFAULT_READY_PATTERN);
         assert_eq!(lock.boot.max_boot_ms, 5000);
         assert_eq!(lock.boot.nested_virtualization, "auto");
-        let probe = lock.boot.probe.as_ref().expect("the lock pins a guest probe");
+        let probe = lock
+            .boot
+            .probe
+            .as_ref()
+            .expect("the lock pins a guest probe");
         assert_eq!(probe.login_user, "root");
         assert!(probe.commands.iter().any(|c| c.contains("ping")));
         assert!(probe.success_pattern.contains("VESPER"));
         assert_eq!(probe.shutdown_command, "poweroff");
-        let control = lock.control.as_ref().expect("the lock defines the control channel");
+        let control = lock
+            .control
+            .as_ref()
+            .expect("the lock defines the control channel");
         assert_eq!(control.cid, 3);
-        assert_eq!(control.bridge_path().to_string_lossy(), "run/systemvm/vsock/3.sock");
+        assert_eq!(
+            control.bridge_path().to_string_lossy(),
+            "run/systemvm/vsock/3.sock"
+        );
         let overlay = lock.overlay.as_ref().expect("the lock delivers an overlay");
         assert_eq!(overlay.dir, "systemvm/overlay");
-        assert!(lock.boot.kernel_cmdline.contains(&format!("apkovl={}", overlay.apkovl_path)));
-        assert!(std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/systemvm/overlay/etc/init.d/vesper-agent")).is_file());
+        assert!(
+            lock.boot
+                .kernel_cmdline
+                .contains(&format!("apkovl={}", overlay.apkovl_path))
+        );
+        assert!(
+            std::path::Path::new(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/systemvm/overlay/etc/init.d/vesper-agent"
+            ))
+            .is_file()
+        );
         assert_eq!(
             lock.expected_image_id,
             image_id(
@@ -495,11 +628,19 @@ mod tests {
 
         let mut lock = sample_lock();
         lock.artifacts.initrd.member_sha256 = lock.artifacts.kernel.sha256.clone();
-        assert!(validate_image_lock(&lock).unwrap_err().contains("unpack none"));
+        assert!(
+            validate_image_lock(&lock)
+                .unwrap_err()
+                .contains("unpack none")
+        );
 
         let mut lock = sample_lock();
         lock.boot_media.as_mut().unwrap().sha256 = lock.artifacts.kernel.sha256.clone();
-        assert!(validate_image_lock(&lock).unwrap_err().contains("source.sha256"));
+        assert!(
+            validate_image_lock(&lock)
+                .unwrap_err()
+                .contains("source.sha256")
+        );
 
         let mut lock = sample_lock();
         lock.artifacts.kernel.file = "initramfs-virt".to_string();
@@ -507,7 +648,11 @@ mod tests {
 
         let mut lock = sample_lock();
         lock.boot.max_boot_ms = 0;
-        assert!(validate_image_lock(&lock).unwrap_err().contains("max_boot_ms"));
+        assert!(
+            validate_image_lock(&lock)
+                .unwrap_err()
+                .contains("max_boot_ms")
+        );
 
         let mut lock = sample_lock();
         lock.boot.probe.as_mut().unwrap().commands.clear();
@@ -515,10 +660,16 @@ mod tests {
 
         let mut lock = sample_lock();
         lock.overlay.as_mut().unwrap().apkovl_path = "/other.apkovl.tar.gz".to_string();
-        assert!(validate_image_lock(&lock).unwrap_err().contains("kernel_cmdline must contain"));
+        assert!(
+            validate_image_lock(&lock)
+                .unwrap_err()
+                .contains("kernel_cmdline must contain")
+        );
 
         let with_extra = fs::read_to_string(REPO_LOCK).unwrap() + "\nextra_field: 1\n";
-        let err = serde_yaml::from_str::<ImageLock>(&with_extra).unwrap_err().to_string();
+        let err = serde_yaml::from_str::<ImageLock>(&with_extra)
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("extra_field"));
     }
 
@@ -543,7 +694,10 @@ mod tests {
         ] {
             assert!(env.contains(key), "missing {key} in\n{env}");
         }
-        assert!(env.lines().all(|line| line.contains("='") && line.ends_with('\'')));
+        assert!(
+            env.lines()
+                .all(|line| line.contains("='") && line.ends_with('\''))
+        );
     }
 
     #[test]
@@ -556,7 +710,9 @@ mod tests {
 
         let kernel = dir.path().join("Image-virt");
         let initrd = dir.path().join("initramfs-virt");
-        let media = dir.path().join(lock.boot_media.as_ref().unwrap().file.clone());
+        let media = dir
+            .path()
+            .join(lock.boot_media.as_ref().unwrap().file.clone());
         fs::write(&kernel, "kernel").unwrap();
         fs::write(&initrd, "initrd").unwrap();
         fs::write(&media, "iso").unwrap();
@@ -582,7 +738,10 @@ mod tests {
             Some(&media_sha),
         );
         let without = verify_image(&lock, dir.path(), false).unwrap();
-        assert!(without.overlay_initrd_path.is_none(), "missing overlay is tolerated before the overlay step");
+        assert!(
+            without.overlay_initrd_path.is_none(),
+            "missing overlay is tolerated before the overlay step"
+        );
         let err = verify_image(&lock, dir.path(), true).unwrap_err();
         assert!(err.contains("derived initramfs") && err.contains("missing"));
         let err = launch_config_from_lock(&lock, dir.path(), "console.log").unwrap_err();
@@ -591,21 +750,43 @@ mod tests {
         fs::write(&derived, "initrdX").unwrap();
         let manifest = verify_image(&lock, dir.path(), true).unwrap();
         assert_eq!(manifest.image_id, lock.expected_image_id);
-        assert_eq!(manifest.initrd_path.as_deref(), Some(initrd.display().to_string().as_str()));
-        assert_eq!(manifest.boot_media_sha256.as_deref(), Some(media_sha.as_str()));
-        assert_eq!(manifest.overlay_initrd_path.as_deref(), Some(derived.display().to_string().as_str()));
+        assert_eq!(
+            manifest.initrd_path.as_deref(),
+            Some(initrd.display().to_string().as_str())
+        );
+        assert_eq!(
+            manifest.boot_media_sha256.as_deref(),
+            Some(media_sha.as_str())
+        );
+        assert_eq!(
+            manifest.overlay_initrd_path.as_deref(),
+            Some(derived.display().to_string().as_str())
+        );
         fs::write(&derived, "unrelated").unwrap();
-        assert!(verify_image(&lock, dir.path(), false).unwrap_err().contains("does not start with"));
+        assert!(
+            verify_image(&lock, dir.path(), false)
+                .unwrap_err()
+                .contains("does not start with")
+        );
         fs::write(&derived, "initrdX").unwrap();
 
         let launch = launch_config_from_lock(&lock, dir.path(), "console.log").unwrap();
         assert_eq!(launch.kernel_path, kernel.display().to_string());
-        assert_eq!(launch.initrd_path.as_deref(), Some(derived.display().to_string().as_str()));
-        assert_eq!(launch.boot_media_path.as_deref(), Some(media.display().to_string().as_str()));
+        assert_eq!(
+            launch.initrd_path.as_deref(),
+            Some(derived.display().to_string().as_str())
+        );
+        assert_eq!(
+            launch.boot_media_path.as_deref(),
+            Some(media.display().to_string().as_str())
+        );
         assert_eq!(launch.kernel_cmdline, lock.boot.kernel_cmdline);
         assert_eq!(launch.ready_pattern, lock.boot.ready_pattern);
         assert_eq!(launch.max_boot_ms, Some(lock.boot.max_boot_ms));
-        assert_eq!(launch.vsock_bridge_path.as_deref(), Some("run/systemvm/vsock/3.sock"));
+        assert_eq!(
+            launch.vsock_bridge_path.as_deref(),
+            Some("run/systemvm/vsock/3.sock")
+        );
         assert_eq!(launch.agent_port, Some(1024));
         assert_eq!(launch.nested_virtualization.as_deref(), Some("auto"));
         assert_eq!(

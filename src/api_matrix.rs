@@ -756,8 +756,7 @@ mod tests {
 
     #[test]
     fn validates_repo_generated_matrix() {
-        let routes = crate::spec::load_routes(DEFAULT_SWAGGER_PATH)
-            .unwrap();
+        let routes = crate::spec::load_routes(DEFAULT_SWAGGER_PATH).unwrap();
         let lock = crate::baseline::load(DEFAULT_BASELINE_LOCK_PATH).unwrap();
         let firecracker_revision = lock.baselines.get("firecracker").unwrap().revision.clone();
         let firecracker_version = crate::spec::load_info_version(DEFAULT_SWAGGER_PATH).unwrap();

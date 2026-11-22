@@ -58,8 +58,7 @@ fn app_router() -> (axum::Router, String) {
     let firecracker_version =
         vesper::spec::load_info_version("third_party/firecracker/firecracker.yaml").unwrap();
 
-    let routes = vesper::spec::load_routes("third_party/firecracker/firecracker.yaml")
-        .unwrap();
+    let routes = vesper::spec::load_routes("third_party/firecracker/firecracker.yaml").unwrap();
     let surface_stub_matrix = vesper::api_matrix::load_surface_stub_matrix(
         vesper::api_matrix::DEFAULT_SURFACE_STUB_MATRIX_PATH,
     )
@@ -2386,8 +2385,12 @@ async fn serial_put_is_refused_after_boot_on_full_router() {
         .unwrap();
     // Firecracker v1.16.0 refuses this after boot (D-026, Backend A replay).
     assert_eq!(serial_response.status(), StatusCode::BAD_REQUEST);
-    let payload: serde_json::Value =
-        serde_json::from_slice(&to_bytes(serial_response.into_body(), usize::MAX).await.unwrap()).unwrap();
+    let payload: serde_json::Value = serde_json::from_slice(
+        &to_bytes(serial_response.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
     assert_eq!(
         payload["fault_message"],
         "The requested operation is not supported after starting the microVM."
@@ -2397,7 +2400,6 @@ async fn serial_put_is_refused_after_boot_on_full_router() {
 #[tokio::test]
 async fn vm_config_serial_omission_persists_after_boot_on_full_router() {
     let (router, _) = app_router();
-
 
     let serial_response = router
         .clone()
@@ -3180,8 +3182,12 @@ async fn metrics_put_is_refused_after_boot_on_full_router() {
         .unwrap();
     // Firecracker v1.16.0 refuses this after boot (D-026, Backend A replay).
     assert_eq!(metrics_response.status(), StatusCode::BAD_REQUEST);
-    let payload: serde_json::Value =
-        serde_json::from_slice(&to_bytes(metrics_response.into_body(), usize::MAX).await.unwrap()).unwrap();
+    let payload: serde_json::Value = serde_json::from_slice(
+        &to_bytes(metrics_response.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
     assert_eq!(
         payload["fault_message"],
         "The requested operation is not supported after starting the microVM."
@@ -3193,7 +3199,6 @@ async fn vm_config_metrics_omission_persists_after_boot_on_full_router() {
     let (router, _) = app_router();
     let tempdir = tempdir().unwrap();
     let metrics_path = tempdir.path().join("metrics-omitted-after-boot.jsonl");
-
 
     let metrics_response = router
         .clone()
@@ -3407,8 +3412,12 @@ async fn logger_put_is_refused_after_boot_on_full_router() {
         .unwrap();
     // Firecracker v1.16.0 refuses this after boot (D-026, Backend A replay).
     assert_eq!(logger_response.status(), StatusCode::BAD_REQUEST);
-    let payload: serde_json::Value =
-        serde_json::from_slice(&to_bytes(logger_response.into_body(), usize::MAX).await.unwrap()).unwrap();
+    let payload: serde_json::Value = serde_json::from_slice(
+        &to_bytes(logger_response.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
     assert_eq!(
         payload["fault_message"],
         "The requested operation is not supported after starting the microVM."
@@ -3418,7 +3427,6 @@ async fn logger_put_is_refused_after_boot_on_full_router() {
 #[tokio::test]
 async fn vm_config_logger_omission_persists_after_boot_on_full_router() {
     let (router, _) = app_router();
-
 
     let logger_response = router
         .clone()
@@ -4413,7 +4421,11 @@ async fn drive_put_rejects_missing_backing_files() {
             .unwrap(),
     )
     .unwrap();
-    assert!(vm_config_payload["drives"].as_array().is_some_and(Vec::is_empty));
+    assert!(
+        vm_config_payload["drives"]
+            .as_array()
+            .is_some_and(Vec::is_empty)
+    );
 }
 
 #[tokio::test]
@@ -4625,7 +4637,9 @@ async fn network_put_rejects_path_body_id_mismatch_on_full_router() {
     )
     .unwrap();
     assert!(
-        vm_config_payload["network-interfaces"].as_array().is_some_and(Vec::is_empty)
+        vm_config_payload["network-interfaces"]
+            .as_array()
+            .is_some_and(Vec::is_empty)
             || vm_config_payload["network-interfaces"]
                 .as_array()
                 .map(|interfaces| interfaces.is_empty())
@@ -5177,12 +5191,20 @@ fn assert_fault(
     );
 }
 
-async fn put_pmem(router: &axum::Router, id: &str, path: &std::path::Path, extra: &str) -> StatusCode {
+async fn put_pmem(
+    router: &axum::Router,
+    id: &str,
+    path: &std::path::Path,
+    extra: &str,
+) -> StatusCode {
     send_json(
         router,
         "PUT",
         &format!("/pmem/{id}"),
-        &format!(r#"{{"id":"{id}","path_on_host":"{}"{extra}}}"#, path.display()),
+        &format!(
+            r#"{{"id":"{id}","path_on_host":"{}"{extra}}}"#,
+            path.display()
+        ),
     )
     .await
     .0
@@ -5214,7 +5236,10 @@ async fn pmem_backing_files_are_validated_at_instance_start_on_full_router() {
         put_pmem(&router, "pmem0", &missing_path, "").await,
         StatusCode::NO_CONTENT
     );
-    assert_eq!(get_json(&router, "/vm/config").await["pmem"][0]["id"], "pmem0");
+    assert_eq!(
+        get_json(&router, "/vm/config").await["pmem"][0]["id"],
+        "pmem0"
+    );
     let (status, payload) = send_json(&router, "PUT", "/actions", start).await;
     assert_fault(
         status,
@@ -5412,18 +5437,40 @@ async fn postboot_device_puts_report_pci_not_enabled_on_full_router() {
         assert_eq!(get_json(&router, "/").await["state"], vm_state);
         for (uri, valid, mismatch, mismatch_message) in &requests {
             let (status, payload) = send_json(&router, "PUT", uri, valid).await;
-            assert_fault(status, &payload, "InvalidRequest", "PCI is not enabled", &firecracker);
+            assert_fault(
+                status,
+                &payload,
+                "InvalidRequest",
+                "PCI is not enabled",
+                &firecracker,
+            );
             // Body parsing and the id check run before the PCI error, as in Firecracker.
             let (status, payload) = send_json(&router, "PUT", uri, mismatch).await;
-            assert_fault(status, &payload, "InvalidRequest", mismatch_message, &firecracker);
+            assert_fault(
+                status,
+                &payload,
+                "InvalidRequest",
+                mismatch_message,
+                &firecracker,
+            );
             let (status, payload) = send_json(&router, "PUT", uri, "{not-json").await;
-            assert_fault(status, &payload, "InvalidRequest", "invalid JSON payload", &firecracker);
+            assert_fault(
+                status,
+                &payload,
+                "InvalidRequest",
+                "invalid JSON payload",
+                &firecracker,
+            );
         }
     }
 
     let vm_config = get_json(&router, "/vm/config").await;
     assert!(vm_config["drives"].as_array().is_some_and(Vec::is_empty));
-    assert!(vm_config["network-interfaces"].as_array().is_some_and(Vec::is_empty));
+    assert!(
+        vm_config["network-interfaces"]
+            .as_array()
+            .is_some_and(Vec::is_empty)
+    );
     assert!(vm_config["pmem"].as_array().is_some_and(Vec::is_empty));
 }
 
@@ -5485,7 +5532,11 @@ async fn network_put_validates_mtu_bounds_on_full_router() {
             &firecracker,
         );
     }
-    assert!(get_json(&router, "/vm/config").await["network-interfaces"].as_array().is_some_and(Vec::is_empty));
+    assert!(
+        get_json(&router, "/vm/config").await["network-interfaces"]
+            .as_array()
+            .is_some_and(Vec::is_empty)
+    );
 
     for (iface, tap, mtu) in [("eth0", "tap0", "68"), ("eth1", "tap1", "65535")] {
         let (status, payload) = send_json(
@@ -5554,7 +5605,12 @@ async fn serial_put_accepts_token_bucket_rate_limiter_on_full_router() {
     .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
     // Firecracker never exports the serial config in GET /vm/config.
-    assert!(get_json(&router, "/vm/config").await.get("serial").is_none());
+    assert!(
+        get_json(&router, "/vm/config")
+            .await
+            .get("serial")
+            .is_none()
+    );
 
     for bad in [
         r#"{"rate_limiter":{"size":4096}}"#,

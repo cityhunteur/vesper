@@ -21,8 +21,8 @@ use std::time::{Duration, Instant};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::signal::unix::{SignalKind, signal};
 use vesper::control::{
-    AGENT_PROTOCOL_VERSION, DEFAULT_AGENT_PORT, MAX_STAGES, Ready, StageSpec, TapSpec, check_network, data_disk_in_use,
-    parse_ready, valid_microvm_id,
+    AGENT_PROTOCOL_VERSION, DEFAULT_AGENT_PORT, MAX_STAGES, Ready, StageSpec, TapSpec,
+    check_network, data_disk_in_use, parse_ready, valid_microvm_id,
 };
 use vesper::proxy::{self, Bounds, Preface, ServerConfig, Target};
 
@@ -65,7 +65,8 @@ pub struct Options {
 
 /// The bridge socket and agent port: `--bridge` and `--agent-port`, else the launch config's.
 pub fn bridge_and_port(args: &super::Args) -> Result<(PathBuf, u32), String> {
-    let (cfg_bridge, cfg_port) = match (&args.bridge, std::fs::read_to_string(&args.launch_config)) {
+    let (cfg_bridge, cfg_port) = match (&args.bridge, std::fs::read_to_string(&args.launch_config))
+    {
         (Some(_), _) => (None, None),
         (None, Ok(text)) => {
             let cfg: vesper::systemvm::LaunchConfig = serde_json::from_str(&text)
@@ -79,12 +80,13 @@ pub fn bridge_and_port(args: &super::Args) -> Result<(PathBuf, u32), String> {
             ));
         }
     };
-    let bridge = args
-        .bridge
-        .clone()
-        .or(cfg_bridge)
-        .ok_or("no bridge socket: the launch config has no vsock_bridge_path and --bridge was not given")?;
-    Ok((PathBuf::from(bridge), args.agent_port.or(cfg_port).unwrap_or(DEFAULT_AGENT_PORT)))
+    let bridge = args.bridge.clone().or(cfg_bridge).ok_or(
+        "no bridge socket: the launch config has no vsock_bridge_path and --bridge was not given",
+    )?;
+    Ok((
+        PathBuf::from(bridge),
+        args.agent_port.or(cfg_port).unwrap_or(DEFAULT_AGENT_PORT),
+    ))
 }
 
 impl Options {
@@ -93,17 +95,36 @@ impl Options {
             "--id ID is required: the default backend starts a microVM in the System VM; pass --id ID, or --backend model for the in-memory model, which starts no microVM",
         )?;
         if !valid_microvm_id(&id) {
-            return Err(format!("--id {id:?}: use 1 to 64 letters, digits and hyphens"));
+            return Err(format!(
+                "--id {id:?}: use 1 to 64 letters, digits and hyphens"
+            ));
         }
         if args.stage.len() > MAX_STAGES {
             return Err(format!("at most {MAX_STAGES} --stage flags"));
         }
-        let stages = args.stage.iter().map(|s| StageSpec::parse(s)).collect::<Result<Vec<_>, _>>()?;
-        let taps = args.tap.iter().map(|t| TapSpec::parse(t)).collect::<Result<Vec<_>, _>>()?;
+        let stages = args
+            .stage
+            .iter()
+            .map(|s| StageSpec::parse(s))
+            .collect::<Result<Vec<_>, _>>()?;
+        let taps = args
+            .tap
+            .iter()
+            .map(|t| TapSpec::parse(t))
+            .collect::<Result<Vec<_>, _>>()?;
         let nat = args.network == Some(super::Network::Nat);
         check_network(nat, &taps)?;
         let (bridge, port) = bridge_and_port(args)?;
-        Ok(Options { id, memory_max: args.memory_max, stages, taps, nat, bridge, port, swagger: args.swagger.clone() })
+        Ok(Options {
+            id,
+            memory_max: args.memory_max,
+            stages,
+            taps,
+            nat,
+            bridge,
+            port,
+            swagger: args.swagger.clone(),
+        })
     }
 }
 
@@ -115,8 +136,17 @@ fn relay_config(opts: &Options, socket: &Path) -> Result<ServerConfig, String> {
         .and_then(|stem| stem.to_str())
         .and_then(|stem| stem.parse::<u32>().ok())
         .filter(|_| opts.bridge.extension().is_some_and(|ext| ext == "sock"))
-        .ok_or_else(|| format!("bridge socket {} is not named <cid>.sock", opts.bridge.display()))?;
-    let dir = opts.bridge.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
+        .ok_or_else(|| {
+            format!(
+                "bridge socket {} is not named <cid>.sock",
+                opts.bridge.display()
+            )
+        })?;
+    let dir = opts
+        .bridge
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
     Ok(ServerConfig {
         listen_path: socket.to_string_lossy().into_owned(),
         upstream_raw: format!("vsock://{cid}:{}", opts.port),
@@ -189,7 +219,11 @@ async fn check_data_disk(target: &Target, config: &ServerConfig) -> Result<(), S
     } else {
         Err(format!(
             "the System VM's data disk is not in use ({}); vesperd microVMs keep their jails and the snapshot store on it",
-            if state.is_empty() { "no DATA line".to_string() } else { state }
+            if state.is_empty() {
+                "no DATA line".to_string()
+            } else {
+                state
+            }
         ))
     }
 }
@@ -209,7 +243,11 @@ async fn launch_once(
     }
     let request = launch_request(opts);
     proxy::write_line(&mut lease, &request, Some(HANDSHAKE_TIMEOUT)).await?;
-    let wait = if opts.stages.is_empty() { READY_TIMEOUT } else { READY_TIMEOUT + STAGE_ALLOWANCE };
+    let wait = if opts.stages.is_empty() {
+        READY_TIMEOUT
+    } else {
+        READY_TIMEOUT + STAGE_ALLOWANCE
+    };
     let reply = proxy::read_line_bounded(&mut lease, MAX_LINE, Some(wait))
         .await
         .map_err(|err| format!("LAUNCHAPI {}: {err}", opts.id))?;
@@ -221,7 +259,11 @@ async fn launch_once(
 }
 
 /// `LAUNCHAPI`, retrying `ERR busy` for `REUSE_WAIT` while an earlier microVM with this id is torn down or reaped.
-async fn launch(opts: &Options, target: &Target, config: &ServerConfig) -> Result<(Box<dyn proxy::Upstream>, Ready), String> {
+async fn launch(
+    opts: &Options,
+    target: &Target,
+    config: &ServerConfig,
+) -> Result<(Box<dyn proxy::Upstream>, Ready), String> {
     let started = Instant::now();
     loop {
         match launch_once(opts, target, config).await? {
@@ -231,7 +273,11 @@ async fn launch(opts: &Options, target: &Target, config: &ServerConfig) -> Resul
                 tokio::time::sleep(REUSE_RETRY).await;
             }
             Err(busy) => {
-                return Err(format!("LAUNCHAPI {}: {busy} after {} s; another microVM holds the id", opts.id, REUSE_WAIT.as_secs()));
+                return Err(format!(
+                    "LAUNCHAPI {}: {busy} after {} s; another microVM holds the id",
+                    opts.id,
+                    REUSE_WAIT.as_secs()
+                ));
             }
         }
     }
@@ -258,7 +304,12 @@ where
     let _ = write.shutdown().await;
     tokio::time::timeout(STOP_WAIT, lease_closed(read))
         .await
-        .map_err(|_| format!("the agent did not confirm the teardown within {} s", STOP_WAIT.as_secs()))?;
+        .map_err(|_| {
+            format!(
+                "the agent did not confirm the teardown within {} s",
+                STOP_WAIT.as_secs()
+            )
+        })?;
     Ok(started.elapsed())
 }
 
@@ -280,8 +331,10 @@ pub async fn run(opts: Options, socket: &Path) -> Result<(), String> {
     let config = relay_config(&opts, socket)?;
     let target = proxy::parse_target(&config.upstream_raw)?;
     // Registered before the launch, so a signal during it still ends in a clean stop.
-    let mut term = signal(SignalKind::terminate()).map_err(|err| format!("register SIGTERM: {err}"))?;
-    let mut int = signal(SignalKind::interrupt()).map_err(|err| format!("register SIGINT: {err}"))?;
+    let mut term =
+        signal(SignalKind::terminate()).map_err(|err| format!("register SIGTERM: {err}"))?;
+    let mut int =
+        signal(SignalKind::interrupt()).map_err(|err| format!("register SIGINT: {err}"))?;
     // Held for the life of the process; no microVM is launched for a socket another vesperd serves.
     let _lock = proxy::claim_socket(socket)?;
     check_data_disk(&target, &config).await?;
@@ -322,8 +375,14 @@ pub async fn run(opts: Options, socket: &Path) -> Result<(), String> {
         Ending::Signal(name) => {
             let took = close_lease(&mut lease_read, &mut lease_write)
                 .await
-                .map_err(|err| format!("{name}: closed the lease of microVM {}, but {err}", opts.id))?;
-            say(&format!("vesperd: {name}: microVM {} stopped in {} ms", opts.id, took.as_millis()));
+                .map_err(|err| {
+                    format!("{name}: closed the lease of microVM {}, but {err}", opts.id)
+                })?;
+            say(&format!(
+                "vesperd: {name}: microVM {} stopped in {} ms",
+                opts.id,
+                took.as_millis()
+            ));
             Ok(())
         }
         Ending::LeaseClosed => Err(format!(
@@ -332,7 +391,9 @@ pub async fn run(opts: Options, socket: &Path) -> Result<(), String> {
         )),
         Ending::Serve(result) => {
             let _ = close_lease(&mut lease_read, &mut lease_write).await;
-            Err(result.err().unwrap_or_else(|| "the relay stopped".to_string()))
+            Err(result
+                .err()
+                .unwrap_or_else(|| "the relay stopped".to_string()))
         }
     }
 }

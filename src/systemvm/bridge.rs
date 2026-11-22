@@ -15,7 +15,12 @@ pub const SHARE_NOTIFY_PORT: u32 = 2401;
 
 /// The ports the owner approved (D-022): the agent's, the Docker relay, the port relay and the share sink.
 pub fn default_bridge_ports(agent_port: u32) -> Vec<u32> {
-    let mut ports = vec![agent_port, DOCKER_RELAY_PORT, PORT_RELAY_PORT, SHARE_NOTIFY_PORT];
+    let mut ports = vec![
+        agent_port,
+        DOCKER_RELAY_PORT,
+        PORT_RELAY_PORT,
+        SHARE_NOTIFY_PORT,
+    ];
     ports.sort_unstable();
     ports.dedup();
     ports
@@ -31,7 +36,7 @@ pub fn apply_bridge_allow_list(config: &mut LaunchConfig) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::systemvm::{default_launch_config, LaunchInputs};
+    use crate::systemvm::{LaunchInputs, default_launch_config};
 
     fn config(bridge: Option<&str>) -> LaunchConfig {
         default_launch_config(&LaunchInputs {
@@ -63,7 +68,10 @@ mod tests {
         apply_bridge_allow_list(&mut with);
         assert_eq!(with.bridge_allowed_ports, vec![1024, 2375, 2400, 2401]);
         let json = serde_json::to_value(&with).expect("json");
-        assert_eq!(json["bridge_allowed_ports"], serde_json::json!([1024, 2375, 2400, 2401]));
+        assert_eq!(
+            json["bridge_allowed_ports"],
+            serde_json::json!([1024, 2375, 2400, 2401])
+        );
         let mut without = config(None);
         apply_bridge_allow_list(&mut without);
         assert!(without.bridge_allowed_ports.is_empty());
@@ -71,13 +79,17 @@ mod tests {
 
     #[test]
     fn the_repository_lock_yields_the_allow_list() {
-        let lock = crate::systemvm::load_image_lock(concat!(env!("CARGO_MANIFEST_DIR"), "/docs/specs/systemvm-image.lock.yaml"))
-            .expect("lock");
+        let lock = crate::systemvm::load_image_lock(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/docs/specs/systemvm-image.lock.yaml"
+        ))
+        .expect("lock");
         let dir = tempfile::tempdir().expect("tempdir");
         if let Some(overlay) = &lock.overlay {
             std::fs::write(dir.path().join(overlay.file.trim()), b"x").expect("overlay stub");
         }
-        let config = crate::systemvm::launch_config_from_lock(&lock, dir.path(), "/c.log").expect("config");
+        let config =
+            crate::systemvm::launch_config_from_lock(&lock, dir.path(), "/c.log").expect("config");
         assert_eq!(config.bridge_allowed_ports, vec![1024, 2375, 2400, 2401]);
     }
 }

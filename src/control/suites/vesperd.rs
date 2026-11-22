@@ -4,9 +4,9 @@
 //! `vesperd` on the socket or with the id is refused; SIGTERM, SIGKILL and a killed Firecracker each leave no
 //! microVM behind. The control channel is used only to inspect and fault the guest.
 
+use super::super::{HttpResponse, http_request, parse_http_response, read_http_response};
 use super::launchapi::{first, wait_absent};
-use super::{connect, report, step, ControlEndpoint, SuiteReport, SuiteStep};
-use super::super::{http_request, parse_http_response, read_http_response, HttpResponse};
+use super::{ControlEndpoint, SuiteReport, SuiteStep, connect, report, step};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixStream;
@@ -57,7 +57,12 @@ impl VesperdRun {
     }
 
     /// `spawn` with more flags, for example `--stage`.
-    pub(super) fn spawn_with(&self, id: &str, socket: &str, flags: &[String]) -> Result<Vesperd, String> {
+    pub(super) fn spawn_with(
+        &self,
+        id: &str,
+        socket: &str,
+        flags: &[String],
+    ) -> Result<Vesperd, String> {
         let socket = self.workdir.join(socket);
         // No --backend flag: the vesperd, snapshot and replay suites run the default backend (D-063).
         let child = Command::new(&self.binary)
@@ -79,7 +84,12 @@ impl VesperdRun {
     }
 
     /// `start` with more flags, for example `--stage`.
-    pub(super) fn start_with(&self, id: &str, socket: &str, flags: &[String]) -> Result<(Vesperd, String, Duration), String> {
+    pub(super) fn start_with(
+        &self,
+        id: &str,
+        socket: &str,
+        flags: &[String],
+    ) -> Result<(Vesperd, String, Duration), String> {
         let started = Instant::now();
         let mut v = self.spawn_with(id, socket, flags)?;
         loop {
@@ -91,10 +101,17 @@ impl VesperdRun {
                 return Ok((v, line.trim().to_string(), started.elapsed()));
             }
             if let Some(status) = v.child.try_wait().map_err(|err| err.to_string())? {
-                return Err(format!("vesperd exited with {status} before listening: {}", stderr(&mut v)));
+                return Err(format!(
+                    "vesperd exited with {status} before listening: {}",
+                    stderr(&mut v)
+                ));
             }
             if started.elapsed() > START_TIMEOUT {
-                return Err(format!("vesperd not listening on {} after {} s", v.socket.display(), START_TIMEOUT.as_secs()));
+                return Err(format!(
+                    "vesperd not listening on {} after {} s",
+                    v.socket.display(),
+                    START_TIMEOUT.as_secs()
+                ));
             }
             thread::sleep(Duration::from_millis(100));
         }
@@ -110,21 +127,30 @@ pub(super) fn stderr(v: &mut Vesperd) -> String {
 }
 
 /// Waits for `vesperd` to exit; returns its exit code (`None` for a signal), stderr and the time taken.
-pub(super) fn wait_exit(v: &mut Vesperd, within: Duration) -> Result<(Option<i32>, String, Duration), String> {
+pub(super) fn wait_exit(
+    v: &mut Vesperd,
+    within: Duration,
+) -> Result<(Option<i32>, String, Duration), String> {
     let started = Instant::now();
     loop {
         if let Some(status) = v.child.try_wait().map_err(|err| err.to_string())? {
             return Ok((status.code(), stderr(v), started.elapsed()));
         }
         if started.elapsed() > within {
-            return Err(format!("vesperd still running after {} s", within.as_secs()));
+            return Err(format!(
+                "vesperd still running after {} s",
+                within.as_secs()
+            ));
         }
         thread::sleep(Duration::from_millis(50));
     }
 }
 
 pub(super) fn signal(v: &Vesperd, name: &str) -> Result<(), String> {
-    let status = Command::new("kill").args([&format!("-{name}"), &v.child.id().to_string()]).status().map_err(|e| e.to_string())?;
+    let status = Command::new("kill")
+        .args([&format!("-{name}"), &v.child.id().to_string()])
+        .status()
+        .map_err(|e| e.to_string())?;
     if !status.success() {
         return Err(format!("kill -{name} {} failed", v.child.id()));
     }
@@ -139,33 +165,61 @@ pub(super) struct Client {
 
 impl Client {
     pub(super) fn connect(socket: &Path) -> Result<Client, String> {
-        let stream = UnixStream::connect(socket).map_err(|err| format!("connect {}: {err}", socket.display()))?;
-        stream.set_read_timeout(Some(Duration::from_secs(60))).map_err(|e| e.to_string())?;
+        let stream = UnixStream::connect(socket)
+            .map_err(|err| format!("connect {}: {err}", socket.display()))?;
+        stream
+            .set_read_timeout(Some(Duration::from_secs(60)))
+            .map_err(|e| e.to_string())?;
         let writer = stream.try_clone().map_err(|e| e.to_string())?;
-        Ok(Client { reader: BufReader::new(stream), writer })
+        Ok(Client {
+            reader: BufReader::new(stream),
+            writer,
+        })
     }
 
     pub(super) fn raw(&mut self, request: &[u8]) -> Result<Vec<u8>, String> {
-        self.writer.write_all(request).and_then(|_| self.writer.flush()).map_err(|err| format!("write request: {err}"))?;
+        self.writer
+            .write_all(request)
+            .and_then(|_| self.writer.flush())
+            .map_err(|err| format!("write request: {err}"))?;
         read_http_response(&mut self.reader)
     }
 
-    pub(super) fn call(&mut self, method: &str, path: &str, body: Option<&str>) -> Result<HttpResponse, String> {
-        let raw = self.raw(&http_request(method, path, body)).map_err(|err| format!("{method} {path}: {err}"))?;
+    pub(super) fn call(
+        &mut self,
+        method: &str,
+        path: &str,
+        body: Option<&str>,
+    ) -> Result<HttpResponse, String> {
+        let raw = self
+            .raw(&http_request(method, path, body))
+            .map_err(|err| format!("{method} {path}: {err}"))?;
         parse_http_response(&raw).map_err(|err| format!("{method} {path}: {err}"))
     }
 
-    pub(super) fn expect(&mut self, method: &str, path: &str, body: Option<&str>, want: u16) -> Result<String, String> {
+    pub(super) fn expect(
+        &mut self,
+        method: &str,
+        path: &str,
+        body: Option<&str>,
+        want: u16,
+    ) -> Result<String, String> {
         let response = self.call(method, path, body)?;
         if response.status != want {
-            return Err(format!("{method} {path}: status {} (want {want}): {}", response.status, response.body));
+            return Err(format!(
+                "{method} {path}: status {} (want {want}): {}",
+                response.status, response.body
+            ));
         }
         Ok(response.body)
     }
 
     /// Reads until the server closes; returns the bytes it sent before closing.
     fn read_to_close(&mut self, within: Duration) -> Result<Vec<u8>, String> {
-        self.reader.get_ref().set_read_timeout(Some(within)).map_err(|e| e.to_string())?;
+        self.reader
+            .get_ref()
+            .set_read_timeout(Some(within))
+            .map_err(|e| e.to_string())?;
         let mut rest = Vec::new();
         match self.reader.read_to_end(&mut rest) {
             Ok(_) => Ok(rest),
@@ -183,22 +237,42 @@ pub(super) fn state_of(body: &str) -> String {
 }
 
 /// Runs the slice 4 checklist; microVM ids are derived from `id`. `expected_version` is the pinned swagger's.
-pub fn run_vesperd_suite(endpoint: &ControlEndpoint, run: &VesperdRun, id: &str, expected_version: &str) -> SuiteReport {
+pub fn run_vesperd_suite(
+    endpoint: &ControlEndpoint,
+    run: &VesperdRun,
+    id: &str,
+    expected_version: &str,
+) -> SuiteReport {
     let mut steps: Vec<SuiteStep> = Vec::new();
-    let ids = [id.to_string(), format!("{id}-kill"), format!("{id}-fcexit"), format!("{id}-net"), format!("{id}-net2")];
+    let ids = [
+        id.to_string(),
+        format!("{id}-kill"),
+        format!("{id}-fcexit"),
+        format!("{id}-net"),
+        format!("{id}-net2"),
+    ];
     let [main, killed, fcexit, net, net2] = &ids;
     let control = step(&mut steps, "handshake", || {
         let session = connect(endpoint)?;
-        let detail = format!("protocol {} host {}", session.handshake.protocol_version, session.handshake.hostname);
+        let detail = format!(
+            "protocol {} host {}",
+            session.handshake.protocol_version, session.handshake.hostname
+        );
         Ok((session, detail))
     });
     let Some(mut control) = control else {
         return report(endpoint, steps, false);
     };
-    let prepared = std::fs::create_dir_all(&run.workdir)
-        .and_then(|_| std::fs::set_permissions(&run.workdir, std::fs::Permissions::from_mode(0o700)));
+    let prepared = std::fs::create_dir_all(&run.workdir).and_then(|_| {
+        std::fs::set_permissions(&run.workdir, std::fs::Permissions::from_mode(0o700))
+    });
     if let Err(err) = prepared {
-        steps.push(SuiteStep { name: "workdir".into(), ok: false, detail: err.to_string(), elapsed_ms: 0 });
+        steps.push(SuiteStep {
+            name: "workdir".into(),
+            ok: false,
+            detail: err.to_string(),
+            elapsed_ms: 0,
+        });
         return report(endpoint, steps, false);
     }
     // Leftovers of an earlier run: their vesperd processes are gone, so the reaper removes their microVMs.
@@ -209,15 +283,28 @@ pub fn run_vesperd_suite(endpoint: &ControlEndpoint, run: &VesperdRun, id: &str,
 
     let started = step(&mut steps, "vesperd_starts", || {
         let (v, line, took) = run.start(main, "main.sock")?;
-        let mode = std::fs::metadata(&v.socket).map_err(|e| e.to_string())?.permissions().mode() & 0o777;
+        let mode = std::fs::metadata(&v.socket)
+            .map_err(|e| e.to_string())?
+            .permissions()
+            .mode()
+            & 0o777;
         if mode != 0o600 {
             return Err(format!("socket mode {mode:o}"));
         }
         if !line.contains(&format!("Firecracker {expected_version} ")) {
-            return Err(format!("expected the pinned Firecracker {expected_version}: {line:?}"));
+            return Err(format!(
+                "expected the pinned Firecracker {expected_version}: {line:?}"
+            ));
         }
         let (_, status) = control.vesperd(&["status", main])?;
-        Ok((v, format!("{line} (mode 600) after {} ms; guest: {}", took.as_millis(), first(&status))))
+        Ok((
+            v,
+            format!(
+                "{line} (mode 600) after {} ms; guest: {}",
+                took.as_millis(),
+                first(&status)
+            ),
+        ))
     });
     if let Some(mut v) = started {
         step(&mut steps, "second_vesperd_on_socket_refused", || {
@@ -228,7 +315,10 @@ pub fn run_vesperd_suite(endpoint: &ControlEndpoint, run: &VesperdRun, id: &str,
             }
             let (_, status) = control.vesperd(&["status", &format!("{main}-second")])?;
             if !first(&status).starts_with("ABSENT") {
-                return Err(format!("the refused vesperd launched a microVM: {}", first(&status)));
+                return Err(format!(
+                    "the refused vesperd launched a microVM: {}",
+                    first(&status)
+                ));
             }
             Ok(((), format!("exit {code:?}: {err}; no microVM launched")))
         });
@@ -241,12 +331,30 @@ pub fn run_vesperd_suite(endpoint: &ControlEndpoint, run: &VesperdRun, id: &str,
         });
         let booted = step(&mut steps, "boot_through_vesperd", || {
             let mut api = Client::connect(&v.socket)?;
-            api.expect("PUT", "/machine-config", Some(r#"{"vcpu_count":1,"mem_size_mib":256}"#), 204)?;
-            let boot = format!(r#"{{"kernel_image_path":"/Image","initrd_path":"/initrd.gz","boot_args":"{BOOT_ARGS}"}}"#);
+            api.expect(
+                "PUT",
+                "/machine-config",
+                Some(r#"{"vcpu_count":1,"mem_size_mib":256}"#),
+                204,
+            )?;
+            let boot = format!(
+                r#"{{"kernel_image_path":"/Image","initrd_path":"/initrd.gz","boot_args":"{BOOT_ARGS}"}}"#
+            );
             api.expect("PUT", "/boot-source", Some(&boot), 204)?;
             let t = Instant::now();
-            api.expect("PUT", "/actions", Some(r#"{"action_type":"InstanceStart"}"#), 204)?;
-            Ok(((), format!("PUT /machine-config (1 vCPU, 256 MiB), PUT /boot-source, PUT /actions InstanceStart -> 204 on one connection; InstanceStart took {} ms", t.elapsed().as_millis())))
+            api.expect(
+                "PUT",
+                "/actions",
+                Some(r#"{"action_type":"InstanceStart"}"#),
+                204,
+            )?;
+            Ok((
+                (),
+                format!(
+                    "PUT /machine-config (1 vCPU, 256 MiB), PUT /boot-source, PUT /actions InstanceStart -> 204 on one connection; InstanceStart took {} ms",
+                    t.elapsed().as_millis()
+                ),
+            ))
         });
         if booted.is_some() {
             step(&mut steps, "get_root_running", || {
@@ -261,28 +369,59 @@ pub fn run_vesperd_suite(endpoint: &ControlEndpoint, run: &VesperdRun, id: &str,
                 loop {
                     let (_, lines) = control.vesperd(&["log", main, "200"])?;
                     if lines.iter().any(|l| l.contains("VESPER-MICROVM-OK")) {
-                        return Ok(((), "the guest init printed VESPER-MICROVM-OK on the serial console".to_string()));
+                        return Ok((
+                            (),
+                            "the guest init printed VESPER-MICROVM-OK on the serial console"
+                                .to_string(),
+                        ));
                     }
                     if Instant::now() >= deadline {
-                        return Err(format!("no boot marker within 20 s: {}", lines.iter().rev().take(6).cloned().collect::<Vec<_>>().join(" | ")));
+                        return Err(format!(
+                            "no boot marker within 20 s: {}",
+                            lines
+                                .iter()
+                                .rev()
+                                .take(6)
+                                .cloned()
+                                .collect::<Vec<_>>()
+                                .join(" | ")
+                        ));
                     }
                     thread::sleep(Duration::from_millis(500));
                 }
             });
             step(&mut steps, "firecracker_error_byte_for_byte", || {
-                let request = http_request("PUT", "/machine-config", Some(r#"{"vcpu_count":2,"mem_size_mib":256}"#));
+                let request = http_request(
+                    "PUT",
+                    "/machine-config",
+                    Some(r#"{"vcpu_count":2,"mem_size_mib":256}"#),
+                );
                 let through = Client::connect(&v.socket)?.raw(&request)?;
                 let mut direct = connect(endpoint)?;
                 direct.fcapi(main)?;
                 let direct = direct.http_raw(&request)?;
                 let parsed = parse_http_response(&through)?;
                 if parsed.status != 400 || !parsed.body.contains("fault_message") {
-                    return Err(format!("expected a Firecracker 400: {}", String::from_utf8_lossy(&through)));
+                    return Err(format!(
+                        "expected a Firecracker 400: {}",
+                        String::from_utf8_lossy(&through)
+                    ));
                 }
                 if through != direct {
-                    return Err(format!("vesperd {:?} != FCAPI {:?}", String::from_utf8_lossy(&through), String::from_utf8_lossy(&direct)));
+                    return Err(format!(
+                        "vesperd {:?} != FCAPI {:?}",
+                        String::from_utf8_lossy(&through),
+                        String::from_utf8_lossy(&direct)
+                    ));
                 }
-                Ok(((), format!("{} bytes identical through vesperd and FCAPI: {}", through.len(), String::from_utf8_lossy(&through).replace("\r\n", "\\r\\n"))))
+                Ok((
+                    (),
+                    format!(
+                        "{} bytes identical through vesperd and FCAPI: {}",
+                        through.len(),
+                        String::from_utf8_lossy(&through).replace("\r\n", "\\r\\n")
+                    ),
+                ))
             });
             step(&mut steps, "pause", || {
                 let mut api = Client::connect(&v.socket)?;
@@ -299,9 +438,20 @@ pub fn run_vesperd_suite(endpoint: &ControlEndpoint, run: &VesperdRun, id: &str,
                 api.expect("PUT", "/snapshot/create", Some(r#"{"snapshot_type":"Full","snapshot_path":"/snap.vmstate","mem_file_path":"/snap.mem"}"#), 204)?;
                 let took = t.elapsed();
                 if took * 10 > VESPERD_REQUEST_CEILING {
-                    return Err(format!("PUT /snapshot/create took {} ms, over a tenth of the {} s ceiling", took.as_millis(), VESPERD_REQUEST_CEILING.as_secs()));
+                    return Err(format!(
+                        "PUT /snapshot/create took {} ms, over a tenth of the {} s ceiling",
+                        took.as_millis(),
+                        VESPERD_REQUEST_CEILING.as_secs()
+                    ));
                 }
-                Ok(((), format!("PUT /snapshot/create (Full, 256 MiB guest, jail on the data disk) -> 204 in {} ms; ceiling {} s", took.as_millis(), VESPERD_REQUEST_CEILING.as_secs())))
+                Ok((
+                    (),
+                    format!(
+                        "PUT /snapshot/create (Full, 256 MiB guest, jail on the data disk) -> 204 in {} ms; ceiling {} s",
+                        took.as_millis(),
+                        VESPERD_REQUEST_CEILING.as_secs()
+                    ),
+                ))
             });
             step(&mut steps, "resume", || {
                 let mut api = Client::connect(&v.socket)?;
@@ -312,44 +462,81 @@ pub fn run_vesperd_suite(endpoint: &ControlEndpoint, run: &VesperdRun, id: &str,
                 }
                 Ok(((), format!("PATCH /vm Resumed -> 204; GET / -> {body}")))
             });
-            step(&mut steps, "firecracker_connection_limit_passes_through", || {
-                let mut held = Vec::new();
-                for _ in 0..FIRECRACKER_MAX_CONNECTIONS {
-                    let mut c = Client::connect(&v.socket)?;
-                    c.expect("GET", "/", None, 200)?;
-                    held.push(c);
-                }
-                let mut extra = Client::connect(&v.socket)?;
-                extra.writer.write_all(&http_request("GET", "/", None)).map_err(|e| e.to_string())?;
-                let got = extra.read_to_close(Duration::from_secs(10))?;
-                if got != FIRECRACKER_SERVER_FULL {
-                    return Err(format!("connection {} got {:?}", FIRECRACKER_MAX_CONNECTIONS + 1, String::from_utf8_lossy(&got)));
-                }
-                drop(held);
-                thread::sleep(Duration::from_millis(500));
-                Client::connect(&v.socket)?.expect("GET", "/", None, 200)?;
-                Ok(((), format!("{FIRECRACKER_MAX_CONNECTIONS} connections open; the next got Firecracker's own 503 byte for byte; after closing them a new one works")))
-            });
-            step(&mut steps, "idle_timeout_closes_only_vesperd_connections", || {
-                let mut relayed = Client::connect(&v.socket)?;
-                relayed.expect("GET", "/", None, 200)?;
-                let mut direct = connect(endpoint)?;
-                direct.fcapi(main)?;
-                direct.http("GET", "/", None)?;
-                let wait = VESPERD_IDLE_TIMEOUT + Duration::from_secs(5);
-                let t = Instant::now();
-                let rest = relayed.read_to_close(wait + Duration::from_secs(10))?;
-                let closed_after = t.elapsed();
-                if !rest.is_empty() || closed_after + Duration::from_secs(2) < VESPERD_IDLE_TIMEOUT {
-                    return Err(format!("closed after {} ms with {} bytes", closed_after.as_millis(), rest.len()));
-                }
-                thread::sleep(wait.saturating_sub(t.elapsed()));
-                let again = direct.http("GET", "/", None)?;
-                if again.status != 200 {
-                    return Err(format!("Firecracker's own connection after {} s: {}", wait.as_secs(), again.status));
-                }
-                Ok(((), format!("vesperd closed an idle connection after {} ms with no bytes; a direct FCAPI connection idle for {} s still answered GET / 200", closed_after.as_millis(), t.elapsed().as_secs())))
-            });
+            step(
+                &mut steps,
+                "firecracker_connection_limit_passes_through",
+                || {
+                    let mut held = Vec::new();
+                    for _ in 0..FIRECRACKER_MAX_CONNECTIONS {
+                        let mut c = Client::connect(&v.socket)?;
+                        c.expect("GET", "/", None, 200)?;
+                        held.push(c);
+                    }
+                    let mut extra = Client::connect(&v.socket)?;
+                    extra
+                        .writer
+                        .write_all(&http_request("GET", "/", None))
+                        .map_err(|e| e.to_string())?;
+                    let got = extra.read_to_close(Duration::from_secs(10))?;
+                    if got != FIRECRACKER_SERVER_FULL {
+                        return Err(format!(
+                            "connection {} got {:?}",
+                            FIRECRACKER_MAX_CONNECTIONS + 1,
+                            String::from_utf8_lossy(&got)
+                        ));
+                    }
+                    drop(held);
+                    thread::sleep(Duration::from_millis(500));
+                    Client::connect(&v.socket)?.expect("GET", "/", None, 200)?;
+                    Ok((
+                        (),
+                        format!(
+                            "{FIRECRACKER_MAX_CONNECTIONS} connections open; the next got Firecracker's own 503 byte for byte; after closing them a new one works"
+                        ),
+                    ))
+                },
+            );
+            step(
+                &mut steps,
+                "idle_timeout_closes_only_vesperd_connections",
+                || {
+                    let mut relayed = Client::connect(&v.socket)?;
+                    relayed.expect("GET", "/", None, 200)?;
+                    let mut direct = connect(endpoint)?;
+                    direct.fcapi(main)?;
+                    direct.http("GET", "/", None)?;
+                    let wait = VESPERD_IDLE_TIMEOUT + Duration::from_secs(5);
+                    let t = Instant::now();
+                    let rest = relayed.read_to_close(wait + Duration::from_secs(10))?;
+                    let closed_after = t.elapsed();
+                    if !rest.is_empty()
+                        || closed_after + Duration::from_secs(2) < VESPERD_IDLE_TIMEOUT
+                    {
+                        return Err(format!(
+                            "closed after {} ms with {} bytes",
+                            closed_after.as_millis(),
+                            rest.len()
+                        ));
+                    }
+                    thread::sleep(wait.saturating_sub(t.elapsed()));
+                    let again = direct.http("GET", "/", None)?;
+                    if again.status != 200 {
+                        return Err(format!(
+                            "Firecracker's own connection after {} s: {}",
+                            wait.as_secs(),
+                            again.status
+                        ));
+                    }
+                    Ok((
+                        (),
+                        format!(
+                            "vesperd closed an idle connection after {} ms with no bytes; a direct FCAPI connection idle for {} s still answered GET / 200",
+                            closed_after.as_millis(),
+                            t.elapsed().as_secs()
+                        ),
+                    ))
+                },
+            );
         }
         step(&mut steps, "same_id_refused", || {
             let mut other = run.spawn(main, "other.sock")?;
@@ -358,7 +545,14 @@ pub fn run_vesperd_suite(endpoint: &ControlEndpoint, run: &VesperdRun, id: &str,
                 return Err(format!("exit {code:?}: {err}"));
             }
             let body = Client::connect(&v.socket)?.expect("GET", "/", None, 200)?;
-            Ok(((), format!("refused after {} ms: {err}; the first still answers GET / ({})", took.as_millis(), state_of(&body))))
+            Ok((
+                (),
+                format!(
+                    "refused after {} ms: {err}; the first still answers GET / ({})",
+                    took.as_millis(),
+                    state_of(&body)
+                ),
+            ))
         });
         step(&mut steps, "sigterm_stops_microvm", || {
             signal(&v, "TERM")?;
@@ -370,7 +564,14 @@ pub fn run_vesperd_suite(endpoint: &ControlEndpoint, run: &VesperdRun, id: &str,
                 return Err("socket left behind".to_string());
             }
             let gone = wait_absent(&mut control, main, Duration::from_secs(5))?;
-            Ok(((), format!("exit 0 after {} ms; socket removed; ABSENT {main} {} ms later (jail, cgroup, record and process gone)", took.as_millis(), gone.as_millis())))
+            Ok((
+                (),
+                format!(
+                    "exit 0 after {} ms; socket removed; ABSENT {main} {} ms later (jail, cgroup, record and process gone)",
+                    took.as_millis(),
+                    gone.as_millis()
+                ),
+            ))
         });
     }
 
@@ -382,7 +583,13 @@ pub fn run_vesperd_suite(endpoint: &ControlEndpoint, run: &VesperdRun, id: &str,
         // SIGKILL leaves the socket file; nothing serves it, and the next vesperd on the path would replace it.
         let stale = v.socket.exists();
         let _ = std::fs::remove_file(&v.socket);
-        Ok(((), format!("SIGKILL to vesperd; ABSENT {killed} after {} ms; stale socket file left: {stale} (removed)", gone.as_millis())))
+        Ok((
+            (),
+            format!(
+                "SIGKILL to vesperd; ABSENT {killed} after {} ms; stale socket file left: {stale} (removed)",
+                gone.as_millis()
+            ),
+        ))
     });
 
     step(&mut steps, "firecracker_killed_vesperd_exits", || {
@@ -399,34 +606,80 @@ pub fn run_vesperd_suite(endpoint: &ControlEndpoint, run: &VesperdRun, id: &str,
             return Err("socket left behind".to_string());
         }
         let gone = wait_absent(&mut control, fcexit, TEARDOWN_TIMEOUT)?;
-        Ok(((), format!("{}; vesperd exited {code:?} after {} ms: {err}; ABSENT {} ms later", first(&lines), took.as_millis(), gone.as_millis())))
+        Ok((
+            (),
+            format!(
+                "{}; vesperd exited {code:?} after {} ms: {err}; ABSENT {} ms later",
+                first(&lines),
+                took.as_millis(),
+                gone.as_millis()
+            ),
+        ))
     });
 
     // CE-0010: --tap gives the microVM tap devices in its own network namespace, which the jailed Firecracker
     // (uid 20000, no CAP_NET_ADMIN) can open; a name not given stays Firecracker's own EPERM error. A second microVM
     // with the same tap names runs at the same time: the names live in separate namespaces, so neither is busy.
     step(&mut steps, "tap_devices_in_own_netns", || {
-        let flags: Vec<String> = ["--tap", "tap0", "--tap", "tap1"].map(String::from).to_vec();
+        let flags: Vec<String> = ["--tap", "tap0", "--tap", "tap1"]
+            .map(String::from)
+            .to_vec();
         let (mut v, _, _) = run.start_with(net, "net.sock", &flags)?;
         let second = run.start_with(net2, "net2.sock", &flags);
         let checked = (|| -> Result<String, String> {
-            let (v2, _, _) = second.as_ref().map_err(|e| format!("second microVM: {e}"))?;
+            let (v2, _, _) = second
+                .as_ref()
+                .map_err(|e| format!("second microVM: {e}"))?;
             let mut api = Client::connect(&v.socket)?;
-            let eth0 = r#"{"iface_id":"eth0","host_dev_name":"tap0","guest_mac":"06:00:ac:10:00:02"}"#;
+            let eth0 =
+                r#"{"iface_id":"eth0","host_dev_name":"tap0","guest_mac":"06:00:ac:10:00:02"}"#;
             api.expect("PUT", "/network-interfaces/eth0", Some(eth0), 204)?;
-            Client::connect(&v2.socket)?.expect("PUT", "/network-interfaces/eth0", Some(eth0), 204).map_err(|e| format!("{net2} tap0 while {net} holds its own tap0: {e}"))?;
-            api.expect("PUT", "/network-interfaces/eth1", Some(r#"{"iface_id":"eth1","host_dev_name":"tap1"}"#), 204)?;
-            let missing = api.call("PUT", "/network-interfaces/eth2", Some(r#"{"iface_id":"eth2","host_dev_name":"tap9"}"#))?;
+            Client::connect(&v2.socket)?
+                .expect("PUT", "/network-interfaces/eth0", Some(eth0), 204)
+                .map_err(|e| format!("{net2} tap0 while {net} holds its own tap0: {e}"))?;
+            api.expect(
+                "PUT",
+                "/network-interfaces/eth1",
+                Some(r#"{"iface_id":"eth1","host_dev_name":"tap1"}"#),
+                204,
+            )?;
+            let missing = api.call(
+                "PUT",
+                "/network-interfaces/eth2",
+                Some(r#"{"iface_id":"eth2","host_dev_name":"tap9"}"#),
+            )?;
             if missing.status != 400 || !missing.body.contains("Open tap device failed") {
-                return Err(format!("tap9 (not given): {} {}", missing.status, missing.body));
+                return Err(format!(
+                    "tap9 (not given): {} {}",
+                    missing.status, missing.body
+                ));
             }
-            api.expect("PUT", "/mmds/config", Some(r#"{"network_interfaces":["eth0"]}"#), 204)?;
-            api.expect("PUT", "/machine-config", Some(r#"{"vcpu_count":1,"mem_size_mib":256}"#), 204)?;
-            let boot = format!(r#"{{"kernel_image_path":"/Image","initrd_path":"/initrd.gz","boot_args":"{BOOT_ARGS}"}}"#);
+            api.expect(
+                "PUT",
+                "/mmds/config",
+                Some(r#"{"network_interfaces":["eth0"]}"#),
+                204,
+            )?;
+            api.expect(
+                "PUT",
+                "/machine-config",
+                Some(r#"{"vcpu_count":1,"mem_size_mib":256}"#),
+                204,
+            )?;
+            let boot = format!(
+                r#"{{"kernel_image_path":"/Image","initrd_path":"/initrd.gz","boot_args":"{BOOT_ARGS}"}}"#
+            );
             api.expect("PUT", "/boot-source", Some(&boot), 204)?;
-            api.expect("PUT", "/actions", Some(r#"{"action_type":"InstanceStart"}"#), 204)?;
+            api.expect(
+                "PUT",
+                "/actions",
+                Some(r#"{"action_type":"InstanceStart"}"#),
+                204,
+            )?;
             let config = api.expect("GET", "/vm/config", None, 200)?;
-            if !config.contains(r#""host_dev_name":"tap0""#) || !config.contains(r#""host_dev_name":"tap1""#) {
+            if !config.contains(r#""host_dev_name":"tap0""#)
+                || !config.contains(r#""host_dev_name":"tap1""#)
+            {
                 return Err(format!("GET /vm/config: {config}"));
             }
             // The namespace holds exactly lo and the two taps (none of the System VM's eth0 or docker0, no tap9), and
@@ -434,7 +687,10 @@ pub fn run_vesperd_suite(endpoint: &ControlEndpoint, run: &VesperdRun, id: &str,
             let (rc, links) = control.vesperd(&["net", net])?;
             let (rc2, links2) = control.vesperd(&["net", net2])?;
             let ino = |lines: &[String], id: &str| {
-                lines.iter().find_map(|l| l.strip_prefix(&format!("NETNS {id} separate=true ino=")).map(str::to_string))
+                lines.iter().find_map(|l| {
+                    l.strip_prefix(&format!("NETNS {id} separate=true ino="))
+                        .map(str::to_string)
+                })
             };
             let want = [
                 "LINK lo state=UP owner=-".to_string(),
@@ -447,7 +703,11 @@ pub fn run_vesperd_suite(endpoint: &ControlEndpoint, run: &VesperdRun, id: &str,
             };
             let (a, b) = (ino(&links, net), ino(&links2, net2));
             if rc != 0 || rc2 != 0 || !only(&links) || !only(&links2) || a.is_none() || a == b {
-                return Err(format!("net: rc {rc}: {} / rc {rc2}: {}", links.join(" | "), links2.join(" | ")));
+                return Err(format!(
+                    "net: rc {rc}: {} / rc {rc2}: {}",
+                    links.join(" | "),
+                    links2.join(" | ")
+                ));
             }
             for each in [net, net2] {
                 let (_, iso) = control.vesperd(&["isolation", each])?;
@@ -475,27 +735,57 @@ pub fn run_vesperd_suite(endpoint: &ControlEndpoint, run: &VesperdRun, id: &str,
         wait_absent(&mut control, net2, Duration::from_secs(5))?;
         let (rc, after) = control.vesperd(&["net", net])?;
         if rc == 0 || !first(&after).starts_with("ERR no network namespace") {
-            return Err(format!("net {net} after teardown: rc {rc}: {}", after.join(" | ")));
+            return Err(format!(
+                "net {net} after teardown: rc {rc}: {}",
+                after.join(" | ")
+            ));
         }
-        Ok(((), format!("{detail}; SIGTERM: ABSENT {net} and {net2} {} ms later; net {net}: {}", gone.as_millis(), first(&after))))
+        Ok((
+            (),
+            format!(
+                "{detail}; SIGTERM: ABSENT {net} and {net2} {} ms later; net {net}: {}",
+                gone.as_millis(),
+                first(&after)
+            ),
+        ))
     });
 
     step(&mut steps, "nothing_left", || {
         let sockets: Vec<String> = std::fs::read_dir(&run.workdir)
             .map_err(|e| e.to_string())?
             .filter_map(|e| e.ok())
-            .filter(|e| e.file_type().map(|t| std::os::unix::fs::FileTypeExt::is_socket(&t)).unwrap_or(false))
+            .filter(|e| {
+                e.file_type()
+                    .map(|t| std::os::unix::fs::FileTypeExt::is_socket(&t))
+                    .unwrap_or(false)
+            })
             .map(|e| e.path().display().to_string())
             .collect();
         if !sockets.is_empty() {
-            return Err(format!("sockets left in {}: {sockets:?}", run.workdir.display()));
+            return Err(format!(
+                "sockets left in {}: {sockets:?}",
+                run.workdir.display()
+            ));
         }
         let (_, lines) = control.vesperd(&["list"])?;
-        let ours: Vec<&String> = lines.iter().filter(|l| ids.iter().any(|i| l.split_whitespace().nth(1) == Some(i.as_str()))).collect();
+        let ours: Vec<&String> = lines
+            .iter()
+            .filter(|l| {
+                ids.iter()
+                    .any(|i| l.split_whitespace().nth(1) == Some(i.as_str()))
+            })
+            .collect();
         if !ours.is_empty() {
             return Err(format!("leftovers: {ours:?}"));
         }
-        Ok(((), format!("no lease or jail for {}; no socket in {}", ids.join(", "), run.workdir.display())))
+        Ok((
+            (),
+            format!(
+                "no lease or jail for {}; no socket in {}",
+                ids.join(", "),
+                run.workdir.display()
+            ),
+        ))
     });
 
     let passed = steps.iter().all(|s| s.ok) && steps.len() == 19;

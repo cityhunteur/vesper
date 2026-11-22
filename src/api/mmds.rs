@@ -198,7 +198,10 @@ pub(super) fn handle_put_mmds_config(
     StatusCode::NO_CONTENT.into_response()
 }
 
-pub(super) fn validate_mmds_config(state: &Arc<AppState>, config: &MmdsConfig) -> Result<(), &'static str> {
+pub(super) fn validate_mmds_config(
+    state: &Arc<AppState>,
+    config: &MmdsConfig,
+) -> Result<(), &'static str> {
     if config.network_interfaces.is_empty() {
         return Err(MMDS_EMPTY_NETWORK_INTERFACE_LIST_MESSAGE);
     }

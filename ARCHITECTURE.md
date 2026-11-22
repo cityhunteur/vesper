@@ -128,9 +128,9 @@ the System VM's initramfs.
 **Verified** for single-path `crate::x` and `vesper::x` references in the 43 files enumerated in the `RULES`
 allowlist of [scripts/harness/check_structure.py](scripts/harness/check_structure.py), which CI checks: the 14
 top-level `src/*.rs` modules, the nine modules under `src/api/` (eight route families and the error surface), `src/baseline/upstream.rs`,
-`src/control/launchapi.rs`, `src/control/stage.rs`, `src/control/suites.rs` and its ten children,
-`src/proxy/relay.rs`, the five `src/systemvm/` children, `src/api_behavior_matrix/validate.rs`, `src/baseline/upstream/tests.rs`
-and the twelve files of the API handler tests under `src/api/tests/` (TD-015, TD-023). That is every library file. The
+`src/control/launchapi.rs`, `src/control/stage.rs`, `src/control/suites.rs` and its thirteen children,
+`src/proxy/relay.rs`, the five `src/systemvm/` children, `src/api_behavior_matrix/validate.rs`, `src/baseline/upstream/tests.rs`,
+`src/api_replay/tests.rs` and the twelve files of the API handler tests under `src/api/tests/` (TD-015, TD-023). That is every library file. The
 allowlist is a fixed list, not a glob: a new module is unchecked, and has no line budget, until a `RULES` row is
 added. Grouped `use crate::{..}` imports, `super::super` paths, the binaries and `tests/` are not checked, and
 `src/lib.rs` has a row for its line budget only (TD-018). The Go module in `shim/` and the Swift launcher are outside this check.

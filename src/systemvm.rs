@@ -93,7 +93,12 @@ pub fn shared_directories_from_specs(specs: &[String]) -> Result<Vec<SharedDirec
         if !Path::new(path).is_dir() {
             return Err(format!("share {spec:?}: {path} is not a directory"));
         }
-        out.push(SharedDirectory { tag: format!("share{i}"), host_path: path.trim_end_matches('/').to_string(), read_only: ro, watch: !ro && !nowatch });
+        out.push(SharedDirectory {
+            tag: format!("share{i}"),
+            host_path: path.trim_end_matches('/').to_string(),
+            read_only: ro,
+            watch: !ro && !nowatch,
+        });
     }
     Ok(out)
 }
@@ -207,7 +212,6 @@ pub struct LaunchInputs<'a> {
     pub console_log_path: &'a str,
 }
 
-
 pub fn build_manifest(config: &ImageBuildConfig) -> Result<ImageManifest, String> {
     if config.kernel_path.trim().is_empty() {
         return Err("kernel path is required".to_string());
@@ -292,7 +296,11 @@ pub fn default_launch_config(inputs: &LaunchInputs<'_>) -> Result<LaunchConfig, 
             let mut cmdline = DEFAULT_KERNEL_CMDLINE.to_string();
             if rootfs_path.is_some() {
                 // The rootfs is the first block device unless boot media precedes it.
-                let root = if boot_media_path.is_some() { "/dev/vdb" } else { "/dev/vda" };
+                let root = if boot_media_path.is_some() {
+                    "/dev/vdb"
+                } else {
+                    "/dev/vda"
+                };
                 cmdline.push_str(&format!(" root={root} rw"));
             }
             cmdline
@@ -342,7 +350,11 @@ pub const MIN_SYSTEMVM_MEMORY_MIB: u32 = 1024;
 
 /// Sets the System VM's CPUs and memory when given (TD-048: a microVM sized by its task's limits needs a System VM
 /// with room for it). The launcher clamps both to what Virtualization.framework allows on the Mac.
-pub fn set_machine_size(config: &mut LaunchConfig, cpus: Option<u16>, memory_mib: Option<u32>) -> Result<(), String> {
+pub fn set_machine_size(
+    config: &mut LaunchConfig,
+    cpus: Option<u16>,
+    memory_mib: Option<u32>,
+) -> Result<(), String> {
     if let Some(cpus) = cpus {
         if cpus == 0 {
             return Err("the System VM needs at least 1 CPU".to_string());
@@ -351,7 +363,9 @@ pub fn set_machine_size(config: &mut LaunchConfig, cpus: Option<u16>, memory_mib
     }
     if let Some(memory_mib) = memory_mib {
         if memory_mib < MIN_SYSTEMVM_MEMORY_MIB {
-            return Err(format!("the System VM needs at least {MIN_SYSTEMVM_MEMORY_MIB} MiB, got {memory_mib}"));
+            return Err(format!(
+                "the System VM needs at least {MIN_SYSTEMVM_MEMORY_MIB} MiB, got {memory_mib}"
+            ));
         }
         config.memory_mib = memory_mib;
     }
@@ -424,25 +438,45 @@ mod tests {
 
     #[test]
     fn share_specs_set_read_only_and_watch() {
-        let dir = std::env::temp_dir().to_string_lossy().trim_end_matches('/').to_string();
-        let specs: Vec<String> =
-            ["", ":ro", ":nowatch", ":ro:nowatch", ":nowatch:ro"].iter().map(|suffix| format!("{dir}{suffix}")).collect();
+        let dir = std::env::temp_dir()
+            .to_string_lossy()
+            .trim_end_matches('/')
+            .to_string();
+        let specs: Vec<String> = ["", ":ro", ":nowatch", ":ro:nowatch", ":nowatch:ro"]
+            .iter()
+            .map(|suffix| format!("{dir}{suffix}"))
+            .collect();
         let shares = shared_directories_from_specs(&specs).expect("specs parse");
         let flags: Vec<(bool, bool)> = shares.iter().map(|s| (s.read_only, s.watch)).collect();
         // A read-write share is watched by default; `:nowatch` opts out; a read-only share is never watched.
-        assert_eq!(flags, vec![(false, true), (true, false), (false, false), (true, false), (true, false)]);
+        assert_eq!(
+            flags,
+            vec![
+                (false, true),
+                (true, false),
+                (false, false),
+                (true, false),
+                (true, false)
+            ]
+        );
         assert!(shares.iter().all(|s| s.host_path == dir));
         assert_eq!(shares[4].tag, "share4");
         assert!(shared_directories_from_specs(&["relative:nowatch".to_string()]).is_err());
         // Configs written before the field existed still load, unwatched.
-        let old: SharedDirectory = serde_json::from_str(r#"{"tag":"share0","host_path":"/x"}"#).expect("old config");
+        let old: SharedDirectory =
+            serde_json::from_str(r#"{"tag":"share0","host_path":"/x"}"#).expect("old config");
         assert!(!old.watch && !old.read_only);
     }
     use tempfile::tempdir;
 
     #[test]
     fn machine_size_is_set_only_when_given_and_in_range() {
-        let inputs = LaunchInputs { kernel_path: "/k", initrd_path: Some("/i"), console_log_path: "/c.log", ..Default::default() };
+        let inputs = LaunchInputs {
+            kernel_path: "/k",
+            initrd_path: Some("/i"),
+            console_log_path: "/c.log",
+            ..Default::default()
+        };
         let mut c = default_launch_config(&inputs).expect("config");
         assert_eq!((c.cpu_count, c.memory_mib), (2, 2048));
         set_machine_size(&mut c, None, None).expect("nothing given");
@@ -621,5 +655,4 @@ mod tests {
         let json = serde_json::to_string(&initrd).unwrap();
         assert!(!json.contains("probe") && !json.contains("max_boot_ms"));
     }
-
 }
