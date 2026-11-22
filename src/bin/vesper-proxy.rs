@@ -35,8 +35,8 @@ struct Args {
     /// events streams can stay quiet for hours (D-072).
     #[arg(long, default_value_t = 5)]
     handshake_timeout_seconds: u64,
-    /// Entitlements plist to check before starting, as `vesperd` does (TD-017). It must parse; the proxy needs no
-    /// key, because it sandboxes itself (ADR 0012).
+    /// Entitlements plist read before starting, as `vesperd` does (TD-017); the proxy needs no key, because it
+    /// sandboxes itself (ADR 0012).
     #[arg(long)]
     entitlements_file: Option<String>,
     /// Run without the seatbelt profile (ADR 0012), for diagnosis only; a warning says so on every start.
@@ -67,9 +67,38 @@ fn absolute(path: &str) -> std::path::PathBuf {
 
 /// What the proxy may touch (ADR 0012): its socket's directory, its socket (it also talks to it, for the publisher),
 /// the bridge socket, the ports status file, and loopback ports when it publishes them.
-fn sandbox_rules(args: &Args) -> Vec<vesper::sandbox::Rule> {
+fn sandbox_rules(args: &Args) -> Result<Vec<vesper::sandbox::Rule>, String> {
     use vesper::sandbox::Rule;
     let listen = absolute(&args.listen);
+    // Made before the profile, which allows writing in these directories but not making their parents; a directory
+    // that is a symlink would let whoever made it choose what the profile grants, so it is refused (council S2).
+    let mut dirs = vec![listen.parent().map(|d| d.to_path_buf())];
+    if args.publish_ports {
+        dirs.push(
+            absolute(&args.ports_status)
+                .parent()
+                .map(|d| d.to_path_buf()),
+        );
+    }
+    for dir in dirs.into_iter().flatten() {
+        if !dir.exists() {
+            use std::os::unix::fs::DirBuilderExt;
+            std::fs::DirBuilder::new()
+                .recursive(true)
+                .mode(0o700)
+                .create(&dir)
+                .map_err(|e| format!("create {}: {e}", dir.display()))?;
+        }
+        if std::fs::symlink_metadata(&dir)
+            .map(|m| m.file_type().is_symlink())
+            .unwrap_or(false)
+        {
+            return Err(format!(
+                "{} is a symbolic link; name the real directory",
+                dir.display()
+            ));
+        }
+    }
     let mut rules = vec![
         Rule::ListenUnix(listen.clone()),
         Rule::ConnectUnix(listen.clone()),
@@ -77,9 +106,20 @@ fn sandbox_rules(args: &Args) -> Vec<vesper::sandbox::Rule> {
     if let Some(dir) = listen.parent() {
         rules.push(Rule::WriteTree(dir.to_path_buf()));
     }
-    if let Ok(Some(up)) = vesper::proxy::parse_target(&args.upstream)
-        .and_then(|t| vesper::proxy::upstream_socket_path(&t, &args.vsock_socket_dir))
-    {
+    let target = vesper::proxy::parse_target(&args.upstream)?;
+    if target.scheme == "tcp" {
+        // Loopback only under the profile; a remote TCP upstream would widen what the proxy can reach.
+        let addr: std::net::SocketAddr = target
+            .address
+            .parse()
+            .map_err(|_| format!("tcp upstream {} must be an ip:port", target.address))?;
+        if !addr.ip().is_loopback() {
+            return Err(format!(
+                "tcp upstream {addr} is not loopback; the sandbox allows loopback only (--no-sandbox to try it)"
+            ));
+        }
+        rules.push(Rule::ConnectLoopbackTcp(addr.port()));
+    } else if let Some(up) = vesper::proxy::upstream_socket_path(&target, &args.vsock_socket_dir)? {
         let up = absolute(&up);
         rules.push(Rule::ReadFile(up.clone()));
         rules.push(Rule::ConnectUnix(up));
@@ -92,7 +132,7 @@ fn sandbox_rules(args: &Args) -> Vec<vesper::sandbox::Rule> {
         rules.push(Rule::LoopbackInbound);
         rules.push(Rule::LoopbackUdpOutbound);
     }
-    rules
+    Ok(rules)
 }
 
 /// Applies the profile and proves it, or exits: a proxy never runs unconfined by accident (ADR 0012).
@@ -103,12 +143,14 @@ fn confine(args: &Args) {
         );
         return;
     }
-    let result = vesper::sandbox::render(&sandbox_rules(args))
-        .and_then(|profile| vesper::sandbox::apply(&profile));
-    let checked = result.and_then(|()| match vesper::sandbox::canary() {
-        Some(home) => vesper::sandbox::self_check(&home),
-        None => Err("sandbox self-check: HOME is not an absolute path".to_string()),
-    });
+    let checked = (|| {
+        let home =
+            vesper::sandbox::canary().ok_or("sandbox self-check: HOME is not an absolute path")?;
+        let rules = sandbox_rules(args)?;
+        vesper::sandbox::check_canary_free(&rules, &home)?;
+        vesper::sandbox::apply(&vesper::sandbox::render(&rules)?)?;
+        vesper::sandbox::self_check(&home)
+    })();
     if let Err(err) = checked {
         eprintln!("vesper-proxy failed: {err}");
         std::process::exit(1);
@@ -119,6 +161,8 @@ fn confine(args: &Args) {
 fn probe(args: &Args) {
     use std::net::{SocketAddr, TcpStream, UdpSocket};
     let home = vesper::sandbox::canary().unwrap_or_default();
+    // A name of its own, never an existing file: without the profile this write succeeds and is removed.
+    let scratch = home.join(format!(".vesper-sandbox-probe-{}", std::process::id()));
     let mut out = Vec::new();
     let mut check = |name: &str, r: std::io::Result<()>| match r {
         Err(_) => out.push(format!("PROBE {name} denied")),
@@ -127,7 +171,11 @@ fn probe(args: &Args) {
     check("read_ssh", std::fs::read_dir(home.join(".ssh")).map(|_| ()));
     check(
         "write_home",
-        std::fs::write(home.join(".vesper-sandbox-probe"), b"x"),
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&scratch)
+            .map(|_| ()),
     );
     check(
         "exec_sh",
@@ -151,7 +199,7 @@ fn probe(args: &Args) {
             std::os::unix::net::UnixStream::connect(path).map(|_| ()),
         );
     }
-    let _ = std::fs::remove_file(home.join(".vesper-sandbox-probe"));
+    let _ = std::fs::remove_file(&scratch);
     for line in out {
         println!("{line}");
     }

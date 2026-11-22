@@ -168,9 +168,12 @@ jobs:
 
       - name: vesper-proxy's seatbelt profile refuses what it never needs, signed with the hardened runtime (ADR 0012)
         run: |
-          cargo build -q --bin vesper-proxy
+          # Build first, then sign, then run: a relink after signing would replace the signature.
+          cargo test -q --test proxy_sandbox --no-run
           bash scripts/macos/sign.sh debug
           cargo test -q --test proxy_sandbox
+          codesign --display --verbose target/debug/vesper-proxy 2>&1 | grep -q 'flags=.*runtime' \
+            || { echo "vesper-proxy is not signed with the hardened runtime"; exit 1; }
 
       - name: Entitlement plists are valid and hold exactly the approved keys (TD-010)
         run: make validate-entitlements

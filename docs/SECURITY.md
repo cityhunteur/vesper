@@ -60,7 +60,11 @@ Vesper’s security model is part of its parity contract. Treat this file as the
   (macOS) shows six refusals: reading `~/.ssh`, writing in `$HOME`, starting `/bin/sh`, binding `0.0.0.0`, connecting
   to a loopback TCP port and to a Unix socket it does not name, each of which works with `--no-sandbox`.
 - The limit is not narrow: through the Docker socket and the bridge, an attacker in the proxy still reaches every
-  share and the System VM (TD-089).
+  share and the System VM (TD-089). The profile's base, `system.sb`, also allows Mach lookups of XPC services,
+  writes to `/dev/null` and `/dev/fd`, and logging; that base is accepted as it is.
+- A file rule resolves the file's directory, not the file, so a symlink at the socket path cannot choose what is
+  granted; a socket directory that is a symlink is refused, and a directory that would cover `$HOME` is refused with
+  that reason. A `tcp://` upstream must be loopback. Missing directories are made, mode 0700, before the profile.
 - `make sign` (and `make docker-up`) signs the proxy ad hoc with the hardened runtime. `vesperd` and the launcher
   follow in slices 2 and 3.
 
