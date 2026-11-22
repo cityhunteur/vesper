@@ -168,6 +168,16 @@ else
   record snapshot_room_in_the_ceiling_and_the_booking false "${l}; ${m}; booked ${booked} MiB; ${c}; with a rootfs: ${r}"
 fi
 
+# --- 5c. A guest that stops before its marker is reported at once, not after the 30 s poll (TD-060) --------------
+t0=$(date +%s)
+f="$(ctl microvm -- launch size-x --test-crash | head -1)"
+t1=$(date +%s); c="$(ctl microvm -- cleanup size-x --logs | head -1)"
+if [ "${f}" = "FAILED size-x" ] && [ $((t1 - t0)) -lt 15 ] && [ "${c}" = "CLEAN size-x" ]; then
+  record failed_launch_reported_at_once true "${f} in $((t1 - t0)) s; ${c}"
+else
+  record failed_launch_reported_at_once false "${f} in $((t1 - t0)) s; ${c}"
+fi
+
 # --- 6. Nothing is left -------------------------------------------------------------------------------------------
 left="$(ctl ctr -- leftovers)"; after="$(budget committed)"
 case "${left}:${after}" in *CLEAN*":${base}") record nothing_left true "${left}; committed ${after}, as before" ;; *) record nothing_left false "${left}; committed ${after}, before ${base}" ;; esac
