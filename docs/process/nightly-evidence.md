@@ -22,7 +22,8 @@ NIGHTLY_SUITES="systemvm-control-suite ports-suite" make nightly   # another sui
 
 The run:
 
-1. Stops Docker and the System VM, and builds the launcher from the current commit.
+1. Stops the dev loop, Docker and the System VM, and builds the launcher, the guest's Go binaries and the guest
+   image from the current commit.
 2. Runs `make systemvm-reliability` (boot cycles, then the control and services suites and a Docker smoke on a VM
    it starts and stops).
 3. Starts the System VM with the snapshot share (`make systemvm-up-snapshot`) and the Docker socket.

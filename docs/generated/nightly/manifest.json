@@ -5,20 +5,20 @@
     "firecracker": "d83d72b710361a10294480131377b1b00b163af8"
   },
   "counts_as_remote_green": false,
-  "finished_at": "2026-11-23T08:39:37Z",
+  "finished_at": "2026-11-23T09:31:59Z",
   "git_dirty": false,
-  "git_sha": "7ac3ed15ed509b33edbc96a1657a596b4c15e539",
+  "git_sha": "b36c008e71f3f7560d3b36543fbf6d18576e7b04",
   "host": "macOS 27.0.1 / Apple M3 Pro",
   "passed": false,
   "schema": 1,
   "source": "owner-hardware",
-  "started_at": "2026-11-23T08:29:08Z",
+  "started_at": "2026-11-23T09:22:52Z",
   "suites": [
     {
-      "passed": false,
-      "rc": 2,
+      "passed": true,
+      "rc": 0,
       "report": "reports/systemvm-reliability.json",
-      "sha256": "f7fde9b1514706ddf386d2e6e2ae8c483c7574052192d5974d2aea74740161de",
+      "sha256": "6aec92031710a9b224509ee367c7935f9b98c697fe2eaafd97338ad14cd0b906",
       "steps_ok": 0,
       "steps_total": 0,
       "target": "systemvm-reliability"
@@ -27,7 +27,7 @@
       "passed": true,
       "rc": 0,
       "report": "reports/systemvm-control-suite.json",
-      "sha256": "c8c240de8ab28b06d4cf29526cfb65f418aaffc7b7c214d8673f47f3dbfc0b08",
+      "sha256": "ca8a7cb0ff517c44eaae37fced5301afccaf7602a4b00c7d5f03a237b0575553",
       "steps_ok": 5,
       "steps_total": 5,
       "target": "systemvm-control-suite"
@@ -36,7 +36,7 @@
       "passed": false,
       "rc": 2,
       "report": "reports/systemvm-services-suite.json",
-      "sha256": "6eaa98a705b7853fed605b14c3d8478eed97a854e3f86c1a2808e5d90d1174f9",
+      "sha256": "9a3b5cdc37cfe8087c3804e1fab2984394b1ee1753609d4bd482c315e92416ce",
       "steps_ok": 9,
       "steps_total": 10,
       "target": "systemvm-services-suite"
@@ -45,7 +45,7 @@
       "passed": true,
       "rc": 0,
       "report": "reports/systemvm-launchapi-suite.json",
-      "sha256": "434bdc5ddf96b750ddbeaea1e67bc17f4fe4a431ee79a0fb55301d380ab0e723",
+      "sha256": "354aba209d84bcc95ce9949d255660a5b359f80d7e3d1785a66c512d17ee5a27",
       "steps_ok": 20,
       "steps_total": 20,
       "target": "systemvm-launchapi-suite"
@@ -54,17 +54,17 @@
       "passed": true,
       "rc": 0,
       "report": "reports/systemvm-vesperd-suite.json",
-      "sha256": "693de902b26b93e12787521dc12f3f60dd63249bf8d1633dd1f6f4f45193c7f7",
+      "sha256": "f8938de886cdd2d02dded48e6560c36c0cee254e844d9aee60d48145e4778fa5",
       "steps_ok": 19,
       "steps_total": 19,
       "target": "systemvm-vesperd-suite"
     },
     {
-      "passed": false,
-      "rc": 2,
+      "passed": true,
+      "rc": 0,
       "report": "reports/systemvm-snapshot-suite.json",
-      "sha256": "920e492a51fc8ec5ecbf3bc9d3d4ba5da9cfc6cda73164521f7003f90a5dfb61",
-      "steps_ok": 25,
+      "sha256": "7c18d23ebe6f91f9c9cfd01a3720b65f811c1017401758382b9cb553a3d4d5cd",
+      "steps_ok": 26,
       "steps_total": 26,
       "target": "systemvm-snapshot-suite"
     },
@@ -72,7 +72,7 @@
       "passed": true,
       "rc": 0,
       "report": "reports/systemvm-replay-suite.json",
-      "sha256": "6cfa02b97b5395b3361d5cac583de5abc3a2ce5938180105210fcf7d83b2a018",
+      "sha256": "7ffbfa80e62029cfec8a8cbab3579ec43778d436bbbecb3cefb0caae6ccc3691",
       "steps_ok": 173,
       "steps_total": 173,
       "target": "systemvm-replay-suite"
@@ -81,18 +81,18 @@
       "passed": true,
       "rc": 0,
       "report": "reports/docker-conformance.json",
-      "sha256": "1eb2329ef9b181b8de7b528694fc7dadb84d5863dabdadeffbc714dc120de20d",
+      "sha256": "852b99c6b34a03abbcd330e3ccb9395c00bcbe2a086b354e767a4ebc194403df",
       "steps_ok": 26,
       "steps_total": 26,
       "target": "docker-conformance"
     },
     {
-      "passed": false,
-      "rc": 2,
+      "passed": true,
+      "rc": 0,
       "report": "reports/ports-suite.json",
-      "sha256": "1b9ce616bdd10d623bb4dc36cf9fdb44cc224143e9ae96645096c9c9ad0dd2a7",
-      "steps_ok": 11,
-      "steps_total": 16,
+      "sha256": "7bf9d5881df07ca20d953c812adc76c27efd68c926343f5d9032c84a472a3d4b",
+      "steps_ok": 18,
+      "steps_total": 18,
       "target": "ports-suite"
     }
   ]
