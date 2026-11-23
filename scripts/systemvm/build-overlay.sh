@@ -41,6 +41,9 @@ APK_ARGS+=(--file "${ROOT_DIR}/build/shim/vesper-runc:/usr/bin/vesper-runc:0755"
 APK_ARGS+=(--file "${ROOT_DIR}/build/shim/vesper-unfs:/usr/bin/vesper-unfs:0755")
 # The guest side of UDP published ports (TD-037, D-077); vesper-port-relay-conn runs it for a `UDP <port>` preface.
 APK_ARGS+=(--file "${ROOT_DIR}/build/shim/vesper-udp-relay:/usr/bin/vesper-udp-relay:0755")
+# The guest side of the Docker relay and TCP published ports (TD-093): passes both half-closes, so a server that
+# closes first is seen as closed on the Mac.
+APK_ARGS+=(--file "${ROOT_DIR}/build/shim/vesper-stream-relay:/usr/bin/vesper-stream-relay:0755")
 # The patched unfsd it runs (D-044; built by scripts/systemvm/build-unfs3.sh, which CI repeats on arm64). Checked
 # against its pinned digest here, so the overlay never ships a binary that differs from the reviewed one.
 (cd "${ROOT_DIR}/third_party/unfs3" && shasum -a 256 -c unfsd-aarch64.sha256 >/dev/null) \

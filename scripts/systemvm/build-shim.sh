@@ -28,3 +28,5 @@ GOOS=linux GOARCH=arm64 CGO_ENABLED=0 GOFLAGS=-mod=mod go build -trimpath \
 # The guest side of UDP published ports (TD-037, D-077); vesper-port-relay-conn runs it.
 GOOS=linux GOARCH=arm64 CGO_ENABLED=0 GOFLAGS=-mod=mod go build -trimpath \
   -ldflags="-s -w -buildid=" -o "${ROOT_DIR}/build/shim/vesper-udp-relay" ./cmd/vesper-udp-relay
+GOOS=linux GOARCH=arm64 CGO_ENABLED=0 GOFLAGS=-mod=mod go build -trimpath \
+  -ldflags="-s -w -buildid=" -o "${ROOT_DIR}/build/shim/vesper-stream-relay" ./cmd/vesper-stream-relay
