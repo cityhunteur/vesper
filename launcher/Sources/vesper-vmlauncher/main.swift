@@ -156,7 +156,9 @@ func bindBridgeSocket(_ path: String) -> (Int32, String?) {
             Darwin.bind(fd, sa, socklen_t(MemoryLayout<sockaddr_un>.size))
         }
     }
-    guard bound == 0, listen(fd, 16) == 0 else {
+    // A backlog of 128 (macOS's somaxconn): a burst of clients to a published port overflowed 16 and was refused
+    // (TD-088, D-093).
+    guard bound == 0, listen(fd, 128) == 0 else {
         let message = "bridge bind/listen \(path): \(String(cString: strerror(errno)))"
         close(fd)
         return (-1, message)
