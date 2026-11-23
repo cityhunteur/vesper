@@ -10,6 +10,8 @@ mkdir -p "${RUN_DIR}"
 pushd "${ROOT_DIR}" >/dev/null
 
 cargo build --bin vesperd --bin vesper-proxy
+# Hardened runtime, ad hoc (ADR 0012); each binary applies its own seatbelt profile at start.
+bash "${ROOT_DIR}/scripts/macos/sign.sh" debug vesperd vesper-proxy
 
 # The in-memory model (no System VM needed); the default backend is the System VM's (D-063).
 "${BIN_DIR}/vesperd" \

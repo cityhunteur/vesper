@@ -11,6 +11,8 @@ use std::path::{Path, PathBuf};
 pub enum Rule {
     /// Read one file.
     ReadFile(PathBuf),
+    /// Read the attributes (`stat`) of one path, not its contents.
+    ReadMetadata(PathBuf),
     /// Read and write one file, which may not exist yet (a socket, a lock, a status file).
     WriteFile(PathBuf),
     /// Read and write a directory and everything under it.
@@ -109,6 +111,10 @@ pub fn render(rules: &[Rule]) -> Result<String, String> {
             Rule::ReadFile(p) => format!(
                 "(allow file-read* (literal {}))",
                 quote(&canonical_file(p)?)?
+            ),
+            Rule::ReadMetadata(p) => format!(
+                "(allow file-read-metadata (literal {}))",
+                quote(&canonical(p)?)?
             ),
             Rule::WriteFile(p) => {
                 format!(
@@ -226,11 +232,198 @@ pub fn check_canary_free(rules: &[Rule], canary: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// The canary for `self_check`: the user's home directory, which no profile names.
+/// The user's home directory from the user database (`getpwuid_r`), which no environment value can change.
+#[cfg(target_os = "macos")]
+pub fn user_home() -> Option<PathBuf> {
+    use std::ffi::{CStr, c_char, c_int};
+    use std::os::unix::ffi::OsStrExt;
+    // `struct passwd` of <pwd.h> on macOS.
+    #[repr(C)]
+    struct Passwd {
+        pw_name: *mut c_char,
+        pw_passwd: *mut c_char,
+        pw_uid: u32,
+        pw_gid: u32,
+        pw_change: i64,
+        pw_class: *mut c_char,
+        pw_gecos: *mut c_char,
+        pw_dir: *mut c_char,
+        pw_shell: *mut c_char,
+        pw_expire: i64,
+    }
+    unsafe extern "C" {
+        fn getuid() -> u32;
+        fn getpwuid_r(
+            uid: u32,
+            pwd: *mut Passwd,
+            buf: *mut c_char,
+            len: usize,
+            result: *mut *mut Passwd,
+        ) -> c_int;
+    }
+    let mut buf = vec![0 as c_char; 4096];
+    // SAFETY: an all-zero `Passwd` is valid (null pointers and zero integers); getpwuid_r fills it, pointing into
+    // `buf`, which outlives every read below; `result` is null or points at `pwd`.
+    let mut pwd: Passwd = unsafe { std::mem::zeroed() };
+    let mut result: *mut Passwd = std::ptr::null_mut();
+    let rc = unsafe { getpwuid_r(getuid(), &mut pwd, buf.as_mut_ptr(), buf.len(), &mut result) };
+    if rc != 0 || result.is_null() || pwd.pw_dir.is_null() {
+        return None;
+    }
+    // SAFETY: getpwuid_r succeeded, so `pw_dir` is a NUL-terminated string inside `buf`.
+    let dir = unsafe { CStr::from_ptr(pwd.pw_dir) };
+    Some(PathBuf::from(std::ffi::OsStr::from_bytes(dir.to_bytes())))
+        .filter(|h| h.is_absolute() && h != Path::new("/"))
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn user_home() -> Option<PathBuf> {
+    None
+}
+
+/// The per-user temporary directory macOS assigns (`confstr(_CS_DARWIN_USER_TEMP_DIR)`), which no environment value
+/// can change; elsewhere `$TMPDIR`.
+pub fn user_temp_dir() -> Option<PathBuf> {
+    #[cfg(target_os = "macos")]
+    {
+        use std::ffi::{CStr, c_char, c_int};
+        use std::os::unix::ffi::OsStrExt;
+        unsafe extern "C" {
+            fn confstr(name: c_int, buf: *mut c_char, len: usize) -> usize;
+        }
+        const CS_DARWIN_USER_TEMP_DIR: c_int = 65537;
+        let mut buf = vec![0 as c_char; 1024];
+        // SAFETY: confstr writes at most `len` bytes, NUL included, into `buf`, and returns 0 on error.
+        let n = unsafe { confstr(CS_DARWIN_USER_TEMP_DIR, buf.as_mut_ptr(), buf.len()) };
+        if n == 0 || n > buf.len() {
+            return None;
+        }
+        // SAFETY: confstr succeeded and the result fitted, so `buf` holds a NUL-terminated string.
+        let dir = unsafe { CStr::from_ptr(buf.as_ptr()) };
+        Some(PathBuf::from(std::ffi::OsStr::from_bytes(dir.to_bytes())))
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        std::env::var_os("TMPDIR")
+            .filter(|t| !t.is_empty())
+            .map(PathBuf::from)
+    }
+}
+
+/// Every home directory a rule must not cover: the user database's, and `HOME` when it names another.
+pub fn homes() -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = Vec::new();
+    for home in [user_home(), std::env::var_os("HOME").map(PathBuf::from)]
+        .into_iter()
+        .flatten()
+    {
+        if home.is_absolute() && home != Path::new("/") && !out.contains(&home) {
+            out.push(home);
+        }
+    }
+    out
+}
+
+/// The canary for `self_check`: the user's home directory, which no profile names. The user database's, so no
+/// environment value can choose it; `HOME` only where there is no user database entry.
 pub fn canary() -> Option<PathBuf> {
-    std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .filter(|h| h.is_absolute())
+    user_home().or_else(|| homes().into_iter().next())
+}
+
+/// The `--sandbox-probe` test hook of each binary: tries what no profile allows and returns one line each,
+/// `PROBE <name> denied` or `PROBE <name> ALLOWED`. `tcp` is a loopback port and `unix` a Unix socket that the
+/// profile does not name. Run without the profile, every attempt must succeed, or the probe shows nothing.
+pub fn probes(home: &Path, tcp: Option<u16>, unix: Option<&Path>) -> Vec<String> {
+    use std::net::{SocketAddr, TcpStream, UdpSocket};
+    // A name of its own, never an existing file: without the profile this write succeeds and is removed.
+    let scratch = home.join(format!(".vesper-sandbox-probe-{}", std::process::id()));
+    let mut out = Vec::new();
+    let mut check = |name: &str, r: std::io::Result<()>| match r {
+        Err(_) => out.push(format!("PROBE {name} denied")),
+        Ok(()) => out.push(format!("PROBE {name} ALLOWED")),
+    };
+    check("read_ssh", std::fs::read_dir(home.join(".ssh")).map(|_| ()));
+    check(
+        "write_home",
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&scratch)
+            .map(|_| ()),
+    );
+    check(
+        "exec_sh",
+        std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg("true")
+            .status()
+            .map(|_| ()),
+    );
+    check("bind_any", UdpSocket::bind("0.0.0.0:0").map(|_| ()));
+    if let Some(port) = tcp {
+        let to: SocketAddr = ([127, 0, 0, 1], port).into();
+        check(
+            "connect_loopback_tcp",
+            TcpStream::connect_timeout(&to, std::time::Duration::from_secs(2)).map(|_| ()),
+        );
+    }
+    if let Some(path) = unix {
+        check(
+            "connect_other_unix",
+            std::os::unix::net::UnixStream::connect(path).map(|_| ()),
+        );
+    }
+    let _ = std::fs::remove_file(&scratch);
+    out
+}
+
+/// Makes `dir` (0700, with its parents) if it is missing, and refuses it if it is a symbolic link: a profile
+/// allows writing in a directory but not making its parents, and a directory that is a symlink would let whoever
+/// made it choose what the profile grants. Call it before `apply`.
+pub fn prepare_dir(dir: &Path) -> Result<(), String> {
+    if !dir.exists() {
+        use std::os::unix::fs::DirBuilderExt;
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(dir)
+            .map_err(|e| format!("create {}: {e}", dir.display()))?;
+    }
+    if std::fs::symlink_metadata(dir)
+        .map(|m| m.file_type().is_symlink())
+        .unwrap_or(false)
+    {
+        return Err(format!(
+            "{} is a symbolic link; name the real directory",
+            dir.display()
+        ));
+    }
+    Ok(())
+}
+
+/// `path` made absolute against the working directory, as the sandbox sees it.
+pub fn absolute(path: &Path) -> PathBuf {
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map(|d| d.join(path))
+            .unwrap_or_else(|_| path.to_path_buf())
+    }
+}
+
+/// Builds the profile from `rules`, applies it and proves it is in force with the `HOME` canary, or returns why
+/// not. On other systems there is no seatbelt, so nothing is checked or applied.
+pub fn confine(rules: &[Rule]) -> Result<(), String> {
+    if !cfg!(target_os = "macos") {
+        return Ok(());
+    }
+    let canary = canary().ok_or("sandbox self-check: no home directory to check against")?;
+    for home in homes() {
+        check_canary_free(rules, &home)?;
+    }
+    apply(&render(rules)?)?;
+    self_check(&canary)
 }
 
 #[cfg(test)]

@@ -44,9 +44,22 @@ impl Drop for Running {
 }
 
 fn start(socket: Option<&Path>, runtime_dir: &Path, expect: &Path) -> Running {
+    start_with(socket, runtime_dir, expect, &[])
+}
+
+/// `start` with more arguments for `vesperd`.
+fn start_with(
+    socket: Option<&Path>,
+    runtime_dir: &Path,
+    expect: &Path,
+    extra: &[&std::ffi::OsStr],
+) -> Running {
     let child = {
         let _spawning = spawn_lock();
-        vesperd(socket, runtime_dir).spawn().expect("spawn vesperd")
+        vesperd(socket, runtime_dir)
+            .args(extra)
+            .spawn()
+            .expect("spawn vesperd")
     };
     let started = Instant::now();
     while started.elapsed() < Duration::from_secs(20) {
@@ -248,7 +261,8 @@ fn a_chunked_body_over_the_limit_gets_a_413_envelope() {
 }
 
 /// TD-024: a request blocked on a host path (a FIFO with no writer) does not keep vesperd from stopping: after
-/// SIGTERM it exits within its 5 s grace.
+/// SIGTERM it exits within its 5 s grace. The FIFO's directory is a host root, so the sandbox (ADR 0012) lets the
+/// open block, as it would for any path the model may open.
 #[test]
 fn a_blocked_request_does_not_stop_the_shutdown() {
     use std::io::Write;
@@ -264,7 +278,12 @@ fn a_blocked_request_does_not_stop_the_shutdown() {
             .unwrap()
             .success()
     );
-    let mut running = start(Some(&socket), &runtime, &socket);
+    let mut running = start_with(
+        Some(&socket),
+        &runtime,
+        &socket,
+        &["--host-root".as_ref(), dir.path().as_os_str()],
+    );
     let mut conn = std::os::unix::net::UnixStream::connect(&socket).unwrap();
     let body = format!("{{\"kernel_image_path\":\"{}\"}}", fifo.display());
     conn.write_all(format!("PUT /boot-source HTTP/1.1\r\nHost: v\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}", body.len()).as_bytes()).unwrap();
@@ -290,5 +309,11 @@ fn a_blocked_request_does_not_stop_the_shutdown() {
     assert!(
         exited.is_some(),
         "vesperd did not exit within 15 s of SIGTERM with a blocked request"
+    );
+    // The request really blocked: the server waited out its grace. A refused open (no host root) ends at once.
+    assert!(
+        stopped.elapsed() >= Duration::from_secs(4),
+        "vesperd exited after {:?}, so the request did not block",
+        stopped.elapsed()
     );
 }

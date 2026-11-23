@@ -51,7 +51,7 @@ const ALLOWED: &[(&str, &str, usize, &str)] = &[
         "published UDP container ports, loopback only (ADR 0005 amendment, D-077)",
     ),
     (
-        "src/bin/vesper-proxy.rs",
+        "src/sandbox.rs",
         "UdpSocket::bind",
         1,
         "the --sandbox-probe test hook's bind to 0.0.0.0, which the seatbelt profile must refuse (ADR 0012)",

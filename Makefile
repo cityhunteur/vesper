@@ -124,6 +124,7 @@ systemvm-launchapi-suite:
 
 systemvm-vesperd-suite:
 	$(CARGO) build --bin vesperd
+	bash scripts/macos/sign.sh debug vesperd
 	$(CARGO) run --bin systemvmctl -- control vesperd-suite
 
 # ADR 0007 slice 5: the snapshot suite stages files from run/vesperd-share, so the System VM must share it.
@@ -139,25 +140,30 @@ systemvm-upstream-suite:
 
 systemvm-snapshot-suite:
 	$(CARGO) build --bin vesperd
+	bash scripts/macos/sign.sh debug vesperd
 	$(CARGO) run --bin systemvmctl -- control snapshot-suite
 
 # ADR 0007 slice 6: replay the behaviour matrix through vesperd on Backend A, one microVM per case
 # (needs make systemvm-up-snapshot). The publish target also rewrites the committed report.
 systemvm-replay-suite:
 	$(CARGO) build --bin vesperd
+	bash scripts/macos/sign.sh debug vesperd
 	$(CARGO) run --bin systemvmctl -- control replay-suite
 
 systemvm-replay-publish:
 	$(CARGO) build --bin vesperd
+	bash scripts/macos/sign.sh debug vesperd
 	$(CARGO) run --bin systemvmctl -- control replay-suite --publish docs/generated/backend-a-behavior-replay.json
 
 # ADR 0008: vesperd --network nat guests probe their egress from inside (needs make systemvm-up and docker running).
 systemvm-bounds-suite:
 	$(CARGO) build --bin vesperd
+	bash scripts/macos/sign.sh debug vesperd
 	$(CARGO) run --bin systemvmctl -- control bounds-suite
 
 systemvm-egress-suite:
 	$(CARGO) build --bin vesperd
+	bash scripts/macos/sign.sh debug vesperd
 	$(CARGO) run --bin systemvmctl -- control egress-suite
 
 # The replay scripts cover the matrix exactly and reproduce it on the model backend (runs in CI with cargo test).

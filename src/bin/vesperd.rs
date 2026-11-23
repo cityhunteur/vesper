@@ -108,37 +108,66 @@ struct Args {
         default_value = "docs/generated/firecracker-api-surface-stub-matrix.json"
     )]
     surface_stub_matrix: String,
+    /// Entitlements plist read before starting (TD-017); `vesperd` needs no key, because it sandboxes itself
+    /// (ADR 0012).
     #[arg(long)]
     entitlements_file: Option<String>,
+    /// A directory the model backend may open host paths in (`--backend model`; repeatable). Default: the working
+    /// directory and the per-user temporary directory macOS assigns. A request that names a path outside them gets the error a path that cannot be
+    /// opened gets (ADR 0012, CE-0013).
+    #[arg(long = "host-root", value_name = "DIR")]
+    host_root: Vec<String>,
+    /// Run without the seatbelt profile (ADR 0012), for diagnosis only; a warning says so on every start.
+    #[arg(long, global = true)]
+    no_sandbox: bool,
+    /// Test hook (ADR 0012): apply the profile, try what it must refuse, print one `PROBE` line each, and exit.
+    #[arg(long, hide = true)]
+    sandbox_probe: bool,
+    /// With --sandbox-probe: a loopback TCP port to try to connect to.
+    #[arg(long, hide = true)]
+    probe_tcp: Option<u16>,
+    /// With --sandbox-probe: a Unix socket the profile does not name.
+    #[arg(long, hide = true)]
+    probe_unix: Option<String>,
+    /// With --sandbox-probe: a file the model backend must not open (outside every --host-root).
+    #[arg(long, hide = true)]
+    probe_file: Option<String>,
 }
 
-#[tokio::main]
-async fn main() {
+fn main() {
     let args = Args::parse();
+    // Read before the profile, which does not name the file.
+    if let Err(err) = vesper::platform::validate_entitlements_file(
+        args.entitlements_file.as_deref().map(Path::new),
+        &[],
+    ) {
+        eprintln!("vesperd failed: {err}");
+        std::process::exit(1);
+    }
+    // The first thing after the arguments, before any thread, socket or log file (ADR 0012).
+    let socket = confine(&args);
+    if args.sandbox_probe {
+        probe(&args);
+        return;
+    }
     vesper::platform::init_logging();
     if let Some(command) = &args.command {
         std::process::exit(stage::run(&args, command));
     }
-    if let Err(err) = run(args).await {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .unwrap_or_else(|err| {
+            eprintln!("vesperd failed: tokio runtime: {err}");
+            std::process::exit(1);
+        });
+    if let Err(err) = runtime.block_on(run(args, socket)) {
         eprintln!("vesperd failed: {err}");
         std::process::exit(1);
     }
 }
 
-/// How long requests in flight may run after the stop signal (TD-024).
-const SHUTDOWN_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
-
-async fn run(args: Args) -> Result<(), String> {
-    vesper::platform::validate_entitlements_file(
-        args.entitlements_file.as_deref().map(Path::new),
-        &["com.apple.security.virtualization"],
-    )?;
-
-    // No fallback (ADR 0007 item 9): without --backend model, a failed start is an error, never the model.
-    if args.backend.unwrap_or(Backend::Systemvm) == Backend::Systemvm {
-        let options = systemvm::Options::from_args(&args)?;
-        return systemvm::run(options, &socket_path(&args)?).await;
-    }
+fn check_model_flags(args: &Args) -> Result<(), String> {
     if args.id.is_some()
         || args.memory_max.is_some()
         || args.bridge.is_some()
@@ -149,6 +178,172 @@ async fn run(args: Args) -> Result<(), String> {
     {
         return Err("--id, --memory-max, --stage, --tap, --network, --bridge and --agent-port do not apply to --backend model".to_string());
     }
+    Ok(())
+}
+
+fn is_model(args: &Args) -> bool {
+    args.command.is_none() && args.backend == Some(Backend::Model)
+}
+
+/// The directories the model backend may open host paths in: `--host-root`, else the working directory and the
+/// user's temporary directory (on macOS the one the system assigns, not `$TMPDIR`, so no environment value widens
+/// the profile). A root that covers a home directory is refused, which keeps the self-check meaningful.
+fn host_roots(args: &Args) -> Result<Vec<PathBuf>, String> {
+    let explicit = !args.host_root.is_empty();
+    let roots: Vec<PathBuf> = if explicit {
+        args.host_root
+            .iter()
+            .map(|r| vesper::sandbox::absolute(Path::new(r)))
+            .collect()
+    } else {
+        let cwd = std::env::current_dir()
+            .map_err(|e| format!("the working directory: {e}; pass --host-root DIR"))?;
+        std::iter::once(cwd)
+            .chain(vesper::sandbox::user_temp_dir())
+            .collect()
+    };
+    // Only macOS has a profile, and so a self-check to keep meaningful.
+    for root in roots.iter().filter(|_| cfg!(target_os = "macos")) {
+        let real = vesper::sandbox::canonical(root)?;
+        for home in vesper::sandbox::homes() {
+            if vesper::sandbox::canonical(&home).is_ok_and(|h| h.starts_with(&real)) {
+                return Err(if explicit {
+                    format!(
+                        "--host-root {} covers the home directory {}; name a directory inside it",
+                        root.display(),
+                        home.display()
+                    )
+                } else {
+                    format!(
+                        "the working directory {} covers the home directory {}, so it cannot be the model backend's default host root; pass --host-root DIR",
+                        root.display(),
+                        home.display()
+                    )
+                });
+            }
+        }
+    }
+    Ok(roots)
+}
+
+/// What `vesperd` may touch (ADR 0012), and its API socket (none for `stage` and `store`). Every mode may read the
+/// files it names; a server may listen on its socket and take `<socket>.lock`; the System VM backend and the
+/// subcommands may connect to the bridge socket; the model backend may read and write under its host roots.
+/// Nothing may start a process or use the network.
+fn sandbox_rules(args: &Args) -> Result<(Vec<vesper::sandbox::Rule>, Option<PathBuf>), String> {
+    use vesper::sandbox::{Rule, absolute};
+    if !args.host_root.is_empty() && !is_model(args) {
+        return Err("--host-root applies to --backend model only".to_string());
+    }
+    // The command line is checked first, so a bad one makes no directory.
+    if args.command.is_none() {
+        if is_model(args) {
+            check_model_flags(args)?;
+        } else {
+            systemvm::Options::from_args(args)?;
+        }
+    }
+    let mut rules = Vec::new();
+    let socket = if args.command.is_none() {
+        let socket = absolute(&socket_path(args)?);
+        // claim_socket makes a missing directory; under the profile it could not, so it is made here.
+        if let Some(dir) = socket.parent() {
+            vesper::sandbox::prepare_dir(dir)?;
+            rules.push(Rule::ReadMetadata(dir.to_path_buf()));
+        }
+        let mut lock = socket.clone().into_os_string();
+        lock.push(".lock");
+        rules.push(Rule::WriteFile(PathBuf::from(lock)));
+        rules.push(Rule::ListenUnix(socket.clone()));
+        // claim_socket connects to an old socket to see whether a server still answers on it.
+        rules.push(Rule::ConnectUnix(socket.clone()));
+        Some(socket)
+    } else {
+        None
+    };
+    if is_model(args) {
+        for file in [
+            &args.baseline_lock,
+            &args.swagger,
+            &args.surface_stub_matrix,
+        ] {
+            rules.push(Rule::ReadFile(absolute(Path::new(file))));
+        }
+        for root in host_roots(args)? {
+            rules.push(Rule::WriteTree(root));
+        }
+    } else {
+        rules.push(Rule::ReadFile(absolute(Path::new(&args.launch_config))));
+        if args.command.is_none() {
+            rules.push(Rule::ReadFile(absolute(Path::new(&args.swagger))));
+        }
+        // An error here (no launch config) is reported by the mode itself, after the profile.
+        if let Ok((bridge, _)) = systemvm::bridge_and_port(args) {
+            let bridge = absolute(&bridge);
+            rules.push(Rule::ReadFile(bridge.clone()));
+            rules.push(Rule::ConnectUnix(bridge));
+        }
+    }
+    Ok((rules, socket))
+}
+
+/// Applies the profile and proves it, or exits: `vesperd` never runs unconfined by accident (ADR 0012). Returns
+/// the API socket path, chosen once for both the profile and the server.
+fn confine(args: &Args) -> Option<PathBuf> {
+    if args.no_sandbox {
+        eprintln!(
+            "vesperd: WARNING: running without its sandbox profile (--no-sandbox), for diagnosis only"
+        );
+        return args
+            .command
+            .is_none()
+            .then(|| socket_path(args).ok())
+            .flatten();
+    }
+    match sandbox_rules(args).and_then(|(rules, socket)| {
+        vesper::sandbox::confine(&rules)?;
+        Ok(socket)
+    }) {
+        Ok(socket) => socket,
+        Err(err) => {
+            eprintln!("vesperd failed: {err}");
+            std::process::exit(1);
+        }
+    }
+}
+
+/// The --sandbox-probe test hook: one `PROBE <name> denied|ALLOWED` line per attempt. With `--probe-file`, also
+/// opens that file as the model backend opens a drive.
+fn probe(args: &Args) {
+    let home = vesper::sandbox::canary().unwrap_or_default();
+    let unix = args.probe_unix.as_deref().map(Path::new);
+    let mut lines = vesper::sandbox::probes(&home, args.probe_tcp, unix);
+    if let Some(file) = &args.probe_file {
+        let opened = std::fs::OpenOptions::new().read(true).open(file);
+        lines.push(format!(
+            "PROBE open_outside_host_root {}",
+            if opened.is_ok() { "ALLOWED" } else { "denied" }
+        ));
+    }
+    for line in lines {
+        println!("{line}");
+    }
+}
+
+/// How long requests in flight may run after the stop signal (TD-024).
+const SHUTDOWN_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
+
+async fn run(args: Args, socket: Option<PathBuf>) -> Result<(), String> {
+    let socket = match socket {
+        Some(socket) => socket,
+        None => socket_path(&args)?,
+    };
+    // No fallback (ADR 0007 item 9): without --backend model, a failed start is an error, never the model.
+    if args.backend.unwrap_or(Backend::Systemvm) == Backend::Systemvm {
+        let options = systemvm::Options::from_args(&args)?;
+        return systemvm::run(options, &socket).await;
+    }
+    check_model_flags(&args)?;
 
     let lock = vesper::baseline::load(&args.baseline_lock)?;
     let firecracker_revision = lock
@@ -171,7 +366,6 @@ async fn run(args: Args) -> Result<(), String> {
     )?;
     let app = app_state.router();
 
-    let socket = socket_path(&args)?;
     // Held for the life of the process: a second vesperd on the same path waits for nothing and fails.
     let _lock = vesper::proxy::claim_socket(&socket)?;
     let listener = bind_owner_only(&socket)?;

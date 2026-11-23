@@ -202,3 +202,20 @@ exceptions:
       through a restart of its control process, or of the System VM, cannot do so here. Measured by make
       systemvm-vesperd-suite step sigkill_removes_microvm. The owner approved this exception in D-066. Resolve by
       accepting it at the parity-GA review, or by a detached lease that a later vesperd can claim.
+  - id: CE-0013
+    owner: cityhunteur
+    issue: 156
+    expiry_date: "2027-03-31"
+    target_release: parity-ga
+    status: open
+    approved_by: cityhunteur
+    approved_on: "2026-11-23"
+    description: >-
+      On vesperd --backend model (the in-memory development surface, ADR 0007 item 9) a request opens host paths
+      (kernel, initrd, drives, pmem, logger and metrics files) only under the --host-root directories, by default
+      the working directory and the per-user temporary directory macOS assigns, because vesperd runs under its own seatbelt profile (ADR 0012). A path
+      outside them gets the error envelope Firecracker gives for a path it cannot open, with "Operation not
+      permitted (os error 1)"; upstream Firecracker opens any path its process may open. Measured by cargo test
+      --test vesperd_sandbox (the_model_backend_opens_host_paths_only_under_its_host_roots). The System VM backend
+      is not changed: its paths name files in the microVM's jail (CE-0009). This follows from the owner's approval
+      of the sandbox in D-066 (D-081). Resolve by accepting it at the parity-GA review.

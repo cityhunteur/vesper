@@ -40,15 +40,13 @@ Vesper’s security model is part of its parity contract. Treat this file as the
 
 ## Entitlements
 
-- Plists: `packaging/macos/vesperd.entitlements` (`com.apple.security.app-sandbox`, `com.apple.security.virtualization`;
-  changes in ADR 0012 slice 2), `packaging/macos/vesper-proxy.entitlements` (no key: the App Sandbox stops an
-  unbundled binary at start, ADR 0012) and `packaging/macos/vesper-vmlauncher.entitlements`
+- Plists: `packaging/macos/vesperd.entitlements` and `packaging/macos/vesper-proxy.entitlements` (no key: the App
+  Sandbox stops an unbundled binary at start, and `vesperd` does not call Virtualization.framework, ADR 0012) and `packaging/macos/vesper-vmlauncher.entitlements`
   (`com.apple.security.virtualization`). `make validate-entitlements` lints them with `plutil` where present, then
   checks that each holds exactly its approved keys, on every host (TD-010). CI runs it in `rust-tests.yml` and on
   macOS in `systemvm-image.yml`.
-- `vesperd --entitlements-file <plist>` checks only that the literal `<key>com.apple.security.virtualization</key>`
-  appears (`src/platform.rs`); the value is not inspected, and without the flag no check runs. `vesper-proxy
-  --entitlements-file` only reads the file before it starts (TD-017).
+- `vesperd --entitlements-file <plist>` and `vesper-proxy --entitlements-file <plist>` only read the file before
+  they start (`src/platform.rs`, TD-017); neither binary needs a key.
 
 ## Seatbelt profiles (ADR 0012)
 
@@ -65,8 +63,16 @@ Vesper’s security model is part of its parity contract. Treat this file as the
 - A file rule resolves the file's directory, not the file, so a symlink at the socket path cannot choose what is
   granted; a socket directory that is a symlink is refused, and a directory that would cover `$HOME` is refused with
   that reason. A `tcp://` upstream must be loopback. Missing directories are made, mode 0700, before the profile.
-- `make sign` (and `make docker-up`) signs the proxy ad hoc with the hardened runtime. `vesperd` and the launcher
-  follow in slices 2 and 3.
+- `vesperd` does the same on both backends (slice 2): it may read the files it names, take `<socket>.lock`, listen
+  on its socket, connect to the bridge socket and, on the model backend, read and write under its `--host-root`
+  directories (default: the working directory and the per-user temporary directory macOS assigns (`confstr`, not `$TMPDIR`), so no environment value widens the profile;
+  CE-0013). A root that covers a home directory, the user database's or `HOME`'s, is refused. A request for a host path outside them gets
+  Firecracker's error envelope for a path it cannot open. It may start no process and use no network.
+  `cargo test --test vesperd_sandbox` (macOS) shows seven refusals on each backend, including a file outside the
+  host roots, and tests show a false `HOME` or `TMPDIR` does not widen the profile. The self-check's canary is the home
+  directory from the user database (`getpwuid_r`). As for the proxy, a socket directory that is a symlink is refused.
+- `make sign`, `make dev-up`, `make docker-up` and the `vesperd` suite targets sign `vesperd` and the proxy ad hoc
+  with the hardened runtime. The launcher follows in slice 3.
 
 ## Security-sensitive changes
 
