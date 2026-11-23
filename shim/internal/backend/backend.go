@@ -17,6 +17,7 @@ import (
 
 	"github.com/cityhunteur/vesper/shim/internal/bundle"
 	"github.com/containerd/containerd/v2/core/mount"
+	"github.com/containerd/log"
 	specs "github.com/opencontainers/runtime-spec/specs-go"
 )
 
@@ -238,6 +239,8 @@ func (m *MicroVM) Launch(ctx context.Context, id, image string, extra []string) 
 	if err != nil || !strings.HasPrefix(first, "LAUNCHED ") {
 		return 0, fmt.Errorf("vesper-microvm launch %s: %v: %s", id, err, first)
 	}
+	// TD-099: the reply carries boot_ms, from the jailer's start to the guest's ready marker.
+	log.G(ctx).WithField("task", id).Info(first)
 	// A workload that exits before the launch returns leaves `pid=` empty: not an error, the watcher
 	// reads its exit marker.
 	match := pidRe.FindStringSubmatch(first)

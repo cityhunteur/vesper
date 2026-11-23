@@ -267,6 +267,18 @@ impl Session {
         (0..n).map(|_| self.read_line()).collect()
     }
 
+    /// The pipes of a supervised daemon (`containerd` or `docker`) and the `log_proxy` processes for its log (TD-094):
+    /// one line for the daemon, then one for each logger, as the agent reports them.
+    pub fn log_pipes(&mut self, daemon: &str) -> Result<Vec<String>, String> {
+        self.send(&format!("LOGPIPES {daemon}"))?;
+        let line = self.read_line()?;
+        let n: usize = line
+            .strip_prefix("LOGPIPES ")
+            .and_then(|v| v.parse().ok())
+            .ok_or_else(|| format!("LOGPIPES {daemon}: unexpected reply {line:?}"))?;
+        (0..n).map(|_| self.read_line()).collect()
+    }
+
     /// Runs `vesper-microvm <args>` in the guest; returns its exit code and output lines.
     pub fn microvm(&mut self, args: &[&str]) -> Result<(i32, Vec<String>), String> {
         self.guest_tool("MICROVM", args)
@@ -477,6 +489,11 @@ mod tests {
                                     .write_all(format!("KILL {name} 4242\n").as_bytes())
                                     .unwrap();
                             }
+                            Some("LOGPIPES") => {
+                                writer
+                                    .write_all(b"LOGPIPES 2\ndaemon pid=7 ppid=6 stdout=pipe:[11] stderr=pipe:[12]\nlogger pid=8 ppid=6 stdin=pipe:[11] cmd=log_proxy\n")
+                                    .unwrap();
+                            }
                             Some("HOSTFREE") => {
                                 let ok = parts.next().is_some_and(|b| b.parse::<u64>().is_ok());
                                 writer
@@ -615,6 +632,9 @@ mod tests {
         let mut session = connect(&endpoint).unwrap();
         assert_eq!(session.kill_service("docker").unwrap(), 4242);
         session.host_free(123_456_789).unwrap();
+        let pipes = session.log_pipes("containerd").unwrap();
+        assert_eq!(pipes.len(), 2);
+        assert!(pipes[1].starts_with("logger pid=8"));
         assert_eq!(session.logs("docker", 10).unwrap().len(), 2);
         let report =
             run_services_suite(&endpoint, &["containerd", "docker"], Duration::from_secs(2));

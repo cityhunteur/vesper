@@ -252,9 +252,18 @@ pub fn run_services_suite(
         let service = *service;
         let before = step(&mut steps, &format!("{service}_healthy_at_boot"), || {
             let health = healthy(&mut session, service)?;
+            // TD-094: a dockerd that started before containerd's socket existed ran a containerd of its own.
+            let pipes = session.log_pipes(service)?;
+            let daemons = pipes.iter().filter(|l| l.starts_with("daemon ")).count();
+            if daemons != 1 {
+                return Err(format!(
+                    "{daemons} {service} processes, not 1: {}",
+                    pipes.join(" | ")
+                ));
+            }
             Ok((
                 (),
-                format!("state started, {service}_ok true, health {health}"),
+                format!("state started, {service}_ok true, one daemon, health {health}"),
             ))
         });
         if before.is_none() {
@@ -304,8 +313,13 @@ pub fn run_services_suite(
                     .filter(|l| l.contains("supervise-daemon") && l.contains(service))
                     .count();
                 if startups < 2 {
+                    // TD-094: what the daemon writes to and which loggers read it, so a lost log carries its state.
+                    let pipes = session
+                        .log_pipes(service)
+                        .map(|l| l.join(" | "))
+                        .unwrap_or_else(|e| e);
                     return Err(format!(
-                        "expected at least two startups in /var/log/{service}.log, found {startups}"
+                        "expected at least two startups in /var/log/{service}.log, found {startups}; log pipes: {pipes}"
                     ));
                 }
                 Ok((

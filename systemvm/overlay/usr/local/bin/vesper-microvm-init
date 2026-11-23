@@ -15,7 +15,8 @@ case " $(cat /proc/cmdline) " in *" vesper_crash=1 "*) echo VESPER-TEST-CRASH; p
 # Upstream Firecracker's guest kernels build these in; without them the balloon and memory-hotplug devices never
 # activate and their API requests fail with "Device not activated yet" (ADR 0007 slice 6).
 /bin/busybox modprobe -a virtio_mmio virtio_balloon virtio_mem >/dev/null 2>&1 || echo "VESPER-MODULES-FAILED"
-echo "VESPER-MICROVM-OK"
+# TD-099: the guest's uptime on the two ready lines times the boot; consumers match the marker as a substring.
+echo "VESPER-MICROVM-OK up=$(cut -d' ' -f1 /proc/uptime)"
 # vesper_console_flood=BYTES writes BYTES of text to the console, then VESPER-FLOOD-DONE: the bounds suite checks
 # that the console log stays bounded (TD-055).
 flood=$(/bin/busybox sed -n 's/.*vesper_console_flood=\([0-9]*\).*/\1/p' /proc/cmdline)
@@ -126,7 +127,7 @@ if /bin/busybox grep -q vesper_rootfs=1 /proc/cmdline; then
       mount --bind /dev/pts /newroot/dev/pts
       ln -s pts/ptmx /newroot/dev/ptmx
       : > /newroot/dev/console
-      echo VESPER-EXEC-READY
+      echo "VESPER-EXEC-READY up=$(cut -d' ' -f1 /proc/uptime)"
       # macOS edits to the task's shares, from the System VM's fanout (GH #160 M6), replayed on the NFS mounts.
       if [ -n "$sharenet" ]; then
         /usr/bin/socat VSOCK-LISTEN:1026,reuseaddr,fork,max-children=16 "EXEC:/usr/bin/vesper-console shares replay,stderr" < /dev/null > /dev/ttyS0 2>&1 &

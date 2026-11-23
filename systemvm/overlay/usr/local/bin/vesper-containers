@@ -129,7 +129,7 @@ prepare() {
     *) hg="" ;;
   esac
   [ -n "$hg" ] || echo "vesper-containers: no IPv4 default gateway; host-gateway stays docker0" >&2
-  printf '{"userns-remap":"default","authorization-plugins":["vesper-authz"],"runtimes":{"vesper-runc":{"path":"/usr/bin/vesper-runc"},"vesper":{"runtimeType":"io.containerd.vesper.v2"}},"default-runtime":"vesper-runc"%s}\n' "${hg:+,\"host-gateway-ips\":[\"$hg\"]}" > "$CONF.new" \
+  printf '{"userns-remap":"default","authorization-plugins":["vesper-authz"],"runtimes":{"vesper-runc":{"path":"/usr/bin/vesper-runc"},"vesper":{"runtimeType":"io.containerd.vesper.v2"}},"default-runtime":"vesper-runc","containerd":"/run/containerd/containerd.sock"%s}\n' "${hg:+,\"host-gateway-ips\":[\"$hg\"]}" > "$CONF.new" \
     && mv -f "$CONF.new" "$CONF" || refuse write-daemon-json
   legacy_store > "$RUN.legacy" # counted once a boot; HEALTH reads it on every poll
   finish mapped
