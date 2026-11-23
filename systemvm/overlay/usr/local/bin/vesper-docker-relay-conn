@@ -4,5 +4,7 @@
 # reaches dockerd (ADR 0010, council finding 20): a container without a seccomp filter can open a vsock socket.
 . "$(dirname "$0")/../lib/vesper/vsock-peer.sh"
 vsock_host_only
-# -t: see vesper-docker-relay; a half-closed client still receives the whole response (GH #167).
-exec /usr/bin/socat -t 86400 STDIO UNIX-CONNECT:/var/run/docker.sock
+# vesper-stream-relay, not socat (TD-093): a half-closed client still receives the whole response (GH #167), and
+# when dockerd ends the stream (it exited, or closed the connection) the host sees the end at once. socat with an
+# STDIO address kept the stream open until the client closed too, which hung `docker events` and the port publisher.
+exec /usr/bin/vesper-stream-relay unix /var/run/docker.sock
