@@ -31,6 +31,9 @@ case "${m3}" in *unsupported*"no binfmt_misc interpreter"*) record unsupported_a
 
 out="$("${DOCKER}" run --rm --platform linux/amd64 "${AMD64_IMAGE}" uname -m 2>&1 | tail -1)"
 [ "${out}" = "x86_64" ] && record run_platform_amd64 true "docker run --platform linux/amd64 ${AMD64_IMAGE} uname -m -> ${out}" || record run_platform_amd64 false "${out}"
+# The run above pulls the amd64 image; where that run is refused (the vesper runtime, D-087) it is pulled here, so
+# this step looks at the image whatever the runtime.
+"${DOCKER}" image inspect "${AMD64_IMAGE}" >/dev/null 2>&1 || "${DOCKER}" pull -q --platform linux/amd64 "${AMD64_IMAGE}" >/dev/null 2>&1
 ia="$("${DOCKER}" image inspect --format '{{.Os}}/{{.Architecture}}' "${AMD64_IMAGE}" 2>&1)"; na="$("${DOCKER}" image inspect --format '{{.Os}}/{{.Architecture}}' "${NATIVE_IMAGE}" 2>&1)"
 [ "${ia}" = "linux/amd64" ] && [ "${na}" = "linux/arm64" ] && record image_inspect_architecture true "${AMD64_IMAGE}: ${ia}; ${NATIVE_IMAGE}: ${na}" || record image_inspect_architecture false "${ia} / ${na}"
 "${DOCKER}" rm -f xa-c >/dev/null 2>&1; "${DOCKER}" run -d --name xa-c --platform linux/amd64 "${AMD64_IMAGE}" sleep 60 >/dev/null 2>&1
