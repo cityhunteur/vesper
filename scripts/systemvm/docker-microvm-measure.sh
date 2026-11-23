@@ -2,14 +2,17 @@
 # ADR 0011 slice 4c: measurements of `vesper` containers beside runc ones, from macOS through vesper-proxy.
 #   run_latency     p50 and p95 of `docker run --rm IMAGE true`, N runs per runtime
 #   stop_latency    p50 and p95 of `docker stop` of a container that exits on SIGTERM, N per runtime
+#   block_io        MiB/s of a dd write with fsync and a read back through the root filesystem, runc and vesper (TD-033)
+#   concurrent_start, memory_per_microvm   K vesper containers started at once; the System VM's available memory
+#                   and Firecracker's resident memory per idle microVM (TD-033)
 #   density         how many `vesper` containers running `sleep` start on this System VM before one is refused, and
 #                   what the refusal says (memory admission, vesper-memadmit)
 #   containerd_restart_keeps_task   containerd is SIGKILLed and respawned while a `vesper` container runs; the
 #                   container still runs, `docker exec` works, and `docker stop` stops it
 #   exit_while_containerd_down      a container exits inside containerd's restart window, with runc and with
 #                   vesper: whether dockerd reports the exit within 30 s of containerd's return, and that `docker
-#                   stop` then reports the right code and leaves no microVM. dockerd misses such an exit with either
-#                   runtime (TD-098); the step passes when vesper does what runc does and stop recovers
+#                   stop` leaves no microVM. dockerd misses such an exit with either runtime, and what it reports after
+#                   stop varies (TD-098); the step passes when vesper answers as runc does in the same run
 # Needs `make systemvm-up && make docker-up`. MEASURE_RUNS (default 10), MEASURE_MAX_DENSITY (default 40). Writes
 # run/systemvm/docker-microvm-measure-report.json. Restarts containerd twice.
 set -uo pipefail
@@ -70,6 +73,31 @@ else
   record density true "all ${MAXD} vesper containers started (MEASURE_MAX_DENSITY); ${mem}"
 fi
 
+# --- TD-033: block I/O, concurrent start, memory per microVM ---------------------------------------------------
+IOSZ="${MEASURE_IO_MIB:-256}"
+IOCMD="ms() { awk '{print int(\$1 * 1000)}' /proc/uptime; }; t0=\$(ms); dd if=/dev/zero of=/io.bin bs=1M count=${IOSZ} conv=fsync 2>/dev/null; t1=\$(ms); dd if=/io.bin of=/dev/null bs=1M 2>/dev/null; t2=\$(ms); echo \$(( ${IOSZ} * 1000 / (t1 - t0 + 1) )) \$(( ${IOSZ} * 1000 / (t2 - t1 + 1) ))"
+io=""; for rt in runc vesper; do
+  r="$(docker run --rm --label vesper.measure=1 --runtime "${rt}" "${IMAGE}" sh -c "${IOCMD}" 2>&1 | tail -1)"
+  io="${io}${rt}: write ${r% *} MiB/s (fsync), read ${r#* } MiB/s (page cache); "
+done
+case "${io}" in *"write "[0-9]*"read "[0-9]*"vesper: write "[0-9]*) record block_io true "${io}${IOSZ} MiB through the container's root filesystem" ;; *) record block_io false "${io}" ;; esac
+# Concurrent start: K vesper containers at once (K defaults to 4, the default System VM's density).
+K="${MEASURE_CONCURRENT:-4}"; t0=$(now_ms); pids=()
+for i in $(seq 1 "${K}"); do docker run -d --label vesper.measure=1 --runtime vesper --name "conc-${i}" "${IMAGE}" sleep 600 >/dev/null 2>&1 & pids+=($!); done
+okn=0; for p in "${pids[@]}"; do wait "${p}" && okn=$((okn + 1)); done; cwall=$(( $(now_ms) - t0 ))
+mem_all="$("${CTL}" control fcparity mem 2>/dev/null | grep '^MEM' | head -1)"
+docker ps -aq --filter label=vesper.measure=1 | xargs docker rm -f >/dev/null 2>&1; sleep 3
+mem_none="$("${CTL}" control fcparity mem 2>/dev/null | grep '^MEM' | head -1)"
+kv() { printf '%s\n' "$1" | tr ' ' '\n' | sed -n "s/^$2=//p"; }
+a0=$(kv "${mem_none}" avail_kib); a1=$(kv "${mem_all}" avail_kib); fcn=$(kv "${mem_all}" firecracker); rss=$(kv "${mem_all}" firecracker_rss_kib)
+if [ "${okn}" = "${K}" ] && [ -n "${a0}" ] && [ -n "${a1}" ] && [ "${fcn:-0}" -gt 0 ]; then
+  record concurrent_start true "${K} vesper containers started at once in ${cwall} ms ($(( okn * 60000 / cwall )) a minute)"
+  record memory_per_microvm true "System VM MemAvailable fell by $(( (a0 - a1) / K / 1024 )) MiB per idle vesper container; Firecracker resident $(( rss / fcn / 1024 )) MiB each (${fcn} running); ${mem_none} / ${mem_all}"
+else
+  record concurrent_start false "${okn} of ${K} started in ${cwall} ms"
+  record memory_per_microvm false "${mem_none} / ${mem_all}"
+fi
+
 # --- containerd restart with a running vesper container ----------------------------------------------------------
 cid="$(docker run -d --label vesper.measure=1 --runtime vesper --name restart-1 "${IMAGE}" sleep 600 2>&1)"
 kill="$("${CTL}" control kill containerd 2>&1 | tail -1)"
@@ -89,23 +117,31 @@ LIFE="${MEASURE_LIFE_MS:-4000}"; LEAD="${MEASURE_KILL_LEAD_MS:-500}"
 declare -A seen
 detail=""
 for rt in runc vesper; do
-  docker rm -f exit-1 >/dev/null 2>&1
-  docker run -d --label vesper.measure=1 --runtime "${rt}" --name exit-1 "${IMAGE}" sh -c "sleep $(python3 -I -c "print(${LIFE}/1000)"); exit 7" >/dev/null 2>&1
-  cid="$(docker inspect -f '{{.Id}}' exit-1 2>/dev/null)"
-  sleep "$(python3 -I -c "print(max(0, (${LIFE} - ${LEAD}) / 1000))")"
+  # The kill must find the container running, with containerd fully back from the step before; else try again.
+  for attempt in 1 2 3; do
+    for _ in $(seq 1 60); do docker run --rm --runtime "${rt}" "${IMAGE}" true >/dev/null 2>&1 && break; sleep 1; done
+    docker rm -f exit-1 >/dev/null 2>&1
+    docker run -d --label vesper.measure=1 --runtime "${rt}" --name exit-1 "${IMAGE}" sh -c "sleep $(python3 -I -c "print(${LIFE}/1000)"); exit 7" >/dev/null 2>&1
+    cid="$(docker inspect -f '{{.Id}}' exit-1 2>/dev/null)"
+    sleep "$(python3 -I -c "print(max(0, (${LIFE} - ${LEAD}) / 1000))")"
+    before="$(docker inspect -f '{{.State.Status}}' exit-1 2>/dev/null)"
+    [ "${before}" = running ] && break
+    detail="${detail}(${rt} attempt ${attempt}: the container was ${before:-gone} before the kill) "
+  done
   "${CTL}" control kill containerd >/dev/null 2>&1
   for _ in $(seq 1 600); do healthy && break; sleep 0.1; done
   reported=no; for _ in $(seq 1 60); do case "$(docker inspect -f '{{.State.Status}}' exit-1 2>/dev/null)" in exited) reported=yes; break ;; esac; sleep 0.5; done
   vm="$("${CTL}" control microvm status "${cid}" 2>/dev/null | head -1 | cut -d' ' -f1)"
   docker stop -t 2 exit-1 >/dev/null 2>&1
   code="$(docker inspect -f '{{.State.ExitCode}}' exit-1 2>&1)"; vm_after="$("${CTL}" control microvm status "${cid}" 2>/dev/null | head -1 | cut -d' ' -f1)"
-  seen[${rt}]="${reported}"
+  seen[${rt}]="${reported} code ${code}"
   detail="${detail}${rt}: exit reported within 30 s: ${reported}; microVM before stop: ${vm:-none}; after docker stop: code ${code}, microVM ${vm_after:-none}. "
-  [ "${code}" = 7 ] || detail="${detail}(${rt}: stop did not report exit code 7) "
   [ "${rt}" = vesper ] && [ "${vm_after}" != ABSENT ] && detail="${detail}(the microVM outlived docker stop) "
   docker rm -f exit-1 >/dev/null 2>&1
 done
-case "${detail}" in *"did not report"*|*"outlived"*) ok=false ;; *) ok=true ;; esac
+# dockerd's answer after the missed exit varies from run to run (code 7 or 0, TD-098); the step asks that vesper
+# answers as runc does in the same run and that no microVM outlives docker stop.
+case "${detail}" in *"outlived"*) ok=false ;; *) ok=true ;; esac
 [ "${seen[runc]}" = "${seen[vesper]}" ] || ok=false
 record exit_while_containerd_down "${ok}" "${detail}(TD-098: dockerd misses an exit while containerd restarts; with vesper the microVM keeps its memory until docker stop)"
 
