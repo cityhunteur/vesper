@@ -164,7 +164,7 @@ func TestVesperShareBindsAllowed(t *testing.T) {
 func TestVesperPlatform(t *testing.T) {
 	store(t)
 	b := `{"Image":"alpine","HostConfig":{"Runtime":"vesper"}}`
-	if d := decide("POST", create+"&platform=linux/amd64", b); d.Allow || !strings.Contains(d.Reason, "linux/arm64 only") {
+	if d := decide("POST", create+"&platform=linux/amd64", b); d.Allow || !strings.Contains(d.Reason, "linux/arm64 only") || !strings.Contains(d.Reason, "--runtime vesper-runc") {
 		t.Errorf("amd64: %+v", d)
 	}
 	for _, p := range []string{"", "&platform=linux/arm64", "&platform=linux/arm64/v8"} {

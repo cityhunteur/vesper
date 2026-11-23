@@ -264,7 +264,8 @@ func checkCreate(u *url.URL, body []byte) Decision {
 		}
 		// A microVM runs the System VM's own architecture; no emulator is in the guest (ADR 0011 slice 4b).
 		if p := u.Query().Get("platform"); p != "" && !strings.HasPrefix(p, "linux/arm64") {
-			return denyVesper("--platform %s is refused for the vesper runtime: its microVM runs linux/arm64 only", p)
+			return denyVesper("--platform %s is refused for the vesper runtime: its microVM runs linux/arm64 only; "+
+				"run the container with --runtime vesper-runc, which runs other architectures under emulation", p)
 		}
 	}
 	if h.VolumeDriver != "" && h.VolumeDriver != "local" {
