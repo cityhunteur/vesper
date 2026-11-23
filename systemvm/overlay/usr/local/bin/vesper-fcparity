@@ -142,10 +142,24 @@ perf() {
   [ "$fails" = 0 ]
 }
 
+# mem: the System VM's available memory and the resident memory of every Firecracker process (TD-033).
+mem() {
+  avail=$(awk '/^MemAvailable:/ {print $2}' /proc/meminfo)
+  count=0; rss=0
+  # As vesper-microvm's fcpid finds them: the command line, then the microVM's own cgroup.
+  for p in $(pgrep -f "firecracker --id " 2>/dev/null); do
+    grep -q "/firecracker/" "/proc/$p/cgroup" 2>/dev/null || continue
+    r=$(awk '/^VmRSS:/ {print $2}' "/proc/$p/status" 2>/dev/null)
+    [ -n "$r" ] && { count=$((count + 1)); rss=$((rss + r)); }
+  done
+  echo "MEM avail_kib=$avail firecracker=$count firecracker_rss_kib=$rss"
+}
+
 cmd=${1:-}; shift 2>/dev/null
 case "$cmd" in
   api) api "$@" ;;
   conformance) conformance "$@" ;;
   perf) perf "$@" ;;
-  *) echo "ERR usage: vesper-fcparity api ID METHOD PATH [BODY] [TIMEOUT]|conformance ID|perf N"; exit 2 ;;
+  mem) mem ;;
+  *) echo "ERR usage: vesper-fcparity api ID METHOD PATH [BODY] [TIMEOUT]|conformance ID|perf N|mem"; exit 2 ;;
 esac
