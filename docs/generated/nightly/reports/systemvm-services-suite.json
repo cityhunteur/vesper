@@ -1,0 +1,67 @@
+{
+  "bridge_path": "run/systemvm/vsock/3.sock",
+  "port": 1024,
+  "steps": [
+    {
+      "name": "handshake",
+      "ok": true,
+      "detail": "protocol 1 host vesper",
+      "elapsed_ms": 3
+    },
+    {
+      "name": "tun_loaded_at_boot",
+      "ok": true,
+      "detail": "/dev/net/tun exists after boot",
+      "elapsed_ms": 65
+    },
+    {
+      "name": "containerd_healthy_at_boot",
+      "ok": true,
+      "detail": "state started, containerd_ok true, health {\"authz\":\"started\",\"containerd_ok\":true,\"containers\":\"mapped\",\"docker_ok\":true,\"docker_version\":\"28.3.3\",\"handlers\":1,\"handlers_max\":64,\"ip\":\"192.168.64.3\",\"kvm\":true,\"legacy_store\":\"absent\",\"packages_ready\":true,\"services\":{\"containerd\":\"started\",\"docker\":\"started\",\"vesper-agent\":\"started\"},\"services_ready\":true,\"share_servers_down\":\"\",\"tun\":true}",
+      "elapsed_ms": 56
+    },
+    {
+      "name": "containerd_simulated_crash",
+      "ok": true,
+      "detail": "SIGKILL sent to pid 2920",
+      "elapsed_ms": 3
+    },
+    {
+      "name": "containerd_recovers",
+      "ok": true,
+      "detail": "healthy again after 57 ms (old pid 2920); health {\"authz\":\"started\",\"containerd_ok\":true,\"containers\":\"mapped\",\"docker_ok\":true,\"docker_version\":\"28.3.3\",\"handlers\":1,\"handlers_max\":64,\"ip\":\"192.168.64.3\",\"kvm\":true,\"legacy_store\":\"absent\",\"packages_ready\":true,\"services\":{\"containerd\":\"started\",\"docker\":\"started\",\"vesper-agent\":\"started\"},\"services_ready\":true,\"share_servers_down\":\"\",\"tun\":true}",
+      "elapsed_ms": 57
+    },
+    {
+      "name": "containerd_logs_capture_startup_and_recovery",
+      "ok": false,
+      "detail": "expected at least two startups in /var/log/containerd.log, found 1",
+      "elapsed_ms": 2
+    },
+    {
+      "name": "docker_healthy_at_boot",
+      "ok": true,
+      "detail": "state started, docker_ok true, health {\"authz\":\"started\",\"containerd_ok\":true,\"containers\":\"mapped\",\"docker_ok\":true,\"docker_version\":\"28.3.3\",\"handlers\":1,\"handlers_max\":64,\"ip\":\"192.168.64.3\",\"kvm\":true,\"legacy_store\":\"absent\",\"packages_ready\":true,\"services\":{\"containerd\":\"started\",\"docker\":\"started\",\"vesper-agent\":\"started\"},\"services_ready\":true,\"share_servers_down\":\"\",\"tun\":true}",
+      "elapsed_ms": 55
+    },
+    {
+      "name": "docker_simulated_crash",
+      "ok": true,
+      "detail": "SIGKILL sent to pid 2878",
+      "elapsed_ms": 2
+    },
+    {
+      "name": "docker_recovers",
+      "ok": true,
+      "detail": "healthy again after 678 ms (old pid 2878); health {\"authz\":\"started\",\"containerd_ok\":true,\"containers\":\"mapped\",\"docker_ok\":true,\"docker_version\":\"28.3.3\",\"handlers\":1,\"handlers_max\":64,\"ip\":\"192.168.64.3\",\"kvm\":true,\"legacy_store\":\"absent\",\"packages_ready\":true,\"services\":{\"containerd\":\"started\",\"docker\":\"started\",\"vesper-agent\":\"started\"},\"services_ready\":true,\"share_servers_down\":\"\",\"tun\":true}",
+      "elapsed_ms": 678
+    },
+    {
+      "name": "docker_logs_capture_startup_and_recovery",
+      "ok": true,
+      "detail": "3 startup lines in docker.log, 6 supervise-daemon lines for docker in messages",
+      "elapsed_ms": 2
+    }
+  ],
+  "passed": false
+}
