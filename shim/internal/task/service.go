@@ -415,7 +415,33 @@ func (s *Service) watch(ctx context.Context, containerID string, t *Task) {
 				}()
 			}
 		}
-		s.publish(ctx, runtime.TaskExitEventTopic, &eventstypes.TaskExit{ContainerID: containerID, ID: t.ID, Pid: uint32(t.Pid()), ExitStatus: status, ExitedAt: protobuf.ToTimestamp(at)})
+		exit := &eventstypes.TaskExit{ContainerID: containerID, ID: t.ID, Pid: uint32(t.Pid()), ExitStatus: status, ExitedAt: protobuf.ToTimestamp(at)}
+		s.publish(ctx, runtime.TaskExitEventTopic, exit)
+		if containerID == t.ID {
+			// Detached from the request, but in its containerd namespace: an event without one is refused.
+			ns, _ := namespaces.Namespace(ctx)
+			go s.republishExit(namespaces.WithNamespace(context.Background(), ns), t, exit)
+		}
+	}
+}
+
+// Republishing of an init task's exit (TD-098): dockerd deletes an exited task within milliseconds of the event,
+// but an exit published while containerd restarts reaches no subscriber, and dockerd does not look again when it
+// resubscribes, so the container showed running until docker stop (with runc as well). Until the task is deleted,
+// the exit is published again every ExitRepublishInterval, at most ExitRepublishTimes times.
+var (
+	ExitRepublishInterval = 10 * time.Second
+	ExitRepublishTimes    = 6
+)
+
+func (s *Service) republishExit(ctx context.Context, t *Task, exit *eventstypes.TaskExit) {
+	for i := 0; i < ExitRepublishTimes; i++ {
+		time.Sleep(ExitRepublishInterval)
+		if t.Phase() == PhaseDeleted {
+			return
+		}
+		log.L.WithField("task", t.ID).Info("the exit is not yet acted on; publishing it again (TD-098)")
+		s.publish(ctx, runtime.TaskExitEventTopic, exit)
 	}
 }
 

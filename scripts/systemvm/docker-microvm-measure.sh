@@ -11,8 +11,9 @@
 #                   container still runs, `docker exec` works, and `docker stop` stops it
 #   exit_while_containerd_down      a container exits inside containerd's restart window, with runc and with
 #                   vesper: whether dockerd reports the exit within 30 s of containerd's return, and that `docker
-#                   stop` leaves no microVM. dockerd misses such an exit with either runtime, and what it reports after
-#                   stop varies (TD-098); the step passes when vesper answers as runc does in the same run
+#                   stop` leaves no microVM. runc's exit is missed (dockerd does not look again when it resubscribes);
+#                   the vesper shim publishes the exit again until the task is deleted, so the step wants vesper's
+#                   exit reported with its code (TD-098)
 # Needs `make systemvm-up && make docker-up`. MEASURE_RUNS (default 10), MEASURE_MAX_DENSITY (default 40). Writes
 # run/systemvm/docker-microvm-measure-report.json. Restarts containerd twice.
 set -uo pipefail
@@ -114,6 +115,7 @@ docker rm -f restart-1 >/dev/null 2>&1
 
 # --- an exit while containerd is down, both runtimes -----------------------------------------------------------
 LIFE="${MEASURE_LIFE_MS:-4000}"; LEAD="${MEASURE_KILL_LEAD_MS:-500}"
+# dockerd hears a republished exit within ExitRepublishInterval (10 s) of resubscribing: wait up to 60 s.
 declare -A seen
 detail=""
 for rt in runc vesper; do
@@ -130,19 +132,20 @@ for rt in runc vesper; do
   done
   "${CTL}" control kill containerd >/dev/null 2>&1
   for _ in $(seq 1 600); do healthy && break; sleep 0.1; done
-  reported=no; for _ in $(seq 1 60); do case "$(docker inspect -f '{{.State.Status}}' exit-1 2>/dev/null)" in exited) reported=yes; break ;; esac; sleep 0.5; done
+  reported=no; for _ in $(seq 1 120); do case "$(docker inspect -f '{{.State.Status}}' exit-1 2>/dev/null)" in exited) reported=yes; break ;; esac; sleep 0.5; done
+  code_seen="$(docker inspect -f '{{.State.ExitCode}}' exit-1 2>/dev/null)"
   vm="$("${CTL}" control microvm status "${cid}" 2>/dev/null | head -1 | cut -d' ' -f1)"
   docker stop -t 2 exit-1 >/dev/null 2>&1
   code="$(docker inspect -f '{{.State.ExitCode}}' exit-1 2>&1)"; vm_after="$("${CTL}" control microvm status "${cid}" 2>/dev/null | head -1 | cut -d' ' -f1)"
-  seen[${rt}]="${reported} code ${code}"
-  detail="${detail}${rt}: exit reported within 30 s: ${reported}; microVM before stop: ${vm:-none}; after docker stop: code ${code}, microVM ${vm_after:-none}. "
+  seen[${rt}]="${reported} code ${code_seen}"
+  detail="${detail}${rt}: exit reported within 60 s: ${reported} (code ${code_seen}); microVM before stop: ${vm:-none}; after docker stop: code ${code}, microVM ${vm_after:-none}. "
   [ "${rt}" = vesper ] && [ "${vm_after}" != ABSENT ] && detail="${detail}(the microVM outlived docker stop) "
   docker rm -f exit-1 >/dev/null 2>&1
 done
-# dockerd's answer after the missed exit varies from run to run (code 7 or 0, TD-098); the step asks that vesper
-# answers as runc does in the same run and that no microVM outlives docker stop.
+# The vesper shim publishes an exit again until the task is deleted (TD-098), so dockerd learns it once it has
+# resubscribed; runc's shim does not, and its line is kept for comparison.
 case "${detail}" in *"outlived"*) ok=false ;; *) ok=true ;; esac
-[ "${seen[runc]}" = "${seen[vesper]}" ] || ok=false
+case "${seen[vesper]}" in "yes code 7") ;; *) ok=false ;; esac
 record exit_while_containerd_down "${ok}" "${detail}(TD-098: dockerd misses an exit while containerd restarts; with vesper the microVM keeps its memory until docker stop)"
 
 passed=true; for s in "${steps[@]}"; do case "$s" in *'"ok":false'*) passed=false ;; esac; done
