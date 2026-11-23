@@ -23,7 +23,7 @@ cd "${ROOT_DIR}"; mkdir -p "$(dirname "${REPORT}")"
 steps=()
 record() { local d; d="$(printf '%s' "$3" | tr '\n' ' ' | cut -c1-600 | sed 's/\\/\\\\/g; s/"/\\"/g')"; steps+=("{\"name\":\"$1\",\"ok\":$2,\"detail\":\"${d}\"}"); if [ "$2" = true ]; then echo "ok   $1"; else echo "FAIL $1: ${d:0:300}"; fi; }
 ctl() { "${CTL[@]}" "$@" 2>&1; }
-NAMES="vm-a vm-b vm-p vm-n vm-s peer-a peer-n joiner"
+NAMES="vm-a vm-b vm-p vm-n vm-s vm-h vm-z vm-c peer-a peer-n joiner"
 NET="${DOCKER_MICROVM_NET:-vesper-microvm-net}"
 cleanup() { docker rm -f ${NAMES} >/dev/null 2>&1; docker network rm "${NET}" >/dev/null 2>&1; }
 trap cleanup EXIT
@@ -156,6 +156,43 @@ case "${iso}|${runcpeer}|${topo}" in "other-port-closed peer-no-reply spoof-no-r
 docker rm -f vm-s >/dev/null 2>&1; sleep 2
 gone="$(ctl microvm sharenet "${sid}" | head -1); $(ctl microvm unfs "${sid}" | head -1)"
 case "${gone}" in "ABSENT ${sid}; "*) record share_link_cleaned_up true "${gone}" ;; *) record share_link_cleaned_up false "${gone}" ;; esac
+
+# --- 11. Honesty and pause (slice 5) ------------------------------------------------------------------------------
+# Routes whose answer would be silently wrong for a microVM are refused by name; a runc container keeps them.
+docker run -d --name vm-h --runtime vesper "${IMAGE}" sleep 300 >/dev/null 2>&1; up vm-h
+bad=""
+EXPORT_TO="$(mktemp)"
+hid="$(docker inspect -f '{{.Id}}' vm-h 2>/dev/null)"
+for op in "cp vm-h:/etc/hostname -" "cp ${hid:0:12}:/etc/hostname -" "diff vm-h" "export -o ${EXPORT_TO} vm-h" "commit vm-h vesper-commit-test" "network connect ${NET} vm-h" "network disconnect bridge vm-h"; do
+  # shellcheck disable=SC2086
+  out="$(docker ${op} 2>&1)"
+  case "${out}" in *"vesper container"*"(ADR 0011)"*) ;; *) bad="${bad} [${op}: ${out:0:100}]" ;; esac
+done
+ctrl="$(docker diff peer-a 2>&1 | head -1)"; case "${ctrl}" in *"(ADR 0011)"*) bad="${bad} [runc diff refused: ${ctrl}]" ;; esac
+# Before its first start a vesper container's drive is still to be built from dockerd's tree: create, cp, start works.
+docker rm -f vm-c >/dev/null 2>&1; docker create --name vm-c --runtime vesper "${IMAGE}" cat /copied.txt >/dev/null 2>&1
+printf 'copied-before-start\n' > "${EXPORT_TO}.in"; cpo="$(docker cp "${EXPORT_TO}.in" vm-c:/copied.txt 2>&1)"; cst="$(docker start -a vm-c 2>&1)"
+docker rm -f vm-c >/dev/null 2>&1; rm -f "${EXPORT_TO}.in"
+[ "${cst}" = copied-before-start ] || bad="${bad} [create, cp, start: ${cpo:0:80} ${cst:0:80}]"
+[ -z "${bad}" ] && record honesty_refusals true "cp (by name and id prefix), diff, export, commit, network connect and disconnect refused for vesper with (ADR 0011); docker diff on runc works; create, cp, start works before the first start" || record honesty_refusals false "${bad}"
+docker rm -f vm-h >/dev/null 2>&1; docker rmi vesper-commit-test >/dev/null 2>&1; rm -f "${EXPORT_TO}"
+# Pause stops the microVM's vCPUs: its output stops, exec is refused, unpause continues it, kill works while paused.
+docker run -d --name vm-z --runtime vesper "${IMAGE}" sh -c 'i=0; while :; do echo $i; i=$((i+1)); sleep 0.2; done' >/dev/null 2>&1; up vm-z
+sleep 1; p="$(docker pause vm-z 2>&1)"; st="$(docker inspect -f '{{.State.Status}}' vm-z 2>&1)"
+n1="$(docker logs vm-z 2>/dev/null | wc -l | tr -d ' ')"; sleep 2; n2="$(docker logs vm-z 2>/dev/null | wc -l | tr -d ' ')"
+ex="$(docker exec vm-z true 2>&1 | head -1)"
+u="$(docker unpause vm-z 2>&1)"; sleep 1.5; n3="$(docker logs vm-z 2>/dev/null | wc -l | tr -d ' ')"
+# After a pause cycle new connections into the guest still work (a Firecracker vCPU pause broke them, D-090).
+ex2="$(timeout 15 docker exec vm-z echo exec-ok 2>&1 | head -1)"
+docker pause vm-z >/dev/null 2>&1; t0=$(date +%s); k="$(docker kill vm-z 2>&1)"; kill_s=$(( $(date +%s) - t0 )); after="$(docker inspect -f '{{.State.Status}}' vm-z 2>&1)"
+detail="pause: ${st}; lines ${n1} then ${n2} after 2 s paused; exec: ${ex:0:80}; unpaused: ${n3} lines; exec after the cycle: ${ex2}; kill while paused: ${after} in ${kill_s} s"
+if [ "${st}" = paused ] && [ "${n1}" = "${n2}" ] && [ "${n3}" -gt "${n2}" ] && case "${ex}" in *paused*) true ;; *) false ;; esac \
+  && [ "${ex2}" = exec-ok ] && [ "${after}" = exited ] && [ "${kill_s}" -le 5 ]; then
+  record pause_and_resume true "${detail}"
+else
+  record pause_and_resume false "${detail}; ${p} ${u} ${k}"
+fi
+docker rm -f vm-z >/dev/null 2>&1
 
 # --- 9. Nothing is left, and the sweep removes the drives ---------------------------------------------------------
 pid_vm_p="$(docker inspect -f '{{.Id}}' vm-p 2>/dev/null)"

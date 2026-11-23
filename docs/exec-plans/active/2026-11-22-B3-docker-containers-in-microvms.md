@@ -28,13 +28,17 @@ macOS. Each Docker command that cannot be honest about a microVM is refused with
   - [x] 4c: measurements (D-088): `vesper` run p50 4.2 s, p95 6.1 s (runc 0.6 s, 1.6 s); stop p50 1.0 s (runc 0.3 s);
     4 containers per default System VM; a task survives a containerd restart; an exit while containerd is down is
     missed as with runc (TD-098) (2026-11-23)
-- [ ] Slice 5: honesty refusals (`cp`, `diff`, `export`, `commit`, `connect`) and Pause and Resume
+- [x] Slice 5: honesty refusals (`cp`, `diff`, `export`, `commit`, `connect`) and Pause and Resume (D-090,
+  `make systemvm-docker-microvm-suite` 16/16, 2026-11-23)
 - [x] Slice 6: only if slice 4's numbers call for it, a shared base drive (TD-035): recorded as not needed (D-089,
   2026-11-23); the drive build is about 0.75 s of a 4 s start, and density is memory-bound
 - [ ] Outcomes & Retrospective written; plan moved to completed
 
 ## Surprises & Discoveries
 
+- Slice 5: after a Firecracker `PATCH /vm` pause and resume, the microVM took no new vsock connection (existing ones
+  kept working), so exec and kill broke after any pause; pause became the guest's cgroup freezer. Firecracker also
+  resets an API connection whose client half-closes before the answer.
 - Slice 4b: an amd64 container in a microVM failed only at exec ("exec format error"); the plugin now refuses the
   option. A `vesper` container running as a non-root user sees share binds owned by `0:0` (TD-097).
 - Slice 4a: BusyBox's `ip link add … type veth peer name X` succeeds but ignores the name (the peer is `veth0`); a

@@ -51,6 +51,9 @@ type Backend interface {
 	Signal(ctx context.Context, id string, port, signal uint32, all bool) error
 	// StopShares stops the microVM's share server once its task has stopped (GH #160 M5); Cleanup does it again.
 	StopShares(ctx context.Context, id string) error
+	// SetPaused freezes or thaws the task's workload with the guest's cgroup freezer (runc pause and resume in the
+	// guest, ADR 0011 slice 5).
+	SetPaused(ctx context.Context, id string, paused bool) error
 	// Stop terminates the microVM (SIGTERM, then SIGKILL after a grace period).
 	Stop(ctx context.Context, id string) error
 	// Cleanup removes the jail, the cgroup and any process and releases the microVM's share of the memory budget;

@@ -2,6 +2,7 @@ package authz
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -23,9 +24,15 @@ var StoreRoots = func() []string {
 
 type storedContainer struct {
 	id, name, runtime string
+	// started: dockerd has started it at least once (State.StartedAt set); a vesper container's drive is built from
+	// dockerd's tree at its first start, so before that the tree is the container's own.
+	started bool
 }
 
 // readStore lists dockerd's containers. An unreadable store is an error: a caller that guards a boundary refuses.
+// errNoStore: none of StoreRoots exists, so dockerd has made no container yet.
+var errNoStore = errors.New("no dockerd container store")
+
 func readStore() ([]storedContainer, error) {
 	var out []storedContainer
 	found := false
@@ -43,8 +50,16 @@ func readStore() ([]storedContainer, error) {
 				continue
 			}
 			dir := filepath.Join(root, e.Name())
-			var cfg struct{ ID, Name string }
+			var cfg struct {
+				ID, Name string
+				State    struct{ StartedAt string }
+			}
 			raw, err := os.ReadFile(filepath.Join(dir, "config.v2.json"))
+			if errors.Is(err, os.ErrNotExist) {
+				// dockerd makes the directory before its files, and removes them before the directory: a container
+				// being created or removed has no name or runtime to match yet (review of D-090).
+				continue
+			}
 			if err != nil {
 				return nil, fmt.Errorf("read %s: %w", dir, err)
 			}
@@ -54,17 +69,21 @@ func readStore() ([]storedContainer, error) {
 			// A container whose runtime cannot be read could be a vesper one: refuse rather than guess (council COR-2).
 			var hc struct{ Runtime string }
 			raw, err = os.ReadFile(filepath.Join(dir, "hostconfig.json"))
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
 			if err != nil {
 				return nil, fmt.Errorf("read %s/hostconfig.json: %w", dir, err)
 			}
 			if err := json.Unmarshal(raw, &hc); err != nil {
 				return nil, fmt.Errorf("parse %s/hostconfig.json: %w", dir, err)
 			}
-			out = append(out, storedContainer{id: cfg.ID, name: strings.TrimPrefix(cfg.Name, "/"), runtime: hc.Runtime})
+			started := cfg.State.StartedAt != "" && !strings.HasPrefix(cfg.State.StartedAt, "0001-01-01")
+			out = append(out, storedContainer{id: cfg.ID, name: strings.TrimPrefix(cfg.Name, "/"), runtime: hc.Runtime, started: started})
 		}
 	}
 	if !found {
-		return nil, fmt.Errorf("no dockerd container store")
+		return nil, errNoStore
 	}
 	return out, nil
 }

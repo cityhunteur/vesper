@@ -5,6 +5,7 @@ import (
 	"github.com/cityhunteur/vesper/shim/internal/bundle"
 	specs "github.com/opencontainers/runtime-spec/specs-go"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cityhunteur/vesper/shim/internal/backend"
@@ -38,6 +39,8 @@ func (p Phase) String() string {
 
 // Task is one container task; the shim serves exactly one.
 type Task struct {
+	// paused: the microVM's vCPUs are paused (ADR 0011 slice 5); changed under opMu, read by State.
+	paused      atomic.Bool
 	opMu        sync.Mutex
 	mu          sync.Mutex
 	ID          string

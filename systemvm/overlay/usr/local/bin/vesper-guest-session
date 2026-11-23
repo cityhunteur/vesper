@@ -45,6 +45,18 @@ case "$op" in
     fi
     echo OK
     exit ;;
+  PAUSE|RESUME)
+    # docker pause and unpause (ADR 0011 slice 5): the workload's cgroup freezer, as runc does on the host. Pausing
+    # the microVM's vCPUs instead left Firecracker taking no new vsock connection after the resume (D-090).
+    [ "$port" = 1028 ] || fail "$op" workload-only
+    [ -f "$dir/pid" ] && [ ! -f "$dir/status" ] || fail "$op" session-not-running
+    if [ "$op" = PAUSE ]; then
+      /usr/bin/runc --root /run/runc pause workload 2>/dev/ttyS0 || fail pause runc-pause-failed
+    else
+      /usr/bin/runc --root /run/runc resume workload 2>/dev/ttyS0 || fail resume runc-resume-failed
+    fi
+    echo OK
+    exit ;;
   RESIZE)
     /usr/bin/vesper-console resize "$dir" "$size" "$tty" 2>/dev/ttyS0 || fail resize resize-failed
     echo OK

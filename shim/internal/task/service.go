@@ -322,6 +322,9 @@ func (s *Service) Start(ctx context.Context, r *taskAPI.StartRequest) (*taskAPI.
 		if parent.Phase() != PhaseRunning || parent.exiting {
 			return nil, errgrpc.ToGRPCf(errdefs.ErrFailedPrecondition, "task is not running")
 		}
+		if parent.paused.Load() {
+			return nil, errgrpc.ToGRPCf(errdefs.ErrFailedPrecondition, "task is paused; resume it first")
+		}
 		pid = parent.Pid()
 	}
 	t.guestKnows = true
@@ -454,6 +457,28 @@ func (s *Service) Kill(ctx context.Context, r *taskAPI.KillRequest) (*emptypb.Em
 		}
 		return &emptypb.Empty{}, nil
 	case PhaseRunning:
+		// A paused guest cannot take a signal: its vCPUs are stopped. As a frozen runc container gets SIGKILL when it
+		// thaws, the microVM is resumed first (ADR 0011 slice 5).
+		// Signal 0 only asks whether the process lives: it is answered without resuming.
+		if task, _ := s.getTask(r.ID); task != nil && task.paused.Load() {
+			if r.Signal == 0 {
+				return &emptypb.Empty{}, nil
+			}
+			if r.ExecID != "" {
+				// The task's lock is not held here; its own Kill or Resume changes the pause.
+				return nil, errgrpc.ToGRPCf(errdefs.ErrFailedPrecondition, "task is paused; resume it first")
+			}
+			if err := s.backend.SetPaused(ctx, r.ID, false); err != nil {
+				if r.Signal == uint32(syscall.SIGKILL) {
+					// A paused guest that cannot be resumed still dies: the bounded wait stops its VMM (review of D-090).
+					go s.killFallback(r.ID, t)
+					return &emptypb.Empty{}, nil
+				}
+				return nil, errgrpc.ToGRPCf(errdefs.ErrUnknown, "resume before the signal: %v", err)
+			}
+			task.paused.Store(false)
+			s.publish(ctx, runtime.TaskResumedEventTopic, &eventstypes.TaskResumed{ContainerID: r.ID})
+		}
 		// A SIGKILL to the init process starts a bounded wait for its EXIT, outside the operation lock. The guest
 		// unmounts its shares before it reports EXIT, so a process stuck in a hard NFS call to a dead server could
 		// hold the task forever; when the wait runs out the VMM is stopped (ADR 0009, Lifecycle; GH #160 M5). The
@@ -570,6 +595,9 @@ func (s *Service) State(ctx context.Context, r *taskAPI.StateRequest) (*taskAPI.
 		status = tasktypes.Status_CREATED
 	case PhaseRunning:
 		status = tasktypes.Status_RUNNING
+		if t.paused.Load() {
+			status = tasktypes.Status_PAUSED
+		}
 	case PhaseStopped:
 		status = tasktypes.Status_STOPPED
 	}
@@ -646,11 +674,43 @@ func notImplemented(what string) error {
 	return errgrpc.ToGRPCf(errdefs.ErrNotImplemented, "%s is not supported by %s yet", what, "io.containerd.vesper.v2")
 }
 
-func (s *Service) Pause(context.Context, *taskAPI.PauseRequest) (*emptypb.Empty, error) {
-	return nil, notImplemented("pause")
+// Pause stops the microVM's vCPUs through its Firecracker (ADR 0011 slice 5): the whole guest halts, the task's
+// processes with it, as the cgroup freezer halts a runc container's. State reports PAUSED until Resume.
+func (s *Service) Pause(ctx context.Context, r *taskAPI.PauseRequest) (*emptypb.Empty, error) {
+	return s.setPaused(ctx, r.ID, true)
 }
-func (s *Service) Resume(context.Context, *taskAPI.ResumeRequest) (*emptypb.Empty, error) {
-	return nil, notImplemented("resume")
+
+// Resume starts the microVM's vCPUs again.
+func (s *Service) Resume(ctx context.Context, r *taskAPI.ResumeRequest) (*emptypb.Empty, error) {
+	return s.setPaused(ctx, r.ID, false)
+}
+
+func (s *Service) setPaused(ctx context.Context, id string, paused bool) (*emptypb.Empty, error) {
+	t, err := s.getTask(id)
+	if err != nil {
+		return nil, err
+	}
+	t.opMu.Lock()
+	defer t.opMu.Unlock()
+	if t.Phase() != PhaseRunning || t.exiting {
+		return nil, errgrpc.ToGRPCf(errdefs.ErrFailedPrecondition, "task must be running")
+	}
+	if t.paused.Load() == paused {
+		if paused {
+			return nil, errgrpc.ToGRPCf(errdefs.ErrFailedPrecondition, "task is already paused")
+		}
+		return nil, errgrpc.ToGRPCf(errdefs.ErrFailedPrecondition, "task is not paused")
+	}
+	if err := s.backend.SetPaused(ctx, id, paused); err != nil {
+		return nil, errgrpc.ToGRPCf(errdefs.ErrUnknown, "%v", err)
+	}
+	t.paused.Store(paused)
+	if paused {
+		s.publish(ctx, runtime.TaskPausedEventTopic, &eventstypes.TaskPaused{ContainerID: id})
+	} else {
+		s.publish(ctx, runtime.TaskResumedEventTopic, &eventstypes.TaskResumed{ContainerID: id})
+	}
+	return &emptypb.Empty{}, nil
 }
 func (s *Service) Checkpoint(context.Context, *taskAPI.CheckpointTaskRequest) (*emptypb.Empty, error) {
 	return nil, notImplemented("checkpoint")
@@ -664,6 +724,9 @@ func (s *Service) Exec(ctx context.Context, r *taskAPI.ExecProcessRequest) (*emp
 	defer parent.opMu.Unlock()
 	if parent.Phase() != PhaseRunning || parent.exiting {
 		return nil, errgrpc.ToGRPCf(errdefs.ErrFailedPrecondition, "task must be running")
+	}
+	if parent.paused.Load() {
+		return nil, errgrpc.ToGRPCf(errdefs.ErrFailedPrecondition, "task is paused; resume it first")
 	}
 	if r.ExecID == "" || r.ExecID == r.ID || r.Spec == nil {
 		return nil, errgrpc.ToGRPCf(errdefs.ErrInvalidArgument, "exec needs a distinct id and process spec")
@@ -712,6 +775,10 @@ func (s *Service) ResizePty(ctx context.Context, r *taskAPI.ResizePtyRequest) (*
 	defer t.opMu.Unlock()
 	if !t.Terminal || t.Phase() != PhaseRunning {
 		return nil, errgrpc.ToGRPCf(errdefs.ErrFailedPrecondition, "terminal session is not running")
+	}
+	// A paused guest would hold this lock through the resize deadline, and with it Resume and Kill.
+	if task, _ := s.getTask(r.ID); task != nil && task.paused.Load() {
+		return nil, errgrpc.ToGRPCf(errdefs.ErrFailedPrecondition, "task is paused; resume it first")
 	}
 	if err := s.backend.Resize(ctx, r.ID, t.Port, r.Height, r.Width); err != nil {
 		return nil, errgrpc.ToGRPCf(errdefs.ErrInvalidArgument, "resize: %v", err)

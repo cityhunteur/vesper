@@ -19,7 +19,7 @@ func TestRoutes(t *testing.T) {
 		{"GET", "/v1.51/images/public.ecr.aws/firecracker/fcuvm:v90/json"},
 		{"DELETE", "/v1.51/images/vesper/trivial:guest"}, {"POST", "/v1.51/images/a/b/tag?repo=c"},
 		{"GET", "/v1.51/distribution/docker.io/library/alpine/json"},
-		{"POST", "/v1.51/networks/create"}, {"POST", "/v1.51/networks/n/connect"}, {"DELETE", "/v1.51/networks/n"},
+		{"POST", "/v1.51/networks/create"}, {"DELETE", "/v1.51/networks/n"},
 		{"GET", "/v1.51/volumes"}, {"DELETE", "/v1.51/volumes/v"}, {"POST", "/v1.51/build?t=x"},
 		{"POST", "/v1.51/build?version=1&networkmode=bridge"}, {"GET", "/v1.51/events"}, {"POST", "/auth"},
 		{"GET", "/v1/version"},

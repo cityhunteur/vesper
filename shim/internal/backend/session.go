@@ -257,6 +257,35 @@ func (m *MicroVM) Signal(ctx context.Context, id string, port, signal uint32, al
 	return nil
 }
 
+// SetPaused sends PAUSE or RESUME for the workload session to the guest's control port: runc pause or resume of the
+// workload in the guest, which freezes its cgroup as runc does a container's on the host. (Pausing Firecracker's
+// vCPUs left the microVM taking no new vsock connection after the resume, D-090.)
+func (m *MicroVM) SetPaused(ctx context.Context, id string, paused bool) error {
+	op := "RESUME"
+	if paused {
+		op = "PAUSE"
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	c, err := dialPort(ctx, m.socket(id), 1025)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	_ = c.SetDeadline(time.Now().Add(5 * time.Second))
+	if _, err = fmt.Fprintf(c, "%s 1028 0 0\n", op); err != nil {
+		return fmt.Errorf("send %s: %w", op, err)
+	}
+	raw, err := bufio.NewReader(c).ReadSlice('\n')
+	if err != nil {
+		return fmt.Errorf("%s reply: %w", op, err)
+	}
+	if line := strings.TrimSpace(string(raw)); line != "OK" {
+		return fmt.Errorf("%s: %s", op, line)
+	}
+	return nil
+}
+
 func (m *MicroVM) Resize(ctx context.Context, id string, port, rows, cols uint32) error {
 	if rows == 0 || cols == 0 || rows > 65535 || cols > 65535 {
 		return fmt.Errorf("terminal size must be 1..65535")
