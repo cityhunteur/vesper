@@ -15,4 +15,10 @@ for name in vesper-proxy vesperd; do
   fi
 done
 
+# A process killed before it could clean up leaves its socket; the reliability suite counts any socket under run/ as a
+# leak. Only the dev loop's two sockets, and only sockets.
+for sock in vesperd.sock docker.sock; do
+  if [[ -S "${RUN_DIR}/${sock}" ]]; then rm -f "${RUN_DIR:?}/${sock}"; fi
+done
+
 echo "services stopped"

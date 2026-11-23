@@ -49,6 +49,7 @@ run_target() { # target [make args...]
 say "commit ${SHA}${DIRTY[0]:+ (tree has changes not committed)}; cycles ${CYCLES}; suites: ${SUITES}"
 # The launcher the suites boot is built from this commit, so the bundle's SHA names what ran.
 make -s vmlauncher-build < /dev/null > "${OUT}/logs/vmlauncher-build.log" 2>&1 || { say "vmlauncher-build failed"; exit 2; }
+make -s dev-down < /dev/null > /dev/null 2>&1 || true
 make -s docker-down < /dev/null > /dev/null 2>&1 || true
 make -s systemvm-down < /dev/null > /dev/null 2>&1 || true
 # The reliability suite boots and stops its own System VMs.
