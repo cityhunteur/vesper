@@ -51,6 +51,8 @@ type Backend interface {
 	Signal(ctx context.Context, id string, port, signal uint32, all bool) error
 	// StopShares stops the microVM's share server once its task has stopped (GH #160 M5); Cleanup does it again.
 	StopShares(ctx context.Context, id string) error
+	// SetPaused pauses or resumes the microVM's vCPUs through its Firecracker (ADR 0011 slice 5).
+	SetPaused(ctx context.Context, id string, paused bool) error
 	// Stop terminates the microVM (SIGTERM, then SIGKILL after a grace period).
 	Stop(ctx context.Context, id string) error
 	// Cleanup removes the jail, the cgroup and any process and releases the microVM's share of the memory budget;
@@ -249,6 +251,18 @@ func (m *MicroVM) StopShares(ctx context.Context, id string) error {
 	out, err := exec.CommandContext(ctx, microvmBin, "unfs-stop", id).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("vesper-microvm unfs-stop %s: %v: %s", id, err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+func (m *MicroVM) SetPaused(ctx context.Context, id string, paused bool) error {
+	state := "Resumed"
+	if paused {
+		state = "Paused"
+	}
+	out, err := exec.CommandContext(ctx, microvmBin, "vm-state", id, state).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("vesper-microvm vm-state %s %s: %v: %s", id, state, err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }

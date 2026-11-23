@@ -176,3 +176,39 @@ func TestVesperPlatform(t *testing.T) {
 		t.Errorf("runc amd64 refused: %s", d.Reason)
 	}
 }
+
+// ADR 0011 slice 5: cp, export, diff, commit and network connect/disconnect are refused for a vesper container, by
+// name, id or unique id prefix, and left to dockerd for any other.
+func TestVesperHonestyRefusals(t *testing.T) {
+	vid, rid := strings.Repeat("a", 64), strings.Repeat("b", 64)
+	store(t, [3]string{vid, "vm", "vesper"}, [3]string{rid, "rc", "runc"})
+	for _, ref := range []string{"vm", vid, "aaaa"} {
+		for _, req := range [][3]string{
+			{"GET", "/v1.51/containers/" + ref + "/archive?path=/etc", ""},
+			{"PUT", "/v1.51/containers/" + ref + "/archive?path=/tmp", ""},
+			{"HEAD", "/v1.51/containers/" + ref + "/archive?path=/etc", ""},
+			{"GET", "/v1.51/containers/" + ref + "/export", ""},
+			{"GET", "/v1.51/containers/" + ref + "/changes", ""},
+			{"POST", "/v1.51/commit?container=" + ref + "&repo=x", ""},
+			{"POST", "/v1.51/networks/n1/connect", `{"Container":"` + ref + `"}`},
+			{"POST", "/v1.51/networks/n1/disconnect", `{"container":"` + ref + `","Force":true}`},
+		} {
+			d := decide(req[0], req[1], req[2])
+			if d.Allow || !strings.Contains(d.Reason, "vesper container") || !strings.HasSuffix(d.Reason, "(ADR 0011)") {
+				t.Errorf("%s %s %s: %+v", req[0], req[1], req[2], d)
+			}
+		}
+	}
+	for _, req := range [][3]string{
+		{"GET", "/v1.51/containers/rc/archive?path=/etc", ""},
+		{"GET", "/containers/" + rid + "/export", ""},
+		{"GET", "/v1.51/containers/rc/changes", ""},
+		{"POST", "/v1.51/commit?container=rc", ""},
+		{"POST", "/v1.51/networks/n1/connect", `{"Container":"rc"}`},
+		{"GET", "/v1.51/containers/nosuch/changes", ""},
+	} {
+		if d := decide(req[0], req[1], req[2]); !d.Allow {
+			t.Errorf("%s %s: refused: %s", req[0], req[1], d.Reason)
+		}
+	}
+}

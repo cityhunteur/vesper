@@ -2,6 +2,7 @@ package authz
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -26,6 +27,9 @@ type storedContainer struct {
 }
 
 // readStore lists dockerd's containers. An unreadable store is an error: a caller that guards a boundary refuses.
+// errNoStore: none of StoreRoots exists, so dockerd has made no container yet.
+var errNoStore = errors.New("no dockerd container store")
+
 func readStore() ([]storedContainer, error) {
 	var out []storedContainer
 	found := false
@@ -64,7 +68,7 @@ func readStore() ([]storedContainer, error) {
 		}
 	}
 	if !found {
-		return nil, fmt.Errorf("no dockerd container store")
+		return nil, errNoStore
 	}
 	return out, nil
 }

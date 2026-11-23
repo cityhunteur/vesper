@@ -674,6 +674,22 @@ test_unfs_probe() { # ID [probe flags]
 # The jail root of microVM ID: a Docker task's is on the data disk (ADR 0011 §5), every other one in tmpfs.
 jail_base() { if [ -e "$CTRNS/$1" ]; then echo "$DISK_JAIL"; else echo "$JAIL"; fi; }
 
+# vm-state ID Paused|Resumed: pause or resume the microVM's vCPUs through its own Firecracker's API (ADR 0011 slice
+# 5, docker pause and unpause). Prints VMSTATE ID STATE, or ERR with Firecracker's answer.
+vm_state() {
+  vs_id=${1:-}; vs_st=${2:-}
+  valid_id "$vs_id" || { echo "ERR bad id"; return 2; }
+  case "$vs_st" in Paused|Resumed) ;; *) echo "ERR usage: vm-state ID Paused|Resumed"; return 2 ;; esac
+  vs_sock="$(jail_base "$vs_id")/firecracker/$vs_id/root/run/firecracker.socket"
+  [ -S "$vs_sock" ] || { echo "ERR $vs_id has no Firecracker API socket"; return 1; }
+  vs_body="{\"state\":\"$vs_st\"}"
+  # A data-disk jail's socket path passes the 108-byte limit of a Unix address, so it is dialled from its directory.
+  # shut-none: Firecracker resets a connection whose client shuts its write side before the answer.
+  vs_resp=$(cd "$(dirname "$vs_sock")" && printf 'PATCH /vm HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: %s\r\nConnection: close\r\n\r\n%s' \
+    "${#vs_body}" "$vs_body" | timeout 10 socat -t 5 - "UNIX-CONNECT:firecracker.socket,shut-none" 2>&1 | head -1 | tr -d '\r')
+  case "$vs_resp" in "HTTP/1.1 204"*) echo "VMSTATE $vs_id $vs_st" ;; *) echo "ERR vm-state: ${vs_resp:-no answer}"; return 1 ;; esac
+}
+
 # ctrns_links ID [SHARENET]: the links of a Docker task in its namespace (ADR 0011 §3): the data link, the DNS link
 # when dockerd runs its resolver there, and with SHARENET 1 the share link (slice 4), always last. Prints the
 # Firecracker network config fragment on its first line and the boot arguments on its second; prints nothing when
@@ -1303,6 +1319,7 @@ case "$cmd" in
   reap-loop) reap_loop "$@" ;;
   setup-user) setup_user ;;
   test-share-listen) test_share_listen "$@" ;;
+  vm-state) vm_state "$@" ;;
   test-share-reach) test_share_reach "$@" ;;
   test-age) test_age "$@" ;;
   test-abort-launch) test_abort_launch "$@" ;;

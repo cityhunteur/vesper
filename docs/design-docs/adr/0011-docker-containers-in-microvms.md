@@ -235,9 +235,10 @@ The table is kept in the shim's README with a test for each row.
 - New costs per container: a holder, two or three taps, possibly a veth pair, a drive on the data disk, a guest NIC
   per link; `iproute2-tc` in the System VM; a store reader in the plugin.
 - Deviations, recorded in design-v0 and the tracker: `docker cp`, `diff`, `export`, `commit` and `network connect`
-  until slice 5 (then refused); named volumes and `--read-only` refused; anonymous volumes are not shared; changes
+  refused for a `vesper` container since slice 5 (D-090); named volumes and `--read-only` refused; anonymous volumes are not shared; changes
   dockerd makes to `hosts` or `resolv.conf` after start do not reach the guest; IPv6 networks refused; `docker
-  pause` refused until slice 5; `docker stats` reports the microVM's cgroup; `docker top` and `docker inspect` show the
+  pause` and `unpause` stop and start the microVM's vCPUs since slice 5 (a paused task is resumed before a `kill`, and
+  `exec` is refused while paused, as Docker does; D-090); `docker stats` reports the microVM's cgroup; `docker top` and `docker inspect` show the
   namespace holder's pid; `Update` refused; `linux/amd64` images do not run in a `vesper` container (the guest has no qemu-user), and
   since slice 4b `--platform` other than `linux/arm64` is refused at create by name (D-087); a non-root container
   user sees its share binds owned by `0:0` and cannot `chmod` them (TD-097). `make phase4-vesper` runs the Phase 4
