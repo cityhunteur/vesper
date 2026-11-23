@@ -71,6 +71,11 @@ struct Options {
     var watchDryRun: [String] = []
     var watchSinkSocket: String? = nil
     var printConfig = false
+    var noSandbox = false
+    var sandboxProbe = false
+    var probeTcp: UInt16? = nil
+    var probeUnix: String? = nil
+    var probeFile: String? = nil
 }
 
 /// Host facts for backend selection (GH #17): nested virtualisation needs macOS 15 and an M3 or later.
@@ -97,7 +102,7 @@ func hostCapabilitiesJSON() -> String {
 
 func usage() -> String {
     """
-    usage: vesper-vmlauncher [--config PATH] [--ready-pattern TEXT] [--timeout-seconds N] [--keep-running] [--skip-probe]
+    usage: vesper-vmlauncher [--config PATH] [--ready-pattern TEXT] [--timeout-seconds N] [--keep-running] [--skip-probe] [--no-sandbox]
            vesper-vmlauncher --host-capabilities
            vesper-vmlauncher --config PATH --print-config
            vesper-vmlauncher --watch-dry-run DIR [--watch-dry-run DIR ...] [--watch-sink-socket PATH]
@@ -105,6 +110,7 @@ func usage() -> String {
       --ready-pattern TEXT   console text that marks a healthy boot (default: ready_pattern from the config, else "login:")
       --timeout-seconds N    give up after N seconds (default 60)
       --keep-running         do not stop the VM after the ready pattern; wait for guest shutdown
+      --no-sandbox           run the VM without the launcher's seatbelt profile (ADR 0012), for diagnosis only
       --skip-probe           ignore the config's probe: stop right after the ready pattern
       --host-capabilities    print host facts (nested virtualization support, macOS, chip) as JSON and exit
       --print-config         no VM: print the launch config as this launcher decoded it, as JSON, and exit
@@ -115,6 +121,49 @@ func usage() -> String {
       --watch-sink-socket PATH  with --watch-dry-run: send the paths to the Unix stream socket PATH, as the
                              launcher sends them to the guest, instead of printing them (self-test)
     """
+}
+
+/// Opens the console log for writing, made or emptied: open(2) with O_CREAT and O_TRUNC, not FileManager.createFile,
+/// which writes a temporary file in the directory and renames it, so a profile that names only the log refuses it.
+func openConsoleLog(_ path: String) -> FileHandle? {
+    try? FileManager.default.createDirectory(
+        at: URL(fileURLWithPath: path).deletingLastPathComponent(), withIntermediateDirectories: true)
+    let fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0o644)
+    return fd >= 0 ? FileHandle(fileDescriptor: fd, closeOnDealloc: true) : nil
+}
+
+/// Binds and listens on the bridge's Unix socket at `path`, owner-only; returns the descriptor, or an error.
+func bindBridgeSocket(_ path: String) -> (Int32, String?) {
+    try? FileManager.default.createDirectory(
+        at: URL(fileURLWithPath: path).deletingLastPathComponent(), withIntermediateDirectories: true)
+    unlink(path)
+    var addr = sockaddr_un()
+    addr.sun_family = sa_family_t(AF_UNIX)
+    let pathBytes = Array(path.utf8)
+    guard pathBytes.count < MemoryLayout.size(ofValue: addr.sun_path) else {
+        return (-1, "bridge socket path is too long: \(path)")
+    }
+    let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+    guard fd >= 0 else { return (-1, "bridge socket(): \(String(cString: strerror(errno)))") }
+    withUnsafeMutablePointer(to: &addr.sun_path) { ptr in
+        ptr.withMemoryRebound(to: UInt8.self, capacity: pathBytes.count + 1) { dst in
+            for (index, byte) in pathBytes.enumerated() { dst[index] = byte }
+            dst[pathBytes.count] = 0
+        }
+    }
+    let bound = withUnsafePointer(to: &addr) { ptr in
+        ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in
+            Darwin.bind(fd, sa, socklen_t(MemoryLayout<sockaddr_un>.size))
+        }
+    }
+    guard bound == 0, listen(fd, 16) == 0 else {
+        let message = "bridge bind/listen \(path): \(String(cString: strerror(errno)))"
+        close(fd)
+        return (-1, message)
+    }
+    // The bridge reaches any guest vsock port, so only the owner may use it.
+    chmod(path, 0o600)
+    return (fd, nil)
 }
 
 func fail(_ code: Int32, _ message: String) -> Never {
@@ -155,6 +204,19 @@ func parseOptions() -> Options {
         case "--watch-sink-socket":
             guard !args.isEmpty else { fail(3, "--watch-sink-socket needs a path") }
             options.watchSinkSocket = args.removeFirst()
+        case "--no-sandbox":
+            options.noSandbox = true
+        case "--sandbox-probe":
+            options.sandboxProbe = true
+        case "--probe-tcp":
+            guard !args.isEmpty, let port = UInt16(args.removeFirst()) else { fail(3, "--probe-tcp needs a port") }
+            options.probeTcp = port
+        case "--probe-unix":
+            guard !args.isEmpty else { fail(3, "--probe-unix needs a path") }
+            options.probeUnix = args.removeFirst()
+        case "--probe-file":
+            guard !args.isEmpty else { fail(3, "--probe-file needs a path") }
+            options.probeFile = args.removeFirst()
         case "--help", "-h":
             print(usage())
             exit(0)
@@ -336,12 +398,8 @@ final class Launcher: NSObject, VZVirtualMachineDelegate {
         self.readyPattern = pattern
         self.patternData = pattern.data(using: .utf8)!
         self.probe = options.skipProbe ? nil : config.probe
-        let logURL = URL(fileURLWithPath: config.console_log_path)
-        try? FileManager.default.createDirectory(
-            at: logURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        FileManager.default.createFile(atPath: config.console_log_path, contents: nil)
-        guard let handle = FileHandle(forWritingAtPath: config.console_log_path) else {
-            fail(3, "cannot open console log \(config.console_log_path) for writing")
+        guard let handle = openConsoleLog(config.console_log_path) else {
+            fail(3, "cannot open console log \(config.console_log_path) for writing: \(String(cString: strerror(errno)))")
         }
         self.log = handle
         super.init()
@@ -426,34 +484,8 @@ final class Launcher: NSObject, VZVirtualMachineDelegate {
         guard let device = machine.socketDevices.first as? VZVirtioSocketDevice else {
             fail(3, "VM has no virtio socket device")
         }
-        let url = URL(fileURLWithPath: path)
-        try? FileManager.default.createDirectory(
-            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        unlink(path)
-        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
-        guard fd >= 0 else { fail(1, "bridge socket(): \(String(cString: strerror(errno)))") }
-        var addr = sockaddr_un()
-        addr.sun_family = sa_family_t(AF_UNIX)
-        let pathBytes = Array(path.utf8)
-        guard pathBytes.count < MemoryLayout.size(ofValue: addr.sun_path) else {
-            fail(3, "bridge socket path is too long: \(path)")
-        }
-        withUnsafeMutablePointer(to: &addr.sun_path) { ptr in
-            ptr.withMemoryRebound(to: UInt8.self, capacity: pathBytes.count + 1) { dst in
-                for (index, byte) in pathBytes.enumerated() { dst[index] = byte }
-                dst[pathBytes.count] = 0
-            }
-        }
-        let bound = withUnsafePointer(to: &addr) { ptr in
-            ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in
-                Darwin.bind(fd, sa, socklen_t(MemoryLayout<sockaddr_un>.size))
-            }
-        }
-        guard bound == 0, listen(fd, 16) == 0 else {
-            fail(1, "bridge bind/listen \(path): \(String(cString: strerror(errno)))")
-        }
-        // The bridge reaches any guest vsock port, so only the owner may use it.
-        chmod(path, 0o600)
+        let (fd, error) = bindBridgeSocket(path)
+        if let error = error { fail(error.hasPrefix("bridge socket path is too long") ? 3 : 1, error) }
         bridgeFd = fd
         let source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: .main)
         source.setEventHandler { [weak self] in
@@ -733,6 +765,42 @@ if options.printConfig {
 // A config written before the bridge allow-list (TD-027) would refuse every port; say so instead.
 if let bridge = config.vsock_bridge_path, !bridge.isEmpty, (config.bridge_allowed_ports ?? []).isEmpty {
     fail(3, "launch config serves a vsock bridge but lists no bridge_allowed_ports; regenerate it with 'make systemvm-launch-config'")
+}
+// The launcher's own profile, before the VM and any of its threads (ADR 0012 slice 3). The modes above need no VM
+// and exit first.
+if options.noSandbox {
+    FileHandle.standardError.write(
+        "vesper-vmlauncher: WARNING: running without its sandbox profile (--no-sandbox), for diagnosis only\n"
+            .data(using: .utf8)!)
+} else if let error = sandboxConfine(config) {
+    fail(1, error.description)
+}
+if options.sandboxProbe {
+    for line in sandboxProbe(tcpPort: options.probeTcp, unixPath: options.probeUnix, file: options.probeFile) {
+        print(line)
+    }
+    // What the launcher needs before and outside the VM, through the same functions the VM path uses.
+    func need(_ name: String, _ ok: Bool) { print("NEED \(name) \(ok ? "ok" : "FAILED \(String(cString: strerror(errno)))")") }
+    need("console_log", openConsoleLog(config.console_log_path) != nil)
+    if let bridge = config.vsock_bridge_path, !bridge.isEmpty {
+        let (fd, _) = bindBridgeSocket(bridge)
+        need("bridge", fd >= 0)
+        if fd >= 0 {
+            close(fd)
+            unlink(bridge)
+        }
+    }
+    for (name, path, mode) in [
+        ("kernel", config.kernel_path, O_RDONLY), ("initrd", config.initrd_path, O_RDONLY),
+        ("boot_media", config.boot_media_path, O_RDONLY), ("rootfs", config.rootfs_path, O_RDWR),
+        ("data_disk", config.data_disk_path, O_RDWR),
+    ] {
+        guard let path = path, !path.isEmpty else { continue }
+        let fd = open(path, mode)
+        need(name, fd >= 0)
+        if fd >= 0 { close(fd) }
+    }
+    exit(0)
 }
 guard VZVirtualMachine.isSupported else {
     fail(3, "Virtualization.framework is not supported on this host")
