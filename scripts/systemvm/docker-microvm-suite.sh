@@ -4,7 +4,8 @@
 # microVM; the image's owners are the container's own; dockerd's hostname, hosts and resolv.conf reach it; it reaches
 # a runc peer by address and the internet and serves a published port; its writes survive stop and start; frames
 # from a spoofed address or MAC go nowhere; every option ADR 0011 refuses is refused, and a runc container cannot
-# join a vesper container's namespaces; on a user-defined network it reaches a peer by name and external names
+# join a vesper container's namespaces; an amd64 image is refused at create, with or without --platform, naming
+# --runtime vesper-runc (D-103); on a user-defined network it reaches a peer by name and external names
 # through dockerd's resolver (slice 3); a bind from a shared macOS directory reads and writes through the container's
 # own share server, read-only when asked, on its last NIC, reaching nothing but the server (slice 4); after
 # `docker rm` nothing is left and the sweep removes the drive.
@@ -112,6 +113,21 @@ done
 tm="$(docker run --rm --runtime vesper --tmpfs /scratch:size=8m "${IMAGE}" sh -c 'grep " /scratch " /proc/mounts | cut -d" " -f3' 2>&1)"
 [ "${tm}" = tmpfs ] || bad="${bad} [--tmpfs is honoured: ${tm}]"
 [ -z "${bad}" ] && record refused_options_are_refused true "eight vesper options and three runc joins refused with (ADR 0011); --tmpfs honoured" || record refused_options_are_refused false "${bad}"
+
+# --- 8b. An image for another architecture is refused at create, naming the runtime that runs it (D-099 G3) -------
+# Its own image reference, as in the crossarch suite: an amd64 pull of IMAGE would re-tag the native one.
+A64="${DOCKER_MICROVM_AMD64_IMAGE:-busybox:1.37}"
+docker pull -q --platform linux/amd64 "${A64}" >/dev/null 2>&1
+ia="$(docker image inspect --format '{{.Architecture}}' "${A64}" 2>&1)"
+# Without --platform the plugin sees nothing to refuse; the shim reads the program's ELF header at create.
+na="$(docker run --rm --runtime vesper "${A64}" true 2>&1 | grep -v "^WARNING" | tr '\n' ' ')"
+pf="$(docker create --runtime vesper --platform linux/amd64 "${A64}" true 2>&1 | tr '\n' ' ')"
+fb="$(docker run --rm --runtime vesper-runc "${A64}" uname -m 2>&1 | tail -1)"
+detail="image ${ia}; no --platform: ${na:0:260}; --platform: ${pf:0:160}; vesper-runc: ${fb}"
+case "${ia}|${na}|${pf}|${fb}" in
+  "amd64|"*"built for linux/amd64"*"--runtime vesper-runc"*"|"*"--runtime vesper-runc"*"|x86_64") record foreign_arch_names_the_fallback true "${detail}" ;;
+  *) record foreign_arch_names_the_fallback false "${detail}" ;;
+esac
 
 # --- 10. Shares (slice 4): a bind from a shared macOS directory reaches the container through its own server -------
 SHARE="${DOCKER_MICROVM_SHARE:-${ROOT_DIR}/run/vesperd-share}"

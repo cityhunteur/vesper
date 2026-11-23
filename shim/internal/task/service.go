@@ -222,6 +222,11 @@ func (s *Service) createDocker(ctx context.Context, r *taskAPI.CreateTaskRequest
 	if err != nil {
 		return nil, errgrpc.ToGRPCf(errdefs.ErrInvalidArgument, "%v", err)
 	}
+	// An image for another architecture is refused here, naming the runtime that can run it, and not left to fail in
+	// the guest with "exec format error" (D-099 G3).
+	if err := bundle.CheckArch(root, spec.Process); err != nil {
+		return nil, errgrpc.ToGRPCf(errdefs.ErrInvalidArgument, "%v", err)
+	}
 	size, err := bundle.SizeOf(spec, bundle.SystemCPUs())
 	if err != nil {
 		return nil, errgrpc.ToGRPCf(errdefs.ErrInvalidArgument, "%v", err)
