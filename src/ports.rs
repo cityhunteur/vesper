@@ -565,13 +565,51 @@ pub async fn dial_gateway(
     Ok(stream)
 }
 
+/// Concurrent connections one TCP published port relays (TD-088). Each holds one bridge connection, and the bridge
+/// serves 512 in all (D-075), shared with the Docker socket (at most 256, D-072) and `vesperd`'s leases; past this
+/// cap a client is closed at once, with no bytes, as the Docker socket relay does.
+pub const MAX_CONNECTIONS_PER_PORT: usize = 64;
+
 async fn forward(listener: TcpListener, bridge: PathBuf, relay_port: u32, host_port: u16) {
+    forward_capped(
+        listener,
+        bridge,
+        relay_port,
+        host_port,
+        MAX_CONNECTIONS_PER_PORT,
+    )
+    .await
+}
+
+async fn forward_capped(
+    listener: TcpListener,
+    bridge: PathBuf,
+    relay_port: u32,
+    host_port: u16,
+    cap: usize,
+) {
+    let slots = std::sync::Arc::new(tokio::sync::Semaphore::new(cap));
+    let mut refused_logged = false;
     loop {
         let Ok((mut client, _)) = listener.accept().await else {
+            // An accept error (out of descriptors) must not spin.
+            tokio::time::sleep(Duration::from_millis(50)).await;
             continue;
         };
+        let Ok(slot) = slots.clone().try_acquire_owned() else {
+            if !refused_logged {
+                eprintln!(
+                    "ports: {host_port}: {cap} connections already relayed; closing new ones until one ends"
+                );
+                refused_logged = true;
+            }
+            drop(client);
+            continue;
+        };
+        refused_logged = false;
         let bridge = bridge.clone();
         tokio::spawn(async move {
+            let _slot = slot;
             match tokio::time::timeout(
                 Duration::from_secs(5),
                 dial_gateway(&bridge, relay_port, host_port),
@@ -592,6 +630,39 @@ async fn forward(listener: TcpListener, bridge: PathBuf, relay_port: u32, host_p
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// TD-088: a published port relays at most its cap of connections at once; the next client is closed at once.
+    #[tokio::test]
+    async fn a_published_port_relays_at_most_its_cap() {
+        use tokio::io::AsyncReadExt;
+        let dir = tempfile::Builder::new()
+            .prefix("pc")
+            .tempdir_in("/tmp")
+            .unwrap();
+        let bridge = dir.path().join("b.sock");
+        let gateway = tokio::net::UnixListener::bind(&bridge).unwrap();
+        // A stand-in gateway that keeps each connection open until the test ends.
+        tokio::spawn(async move {
+            let mut held = Vec::new();
+            while let Ok((s, _)) = gateway.accept().await {
+                held.push(s);
+            }
+        });
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(forward_capped(listener, bridge, 2400, addr.port(), 2));
+        let a = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let _b = tokio::net::TcpStream::connect(addr).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let mut c = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let mut buf = [0u8; 1];
+        let n = tokio::time::timeout(Duration::from_secs(2), c.read(&mut buf)).await;
+        assert!(
+            matches!(n, Ok(Ok(0)) | Ok(Err(_))),
+            "the third client was not closed: {n:?}"
+        );
+        drop(a);
+    }
 
     fn inspect(ports: &str) -> serde_json::Value {
         serde_json::from_str(&format!(r#"{{"NetworkSettings":{{"Ports":{ports}}}}}"#)).unwrap()

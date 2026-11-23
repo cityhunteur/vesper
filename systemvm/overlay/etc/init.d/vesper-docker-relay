@@ -11,7 +11,7 @@ command=/usr/bin/socat
 # Each connection runs vesper-docker-relay-conn, which serves the macOS host only. max-children bounds the
 # connections held at once (a streamed attach, logs -f or events holds one for its lifetime); past it socat stops
 # accepting until one ends, so a flood waits rather than exhausting the System VM (ADR 0010, council finding 20).
-command_args="-t 86400 VSOCK-LISTEN:${relay_port},reuseaddr,fork,max-children=256 EXEC:/usr/local/bin/vesper-docker-relay-conn"
+command_args="-t 86400 VSOCK-LISTEN:${relay_port},reuseaddr,fork,max-children=256,backlog=128 EXEC:/usr/local/bin/vesper-docker-relay-conn"
 respawn_delay=1
 respawn_max=0
 
