@@ -139,6 +139,13 @@ jobs:
       - name: Build and sign vesper-vmlauncher
         run: make vmlauncher-build
 
+      - name: The launcher's seatbelt profile refuses what it never needs, signed with the hardened runtime (ADR 0012)
+        run: |
+          bash scripts/macos/launcher-sandbox-probe.sh
+          # Read whole first: with pipefail, grep -q closing the pipe early would fail codesign with SIGPIPE.
+          sig="$(codesign --display --verbose build/vmlauncher/vesper-vmlauncher 2>&1)"
+          case "$sig" in *flags=*runtime*) echo "vesper-vmlauncher: hardened runtime" ;; *) echo "not signed with the hardened runtime: $sig"; exit 1 ;; esac
+
       - name: Launcher runs and rejects a missing config
         run: |
           build/vmlauncher/vesper-vmlauncher --help

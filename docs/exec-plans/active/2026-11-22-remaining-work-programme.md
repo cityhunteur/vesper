@@ -31,8 +31,8 @@ harness (GH #87) and a design of the shim boundary (D-017), are not met.
   TD-026 narrowed with the bridge fault fixed (#251, D-075), TD-064 narrowed (#252), TD-044 narrowed (#253), TD-041
   (#254), TD-053 narrowed (#255, D-076), TD-037 UDP on loopback (#256, D-077). Residuals in the tracker (HOSTFREE for
   TD-053, the name without `extra_hosts` for TD-039, TD-087, TD-088)
-- [ ] E Sandbox and signing: TD-010 (#258); ADR 0012 accepted (#261, D-080); slice 1 `vesper-proxy` (#263); slice 2
-  `vesperd` (D-081, CE-0013); slice 3, the launcher, open
+- [x] E Sandbox and signing: TD-010 (#258); ADR 0012 accepted (#261, D-080); slice 1 `vesper-proxy` (#263); slice 2
+  `vesperd` (#264, D-081, CE-0013); slice 3 the launcher (D-082)
 - [ ] F Evidence: TD-047 property tests (#260), TD-052 (#259, D-079); TD-005 nightly and TD-033 open
 - [x] G Deviations and compat exceptions recorded: CE-0011 and CE-0012, the Uffd answer measured (#257, D-078)
 - [x] H Tracker truth: #96 closed as not planned; #59's criterion corrected; #103 and #56 given their status (2026-11-22)

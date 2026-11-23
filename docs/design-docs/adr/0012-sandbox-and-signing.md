@@ -59,14 +59,16 @@ run on macOS: `vesper-vmlauncher` (Swift, Virtualization.framework), `vesperd` a
      refuses to start. `--no-sandbox`, a command-line flag (no environment variable), runs without the profile for
      diagnosis; it prints a warning in the first log line and on every start, and suites and CI assert it is not
      passed.
-   - The launcher's read-only modes (`--host-capabilities`, `--print-config`, `--watch-dry-run`) need no VM; they
-     run under the profile of a parent that starts them, such as `vesperd`, and skip their own call there.
+   - The launcher's read-only modes (`--host-capabilities`, `--print-config`, `--watch-dry-run`) need no VM and exit
+     before the profile. `systemvmctl` and the scripts start them, not `vesperd`, so they run without a profile
+     (corrected 2026-11-23, slice 3).
    - The model backend reads and writes only under `--host-root` directories (default: the working directory and
      the per-user temporary directory macOS assigns); a request for a path outside them gets the error envelope Firecracker gives for a path it cannot
      open, and the compat registry records the narrowing.
    - The order is `vesper-proxy` first, then `vesperd`, then the launcher. Each lands only with its runtime suites
-     passing under its profile. The launcher's slice starts with a spike: boot once with denials reported
-     (`(deny default (with report))`) and add each named Mach service with its evidence; no broad `mach-lookup`.
+     passing under its profile. The launcher's slice starts with a spike: boot once under `(deny default)` (`(with report)` is
+     not accepted there; launchd logs denied lookups and the framework names the rest) and add each named Mach
+     service with its evidence; no broad `mach-lookup`.
      Virtualization.framework's own XPC processes are started by launchd and are outside the launcher's profile.
 2. **Signing.** `make sign` signs all three binaries ad hoc with the hardened runtime (`codesign --options
    runtime`) and their plists, after each build; `dev-up`, `docker-up` and the sandbox suites run the signed
@@ -107,7 +109,8 @@ run on macOS: `vesper-vmlauncher` (Swift, Virtualization.framework), `vesperd` a
   debt (TD-089).
 - `sandbox_init` is deprecated, like `sandbox-exec`. If Apple removes it, the binaries refuse to start without
   `--no-sandbox`, so a missing sandbox is never silent. Recorded as debt.
-- The first `unsafe` code in the Rust crate is this one FFI call, in one function with its safety comment.
+- The first `unsafe` code in the Rust crate is in `src/sandbox.rs`: the `sandbox_init` call, and since slice 2
+  `getpwuid_r` and `confstr`, each with its safety comment. The launcher reaches `sandbox_init` through `dlsym`.
 - Running inside a sandboxed agent or IDE now fails at start with a distinct message; `--no-sandbox` is the
   documented way out for diagnosis.
 - Hardened runtime: `DYLD_*` variables are ignored and `lldb` cannot attach to a signed binary.
@@ -126,6 +129,13 @@ connect to the bridge socket, and on the model backend read and write under each
 `stage` and `store` subcommands get the same rules without a socket. The canary and the home directories a rule may
 not cover come from the user database (`getpwuid_r`) as well as `HOME`, and the default temporary root from
 `confstr`, so no environment value widens the profile. `cargo test --test vesperd_sandbox` shows seven refusals on each backend.
+
+Slice 3 (2026-11-23, D-082): the launcher applies its profile from `Sandbox.swift` after the config is decoded and
+before the VM is built, and is signed with the hardened runtime. The spike (`scripts/macos/sandbox-spike/launcher.sh`)
+found three rules beyond files and sockets, each the cause of a failed boot without it: `generic-issue-extension`
+(the framework's "Fuse" extension for virtio-fs), `file-issue-extension` for the files and shares the profile names,
+and `mach-lookup` of `com.apple.FSEvents` for watched shares. No other Mach service was needed. The canary is the
+home directory from the user database, or the per-user temporary directory when a share covers it.
 
 ## References
 

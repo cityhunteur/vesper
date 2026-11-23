@@ -71,6 +71,11 @@ struct Options {
     var watchDryRun: [String] = []
     var watchSinkSocket: String? = nil
     var printConfig = false
+    var noSandbox = false
+    var sandboxProbe = false
+    var probeTcp: UInt16? = nil
+    var probeUnix: String? = nil
+    var probeFile: String? = nil
 }
 
 /// Host facts for backend selection (GH #17): nested virtualisation needs macOS 15 and an M3 or later.
@@ -97,7 +102,7 @@ func hostCapabilitiesJSON() -> String {
 
 func usage() -> String {
     """
-    usage: vesper-vmlauncher [--config PATH] [--ready-pattern TEXT] [--timeout-seconds N] [--keep-running] [--skip-probe]
+    usage: vesper-vmlauncher [--config PATH] [--ready-pattern TEXT] [--timeout-seconds N] [--keep-running] [--skip-probe] [--no-sandbox]
            vesper-vmlauncher --host-capabilities
            vesper-vmlauncher --config PATH --print-config
            vesper-vmlauncher --watch-dry-run DIR [--watch-dry-run DIR ...] [--watch-sink-socket PATH]
@@ -105,6 +110,7 @@ func usage() -> String {
       --ready-pattern TEXT   console text that marks a healthy boot (default: ready_pattern from the config, else "login:")
       --timeout-seconds N    give up after N seconds (default 60)
       --keep-running         do not stop the VM after the ready pattern; wait for guest shutdown
+      --no-sandbox           run the VM without the launcher's seatbelt profile (ADR 0012), for diagnosis only
       --skip-probe           ignore the config's probe: stop right after the ready pattern
       --host-capabilities    print host facts (nested virtualization support, macOS, chip) as JSON and exit
       --print-config         no VM: print the launch config as this launcher decoded it, as JSON, and exit
@@ -155,6 +161,19 @@ func parseOptions() -> Options {
         case "--watch-sink-socket":
             guard !args.isEmpty else { fail(3, "--watch-sink-socket needs a path") }
             options.watchSinkSocket = args.removeFirst()
+        case "--no-sandbox":
+            options.noSandbox = true
+        case "--sandbox-probe":
+            options.sandboxProbe = true
+        case "--probe-tcp":
+            guard !args.isEmpty, let port = UInt16(args.removeFirst()) else { fail(3, "--probe-tcp needs a port") }
+            options.probeTcp = port
+        case "--probe-unix":
+            guard !args.isEmpty else { fail(3, "--probe-unix needs a path") }
+            options.probeUnix = args.removeFirst()
+        case "--probe-file":
+            guard !args.isEmpty else { fail(3, "--probe-file needs a path") }
+            options.probeFile = args.removeFirst()
         case "--help", "-h":
             print(usage())
             exit(0)
@@ -733,6 +752,21 @@ if options.printConfig {
 // A config written before the bridge allow-list (TD-027) would refuse every port; say so instead.
 if let bridge = config.vsock_bridge_path, !bridge.isEmpty, (config.bridge_allowed_ports ?? []).isEmpty {
     fail(3, "launch config serves a vsock bridge but lists no bridge_allowed_ports; regenerate it with 'make systemvm-launch-config'")
+}
+// The launcher's own profile, before the VM and any of its threads (ADR 0012 slice 3). The modes above need no VM
+// and exit first.
+if options.noSandbox {
+    FileHandle.standardError.write(
+        "vesper-vmlauncher: WARNING: running without its sandbox profile (--no-sandbox), for diagnosis only\n"
+            .data(using: .utf8)!)
+} else if let error = sandboxConfine(config, configPath: options.configPath) {
+    fail(1, error.description)
+}
+if options.sandboxProbe {
+    for line in sandboxProbe(tcpPort: options.probeTcp, unixPath: options.probeUnix, file: options.probeFile) {
+        print(line)
+    }
+    exit(0)
 }
 guard VZVirtualMachine.isSupported else {
     fail(3, "Virtualization.framework is not supported on this host")

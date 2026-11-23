@@ -19,7 +19,8 @@ BUILT="$(swift build -c release --package-path "${PACKAGE_DIR}" --show-bin-path)
 
 mkdir -p "${OUT_DIR}"
 cp -f "${BUILT}" "${BINARY}"
-codesign --force --sign - --entitlements "${ENTITLEMENTS}" "${BINARY}"
+# Ad hoc, with the hardened runtime (ADR 0012); the launcher applies its own seatbelt profile at start.
+codesign --force --sign - --options runtime --entitlements "${ENTITLEMENTS}" "${BINARY}"
 codesign --display --entitlements - "${BINARY}" 2>&1 | grep -q "com.apple.security.virtualization" \
   || { echo "build-vmlauncher: entitlement missing after signing" >&2; exit 1; }
 echo "built and signed ${BINARY}"

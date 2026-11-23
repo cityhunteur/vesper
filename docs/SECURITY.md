@@ -71,8 +71,19 @@ Vesper’s security model is part of its parity contract. Treat this file as the
   `cargo test --test vesperd_sandbox` (macOS) shows seven refusals on each backend, including a file outside the
   host roots, and tests show a false `HOME` or `TMPDIR` does not widen the profile. The self-check's canary is the home
   directory from the user database (`getpwuid_r`). As for the proxy, a socket directory that is a symlink is refused.
+- `vesper-vmlauncher` does the same (slice 3, `launcher/Sources/vesper-vmlauncher/Sandbox.swift`), from its decoded
+  launch config, before the VM is built: it may read the config, kernel, initrd and boot media, read and write the
+  rootfs, data disk and console log, listen on the bridge socket, and use the shares (read-only ones read only).
+  Three rules beyond files and sockets each have a failed boot as evidence (`scripts/macos/sandbox-spike/launcher.sh`):
+  issuing file extensions for those paths and the "Fuse" extension (`generic-issue-extension`, not narrowed by
+  class) to Virtualization.framework's VM process, and looking up `com.apple.FSEvents` when a share is watched. The
+  VM runs in that XPC process, which launchd starts outside the profile. `--host-capabilities`, `--print-config`
+  and `--watch-dry-run` need no VM and exit before the profile, so they run without one.
+  `scripts/macos/launcher-sandbox-probe.sh` (macOS CI) shows seven refusals, and that a share path with SBPL
+  metacharacters does not widen the profile. A share of the home directory moves the self-check to the per-user
+  temporary directory; a share of `/` is refused.
 - `make sign`, `make dev-up`, `make docker-up` and the `vesperd` suite targets sign `vesperd` and the proxy ad hoc
-  with the hardened runtime. The launcher follows in slice 3.
+  with the hardened runtime; `make vmlauncher-build` signs the launcher the same way, with its plist.
 
 ## Security-sensitive changes
 
