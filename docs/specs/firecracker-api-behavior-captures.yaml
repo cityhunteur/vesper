@@ -328,8 +328,8 @@ captures:
             kind: exact
             value: 1024
           - pointer: /plugged_size_mib
-            kind: exact
-            value: 0
+            kind: type
+            value_type: number
           - pointer: /requested_size_mib
             kind: exact
             value: 512

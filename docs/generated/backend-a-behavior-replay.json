@@ -4,8 +4,8 @@
     "backend": "systemvm",
     "host_os": "macOS 27.0.1",
     "host_cpu": "Apple M3 Pro",
-    "timestamp": "2026-11-13T04:40:25Z",
-    "git_sha": "e0add5f821964ca98ecb5639bd4427a59a4d2e61",
+    "timestamp": "2026-11-23T08:15:58Z",
+    "git_sha": "83c6f369cb47f77bb7eb004c71f1475c15022914",
     "scripts": "docs/specs/firecracker-api-behavior-replay.yaml",
     "matrix": "docs/generated/firecracker-api-behavior-matrix.json"
   },
@@ -17,7 +17,7 @@
     "backend_error": 0,
     "not_applicable": 3
   },
-  "fixture": "5 steps, store vesper-rp.vmstate and vesper-rp.mem, 1082 ms",
+  "fixture": "5 steps, store vesper-rp.vmstate and vesper-rp.mem, 5206 ms",
   "cases": [
     {
       "key": "GET /#preboot_instance_info",
@@ -122,7 +122,7 @@
       "verdict": "match",
       "detail": "200, 4 assertions",
       "status": 200,
-      "body": "{\"target_pages\":16384,\"actual_pages\":16384,\"target_mib\":64,\"actual_mib\":64,\"swap_in\":0,\"swap_out\":0,\"major_faults\":0,\"minor_faults\":1210,\"free_memory\":118542336,\"total_memory\":225574912,\"available_memory\":115994624,\"disk_caches\":25636864,\"hugetlb_allocations\":0,\"hugetlb_failures\":0,\"oom_kill\":0,\"alloc_stall\":0,\"async_scan\":0,\"direct_scan\":0,\"async_reclaim\":0,\"direct_reclaim\":0}"
+      "body": "{\"target_pages\":16384,\"actual_pages\":16384,\"target_mib\":64,\"actual_mib\":64,\"swap_in\":0,\"swap_out\":0,\"major_faults\":0,\"minor_faults\":1578,\"free_memory\":112873472,\"total_memory\":225579008,\"available_memory\":110354432,\"disk_caches\":32432128,\"hugetlb_allocations\":0,\"hugetlb_failures\":0,\"oom_kill\":0,\"alloc_stall\":0,\"async_scan\":0,\"direct_scan\":0,\"async_reclaim\":0,\"direct_reclaim\":0}"
     },
     {
       "key": "GET /hotplug/memory#preboot_invalid_state",
@@ -143,7 +143,7 @@
       "verdict": "match",
       "detail": "200, 5 assertions",
       "status": 200,
-      "body": "{\"block_size_mib\":2,\"total_size_mib\":1024,\"slot_size_mib\":128,\"plugged_size_mib\":0,\"requested_size_mib\":512}"
+      "body": "{\"block_size_mib\":2,\"total_size_mib\":1024,\"slot_size_mib\":128,\"plugged_size_mib\":512,\"requested_size_mib\":512}"
     },
     {
       "key": "GET /machine-config#preboot_after_put_patch",
