@@ -174,6 +174,9 @@ proc_running() { # PID -> 0 when PID exists and is not a zombie (a child this sh
   pr=$(proc_stat "$1") || return 1
   [ "${pr% *}" != Z ]
 }
+# PID: wait up to 1 s, in 20 ms steps, for PID to end after a kill. A fixed 0.5 s sleep did this before and was
+# most of a cleanup's time (TD-100).
+proc_gone() { for _ in $(seq 1 50); do proc_running "$1" || return 0; sleep 0.02; done; return 1; }
 proc_alive() { # PID START -> 0 when PID runs and started at START (a reused pid or a zombie is not alive)
   pa=$(proc_stat "${1:-}") || return 1
   [ "${pa% *}" != Z ] && [ "${pa#* }" = "${2:-}" ]
@@ -1059,12 +1062,13 @@ launch() {
   JAILER_PID=$!
   # With a share network the guest must also report its interface up (it prints that after the marker).
   ready() { grep -q "$MARKER" "$lf" && { [ "$sharenet" = 0 ] || grep -q "VESPER-SHARE-NET-OK" "$lf"; }; }
-  for _ in $(seq 1 120); do
+  # Every 50 ms for up to 30 s: polling every 0.25 s added about 0.12 s to each start on average (TD-100).
+  for _ in $(seq 1 600); do
     ready && break
     grep -q "VESPER-SHARE-NET-FAILED" "$lf" && break
     # The jailer, or the Firecracker it became, is gone: no marker can come (TD-060).
     proc_running "$JAILER_PID" || { sleep 0.25; ready; break; }
-    sleep 0.25
+    sleep 0.05
   done
   if ready; then
     end=$(now_ms)
@@ -1134,8 +1138,8 @@ stop() {
   id=$1; pid=$(fcpid "$id")
   [ -n "$pid" ] || { echo "STOPPED $id (not running)"; return 0; }
   kill -TERM "$pid" 2>/dev/null
-  for _ in $(seq 1 40); do kill -0 "$pid" 2>/dev/null || { echo "STOPPED $id"; return 0; }; sleep 0.25; done
-  kill -KILL "$pid" 2>/dev/null; sleep 0.5
+  for _ in $(seq 1 200); do kill -0 "$pid" 2>/dev/null || { echo "STOPPED $id"; return 0; }; sleep 0.05; done
+  kill -KILL "$pid" 2>/dev/null; proc_gone "$pid"
   echo "STOPPED $id (killed after timeout)"
 }
 
@@ -1159,7 +1163,7 @@ cleanup_locked() {
   id=$1; pid=$(fcpid "$id")
   # A jailer this script started that has not exec'd Firecracker yet is no fcpid match (TD-060).
   [ -z "$pid" ] && [ "$LAUNCHING" = "$id" ] && proc_running "$JAILER_PID" && pid=$JAILER_PID
-  [ -n "$pid" ] && { kill -KILL "$pid" 2>/dev/null; sleep 0.5; }
+  [ -n "$pid" ] && { kill -KILL "$pid" 2>/dev/null; proc_gone "$pid"; }
   unfs_stop "$id"
   ctrns_links_down "$id"   # the data link only; the namespace is the task's until ctrns-down (ADR 0011 §6)
   rm -rf "$JAIL/firecracker/$id" "$DISK_JAIL/firecracker/$id"
@@ -1174,8 +1178,10 @@ cleanup_locked() {
     logger -t vesper-microvm "$msg" 2>/dev/null
     [ "${2:-}" = --logs ] || { [ -f "$(logfile "$id")" ] && echo "$msg" >> "$(logfile "$id")"; }
   fi
+  # The kernel can still count a process that has just ended in its cgroup, so rmdir gets a few tries; a cgroup
+  # left behind reads as DIRTY and keeps the memory booked.
   for cg in "/sys/fs/cgroup/firecracker/$id" "/sys/fs/cgroup/$id"; do
-    [ -d "$cg" ] && rmdir "$cg" 2>/dev/null
+    for _ in 1 2 3 4 5 6 7 8 9 10; do [ -d "$cg" ] || break; rmdir "$cg" 2>/dev/null && break; sleep 0.05; done
   done
   # shellcheck disable=SC2046
   [ -f "$STATE/test-listen.$id" ] && { kill $(cat "$STATE/test-listen.$id") 2>/dev/null; rm -f "$STATE/test-listen.$id"; }
