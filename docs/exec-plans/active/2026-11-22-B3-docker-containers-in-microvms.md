@@ -26,7 +26,9 @@ macOS. Each Docker command that cannot be honest about a microVM is refused with
   - [x] 4b: the Phase 4 suites with `VESPER_DOCKER_RUNTIME=vesper`, each failing step a deviation (D-087):
     `make phase4-vesper` 94 steps pass in six suites; four recorded deviations (two `--platform linux/amd64` steps
     and their container, refused by name; a non-root user's share ownership, TD-097) (2026-11-23)
-  - [ ] 4c: measurements (`docker run`/`stop` p50 and p95, density, containerd restart, exit while containerd is down)
+  - [x] 4c: measurements (D-088): `vesper` run p50 4.2 s, p95 6.1 s (runc 0.6 s, 1.6 s); stop p50 1.0 s (runc 0.3 s);
+    4 containers per default System VM; a task survives a containerd restart; an exit while containerd is down is
+    missed as with runc (TD-098) (2026-11-23)
 - [ ] Slice 5: honesty refusals (`cp`, `diff`, `export`, `commit`, `connect`) and Pause and Resume
 - [ ] Slice 6: only if slice 4's numbers call for it, a shared base drive (TD-035)
 - [ ] Outcomes & Retrospective written; plan moved to completed
