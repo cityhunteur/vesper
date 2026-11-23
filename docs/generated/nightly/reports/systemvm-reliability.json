@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-11-23T09:25:03Z",
+  "host": "27.0.1 Mac15,6",
+  "commit": "b36c008",
+  "cycles": 10,
+  "boot_stress": {
+    "status": "ok",
+    "cycles": 10,
+    "successful": 10,
+    "failed": 0,
+    "max_boot_ms": 4152,
+    "mean_boot_ms": 3693,
+    "threshold_ms": 5000,
+    "failure_messages": [],
+    "drift_first5_ms": 3857,
+    "drift_last5_ms": 3528,
+    "drift_ok": true
+  },
+  "control_suite": {
+    "status": "ok",
+    "steps": 5,
+    "failed_steps": []
+  },
+  "docker_smoke": {
+    "status": "ok",
+    "steps": 7,
+    "failed_steps": []
+  },
+  "services_suite": {
+    "status": "ok",
+    "steps": 10,
+    "failed_steps": []
+  },
+  "leaks": {
+    "status": "ok",
+    "before": {
+      "launcher_processes": 0,
+      "launcher_processes_detail": "",
+      "proxy_processes": 0,
+      "proxy_processes_detail": "",
+      "sockets": 1,
+      "sockets_detail": "run/systemvm/vsock/3.sock",
+      "pid_files": 0,
+      "pid_files_detail": ""
+    },
+    "after": {
+      "launcher_processes": 0,
+      "launcher_processes_detail": "",
+      "proxy_processes": 0,
+      "proxy_processes_detail": "",
+      "sockets": 0,
+      "sockets_detail": "",
+      "pid_files": 0,
+      "pid_files_detail": ""
+    }
+  },
+  "failures": [],
+  "passed": true
+}

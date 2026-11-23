@@ -98,9 +98,13 @@ runs on `macos-15`; all are reproducible locally:
   tests, `make share-notify-selftest`, the pinned image fetch and the deterministic overlay build; job
   `launcher-build` on `macos-15` builds and signs the launcher and runs `make share-watch-selftest`. No job boots
   a VM, so `make binds-suite`, `make data-disk-suite` and the other System VM suites run only on developer hardware
-  (TD-005).
+  (TD-005). `make nightly` runs the reliability suite and eight of them as one evidence bundle
+  ([nightly-evidence.md](process/nightly-evidence.md)).
 - `shim-tests.yml` (`shim/**`, `build-shim.sh`, `systemvm/overlay/usr/local/bin/vesper-microvm`): `go vet`, `go test -count=1` (one test of `shim/internal/unfs` reads `vesper-microvm`, which the Go test cache does not look at), cross-build, artifact upload.
 - `ctr-conformance.yml` (the committed ctr capture, lock, assembler): self-test, `--validate`, artifact upload.
+- `nightly-evidence.yml` (every pull request, a daily schedule, manual dispatch): `scripts/ci/nightly_evidence.py`
+  self-test and `--check` of `docs/generated/nightly/`, which warns when the owner-hardware bundle is old, dirty or
+  failed and fails only when a `docs/specs` document cites it then; artifact upload.
 - `parity-baseline.yml` (the committed capture, lock, registry, archives, assembler): assembler self-test, `--validate` of `docs/specs/backend-a-parity-baseline.json`, artifact upload.
 - `baseline-governance.yml` (lock file, `src/baseline.rs`, `baselinectl`): `cargo test`, metadata generate and validate.
 - `compat-exceptions.yml` (registry, `src/compat.rs`, `compatexctl`): `cargo test`, `compatexctl`; a `workflow_dispatch`

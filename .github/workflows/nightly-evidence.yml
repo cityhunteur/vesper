@@ -1,0 +1,39 @@
+name: Nightly Evidence
+
+# TD-005 (D-084): the System VM suites run on an M3 or later Mac (`make nightly PUBLISH=1`), which commits a bundle
+# to docs/generated/nightly/. This workflow validates that bundle, uploads it as an artifact, and warns when it is
+# old, from a dirty tree or has a failed suite. It fails only when a parity document in docs/specs cites the bundle
+# while it is in one of those states. Owner-hardware evidence never counts as remote green.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 6 * * *"
+  pull_request:
+  push:
+    branches: [main]
+    paths:
+      - docs/generated/nightly/**
+      - docs/specs/**
+      - scripts/ci/nightly_evidence.py
+      - .github/workflows/nightly-evidence.yml
+
+jobs:
+  nightly-evidence:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Evidence tool self-test
+        run: python3 -I scripts/ci/nightly_evidence.py --self-test
+
+      - name: Validate the published bundle; warn when it is old, dirty or failed
+        run: python3 -I scripts/ci/nightly_evidence.py --check docs/generated/nightly
+
+      - name: Upload the bundle
+        if: hashFiles('docs/generated/nightly/manifest.json') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-evidence-${{ github.sha }}
+          path: docs/generated/nightly/
+          if-no-files-found: error

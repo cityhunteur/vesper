@@ -1,0 +1,99 @@
+{
+  "baseline": {
+    "apple_containerization": "636eef0eff00e451de6d5d426e6a6785b90b44e2",
+    "containerd": "d1d9d07f1960f7f3648298e44963a263eac87fa5",
+    "firecracker": "d83d72b710361a10294480131377b1b00b163af8"
+  },
+  "counts_as_remote_green": false,
+  "finished_at": "2026-11-23T09:31:59Z",
+  "git_dirty": false,
+  "git_sha": "b36c008e71f3f7560d3b36543fbf6d18576e7b04",
+  "host": "macOS 27.0.1 / Apple M3 Pro",
+  "passed": false,
+  "schema": 1,
+  "source": "owner-hardware",
+  "started_at": "2026-11-23T09:22:52Z",
+  "suites": [
+    {
+      "passed": true,
+      "rc": 0,
+      "report": "reports/systemvm-reliability.json",
+      "sha256": "6aec92031710a9b224509ee367c7935f9b98c697fe2eaafd97338ad14cd0b906",
+      "steps_ok": 0,
+      "steps_total": 0,
+      "target": "systemvm-reliability"
+    },
+    {
+      "passed": true,
+      "rc": 0,
+      "report": "reports/systemvm-control-suite.json",
+      "sha256": "ca8a7cb0ff517c44eaae37fced5301afccaf7602a4b00c7d5f03a237b0575553",
+      "steps_ok": 5,
+      "steps_total": 5,
+      "target": "systemvm-control-suite"
+    },
+    {
+      "passed": false,
+      "rc": 2,
+      "report": "reports/systemvm-services-suite.json",
+      "sha256": "9a3b5cdc37cfe8087c3804e1fab2984394b1ee1753609d4bd482c315e92416ce",
+      "steps_ok": 9,
+      "steps_total": 10,
+      "target": "systemvm-services-suite"
+    },
+    {
+      "passed": true,
+      "rc": 0,
+      "report": "reports/systemvm-launchapi-suite.json",
+      "sha256": "354aba209d84bcc95ce9949d255660a5b359f80d7e3d1785a66c512d17ee5a27",
+      "steps_ok": 20,
+      "steps_total": 20,
+      "target": "systemvm-launchapi-suite"
+    },
+    {
+      "passed": true,
+      "rc": 0,
+      "report": "reports/systemvm-vesperd-suite.json",
+      "sha256": "f8938de886cdd2d02dded48e6560c36c0cee254e844d9aee60d48145e4778fa5",
+      "steps_ok": 19,
+      "steps_total": 19,
+      "target": "systemvm-vesperd-suite"
+    },
+    {
+      "passed": true,
+      "rc": 0,
+      "report": "reports/systemvm-snapshot-suite.json",
+      "sha256": "7c18d23ebe6f91f9c9cfd01a3720b65f811c1017401758382b9cb553a3d4d5cd",
+      "steps_ok": 26,
+      "steps_total": 26,
+      "target": "systemvm-snapshot-suite"
+    },
+    {
+      "passed": true,
+      "rc": 0,
+      "report": "reports/systemvm-replay-suite.json",
+      "sha256": "7ffbfa80e62029cfec8a8cbab3579ec43778d436bbbecb3cefb0caae6ccc3691",
+      "steps_ok": 173,
+      "steps_total": 173,
+      "target": "systemvm-replay-suite"
+    },
+    {
+      "passed": true,
+      "rc": 0,
+      "report": "reports/docker-conformance.json",
+      "sha256": "852b99c6b34a03abbcd330e3ccb9395c00bcbe2a086b354e767a4ebc194403df",
+      "steps_ok": 26,
+      "steps_total": 26,
+      "target": "docker-conformance"
+    },
+    {
+      "passed": true,
+      "rc": 0,
+      "report": "reports/ports-suite.json",
+      "sha256": "7bf9d5881df07ca20d953c812adc76c27efd68c926343f5d9032c84a472a3d4b",
+      "steps_ok": 18,
+      "steps_total": 18,
+      "target": "ports-suite"
+    }
+  ]
+}
