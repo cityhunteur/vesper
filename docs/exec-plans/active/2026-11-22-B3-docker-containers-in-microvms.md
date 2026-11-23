@@ -19,8 +19,7 @@ macOS. Each Docker command that cannot be honest about a microVM is refused with
   pass, `run/B3/s2-*`; council and judge `run/B3/s2-council.md`; D-071)
 - [x] Slice 3: user-defined networks (the DNS link, DNAT to dockerd's resolver, no host-side process); `dns-suite` 12 of
   12 with `VESPER_DOCKER_RUNTIME=vesper` and with the default (2026-11-22, `run/B3/s3-*`)
-- [ ] Slice 4: shares for `vesper` containers and `ctr` tasks; the Phase 4 suites with the runtime forced; latency,
-  density and restart measurements
+- [x] Slice 4: shares for `vesper` containers; the Phase 4 suites with the runtime forced; measurements
   - [x] 4a: share binds for `vesper` containers over the veth share link; `ctr` tasks keep ADR 0009's model (D-086);
     `make systemvm-docker-microvm-suite` 14/14 (2026-11-23, `run/B3/s4a-plan.md`)
   - [x] 4b: the Phase 4 suites with `VESPER_DOCKER_RUNTIME=vesper`, each failing step a deviation (D-087):
@@ -30,7 +29,8 @@ macOS. Each Docker command that cannot be honest about a microVM is refused with
     4 containers per default System VM; a task survives a containerd restart; an exit while containerd is down is
     missed as with runc (TD-098) (2026-11-23)
 - [ ] Slice 5: honesty refusals (`cp`, `diff`, `export`, `commit`, `connect`) and Pause and Resume
-- [ ] Slice 6: only if slice 4's numbers call for it, a shared base drive (TD-035)
+- [x] Slice 6: only if slice 4's numbers call for it, a shared base drive (TD-035): recorded as not needed (D-089,
+  2026-11-23); the drive build is about 0.75 s of a 4 s start, and density is memory-bound
 - [ ] Outcomes & Retrospective written; plan moved to completed
 
 ## Surprises & Discoveries
