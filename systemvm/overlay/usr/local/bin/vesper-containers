@@ -129,7 +129,18 @@ prepare() {
     *) hg="" ;;
   esac
   [ -n "$hg" ] || echo "vesper-containers: no IPv4 default gateway; host-gateway stays docker0" >&2
-  printf '{"userns-remap":"default","authorization-plugins":["vesper-authz"],"runtimes":{"vesper-runc":{"path":"/usr/bin/vesper-runc"},"vesper":{"runtimeType":"io.containerd.vesper.v2"}},"default-runtime":"vesper-runc","containerd":"/run/containerd/containerd.sock"%s}\n' "${hg:+,\"host-gateway-ips\":[\"$hg\"]}" > "$CONF.new" \
+  # The default runtime is vesper-runc. `vesper.default-runtime=vesper` on the kernel command line makes it vesper, for
+  # the measurement of the owner's gate (D-099, D-104); it is not the default until the owner decides. The plugin reads
+  # the same key to check a create that names no runtime as the default runtime's.
+  dr=vesper-runc
+  for w in $(cat /proc/cmdline); do
+    case "$w" in
+      vesper.default-runtime=vesper) dr=vesper ;;
+      vesper.default-runtime=vesper-runc) dr=vesper-runc ;;
+      vesper.default-runtime=*) echo "vesper-containers: $w is not vesper or vesper-runc; the default stays vesper-runc" >&2 ;;
+    esac
+  done
+  printf '{"userns-remap":"default","authorization-plugins":["vesper-authz"],"runtimes":{"vesper-runc":{"path":"/usr/bin/vesper-runc"},"vesper":{"runtimeType":"io.containerd.vesper.v2"}},"default-runtime":"%s","containerd":"/run/containerd/containerd.sock"%s}\n' "$dr" "${hg:+,\"host-gateway-ips\":[\"$hg\"]}" > "$CONF.new" \
     && mv -f "$CONF.new" "$CONF" || refuse write-daemon-json
   legacy_store > "$RUN.legacy" # counted once a boot; HEALTH reads it on every poll
   finish mapped
