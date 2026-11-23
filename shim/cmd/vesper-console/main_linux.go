@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -15,8 +16,10 @@ import (
 
 	"github.com/containerd/console"
 	runc "github.com/containerd/go-runc"
+	specs "github.com/opencontainers/runtime-spec/specs-go"
 	"golang.org/x/sys/unix"
 
+	"github.com/cityhunteur/vesper/shim/internal/runcwrap"
 	"github.com/cityhunteur/vesper/shim/internal/shares"
 )
 
@@ -40,6 +43,12 @@ func main() {
 			fmt.Println(err)
 			os.Exit(1)
 		}
+		return
+	}
+	// shares refresh SESSION-DIR: ask the share server for each mounted share as the task's uid (TD-097). It never
+	// fails the session; its one line goes to the console.
+	if len(os.Args) == 4 && os.Args[1] == "shares" && os.Args[2] == "refresh" {
+		fmt.Fprintln(os.Stderr, refreshShares(os.Args[3]))
 		return
 	}
 	// shares mount1 EXPORT ro|rw: one mount on descriptor 3, the child of `shares mount` (bounded by MountTimeout).
@@ -89,6 +98,38 @@ func main() {
 		os.Exit(255)
 	}
 	os.Exit(code)
+}
+
+// refreshShares makes the guest's NFS client hold the task's view of its shares. The guest mounted them as root, so
+// the client kept root's attributes, and the share server answers each uid with that uid as the owner of the sharing
+// user's files: a non-root task saw its shares owned by 0:0 until the cache expired (TD-097). A forced stat as the
+// task's uid and gid replaces that view, as vesper-runc does for runc containers in the System VM (TD-062).
+func refreshShares(dir string) string {
+	raw, err := os.ReadFile(filepath.Join(dir, "config.json"))
+	if err != nil {
+		return "VESPER-SHARE-REFRESH error=no-config"
+	}
+	var s specs.Spec
+	if err := json.Unmarshal(raw, &s); err != nil {
+		return "VESPER-SHARE-REFRESH error=bad-config"
+	}
+	uid, gid, ok := runcwrap.ProcessIDs(&s)
+	if !ok || uid == 0 {
+		return "VESPER-SHARE-REFRESH none"
+	}
+	paths, err := shares.Mounted(dir, "/newroot")
+	if err != nil {
+		return "VESPER-SHARE-REFRESH error=" + strings.ReplaceAll(err.Error(), " ", "_")
+	}
+	if len(paths) == 0 {
+		return "VESPER-SHARE-REFRESH none"
+	}
+	r := runcwrap.Refresh(runcwrap.Target{Paths: paths, UID: uid, GID: gid}, 5*time.Second)
+	line := fmt.Sprintf("VESPER-SHARE-REFRESH uid=%d gid=%d refreshed=%d skipped=%d failed=%d", uid, gid, r.Refreshed, r.Skipped, len(r.Errors))
+	if len(r.Errors) > 0 {
+		line += " first=" + strings.ReplaceAll(r.Errors[0].Error(), " ", "_")
+	}
+	return line
 }
 
 func resize(dir, rows, cols string) error {

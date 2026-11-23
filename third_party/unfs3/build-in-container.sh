@@ -10,7 +10,7 @@ apk add --no-cache -q $(cat build-packages.txt)
 export SOURCE_DATE_EPOCH=1700000000
 mkdir -p /build && tar -xzf unfs3-0.10.0.tar.gz -C /build
 cd /build/unfs3-0.10.0
-for p in alpine-implicit alpine-lfs64 0001-create-unchecked-keeps-data 0002-fh-decode-refuses-malformed-handles 0003-nanosecond-times 0004-fh-cache-keyed-by-handle-path 0005-svc-run-private-pollfd 0006-protect-by-identity; do
+for p in alpine-implicit alpine-lfs64 0001-create-unchecked-keeps-data 0002-fh-decode-refuses-malformed-handles 0003-nanosecond-times 0004-fh-cache-keyed-by-handle-path 0005-svc-run-private-pollfd 0006-protect-by-identity 0007-stat-as-the-caller; do
   patch -p1 -s < "/in/patches/$p.patch"
 done
 # The same configure as Alpine's APKBUILD; paths in the binary are made independent of the build directory.

@@ -98,6 +98,8 @@ if [ "$op" = RUN ]; then
 fi
 # The guest's root is its initramfs, where pivot_root is refused: a task with its own mount namespace (a Docker
 # task, ADR 0011) is jailed by runc with a move and a chroot instead. The microVM is the boundary (CE-0004).
+# A non-root task sees its shares as the share server answers its uid (TD-097): the mounts above ran as root.
+[ "$op" != RUN ] || /usr/bin/vesper-console shares refresh "$dir" 2>/dev/ttyS0 || true
 nopivot=''
 grep -q '"type":"mount"' "$dir/config.json" && nopivot=--no-pivot
 mkfifo "$dir/in" "$dir/out" "$dir/err"
