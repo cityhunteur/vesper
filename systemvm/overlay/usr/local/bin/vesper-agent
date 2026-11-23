@@ -12,6 +12,7 @@
 #                             "legacy_store":"absent|present volumes=N containers=M",  (ADR 0010)
 #                             "share_servers_down":"<id>,...",  (TD-070: shim microVMs whose share server stopped)
 #                             "handlers":N,"handlers_max":N}  (TD-026: connections open on the agent port)
+#   HOSTFREE <bytes>      -> OK after recording the macOS volume's free bytes for vesper-vesperd (TD-053, D-095)
 #   KILL <containerd|docker> -> KILL <name> <pid> after SIGKILL to the daemon (crash simulation)
 #   LOGS <messages|containerd|docker> <n> -> LOGS <count> then <count> log lines
 #   MICROVM <args...>     -> MICROVM <rc> <count> then <count> output lines of `vesper-microvm <args>`
@@ -86,6 +87,13 @@ while IFS= read -r -t "$AGENT_IDLE_S" line; do
   set -- $line
   case "$1" in
     PING) echo PONG ;;
+    HOSTFREE)
+      # TD-053: the free bytes of the macOS volume that holds the data disk image, from the launcher every 30 s.
+      # vesper-vesperd counts the smaller of this and the disk's own free space against its reserve.
+      case "${2:-}" in ''|*[!0-9]*) echo "ERR bad bytes"; continue ;; esac
+      printf '%s %s\n' "$2" "$(date +%s)" > /run/vesper/hostfree.tmp && mv /run/vesper/hostfree.tmp /run/vesper/hostfree \
+        && echo OK || echo "ERR write"
+      ;;
     VERSION) echo "VERSION 1" ;;
     ECHO)
       n="${2:-0}"

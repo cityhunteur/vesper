@@ -560,10 +560,20 @@ reserve_bytes() {
 }
 # Free space including the blocks only root may use (TD-053): the copies this script makes run as root and may use
 # them; df's "available" leaves them out, which would count the root reserve against the reserve a second time.
+# hostfree_bytes: the macOS volume's free bytes as the launcher last reported them (HOSTFREE, TD-053), when the
+# report is under 2 minutes old; nothing otherwise. The data disk image is sparse, so the guest's own free space can
+# promise more than the Mac has.
+hostfree_bytes() {
+  # shellcheck disable=SC2046
+  set -- $(cat /run/vesper/hostfree 2>/dev/null)
+  digits "${1:-}" && digits "${2:-}" && [ $(( $(date +%s) - $2 )) -le 120 ] && echo "$1"
+}
 avail_bytes() {
   # shellcheck disable=SC2046
   set -- $(stat -f -c '%f %S' "$DATA" 2>/dev/null)
-  digits "${1:-}" && digits "${2:-}" && echo $(($1 * $2))
+  digits "${1:-}" && digits "${2:-}" || return 1
+  ab=$(($1 * $2)); hf=$(hostfree_bytes)
+  if digits "$hf" && [ "$hf" -lt "$ab" ]; then echo "$hf"; else echo "$ab"; fi
 }
 store_quota() { # bytes the store may hold: STORE_PCT of the data disk, unless a test overrides it
   q=$(cat "$QUOTA_OVERRIDE" 2>/dev/null)
@@ -815,6 +825,11 @@ launch_fail() { echo "ERR $*"; exit 1; }
 launch() {
   LID=${1:-}; shift 2>/dev/null
   valid_id "$LID" || { echo "ERR bad id"; return 2; }
+  # TD-053: a Mac volume below the reserve takes no new microVM; a full volume would turn the data disk read-only.
+  lh=$(hostfree_bytes); lr=$(reserve_bytes)
+  if digits "$lh" && digits "$lr" && [ "$lh" -lt "$lr" ]; then
+    echo "ERR the macOS volume that holds the data disk has $lh bytes free, under the $lr-byte reserve (TD-053)"; return 1
+  fi
   ceiling=$DEFAULT_CEILING
   case "${1:-}" in stage=*|tap=*|tapaddr=*|net=*|'') ;; *) ceiling=$1; shift; digits "$ceiling" || { echo "ERR bad ceiling"; return 2; } ;; esac
   nstage=0; taps=""; ntap=0; policy=none; netset=""; gws=""

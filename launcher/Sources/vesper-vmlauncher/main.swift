@@ -386,6 +386,7 @@ final class Launcher: NSObject, VZVirtualMachineDelegate {
     var probeDone = false
     var bridgeSource: DispatchSourceRead?
     var bridgeFd: Int32 = -1
+    var hostFreeTimer: DispatchSourceTimer?
     /// Open bridge connections, changed on the main queue only. Each costs up to two threads (council F1, TD-026).
     var bridgeOpen = 0
     static let bridgeMax = 512
@@ -424,6 +425,7 @@ final class Launcher: NSObject, VZVirtualMachineDelegate {
             }
             if options.keepRunning {
                 report(status: "running")
+                startHostFree()
                 return
             }
             stopAndExit(0)
@@ -475,12 +477,57 @@ final class Launcher: NSObject, VZVirtualMachineDelegate {
         report(status: "probe-ok")
         if options.keepRunning {
             report(status: "running")
+            startHostFree()
             return
         }
         typeLine(probe.shutdown_command)
     }
 
     // MARK: vsock bridge
+
+    // MARK: host free space (TD-053)
+
+    /// The data disk image is sparse: the guest sees its nominal size, not what the macOS volume can still hold. Every
+    /// 30 s the volume's free bytes go to the agent as HOSTFREE, and the guest refuses new vesperd microVMs and store
+    /// copies below its reserve.
+    func startHostFree() {
+        guard hostFreeTimer == nil, let disk = config.data_disk_path, !disk.isEmpty else { return }
+        let port = config.agent_port ?? 1024
+        let send = { [weak self] in
+            guard let self = self, let device = self.machine.socketDevices.first as? VZVirtioSocketDevice else { return }
+            var st = statfs()
+            guard statfs(disk, &st) == 0 else { return }
+            let free = UInt64(st.f_bavail) * UInt64(st.f_bsize)
+            device.connect(toPort: port) { result in
+                guard case .success(let connection) = result else { return }
+                Launcher.blocking("hostfree") {
+                    let fd = connection.fileDescriptor
+                    var tv = timeval(tv_sec: 5, tv_usec: 0)
+                    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+                    func line() -> String {
+                        var bytes: [UInt8] = []
+                        var b: UInt8 = 0
+                        while bytes.count < 256, read(fd, &b, 1) == 1, b != 10 { bytes.append(b) }
+                        return String(decoding: bytes, as: UTF8.self)
+                    }
+                    _ = line()  // the agent's greeting
+                    let msg = Array("HOSTFREE \(free)\nQUIT\n".utf8)
+                    _ = msg.withUnsafeBytes { write(fd, $0.baseAddress!, msg.count) }
+                    let reply = line()
+                    if reply != "OK" {
+                        FileHandle.standardError.write("vesper-vmlauncher: HOSTFREE \(free): \(reply)\n".data(using: .utf8)!)
+                    }
+                    connection.close()
+                }
+            }
+        }
+        send()
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now() + 30, repeating: 30)
+        timer.setEventHandler(handler: send)
+        timer.resume()
+        hostFreeTimer = timer
+    }
 
     func startBridge(_ path: String) {
         guard let device = machine.socketDevices.first as? VZVirtioSocketDevice else {

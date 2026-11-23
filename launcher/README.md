@@ -23,6 +23,8 @@ optional vsock bridge socket the config names, and reports.
   - `--timeout-seconds` default `60`, must be positive; covers the boot and the whole probe.
   - `--keep-running`: run the probe without its shutdown command (or stop after the ready pattern when there is no probe) and keep the VM up until the guest powers off or the launcher receives SIGTERM (it then stops the VM and exits 0 when it was ready).
   - `--skip-probe`: ignore the config's `probe` and stop right after the ready pattern.
+  - With `--keep-running` and a data disk, from "running" on and every 30 s, the launcher sends the free bytes of the
+    macOS volume that holds the data disk image to the agent as `HOSTFREE <bytes>` (TD-053, D-095).
   - `--no-sandbox`: run the VM without the launcher's seatbelt profile, for diagnosis only; a warning says so on every
     start. Without it (ADR 0012 slice 3, `Sandbox.swift`), after the config is decoded and before the VM is built,
     the launcher makes the console log's and bridge socket's directories (0700; a symlink is refused), applies a
