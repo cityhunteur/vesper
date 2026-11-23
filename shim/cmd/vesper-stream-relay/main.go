@@ -21,7 +21,8 @@ func main() {
 		fmt.Fprintf(os.Stderr, "vesper-stream-relay: %s %s: %v\n", os.Args[1], os.Args[2], err)
 		os.Exit(1)
 	}
-	if err := streamrelay.Relay(os.Stdin, os.Stdout, target); err != nil {
+	if err := streamrelay.Relay(os.Stdin, os.Stdout, target, streamrelay.HalfCloseLimit); err != nil {
+		fmt.Fprintf(os.Stderr, "vesper-stream-relay: %s %s: %v\n", os.Args[1], os.Args[2], err)
 		os.Exit(1)
 	}
 }

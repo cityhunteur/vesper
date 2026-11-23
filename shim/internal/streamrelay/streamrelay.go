@@ -17,7 +17,13 @@ import (
 	"net"
 	"os"
 	"syscall"
+	"time"
 )
+
+// HalfCloseLimit is the bound the program uses for how long the relay waits for the target to end after the client has ended its writes: the
+// inner `socat -t 86400` it replaces ended a connection that long after either side ended. Without it a target
+// that ignores the half-close (a silent attach, a server that never answers) would hold its socket for ever.
+const HalfCloseLimit = 24 * time.Hour
 
 // HalfCloser is a target the relay can half-close: *net.UnixConn and *net.TCPConn.
 type HalfCloser interface {
@@ -28,12 +34,14 @@ type HalfCloser interface {
 // Relay copies in to target and target to out until the target ends its writes, then closes out (shutting down
 // its write side first, when it is a socket, so a duplicate of the descriptor cannot keep the stream open) and
 // returns. An end of in half-closes the target and the relay goes on. It returns the error that ended the
-// target-to-client copy, or nil for a clean end.
-func Relay(in io.Reader, out io.WriteCloser, target HalfCloser) error {
+// target-to-client copy, or nil for a clean end. After the client's end the target has halfCloseLimit to end its
+// reply (HalfCloseLimit in the program). The copy from in is left blocked when the target ends first; the program exits then.
+func Relay(in io.Reader, out io.WriteCloser, target HalfCloser, halfCloseLimit time.Duration) error {
 	go func() {
 		_, _ = io.Copy(target, in)
-		// The client has no more to send; the target may still answer.
+		// The client has no more to send; the target may still answer, within halfCloseLimit.
 		_ = target.CloseWrite()
+		_ = target.SetReadDeadline(time.Now().Add(halfCloseLimit))
 	}()
 	_, err := io.Copy(out, target)
 	shutdownWrite(out)

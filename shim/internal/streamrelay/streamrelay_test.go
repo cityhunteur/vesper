@@ -80,7 +80,7 @@ func TestServerCloseEndsTheStreamWhileTheClientStillWrites(t *testing.T) {
 		_, _ = c.Write([]byte("hi\n"))
 		c.Close()
 	})
-	go func() { _ = Relay(in, out, tg) }()
+	go func() { _ = Relay(in, out, tg, HalfCloseLimit) }()
 	start := time.Now()
 	if got := readAll(t, fromRelay, 3*time.Second); got != "hi\n" {
 		t.Fatalf("got %q", got)
@@ -99,7 +99,7 @@ func TestClientHalfCloseStillGetsALateReply(t *testing.T) {
 		_, _ = c.Write([]byte("late:" + string(req)))
 		c.Close()
 	})
-	go func() { _ = Relay(in, out, tg) }()
+	go func() { _ = Relay(in, out, tg, HalfCloseLimit) }()
 	_, _ = toRelay.Write([]byte("req"))
 	_ = toRelay.Close()
 	if got := readAll(t, fromRelay, 5*time.Second); got != "late:req" {
@@ -114,7 +114,7 @@ func TestBothDirectionsCarryTheBytes(t *testing.T) {
 		_, _ = io.Copy(c, c) // echo until the client half-closes
 		c.Close()
 	})
-	go func() { _ = Relay(in, out, tg) }()
+	go func() { _ = Relay(in, out, tg, HalfCloseLimit) }()
 	r := bufio.NewReader(fromRelay)
 	for i := range 100 {
 		line := []byte("line\n")
@@ -146,7 +146,7 @@ func TestEndReachesTheClientWhenOutIsDuplicated(t *testing.T) {
 		_, _ = c.Write([]byte("x"))
 		c.Close()
 	})
-	go func() { _ = Relay(in, out, tg) }()
+	go func() { _ = Relay(in, out, tg, HalfCloseLimit) }()
 	if got := readAll(t, fromRelay, 3*time.Second); got != "x" {
 		t.Fatalf("got %q", got)
 	}
@@ -155,5 +155,27 @@ func TestEndReachesTheClientWhenOutIsDuplicated(t *testing.T) {
 func TestDialRefusesOtherNetworks(t *testing.T) {
 	if _, err := Dial("udp", "127.0.0.1:1"); err == nil {
 		t.Fatal("udp was accepted")
+	}
+}
+
+// A target that ignores the client's half-close is cut off after HalfCloseLimit, as socat's -t did.
+func TestATargetThatNeverEndsIsCutOffAfterTheHalfClose(t *testing.T) {
+	in, out, toRelay, fromRelay := client(t)
+	hold := make(chan struct{})
+	defer close(hold)
+	tg := target(t, func(c *net.UnixConn) {
+		<-hold // reads nothing, writes nothing, never closes while the test runs
+		c.Close()
+	})
+	done := make(chan error, 1)
+	go func() { done <- Relay(in, out, tg, 300*time.Millisecond) }()
+	_ = toRelay.Close()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the relay did not end after HalfCloseLimit")
+	}
+	if got := readAll(t, fromRelay, time.Second); got != "" {
+		t.Fatalf("got %q", got)
 	}
 }

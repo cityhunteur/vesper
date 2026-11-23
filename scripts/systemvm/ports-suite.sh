@@ -147,7 +147,8 @@ except Exception as e:
 PY
 }
 if "${DOCKER}" run -d --name pp7 -p 18097:80 "${UDP_IMAGE}" TCP-LISTEN:80,fork,reuseaddr SYSTEM:'echo hi' >/dev/null 2>&1; then
-  out=""; for _ in $(seq 1 40); do out="$(eof_after 18097 2>&1)"; case "${out}" in EOF*hi*) break ;; esac; sleep 0.25; done
+  # Retry only while the port is not yet published (connection refused); once connected, one try decides.
+  out=""; for _ in $(seq 1 40); do out="$(eof_after 18097 2>&1)"; case "${out}" in EOF*|NO-EOF*) break ;; esac; sleep 0.25; done
   case "${out}" in EOF*hi*) record server_close_reaches_client true "server wrote and closed: the client saw ${out}" ;; *) record server_close_reaches_client false "${out}" ;; esac
 else
   record server_close_reaches_client false "cannot start ${UDP_IMAGE}"
@@ -155,6 +156,8 @@ fi
 
 # TD-093: dockerd crashes and supervise-daemon restarts it. A Docker events stream open through the proxy ends (so
 # the publisher, which follows the same stream, reconnects), and a container started after the restart is published.
+# systemvmctl is built first, so a build cannot use up the stream's 30 s.
+cargo build -q --bin systemvmctl >/dev/null 2>&1
 python3 -I - "${SOCKET}" > "${ROOT_DIR}/run/systemvm/ports-events.out" 2>&1 <<'PY' &
 import socket, sys, time
 s = socket.socket(socket.AF_UNIX); s.connect(sys.argv[1])
@@ -168,12 +171,16 @@ except Exception as e:
 PY
 EVPID=$!
 sleep 2
-if cargo run -q --bin systemvmctl -- control kill docker >/dev/null 2>&1; then
+if target/debug/systemvmctl control kill docker >/dev/null 2>&1; then
   wait "${EVPID}"; ev="$(cat "${ROOT_DIR}/run/systemvm/ports-events.out")"
   case "${ev}" in EOF*) record event_stream_ends_on_dockerd_exit true "an events stream open before the kill ended: ${ev}" ;; *) record event_stream_ends_on_dockerd_exit false "${ev}" ;; esac
-  for _ in $(seq 1 120); do "${DOCKER}" info >/dev/null 2>&1 && break; sleep 0.5; done
-  "${DOCKER}" run -d --name pp8 -p 18098:80 "${IMAGE}" sh -c "${SERVE}" sh 80 >/dev/null 2>&1
-  out="$(wait_http 18098)"; [ "${out}" = "port-80" ] && record published_after_dockerd_restart true "127.0.0.1:18098 -> ${out} for a container started after dockerd restarted" || record published_after_dockerd_restart false "127.0.0.1:18098 -> ${out:-no answer}; $(mappings | tr '\n' ';')"
+  back=no; for _ in $(seq 1 120); do "${DOCKER}" info >/dev/null 2>&1 && { back=yes; break; }; sleep 0.5; done
+  if [ "${back}" = yes ]; then
+    "${DOCKER}" run -d --name pp8 -p 18098:80 "${IMAGE}" sh -c "${SERVE}" sh 80 >/dev/null 2>&1
+    out="$(wait_http 18098)"; [ "${out}" = "port-80" ] && record published_after_dockerd_restart true "127.0.0.1:18098 -> ${out} for a container started after dockerd restarted" || record published_after_dockerd_restart false "127.0.0.1:18098 -> ${out:-no answer}; $(mappings | tr '\n' ';')"
+  else
+    record published_after_dockerd_restart false "dockerd did not answer docker info within 60 s of the kill; later suites will find it down"
+  fi
 else
   kill "${EVPID}" 2>/dev/null
   record event_stream_ends_on_dockerd_exit false "systemvmctl control kill docker failed"
