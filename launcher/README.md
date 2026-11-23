@@ -29,13 +29,18 @@ optional vsock bridge socket the config names, and reports.
     deny-by-default profile with `sandbox_init` and checks it: listing the home directory (from the user database),
     or the per-user temporary directory when a share covers the home directory, must give `EPERM`. It exits 1 if the
     profile cannot be applied (for example under a sandboxed parent) or the check fails, and when the shares cover
-    both directories. The profile allows reading the config, kernel, initrd and boot media; reading and writing the
-    rootfs, data disk and console log; listening on the bridge socket; the shares (read-only ones read only); issuing
-    file extensions for those to Virtualization.framework's VM process, and its "Fuse" extension
-    (`generic-issue-extension`); and looking up `com.apple.FSEvents` when a share is watched. It allows no process
+    both directories. The profile allows reading the kernel, initrd and boot media; reading and writing the rootfs,
+    data disk and console log (opened with `O_CREAT|O_TRUNC`, since `FileManager.createFile` writes a temporary file
+    beside it); listening on the bridge socket; the shares (read-only ones read only); issuing App Sandbox file
+    extensions for those to Virtualization.framework's VM process (read-write only where the launcher may write),
+    and its "Fuse" extension (`generic-issue-extension`, any class); and looking up `com.apple.FSEvents` when a share
+    is watched. A file named through a symbolic link fails to open under the profile (it names the link, the kernel
+    checks the target); name the real file. It allows no process
     start and no other network use. `--host-capabilities`, `--print-config` and `--watch-dry-run` need no VM and
     exit before the profile. A hidden `--sandbox-probe` (with `--probe-tcp`, `--probe-unix`, `--probe-file`) tries
-    what the profile refuses and exits before the VM; `scripts/macos/launcher-sandbox-probe.sh` runs it.
+    what the profile refuses (`PROBE` lines), then opens the console log, binds the bridge and opens each VM file
+    through the functions the VM path uses (`NEED` lines), and exits before the VM;
+    `scripts/macos/launcher-sandbox-probe.sh` runs it.
 - stdout: one JSON line per status change, `{"status":..., "elapsed_ms":..., "ready_pattern":..., "console_log":...}`: `bridge-listening` (with `"bridge":PATH`) right after start when `vsock_bridge_path` is set, `share-watch` or `share-watch-failed` when a share is watched (below), `ready`, then for a probe `probe-ok` or `probe-failed`, `running` (keep-running), `share-watch-summary` (when a share is watched), `terminating` (SIGTERM), then `stopped`; or `timeout`, `probe-timeout`, `start-failed`, `stopped-before-ready`, `stopped-before-probe`, `error`.
 - vsock bridge (`vsock_bridge_path` in the config): a Unix stream socket created with mode 0600 (parent directory created, stale file unlinked). Per client the launcher reads one line of at most 64 bytes; it must be `CONNECT <port>`; a port missing from `bridge_allowed_ports` is refused and logged (`bridge: port <n> is not allowed`) before any guest connect, and a config that sets `vsock_bridge_path` with no allowed ports fails at start with exit 3 (TD-027); otherwise the launcher connects to that guest vsock port through the VM's `VZVirtioSocketDevice` and relays bytes in both directions with 64 KiB buffers until either side closes (half-close is forwarded with `shutdown(SHUT_WR)`). No reply line is sent, matching `vesper-proxy`'s preface. SIGPIPE is ignored and `SO_NOSIGPIPE` is set on accepted clients, so a client that disappears mid-stream ends only its relay (ADR 0005). Bad prefaces and failed guest connects are logged to stderr and the client is closed. The socket is unlinked when the VM stops or the launcher is terminated.
 - Probe sequence after `ready`: type `login_user`; wait for `shell_prompt`; for each of `commands` type it and wait for `shell_prompt`; after the last prompt require `success_pattern` in the console output produced since the last command was typed; type `shutdown_command` and wait for the guest to stop. Input is typed only after the awaited pattern appeared.

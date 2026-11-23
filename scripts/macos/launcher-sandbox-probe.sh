@@ -60,17 +60,28 @@ config "${WORK}/share"
 confined="$(probe)" || fail "the launcher did not run under its profile"
 open="$(probe --no-sandbox)" || fail "the launcher did not run with --no-sandbox"
 [ "$(grep -c '^PROBE .* denied$' <<<"${confined}")" = 7 ] || fail "under the profile, not every probe was denied: ${confined}"
+# What the launcher needs outside the VM works under the profile: a new console log (none exists yet), the bridge
+# socket, the kernel, the initrd and the data disk, through the functions the VM path uses.
+[ "$(grep -c '^NEED .* ok$' <<<"${confined}")" = 5 ] || fail "under the profile, the launcher cannot reach what it needs: ${confined}"
+[ -f "${WORK}/run/console.log" ] || fail "the console log was not created"
 [ "$(grep -c '^PROBE .* ALLOWED$' <<<"${open}")" = 7 ] || fail "without the profile, not every probe worked: ${open}"
 grep -q "running without its sandbox profile" "${WORK}/stderr" || fail "--no-sandbox printed no warning"
-echo "launcher-sandbox-probe: 7 probes denied under the profile, 7 allowed without it"
+echo "launcher-sandbox-probe: 7 probes denied under the profile, 7 allowed without it; a new console log, the bridge and the VM's files work under it"
 
-# A share path that tries to end its SBPL string and allow everything: the profile must still deny.
-HOSTILE="${WORK}/sh\")(allow default)(\""
-mkdir -p "${HOSTILE}"
-config "${HOSTILE}"
-hostile="$(probe)" || fail "the launcher did not run with a hostile share path"
-[ "$(grep -c '^PROBE .* denied$' <<<"${hostile}")" = 7 ] || fail "a hostile share path widened the profile: ${hostile}"
-echo "launcher-sandbox-probe: a share path with SBPL metacharacters does not widen the profile"
+# Share paths that try to end their SBPL string and add a rule: in ASCII, and with the quote joined to a combining
+# mark (U+0600 before it, U+0301 after), which escaping by grapheme cluster would not see (review, D-082). The rule
+# they add is narrow, `(allow network*)`, so the self-check (which an `(allow default)` would trip) cannot hide it: the
+# launcher must start, and every probe must still be denied.
+i=0
+for HOSTILE in "${WORK}/sh\")) (allow network*) (allow file-read* (subpath \"" \
+  "$(python3 -I -c 'import sys;print(sys.argv[1] + "/q\u0600\")) (allow network*) (allow file-read* (subpath \"\u0301")' "${WORK}")"; do
+  i=$((i+1))
+  mkdir -p "${HOSTILE}"
+  config "${HOSTILE}"
+  hostile="$(probe)" || fail "the launcher did not start with hostile share path ${i}"
+  [ "$(grep -c '^PROBE .* denied$' <<<"${hostile}")" = 7 ] || fail "hostile share path ${i} widened the profile: ${hostile}"
+done
+echo "launcher-sandbox-probe: share paths with SBPL metacharacters, plain or joined to combining marks, do not widen the profile"
 
 # A share of the home directory is allowed; the self-check then uses the temporary directory.
 config "$(python3 -I -c 'import pwd,os;print(pwd.getpwuid(os.getuid()).pw_dir)')"

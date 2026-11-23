@@ -133,7 +133,8 @@ not cover come from the user database (`getpwuid_r`) as well as `HOME`, and the 
 Slice 3 (2026-11-23, D-082): the launcher applies its profile from `Sandbox.swift` after the config is decoded and
 before the VM is built, and is signed with the hardened runtime. The spike (`scripts/macos/sandbox-spike/launcher.sh`)
 found three rules beyond files and sockets, each the cause of a failed boot without it: `generic-issue-extension`
-(the framework's "Fuse" extension for virtio-fs), `file-issue-extension` for the files and shares the profile names,
+(the framework's "Fuse" extension for virtio-fs; its class is not known, so it is not narrowed), `file-issue-extension`
+of the App Sandbox read and read-write classes for the files and shares the profile names,
 and `mach-lookup` of `com.apple.FSEvents` for watched shares. No other Mach service was needed. The canary is the
 home directory from the user database, or the per-user temporary directory when a share covers it.
 

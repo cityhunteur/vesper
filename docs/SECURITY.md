@@ -75,12 +75,14 @@ Vesper’s security model is part of its parity contract. Treat this file as the
   launch config, before the VM is built: it may read the config, kernel, initrd and boot media, read and write the
   rootfs, data disk and console log, listen on the bridge socket, and use the shares (read-only ones read only).
   Three rules beyond files and sockets each have a failed boot as evidence (`scripts/macos/sandbox-spike/launcher.sh`):
-  issuing file extensions for those paths and the "Fuse" extension (`generic-issue-extension`, not narrowed by
-  class) to Virtualization.framework's VM process, and looking up `com.apple.FSEvents` when a share is watched. The
+  issuing App Sandbox file extensions for those paths (read-write only where the launcher may write) and the
+  "Fuse" extension (`generic-issue-extension`, not narrowed by class: its class name is not known) to
+  Virtualization.framework's VM process, and looking up `com.apple.FSEvents` when a share is watched. The
   VM runs in that XPC process, which launchd starts outside the profile. `--host-capabilities`, `--print-config`
   and `--watch-dry-run` need no VM and exit before the profile, so they run without one.
-  `scripts/macos/launcher-sandbox-probe.sh` (macOS CI) shows seven refusals, and that a share path with SBPL
-  metacharacters does not widen the profile. A share of the home directory moves the self-check to the per-user
+  `scripts/macos/launcher-sandbox-probe.sh` (macOS CI) shows seven refusals, that a new console log, the bridge and
+  the VM's files work under the profile, and that share paths with SBPL metacharacters, plain or joined to
+  combining marks, do not widen it (the launcher escapes by Unicode scalar, as `src/sandbox.rs` does). A share of the home directory moves the self-check to the per-user
   temporary directory; a share of `/` is refused.
 - `make sign`, `make dev-up`, `make docker-up` and the `vesperd` suite targets sign `vesperd` and the proxy ad hoc
   with the hardened runtime; `make vmlauncher-build` signs the launcher the same way, with its plist.

@@ -16,7 +16,7 @@ enum SandboxRule {
     case readTree(String)
     case writeTree(String)
     case listenUnix(String)
-    case issueFileExtension(String, tree: Bool)
+    case issueFileExtension(String, tree: Bool, writable: Bool)
     case issueGenericExtensions
     case lookup(String)
 }
@@ -49,15 +49,19 @@ func sandboxCanonicalFile(_ path: String) -> String? {
     return (dir.hasSuffix("/") ? dir : dir + "/") + url.lastPathComponent
 }
 
-/// `path` as an SBPL string literal; a path with a control character is refused, `\` and `"` are escaped.
+/// `path` as an SBPL string literal; a path with a control character (C0, DEL or C1, as Rust's `char::is_control`)
+/// is refused, `\` and `"` are escaped. It walks Unicode scalars, not Swift `Character`s: a quote joined to a
+/// combining mark is one `Character`, which would not compare equal to `"` and would end the string (review, D-082).
 func sandboxQuote(_ path: String) -> String? {
-    if path.unicodeScalars.contains(where: { $0.value < 0x20 || $0.value == 0x7f }) { return nil }
-    var out = "\""
-    for c in path {
-        if c == "\\" || c == "\"" { out.append("\\") }
-        out.append(c)
+    if path.unicodeScalars.contains(where: { $0.value < 0x20 || (0x7f...0x9f).contains($0.value) }) { return nil }
+    var out = String.UnicodeScalarView()
+    out.append("\"")
+    for s in path.unicodeScalars {
+        if s == "\\" || s == "\"" { out.append("\\") }
+        out.append(s)
     }
-    return out + "\""
+    out.append("\"")
+    return String(out)
 }
 
 func sandboxRender(_ rules: [SandboxRule]) -> Result<String, SandboxError> {
@@ -81,8 +85,12 @@ func sandboxRender(_ rules: [SandboxRule]) -> Result<String, SandboxError> {
                 let q = try file(p)
                 out += "(allow file-read* file-write* (literal \(q)))\n"
                 out += "(allow network-bind network-inbound (local unix-socket (path-literal \(q))))\n"
-            case .issueFileExtension(let p, let isTree):
-                out += "(allow file-issue-extension (\(isTree ? "subpath" : "literal") \(isTree ? try tree(p) : try file(p))))\n"
+            case .issueFileExtension(let p, let isTree, let writable):
+                // Only the App Sandbox's file classes, and read-write only where the launcher itself may write.
+                let classes = writable
+                    ? "\"com.apple.app-sandbox.read\" \"com.apple.app-sandbox.read-write\"" : "\"com.apple.app-sandbox.read\""
+                let filter = "(\(isTree ? "subpath" : "literal") \(isTree ? try tree(p) : try file(p)))"
+                out += "(allow file-issue-extension (require-all (extension-class \(classes)) \(filter)))\n"
             case .issueGenericExtensions: out += "(allow generic-issue-extension)\n"
             case .lookup(let name):
                 guard let q = sandboxQuote(name) else { throw SandboxError.path(name) }
@@ -111,13 +119,14 @@ enum SandboxError: Error, CustomStringConvertible {
 }
 
 /// What the launcher may touch for `config`. Directories it creates are made first, by `sandboxPrepare`.
-func sandboxRules(_ config: LaunchConfig, configPath: String) -> [SandboxRule] {
-    var rules: [SandboxRule] = [.readFile(absolutePath(configPath)), .issueGenericExtensions]
+func sandboxRules(_ config: LaunchConfig) -> [SandboxRule] {
+    // The config itself is decoded before the profile, so no rule names it.
+    var rules: [SandboxRule] = [.issueGenericExtensions]
     for p in [config.kernel_path, config.initrd_path, config.boot_media_path].compactMap({ $0 }) where !p.isEmpty {
-        rules += [.readFile(absolutePath(p)), .issueFileExtension(absolutePath(p), tree: false)]
+        rules += [.readFile(absolutePath(p)), .issueFileExtension(absolutePath(p), tree: false, writable: false)]
     }
     for p in [config.rootfs_path, config.data_disk_path].compactMap({ $0 }) where !p.isEmpty {
-        rules += [.writeFile(absolutePath(p)), .issueFileExtension(absolutePath(p), tree: false)]
+        rules += [.writeFile(absolutePath(p)), .issueFileExtension(absolutePath(p), tree: false, writable: true)]
     }
     rules += [.writeFile(absolutePath(config.console_log_path))]
     if let bridge = config.vsock_bridge_path, !bridge.isEmpty {
@@ -125,8 +134,9 @@ func sandboxRules(_ config: LaunchConfig, configPath: String) -> [SandboxRule] {
     }
     for share in config.shared_directories ?? [] {
         let p = absolutePath(share.host_path)
-        rules.append((share.read_only ?? false) ? .readTree(p) : .writeTree(p))
-        rules.append(.issueFileExtension(p, tree: true))
+        let readOnly = share.read_only ?? false
+        rules.append(readOnly ? .readTree(p) : .writeTree(p))
+        rules.append(.issueFileExtension(p, tree: true, writable: !readOnly))
     }
     if (config.shared_directories ?? []).contains(where: { $0.watch ?? false }) {
         rules.append(.lookup("com.apple.FSEvents"))
@@ -233,9 +243,9 @@ func sandboxSelfCheck(_ canary: String) -> SandboxError? {
 }
 
 /// Builds, applies and proves the launcher's profile, or returns why not.
-func sandboxConfine(_ config: LaunchConfig, configPath: String) -> SandboxError? {
+func sandboxConfine(_ config: LaunchConfig) -> SandboxError? {
     if let e = sandboxPrepare(config) { return e }
-    let rules = sandboxRules(config, configPath: configPath)
+    let rules = sandboxRules(config)
     guard let canary = sandboxCanary(rules) else {
         return .check("sandbox: the shares cover both the home directory and the temporary directory, so the self-check has nothing to test; share a narrower directory")
     }
@@ -301,11 +311,11 @@ func sandboxProbe(tcpPort: UInt16?, unixPath: String?, file: String?) -> [String
         let s = socket(AF_UNIX, SOCK_STREAM, 0)
         var addr = sockaddr_un()
         addr.sun_family = sa_family_t(AF_UNIX)
-        let bytes = Array(path.utf8)
+        let bytes = Array(path.utf8.prefix(MemoryLayout.size(ofValue: addr.sun_path) - 1))
         withUnsafeMutablePointer(to: &addr.sun_path) { ptr in
             ptr.withMemoryRebound(to: UInt8.self, capacity: bytes.count + 1) { dst in
-                for (i, b) in bytes.prefix(103).enumerated() { dst[i] = b }
-                dst[min(bytes.count, 103)] = 0
+                for (i, b) in bytes.enumerated() { dst[i] = b }
+                dst[bytes.count] = 0
             }
         }
         let rc = withUnsafePointer(to: &addr) {
