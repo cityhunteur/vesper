@@ -32,7 +32,7 @@ macOS. Each Docker command that cannot be honest about a microVM is refused with
   `make systemvm-docker-microvm-suite` 16/16, 2026-11-23)
 - [x] Slice 6: only if slice 4's numbers call for it, a shared base drive (TD-035): recorded as not needed (D-089,
   2026-11-23); the drive build is about 0.75 s of a 4 s start, and density is memory-bound
-- [ ] Outcomes & Retrospective written; plan moved to completed
+- [x] Outcomes & Retrospective written; plan moved to completed (2026-11-23)
 
 ## Surprises & Discoveries
 
@@ -69,7 +69,31 @@ macOS. Each Docker command that cannot be honest about a microVM is refused with
 
 ## Outcomes & Retrospective
 
-Not yet written.
+Done on 2026-11-23 (D-091). `docker run --runtime vesper` from macOS runs the container in its own jailed
+Firecracker microVM, opt-in as the owner chose (D-066): its address and published ports, peers by address and by name
+on user-defined networks, outbound access, writes kept across stop and start, binds from shared macOS directories
+through its own share server, `pause` and `unpause`, and a refusal by name for every Docker operation a microVM cannot
+answer honestly. `make phase4-vesper` runs the six Phase 4 suites with every container in a microVM: 94 steps pass,
+and the four failing steps are recorded deviations. Slice 6 was not built: the numbers did not call for it (D-089).
+
+Against the purpose:
+
+- **Met:** the container's network, ports, names, writes, shares, pause; refusals that name ADR 0011.
+- **Deviations, recorded:** `linux/amd64` refused; a non-root user's share ownership (TD-097); dockerd's copy of the
+  files (`cp`, `diff`, `export`, `commit`) and `network connect` refused once the container has started; the rest of
+  ADR 0011's list.
+- **Costs measured (D-088):** `docker run` p50 4.2 s against 0.6 s with runc, mostly the microVM's launch and boot
+  (TD-099); 4 containers per default 2 GiB System VM, memory-bound.
+- **Shared gap found:** an exit while containerd restarts is missed by dockerd with runc as well (TD-098).
+
+What worked: building each slice with its suite on a freshly booted System VM, then a review that read the code
+without the author's view; each review found real defects (a share-link check that could not fail, a pid-reuse
+window, a body the plugin never saw). Mutant runs (a guard removed, the suite must fail) showed which steps proved
+anything. Measuring before deciding saved slice 6, and measuring the vCPU pause showed it broke vsock.
+
+What to do differently: test each new isolation step against its own defect before trusting it; three of slice 4a's
+first steps would have passed with the defect. Time a new control operation the first time it runs (the vCPU pause's
+5 s socat wait hid the vsock fault for one run).
 
 ## Context and Orientation
 
