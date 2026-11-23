@@ -21,11 +21,18 @@ macOS. Each Docker command that cannot be honest about a microVM is refused with
   12 with `VESPER_DOCKER_RUNTIME=vesper` and with the default (2026-11-22, `run/B3/s3-*`)
 - [ ] Slice 4: shares for `vesper` containers and `ctr` tasks; the Phase 4 suites with the runtime forced; latency,
   density and restart measurements
+  - [x] 4a: share binds for `vesper` containers over the veth share link; `ctr` tasks keep ADR 0009's model (D-086);
+    `make systemvm-docker-microvm-suite` 14/14 (2026-11-23, `run/B3/s4a-plan.md`)
+  - [ ] 4b: the Phase 4 suites with `VESPER_DOCKER_RUNTIME=vesper`, each failing step a deviation
+  - [ ] 4c: measurements (`docker run`/`stop` p50 and p95, density, containerd restart, exit while containerd is down)
 - [ ] Slice 5: honesty refusals (`cp`, `diff`, `export`, `commit`, `connect`) and Pause and Resume
 - [ ] Slice 6: only if slice 4's numbers call for it, a shared base drive (TD-035)
 - [ ] Outcomes & Retrospective written; plan moved to completed
 
 ## Surprises & Discoveries
+
+- Slice 4a: BusyBox's `ip link add … type veth peer name X` succeeds but ignores the name (the peer is `veth0`); a
+  spoof test with the /30's broadcast address proved nothing, because the kernel used the real source address.
 
 - Slice 3: dockerd sets a container's final MAC on `eth0` after the task starts, and until then `eth0` can carry a
   placeholder shared by several containers: two microVMs in one compose project got the same MAC and could not reach

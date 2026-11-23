@@ -118,18 +118,9 @@ func (s *Service) Create(ctx context.Context, r *taskAPI.CreateTaskRequest) (_ *
 	}
 	// Bind mounts from macOS shares become NFS mounts from the microVM's own server (ADR 0009, GH #160 M5); other
 	// bind mounts keep today's behaviour.
-	procMounts, _ := os.ReadFile("/proc/mounts")
-	plan, err := shares.MakePlan(spec.Mounts, shares.ShareMounts(string(procMounts)), shares.HostResolver)
+	plan, annotations, err := planShares(spec)
 	if err != nil {
 		return nil, errgrpc.ToGRPCf(errdefs.ErrInvalidArgument, "%v", err)
-	}
-	var annotations map[string]string
-	if len(plan.Shares) > 0 {
-		v, err := shares.Encode(plan.Shares)
-		if err != nil {
-			return nil, errgrpc.ToGRPCf(errdefs.ErrInvalidArgument, "%v", err)
-		}
-		annotations = map[string]string{shares.Annotation: v}
 	}
 	// The machine and the limits the guest applies both come from the spec's resources (TD-048).
 	size, err := bundle.SizeOf(spec, bundle.SystemCPUs())
@@ -176,6 +167,31 @@ func (s *Service) Create(ctx context.Context, r *taskAPI.CreateTaskRequest) (_ *
 	return &taskAPI.CreateTaskResponse{Pid: uint32(os.Getpid())}, nil
 }
 
+// planShares maps spec's binds from macOS shares onto the microVM's share server (ADR 0009) and returns the plan with
+// the guest config's annotation for it (none when there is no share).
+func planShares(spec *specs.Spec) (shares.Plan, map[string]string, error) {
+	procMounts, _ := os.ReadFile("/proc/mounts")
+	plan, err := shares.MakePlan(spec.Mounts, shares.ShareMounts(string(procMounts)), shares.HostResolver)
+	if err != nil || len(plan.Shares) == 0 {
+		return plan, nil, err
+	}
+	v, err := shares.Encode(plan.Shares)
+	if err != nil {
+		return plan, nil, err
+	}
+	return plan, map[string]string{shares.Annotation: v}, nil
+}
+
+// hasShareNet reports whether a launch has a share server to stop.
+func hasShareNet(args []string) bool {
+	for _, a := range args {
+		if a == "--share-net" {
+			return true
+		}
+	}
+	return false
+}
+
 // The namespace holder, replaceable in tests.
 var (
 	startNetns   = ctrns.Start
@@ -192,7 +208,17 @@ func (s *Service) createDocker(ctx context.Context, r *taskAPI.CreateTaskRequest
 	if ns, _ := namespaces.Namespace(ctx); ns != "moby" && !strings.HasPrefix(ns, "moby-") {
 		return nil, errgrpc.ToGRPCf(errdefs.ErrInvalidArgument, "a dockerd root filesystem in containerd namespace %q is refused (ADR 0011)", ns)
 	}
-	files, err := bundle.CheckDocker(spec, r.ID)
+	// Binds from macOS shares reach the microVM through its share server (ADR 0011 slice 4); CheckDocker refuses
+	// every other bind of a System VM path.
+	plan, annotations, err := planShares(spec)
+	if err != nil {
+		return nil, errgrpc.ToGRPCf(errdefs.ErrInvalidArgument, "%v", err)
+	}
+	shareDests := map[string]bool{}
+	for _, sh := range plan.Shares {
+		shareDests[sh.Dest] = true
+	}
+	files, err := bundle.CheckDocker(spec, r.ID, shareDests)
 	if err != nil {
 		return nil, errgrpc.ToGRPCf(errdefs.ErrInvalidArgument, "%v", err)
 	}
@@ -204,10 +230,10 @@ func (s *Service) createDocker(ctx context.Context, r *taskAPI.CreateTaskRequest
 	t.Port = 1028
 	// The guest config is built at Start: dockerd writes the container's address into its hosts file while it wires
 	// the namespace, after Create. Built here once with no files, it proves the spec converts.
-	if _, err := bundle.GuestDockerConfig(spec, nil, bundle.GuestResources(spec), fmt.Sprintf("/run/sessions/p%d", t.Port)); err != nil {
+	if _, err := bundle.GuestDockerConfig(spec, nil, bundle.GuestResources(spec), fmt.Sprintf("/run/sessions/p%d", t.Port), annotations); err != nil {
 		return nil, errgrpc.ToGRPCf(errdefs.ErrInvalidArgument, "%v", err)
 	}
-	t.dockerSpec, t.dockerFiles = spec, files
+	t.dockerSpec, t.dockerFiles, t.dockerAnnotations = spec, files, annotations
 	var uids, gids []specs.LinuxIDMapping
 	if spec.Linux != nil {
 		uids, gids = spec.Linux.UIDMappings, spec.Linux.GIDMappings
@@ -223,7 +249,7 @@ func (s *Service) createDocker(ctx context.Context, r *taskAPI.CreateTaskRequest
 	}
 	t.Image, t.Docker, t.Holder = image, true, holder
 	t.SetCreatedPid(holder)
-	t.LaunchArgs, t.SizeArgs = []string{"--ctrns"}, size.LaunchArgs()
+	t.LaunchArgs, t.SizeArgs = append([]string{"--ctrns"}, plan.LaunchArgs()...), size.LaunchArgs()
 	t.Stdin, t.Stdout, t.Stderr, t.Terminal = r.Stdin, r.Stdout, r.Stderr, r.Terminal
 	s.task = t
 	s.persist(ctx, t)
@@ -276,7 +302,7 @@ func (s *Service) Start(ctx context.Context, r *taskAPI.StartRequest) (*taskAPI.
 		if err != nil {
 			return nil, errgrpc.ToGRPCf(errdefs.ErrFailedPrecondition, "%v", err)
 		}
-		if t.Config, err = bundle.GuestDockerConfig(t.dockerSpec, contents, bundle.GuestResources(t.dockerSpec), fmt.Sprintf("/run/sessions/p%d", t.Port)); err != nil {
+		if t.Config, err = bundle.GuestDockerConfig(t.dockerSpec, contents, bundle.GuestResources(t.dockerSpec), fmt.Sprintf("/run/sessions/p%d", t.Port), t.dockerAnnotations); err != nil {
 			return nil, errgrpc.ToGRPCf(errdefs.ErrInvalidArgument, "%v", err)
 		}
 	}
@@ -378,7 +404,7 @@ func (s *Service) watch(ctx context.Context, containerID string, t *Task) {
 			s.persist(ctx, t)
 			// The guest unmounted its shares before EXIT, so the server has nothing left to serve (ADR 0009,
 			// Lifecycle): stop it now rather than at Delete, which may come much later.
-			if len(t.LaunchArgs) > 0 {
+			if hasShareNet(t.LaunchArgs) {
 				go func() {
 					if err := s.backend.StopShares(context.Background(), containerID); err != nil {
 						log.L.WithError(err).WithField("task", containerID).Warn("stop share server")

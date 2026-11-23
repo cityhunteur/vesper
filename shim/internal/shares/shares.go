@@ -142,7 +142,8 @@ func readOnly(m specs.Mount) bool {
 	ro := false
 	for _, o := range m.Options {
 		switch o {
-		case "ro":
+		case "ro", "rro":
+			// rro: Docker 25 and later ask for a recursive read-only bind this way (review of D-086).
 			ro = true
 		case "rw":
 			ro = false

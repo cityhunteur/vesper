@@ -5,8 +5,11 @@
 # a runc peer by address and the internet and serves a published port; its writes survive stop and start; frames
 # from a spoofed address or MAC go nowhere; every option ADR 0011 refuses is refused, and a runc container cannot
 # join a vesper container's namespaces; on a user-defined network it reaches a peer by name and external names
-# through dockerd's resolver (slice 3); after `docker rm` nothing is left and the sweep removes the drive.
-# Needs `make systemvm-up && make docker-up` and outbound network for the image. Writes
+# through dockerd's resolver (slice 3); a bind from a shared macOS directory reads and writes through the container's
+# own share server, read-only when asked, on its last NIC, reaching nothing but the server (slice 4); after
+# `docker rm` nothing is left and the sweep removes the drive.
+# Needs `make systemvm-up-snapshot && make docker-up` (the share, DOCKER_MICROVM_SHARE) and outbound network for the
+# image. Writes
 # run/systemvm/docker-microvm-report.json.
 set -uo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -20,7 +23,7 @@ cd "${ROOT_DIR}"; mkdir -p "$(dirname "${REPORT}")"
 steps=()
 record() { local d; d="$(printf '%s' "$3" | tr '\n' ' ' | cut -c1-600 | sed 's/\\/\\\\/g; s/"/\\"/g')"; steps+=("{\"name\":\"$1\",\"ok\":$2,\"detail\":\"${d}\"}"); if [ "$2" = true ]; then echo "ok   $1"; else echo "FAIL $1: ${d:0:300}"; fi; }
 ctl() { "${CTL[@]}" "$@" 2>&1; }
-NAMES="vm-a vm-b vm-p vm-n peer-a peer-n joiner"
+NAMES="vm-a vm-b vm-p vm-n vm-s peer-a peer-n joiner"
 NET="${DOCKER_MICROVM_NET:-vesper-microvm-net}"
 cleanup() { docker rm -f ${NAMES} >/dev/null 2>&1; docker network rm "${NET}" >/dev/null 2>&1; }
 trap cleanup EXIT
@@ -109,6 +112,50 @@ done
 tm="$(docker run --rm --runtime vesper --tmpfs /scratch:size=8m "${IMAGE}" sh -c 'grep " /scratch " /proc/mounts | cut -d" " -f3' 2>&1)"
 [ "${tm}" = tmpfs ] || bad="${bad} [--tmpfs is honoured: ${tm}]"
 [ -z "${bad}" ] && record refused_options_are_refused true "eight vesper options and three runc joins refused with (ADR 0011); --tmpfs honoured" || record refused_options_are_refused false "${bad}"
+
+# --- 10. Shares (slice 4): a bind from a shared macOS directory reaches the container through its own server -------
+SHARE="${DOCKER_MICROVM_SHARE:-${ROOT_DIR}/run/vesperd-share}"
+SD="${SHARE}/docker-microvm"
+mkdir -p "${SD}" && echo from-mac > "${SD}/in.txt" && rm -f "${SD}/out.txt" "${SD}/ro.txt"
+rw="$(docker run --rm --runtime vesper -v "${SD}:/data" "${IMAGE}" sh -c 'cat /data/in.txt; echo from-vesper > /data/out.txt; grep " /data " /proc/mounts | cut -d" " -f1,3' 2>&1 | tr '\n' ' ')"
+ro="$(docker run --rm --runtime vesper -v "${SD}:/data:ro" "${IMAGE}" sh -c 'cat /data/in.txt; (echo x > /data/ro.txt) 2>/dev/null && echo wrote || echo refused' 2>&1 | tr '\n' ' ')"
+# --mount ...,readonly may reach the runtime as rro (Docker 25 and later), which must be read-only too.
+ro="${ro}$(docker run --rm --runtime vesper --mount "type=bind,source=${SD},target=/data,readonly" "${IMAGE}" sh -c 'cat /data/in.txt; (echo x > /data/ro.txt) 2>/dev/null && echo wrote || echo refused' 2>&1 | tr '\n' ' ')"
+back="$(cat "${SD}/out.txt" 2>&1)"; [ -e "${SD}/ro.txt" ] && back="${back} ro.txt-written"
+case "${rw}|${ro}|${back}" in "from-mac 169.254.77.1:/s/0 nfs |from-mac refused from-mac refused |from-vesper")
+    record share_bind_reads_and_writes true "rw: ${rw}; ro: ${ro}; the Mac reads: ${back}" ;;
+  *) record share_bind_reads_and_writes false "rw: ${rw}; ro: ${ro}; the Mac reads: ${back} (is ${SHARE} shared? make systemvm-up-snapshot)" ;; esac
+# The share link is the last NIC: eth0 with no network, eth2 after the data and DNS links on a user network.
+addr='cat /data/in.txt; ip -o -4 addr | awk "\$4 == \"169.254.77.2/30\" {print \$2}"'
+nn="$(docker run --rm --runtime vesper --network none -v "${SD}:/data" "${IMAGE}" sh -c "${addr}" 2>&1 | tr '\n' ' ')"
+un="$(docker run --rm --runtime vesper --network "${NET}" -v "${SD}:/data" "${IMAGE}" sh -c "${addr}" 2>&1 | tr '\n' ' ')"
+case "${nn}|${un}" in "from-mac eth0 |from-mac eth2 ") record share_link_on_each_network true "none: ${nn}; ${NET}: ${un}" ;;
+  *) record share_link_on_each_network false "none: ${nn}; ${NET}: ${un}" ;; esac
+# The share link reaches the server's NFS ports and nothing else (review of D-086: each check must fail if its guard
+# is missing):
+# - a listener on another port of the server address is closed (the INPUT rules on vh0);
+# - a peer routed through the server is not reached (the share namespace forwards nothing);
+# - a spoofed MAC on the share device reaches nothing (the tc allow-list), and the real one works again;
+# - a runc peer with a route to the server through the vesper container's address does not reach it (the container
+#   namespace's stack never sees the share link);
+# - Firecracker is not in the share namespace, which holds lo and vh0 only.
+docker run -d --name vm-s --runtime vesper -v "${SD}:/data" "${IMAGE}" sleep 300 >/dev/null 2>&1; up vm-s
+sid="$(docker inspect -f '{{.Id}}' vm-s 2>/dev/null)"; sip="$(docker inspect -f '{{.NetworkSettings.IPAddress}}' vm-s 2>/dev/null)"
+sdev="$(docker exec vm-s sh -c 'ip -o -4 addr | awk "\$4 == \"169.254.77.2/30\" {print \$2}"' 2>&1)"
+lis="$(ctl microvm -- test-share-listen "${sid}" 4444 | head -1)"
+iso="$(docker exec vm-s sh -c "nc -w 2 169.254.77.1 4444 </dev/null 2>/dev/null | grep -q vesper-share && echo other-port-open || echo other-port-closed
+  ip route add ${peer}/32 via 169.254.77.1 dev ${sdev} && (nc -w 3 ${peer} 9000 || echo peer-no-reply); ip route del ${peer}/32 via 169.254.77.1 dev ${sdev}
+  m=\$(cat /sys/class/net/${sdev}/address); ifconfig ${sdev} hw ether 02:00:00:00:00:98 && (nc -w 3 169.254.77.1 2049 </dev/null >/dev/null 2>&1 && echo spoof-reached || echo spoof-no-reply); ifconfig ${sdev} hw ether \$m
+  nc -w 3 169.254.77.1 2049 </dev/null >/dev/null 2>&1 && echo nfs-open || echo nfs-closed" 2>&1 | tr '\n' ' ')"
+ctl microvm -- test-share-listen "${sid}" stop >/dev/null
+runcpeer="$(docker run --rm --cap-add NET_ADMIN "${IMAGE}" sh -c "ip route add 169.254.77.1/32 via ${sip} && (nc -w 3 169.254.77.1 2049 </dev/null >/dev/null 2>&1 && echo reached || echo unreachable)" 2>&1)"
+topo="$(ctl microvm sharenet "${sid}" | head -1)"
+case "${iso}|${runcpeer}|${topo}" in "other-port-closed peer-no-reply spoof-no-reply nfs-open |unreachable|"*"links=lo,vh0 "*"fc_in_ns=no"*)
+    record share_link_reaches_only_the_server true "${sdev}: ${iso}; listener: ${lis}; runc peer via ${sip}: ${runcpeer}; ${topo}" ;;
+  *) record share_link_reaches_only_the_server false "${sdev}: ${iso}; listener: ${lis}; runc peer via ${sip}: ${runcpeer}; ${topo}" ;; esac
+docker rm -f vm-s >/dev/null 2>&1; sleep 2
+gone="$(ctl microvm sharenet "${sid}" | head -1); $(ctl microvm unfs "${sid}" | head -1)"
+case "${gone}" in "ABSENT ${sid}; "*) record share_link_cleaned_up true "${gone}" ;; *) record share_link_cleaned_up false "${gone}" ;; esac
 
 # --- 9. Nothing is left, and the sweep removes the drives ---------------------------------------------------------
 pid_vm_p="$(docker inspect -f '{{.Id}}' vm-p 2>/dev/null)"

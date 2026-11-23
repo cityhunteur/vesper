@@ -637,6 +637,26 @@ from its own microVM's server. Docker containers do not use the shim and still g
   whole System VM forget the files it does not hold. They all need root in the System VM.
 - **Evidence:** `make systemvm-sharenet-suite` (12 steps, `run/GH-160/m2-sharenet-suite.json`).
 
+### Shares for `vesper` containers (ADR 0011 slice 4, D-086)
+
+- A `docker run --runtime vesper` container gets a bind only from a shared macOS directory, through its microVM's
+  own share server, as a `ctr` task does. The plugin refuses named volumes, `tmpfs` and `volume` mounts and binds of
+  System VM paths; its share check (`statfs` of the path or its deepest existing ancestor: virtio-fs) is
+  advice, and the shim decides after resolving links
+  (`bundle.CheckDocker`, `shares.MakePlan`). A share the guest's runc would mount over (`/proc`, `/sys`, `/dev`, a
+  `tmpfs`) is refused, so a write never lands in a cover.
+- **The share link** is not the `ctr` tap: the share namespace holds `lo`, `vh0` (`169.254.77.1/30`) and the
+  server; `vh1` moves into the container's namespace through its holder, checked by start time and namespace, and
+  `tc` mirrors it with tap `vs0`, so the namespace's own stack never handles the frames. From the guest only the
+  share MAC (`06:00:a9:fe:4d:02`) and `169.254.77.2` pass; the server's `INPUT` rules accept only its NFS ports on
+  `vh0`; the tap has the share rate limiter. Firecracker runs in the container's namespace, not the share namespace.
+- `make systemvm-docker-microvm-suite` shows it, each check built to fail if its guard is missing: a listener on
+  another port of the server address is closed (the `INPUT` rules), a peer routed through the server is not reached
+  (no forwarding), a spoofed MAC on the share device reaches nothing (the `tc` allow-list; a spoofed address is also
+  dropped by reverse-path filtering on `vh0`), a runc peer routed to the server through the container's address does
+  not reach it, and nothing of the link is left after `docker rm`. `vh1` moves through a helper process the script
+  holds, so a reused pid cannot receive it. `rro` (Docker 25's recursive read-only bind) is read-only. What the guest does with its own exports is the guest's (ADR 0009).
+
 ### The share server (GH #160 M3)
 
 - `vesper-microvm launch ID --share-net --unfs-mount DIR --unfs-src REL:ro|rw ...` starts one `unfsd` for that

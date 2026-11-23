@@ -49,3 +49,12 @@ func TestLifecycle(t *testing.T) {
 		t.Fatalf("delete after exit: %v", err)
 	}
 }
+
+func TestHasShareNet(t *testing.T) {
+	if hasShareNet([]string{"--ctrns"}) {
+		t.Error("a Docker task with no share was said to have a share server")
+	}
+	if !hasShareNet([]string{"--ctrns", "--share-net", "--unfs-mount", "/Users/me"}) {
+		t.Error("a Docker task with shares was said to have none")
+	}
+}

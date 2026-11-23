@@ -115,6 +115,7 @@ REC=$STATE/records                 # records/<id>: "pid=<launch pid> start=<its 
 LOCK=$STATE/lock                   # serialises record and namespace creation with the reaper
 JUSER=vesper-shim-jail             # the uid 10000 user: the tap owner is given by name (netns.sh)
 SHARE_TAP=share0
+SHARE_MAC=06:00:a9:fe:4d:02
 SHARE_SRV=169.254.77.1
 SHARE_GUEST=169.254.77.2
 SHARE_PREFIX=30
@@ -195,16 +196,35 @@ setup_user() {
   grep -q "^$JUSER:x:$JUID:$JGID:" /etc/passwd || { echo "ERR $JUSER exists with another uid or gid"; return 1; }
   echo "USER $JUSER $JUID"
 }
-sharenet_up() { # ID (lock held, record written) -> a reason on failure
+sharenet_up() { # ID [veth] (lock held, record written) -> a reason on failure
+  # Without "veth" the namespace holds lo and the tap, and Firecracker runs in it (ADR 0009). With "veth", for a
+  # Docker task whose Firecracker runs in the container's own namespace (ADR 0011 slice 4), it holds lo and vh0, one
+  # end of a veth pair; ctrns_share_link moves the other end, vh1, into the container's namespace.
   sn_f="$NETNS/$1"
-  sn_why=$(vnetns_up "$NETNS" "$JUSER" "$1" "$SHARE_TAP") || { echo "$sn_why"; return 1; }
-  nsenter --net="$sn_f" ip addr add "$SHARE_SRV/$SHARE_PREFIX" dev "$SHARE_TAP" 2>/dev/null || { echo "address"; return 1; }
+  if [ "${2:-}" = veth ]; then
+    sn_dev=vh0
+    sn_why=$(vnetns_up "$NETNS" "$JUSER" "$1") || { echo "$sn_why"; return 1; }
+    # Created here, so both ends inherit this namespace's defaults: IPv6 off, strict reverse-path filtering. BusyBox's
+    # ip ignores "peer name" and calls the peer veth0 in this fresh namespace, so it is renamed.
+    { nsenter --net="$sn_f" ip link add vh0 type veth && nsenter --net="$sn_f" ip link set dev veth0 name vh1; } 2>/dev/null \
+      || { echo "veth"; return 1; }
+    nsenter --net="$sn_f" ip link set dev vh0 up 2>/dev/null || { echo "veth up"; return 1; }
+  else
+    sn_dev=$SHARE_TAP
+    sn_why=$(vnetns_up "$NETNS" "$JUSER" "$1" "$SHARE_TAP") || { echo "$sn_why"; return 1; }
+  fi
+  nsenter --net="$sn_f" ip addr add "$SHARE_SRV/$SHARE_PREFIX" dev "$sn_dev" 2>/dev/null || { echo "address"; return 1; }
   # Defence in depth: only the tap reaches the server's ports, and nothing is forwarded. Isolation does not rest
   # on this rule (nothing else is in the namespace); it keeps the server private if an uplink joins later (TD-032).
   nsenter --net="$sn_f" iptables -w -P INPUT DROP && nsenter --net="$sn_f" iptables -w -P FORWARD DROP || { echo "policy"; return 1; }
   for sn_p in $SHARE_PORTS; do
-    nsenter --net="$sn_f" iptables -w -A INPUT -i "$SHARE_TAP" -d "$SHARE_SRV" -p tcp --dport "$sn_p" -j ACCEPT || { echo "rule $sn_p"; return 1; }
+    nsenter --net="$sn_f" iptables -w -A INPUT -i "$sn_dev" -d "$SHARE_SRV" -p tcp --dport "$sn_p" -j ACCEPT || { echo "rule $sn_p"; return 1; }
   done
+}
+share_rl() { # the share link's Firecracker rate limiter (TD-032), or the test hook's
+  sr_b=$SHARE_RATE_BYTES; sr_o=$SHARE_RATE_OPS
+  [ -r "$SHARE_RATE_TEST" ] && read -r sr_b sr_o < "$SHARE_RATE_TEST"
+  echo "{\"bandwidth\":{\"size\":$sr_b,\"refill_time\":1000},\"ops\":{\"size\":$sr_o,\"refill_time\":1000}}"
 }
 sharenet() { # ID: what the namespace holds, for the suites and for diagnosis
   id=${1:-}; valid_id "$id" || { echo "ERR bad id"; return 2; }
@@ -216,7 +236,8 @@ sharenet() { # ID: what the namespace holds, for the suites and for diagnosis
     echo "links=$(ls "$d/class/net" | sort | tr "\n" "," | sed "s/,\$//") owner=$(cat "$d/class/net/$1/owner" 2>/dev/null)"
     umount "$d"; rmdir "$d"' sh "$SHARE_TAP" 2>/dev/null)
   links=$(printf '%s' "$sys" | sed -n 's/^links=\([^ ]*\) .*/\1/p'); owner=${sys##*owner=}
-  addr=$(nsenter --net="$f" ip -o -4 addr show dev "$SHARE_TAP" 2>/dev/null | awk '{print $4}' | tr '\n' ',' | sed 's/,$//')
+  sn_dev=$SHARE_TAP; nsenter --net="$f" ip link show dev "$SHARE_TAP" > /dev/null 2>&1 || sn_dev=vh0
+  addr=$(nsenter --net="$f" ip -o -4 addr show dev "$sn_dev" 2>/dev/null | awk '{print $4}' | tr '\n' ',' | sed 's/,$//')
   routes=$(nsenter --net="$f" ip route 2>/dev/null | grep -c .)
   default=no; nsenter --net="$f" ip route 2>/dev/null | grep -q '^default' && default=yes
   rules=$(nsenter --net="$f" iptables -w -S 2>/dev/null)
@@ -653,13 +674,59 @@ test_unfs_probe() { # ID [probe flags]
 # The jail root of microVM ID: a Docker task's is on the data disk (ADR 0011 §5), every other one in tmpfs.
 jail_base() { if [ -e "$CTRNS/$1" ]; then echo "$DISK_JAIL"; else echo "$JAIL"; fi; }
 
-# ctrns_links ID: the data link of a Docker task in its namespace (ADR 0011 §3). Prints the Firecracker network
-# config fragment on its first line and the boot arguments on its second; prints nothing with no interface but lo;
-# fails with a reason otherwise.
+# ctrns_links ID [SHARENET]: the links of a Docker task in its namespace (ADR 0011 §3): the data link, the DNS link
+# when dockerd runs its resolver there, and with SHARENET 1 the share link (slice 4), always last. Prints the
+# Firecracker network config fragment on its first line and the boot arguments on its second; prints nothing when
+# there is no link; fails with a reason otherwise.
 ctrns_links() {
   cl_f="$CTRNS/$1"
+  cl_nics=""; cl_boot=""; cl_mtu=1500
   cl_ifs=$(nsenter --net="$cl_f" ip -o link 2>/dev/null | awk -F': ' '{print $2}' | sed 's/@.*//' | grep -v '^lo$' | tr '\n' ' ' | sed 's/ $//')
-  [ -z "$cl_ifs" ] && return 0
+  [ -n "$cl_ifs" ] && { ctrns_data_links "$1" || return 1; }
+  if [ "${2:-0}" = 1 ]; then
+    cl_n=0; [ -n "$cl_nics" ] && cl_n=$(printf '%s' "$cl_nics" | grep -o '"iface_id"' | wc -l | tr -d ' ')
+    cl_why=$(ctrns_share_link "$1") || { echo "share link: $cl_why"; return 1; }
+    cl_nics="${cl_nics:+$cl_nics,}{\"iface_id\":\"eth$cl_n\",\"host_dev_name\":\"vs0\",\"guest_mac\":\"$SHARE_MAC\",\"rx_rate_limiter\":$(share_rl),\"tx_rate_limiter\":$(share_rl)}"
+    cl_boot="$cl_boot vesper_share_dev=eth$cl_n"
+  fi
+  [ -z "$cl_nics" ] && return 0
+  echo ",\"network-interfaces\":[$cl_nics]"
+  [ "$cl_mtu" = 1500 ] || cl_boot="$cl_boot vesper_mtu=$cl_mtu"
+  echo "$cl_boot"
+}
+# ctrns_share_link ID: the share link (ADR 0011 §3, slice 4). vh1, made with vh0 in the share namespace, moves into
+# the container's namespace through a helper this function starts there and holds, so the pid it names cannot be
+# reused by another process before the move (review of D-086); tap vs0 carries the guest's
+# frames, mirrored both ways with vh1 by tc, so the namespace's own stack never handles them; from the guest only the
+# share MAC and address pass (an allow-list, as on the data link). A reason on failure.
+ctrns_share_link() {
+  cs_f="$CTRNS/$1"
+  cs_ino=$(stat -L -c %i "$cs_f" 2>/dev/null) || { echo "the container's namespace is gone"; return 1; }
+  # nsenter joins the namespace and execs sleep in the same process; this shell is its parent and has not reaped it,
+  # so its pid stays ours until the wait below.
+  nsenter --net="$cs_f" sleep 30 < /dev/null > /dev/null 2>&1 &
+  cs_h=$!
+  cs_in=""; for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+    [ "$(stat -L -c %i "/proc/$cs_h/ns/net" 2>/dev/null)" = "$cs_ino" ] && { cs_in=1; break; }; sleep 0.05
+  done
+  cs_ok=""; [ -n "$cs_in" ] && nsenter --net="$NETNS/$1" ip link set dev vh1 netns "$cs_h" 2>/dev/null && cs_ok=1
+  kill "$cs_h" 2>/dev/null; wait "$cs_h" 2>/dev/null
+  [ -n "$cs_ok" ] || { echo "move vh1"; return 1; }
+  cs_why=$(vnetns_tap "$cs_f" "$JUSER" vs0) || { echo "$cs_why"; return 1; }
+  nsenter --net="$cs_f" sh -c '
+    set -e
+    echo 1 > /proc/sys/net/ipv6/conf/vh1/disable_ipv6
+    ip link set dev vh1 up
+    tc qdisc add dev vh1 ingress
+    tc filter add dev vh1 parent ffff: prio 1 matchall action mirred egress redirect dev vs0
+    tc qdisc add dev vs0 ingress
+    tc filter add dev vs0 parent ffff: prio 1 protocol ip flower src_mac "$1" src_ip "$2" action mirred egress redirect dev vh1
+    tc filter add dev vs0 parent ffff: prio 2 protocol arp flower src_mac "$1" arp_sip "$2" arp_sha "$1" action mirred egress redirect dev vh1
+    tc filter add dev vs0 parent ffff: prio 9 matchall action drop' sh "$SHARE_MAC" "$SHARE_GUEST" 2>&1 || { echo "tc failed"; return 1; }
+}
+# ctrns_data_links ID: the data and DNS links (sets cl_nics, cl_boot, cl_mtu); a reason on failure.
+ctrns_data_links() {
+  cl_f="$CTRNS/$1"
   [ "$cl_ifs" = eth0 ] || { echo "the container's namespace holds $cl_ifs; a vesper container has one network (ADR 0011)"; return 1; }
   cl_addr=$(nsenter --net="$cl_f" ip -o -4 addr show dev eth0 | awk '{print $4}')
   [ "$(printf '%s\n' "$cl_addr" | grep -c .)" = 1 ] || { echo "eth0 needs exactly one IPv4 address, it has: ${cl_addr:-none}"; return 1; }
@@ -719,11 +786,9 @@ ctrns_links() {
     cl_nics="$cl_nics,{\"iface_id\":\"eth1\",\"host_dev_name\":\"vn0\",\"guest_mac\":\"06:00:a9:fe:4e:02\",\"rx_rate_limiter\":$cl_rl,\"tx_rate_limiter\":$cl_rl}"
     cl_boot="$cl_boot vesper_dns=169.254.78.2/30"
   fi
-  echo ",\"network-interfaces\":[$cl_nics]"
-  [ "$cl_mtu" = 1500 ] || cl_boot="$cl_boot vesper_mtu=$cl_mtu"
-  echo "$cl_boot"
+  return 0
 }
-ctrns_links_down() { [ -e "$CTRNS/$1" ] && nsenter --net="$CTRNS/$1" sh -c 'tc qdisc del dev eth0 ingress 2>/dev/null; ip link del vd0 2>/dev/null; ip link del vn0 2>/dev/null; iptables -w -t nat -F VESPER_DNS 2>/dev/null; iptables -w -F VESPER_DNS_IN 2>/dev/null' ; return 0; }
+ctrns_links_down() { [ -e "$CTRNS/$1" ] && nsenter --net="$CTRNS/$1" sh -c 'tc qdisc del dev eth0 ingress 2>/dev/null; ip link del vd0 2>/dev/null; ip link del vn0 2>/dev/null; ip link del vs0 2>/dev/null; ip link del vh1 2>/dev/null; iptables -w -t nat -F VESPER_DNS 2>/dev/null; iptables -w -F VESPER_DNS_IN 2>/dev/null' ; return 0; }
 
 # ctrns-up ID HOLDER: make the bound namespace default-deny before dockerd wires it (ADR 0011 §2).
 ctrns_up() {
@@ -844,7 +909,7 @@ launch() {
   done
   # The room loosens the ceiling that holds a hostile workload, so it is for the busybox guest only (council SEC-2).
   if [ "$ctrns" = 1 ]; then
-    { [ -e "$CTRNS/$id" ] && [ "$sharenet" = 0 ]; } || { echo "ERR --ctrns needs the task's bound namespace and excludes --share-net"; return 2; }
+    [ -e "$CTRNS/$id" ] || { echo "ERR --ctrns needs the task's bound namespace"; return 2; }
   fi
   if [ "$snaproom" = 1 ] && [ -n "$rootfs" ]; then echo "ERR --snapshot-room is for the parity conformance check and excludes --rootfs"; return 2; fi
   prep=$(prepare) || { echo "$prep"; return 1; }
@@ -916,18 +981,18 @@ launch() {
     made=$(setup_user) || why="user: $made"
     [ -z "$why" ] && { mkdir -p "$REC" || why="record directory"; }
     [ -z "$why" ] && { echo "pid=$$ start=$(proc_stat $$ | cut -d' ' -f2) t=$(date +%s)" > "$REC/$id" && [ -s "$REC/$id" ] || why="record not written"; }
-    [ -z "$why" ] && { why=$(sharenet_up "$id") && why=""; }
+    sn_mode=""; [ "$ctrns" = 1 ] && sn_mode=veth
+    [ -z "$why" ] && { why=$(sharenet_up "$id" $sn_mode) && why=""; }
     # The server starts in the namespace before the jailer, so the guest finds it listening (ADR 0009, Lifecycle).
     [ -z "$why" ] && [ -n "$unfs_srcs" ] && { why=$(unfs_start "$id" "$unfs_spec" "$unfs_squash") && why="" || why="unfs: ${why:-start failed}"; }
     if [ -n "$why" ]; then
       cleanup "$id" > /dev/null; unlock; LAUNCHING=""
       echo "ERR share network: $why"; return 1
     fi
-    nsarg="--netns $NETNS/$id"
-    rb=$SHARE_RATE_BYTES; ro=$SHARE_RATE_OPS
-    [ -r "$SHARE_RATE_TEST" ] && read -r rb ro < "$SHARE_RATE_TEST"
-    rl="{\"bandwidth\":{\"size\":$rb,\"refill_time\":1000},\"ops\":{\"size\":$ro,\"refill_time\":1000}}"
-    netcfg=",\"network-interfaces\":[{\"iface_id\":\"$SHARE_TAP\",\"host_dev_name\":\"$SHARE_TAP\",\"guest_mac\":\"06:00:a9:fe:4d:02\",\"rx_rate_limiter\":$rl,\"tx_rate_limiter\":$rl}]"
+    if [ "$ctrns" = 0 ]; then
+      nsarg="--netns $NETNS/$id"
+      netcfg=",\"network-interfaces\":[{\"iface_id\":\"$SHARE_TAP\",\"host_dev_name\":\"$SHARE_TAP\",\"guest_mac\":\"$SHARE_MAC\",\"rx_rate_limiter\":$(share_rl),\"tx_rate_limiter\":$(share_rl)}]"
+    fi
   fi
   unlock
   root="$jb/firecracker/$id/root"
@@ -948,7 +1013,7 @@ launch() {
     extra="$extra vesper_cmd=$cmd64"
   fi
   if [ "$ctrns" = 1 ]; then
-    links=$(ctrns_links "$id") || { echo "ERR network: $links"; ctrns_links_down "$id"; cleanup "$id" > /dev/null; LAUNCHING=""; return 1; }
+    links=$(ctrns_links "$id" "$sharenet") || { echo "ERR network: $links"; ctrns_links_down "$id"; cleanup "$id" > /dev/null; LAUNCHING=""; return 1; }
     netcfg=$(printf '%s\n' "$links" | sed -n 1p); extra="$extra$(printf '%s\n' "$links" | sed -n 2p)"
     nsarg="--netns $CTRNS/$id"
   fi

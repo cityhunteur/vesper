@@ -241,3 +241,14 @@ func TestMountOptions(t *testing.T) {
 		t.Error(MountOptions())
 	}
 }
+
+// Docker 25 and later write rro for a recursive read-only bind (--mount ...,readonly, -v ...:ro): it is read-only.
+func TestRecursiveReadOnlyIsReadOnly(t *testing.T) {
+	p, err := MakePlan([]specs.Mount{{Destination: "/data", Type: "bind", Source: "/Users/me/proj", Options: []string{"rbind", "rro"}}}, []string{"/Users/me"}, fake)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Shares) != 1 || !p.Shares[0].ReadOnly || !p.Sources[0].ReadOnly {
+		t.Errorf("rro was not read-only: %+v %+v", p.Shares, p.Sources)
+	}
+}
