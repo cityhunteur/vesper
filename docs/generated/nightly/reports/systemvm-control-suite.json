@@ -1,0 +1,37 @@
+{
+  "bridge_path": "run/systemvm/vsock/3.sock",
+  "port": 1024,
+  "steps": [
+    {
+      "name": "handshake",
+      "ok": true,
+      "detail": "protocol 1 host vesper in 4 ms",
+      "elapsed_ms": 4
+    },
+    {
+      "name": "keepalive",
+      "ok": true,
+      "detail": "11 pings over 20 s",
+      "elapsed_ms": 20136
+    },
+    {
+      "name": "reconnect",
+      "ok": true,
+      "detail": "reconnected after a server-side drop in 1 attempt(s)",
+      "elapsed_ms": 20
+    },
+    {
+      "name": "large_payload",
+      "ok": true,
+      "detail": "2097152 bytes echoed intact in 21 ms",
+      "elapsed_ms": 40
+    },
+    {
+      "name": "control_slots_reserved",
+      "ok": true,
+      "detail": "1 open, 55 more held: LAUNCHAPI refused (ERR full: 57 of 64 handlers open; 8 are kept for control commands); HEALTH answered with 58 handlers open",
+      "elapsed_ms": 344
+    }
+  ],
+  "passed": true
+}

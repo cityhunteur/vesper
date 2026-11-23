@@ -16,5 +16,6 @@ case "$port" in
 esac
 [ "$port" -ge 1 ] && [ "$port" -le 65535 ] || exit 1
 [ "$proto" = udp ] && exec /usr/bin/vesper-udp-relay "$port"
-# -t: see vesper-port-relay; a half-closed client still receives the whole response (GH #167).
-exec /usr/bin/socat -t 86400 STDIO "TCP:127.0.0.1:$port"
+# vesper-stream-relay passes both half-closes (TD-093): a container server that closes first is seen as closed on the
+# Mac, and a client that half-closes still gets the whole reply (GH #167).
+exec /usr/bin/vesper-stream-relay tcp "127.0.0.1:$port"

@@ -1,0 +1,90 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-11-23T08:31:43Z",
+  "host": "27.0.1 Mac15,6",
+  "commit": "7ac3ed1",
+  "cycles": 10,
+  "boot_stress": {
+    "status": "failed",
+    "cycles": 10,
+    "successful": 9,
+    "failed": 1,
+    "max_boot_ms": 5391,
+    "mean_boot_ms": 4508,
+    "threshold_ms": 5000,
+    "failure_messages": [
+      "iteration 4: boot took 5391 ms, over the 5000 ms threshold"
+    ],
+    "drift_first5_ms": 4570,
+    "drift_last5_ms": 4446,
+    "drift_ok": true
+  },
+  "control_suite": {
+    "status": "ok",
+    "steps": 5,
+    "failed_steps": []
+  },
+  "docker_smoke": {
+    "status": "ok",
+    "steps": 7,
+    "failed_steps": []
+  },
+  "services_suite": {
+    "status": "failed",
+    "steps": 10,
+    "failed_steps": [
+      "containerd_logs_capture_startup_and_recovery"
+    ]
+  },
+  "leaks": {
+    "status": "failed",
+    "before": {
+      "launcher_processes": 0,
+      "launcher_processes_detail": "",
+      "proxy_processes": 0,
+      "proxy_processes_detail": "",
+      "sockets": 3,
+      "sockets_detail": "run/vesperd.sock run/systemvm/vsock/3.sock run/docker.sock",
+      "pid_files": 0,
+      "pid_files_detail": ""
+    },
+    "after": {
+      "launcher_processes": 0,
+      "launcher_processes_detail": "",
+      "proxy_processes": 0,
+      "proxy_processes_detail": "",
+      "sockets": 2,
+      "sockets_detail": "run/vesperd.sock run/docker.sock",
+      "pid_files": 0,
+      "pid_files_detail": ""
+    }
+  },
+  "failures": [
+    {
+      "step": "boot_stress",
+      "reason": "1 of 10 cycles failed (expected 10 cycles): iteration 4: boot took 5391 ms, over the 5000 ms threshold",
+      "evidence": "run/systemvm/boot.log, run/systemvm/console.log"
+    },
+    {
+      "step": "services_suite.containerd_logs_capture_startup_and_recovery",
+      "reason": "expected at least two startups in /var/log/containerd.log, found 1",
+      "evidence": "run/systemvm/services-report.json"
+    },
+    {
+      "step": "leaks.sockets",
+      "reason": "2 left after the run (before: 3)",
+      "evidence": "run/vesperd.sock run/docker.sock"
+    },
+    {
+      "step": "suite",
+      "reason": "boot stress (see run/systemvm/boot.log and run/systemvm/console.log)",
+      "evidence": "run/systemvm/reliability.log"
+    },
+    {
+      "step": "suite",
+      "reason": "services suite (run/systemvm/services-report.json)",
+      "evidence": "run/systemvm/reliability.log"
+    }
+  ],
+  "passed": false
+}
