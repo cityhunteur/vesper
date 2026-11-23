@@ -180,6 +180,10 @@ enum ControlAction {
     Kill {
         service: String,
     },
+    /// Tell the guest the macOS volume's free bytes, as the launcher does every 30 s (TD-053; for tests).
+    Hostfree {
+        bytes: u64,
+    },
     /// Tail a guest log: messages, containerd or docker.
     Logs {
         log: String,
@@ -891,6 +895,11 @@ fn run_control(
         ControlAction::Kill { service } => {
             let mut session = control::connect(&endpoint)?;
             println!("killed {service} pid {}", session.kill_service(&service)?);
+        }
+        ControlAction::Hostfree { bytes } => {
+            let mut session = control::connect(&endpoint)?;
+            session.host_free(bytes)?;
+            println!("HOSTFREE {bytes} sent");
         }
         ControlAction::Logs { log, lines } => {
             let mut session = control::connect(&endpoint)?;

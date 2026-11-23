@@ -27,7 +27,7 @@ pub const DEFAULT_CEILING_MIB: u64 = 640;
 /// The largest guest the measurement step boots under the default ceiling, and how much of it the guest dirties.
 pub const MEASURE_GUEST_MIB: u64 = 640;
 pub const MEASURE_FILL_MIB: u64 = 512;
-const STEPS: usize = 26;
+const STEPS: usize = 27;
 const DRIVE_BYTES: usize = 1024 * 1024;
 
 /// Where the suite works: the `vesperd` runner and an absolute directory inside a configured share.
@@ -644,6 +644,45 @@ pub fn run_snapshot_suite(endpoint: &ControlEndpoint, run: &SnapshotRun, id: &st
             (),
             format!(
                 "exit {code:?}: {err}; ABSENT {c} after {} ms",
+                gone.as_millis()
+            ),
+        ))
+    });
+
+    // TD-053: the guest counts the macOS volume's free space, sent by the launcher as HOSTFREE every 30 s; below the
+    // reserve no new microVM starts. The launcher's figure is checked against df on the Mac, then a test value of
+    // 1 byte must refuse a launch with its reason, and a large one restores it.
+    step(&mut steps, "host_free_space_bounds_launches", || {
+        let df = Command::new("df")
+            .args(["-k", "run/systemvm"])
+            .output()
+            .map_err(|e| format!("df: {e}"))?;
+        let mac_free: u64 = String::from_utf8_lossy(&df.stdout)
+            .lines()
+            .nth(1)
+            .and_then(|l| l.split_whitespace().nth(3))
+            .and_then(|k| k.parse::<u64>().ok())
+            .map(|k| k * 1024)
+            .ok_or("df gave no free space for run/systemvm")?;
+        let (_, avail) = store(v)?;
+        if avail > mac_free + (1 << 30) {
+            return Err(format!(
+                "the guest counts {avail} free bytes, more than the Mac volume's {mac_free}: the launcher's HOSTFREE is not in use"
+            ));
+        }
+        control.host_free(1)?;
+        let mut vc = v.spawn_with(c, "c.sock", &[])?;
+        let (code, err, _) = wait_exit(&mut vc, Duration::from_secs(30))?;
+        control.host_free(1 << 50)?;
+        if code == Some(0) || !err.contains("TD-053") {
+            return Err(format!("with HOSTFREE 1: exit {code:?}: {err}"));
+        }
+        let gone = wait_absent(&mut control, c, TEARDOWN_TIMEOUT)?;
+        Ok((
+            (),
+            format!(
+                "the guest counts {avail} free bytes, the Mac volume has {mac_free}; with HOSTFREE 1: exit {code:?}: {}; ABSENT {c} after {} ms",
+                err.trim(),
                 gone.as_millis()
             ),
         ))

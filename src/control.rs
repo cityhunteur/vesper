@@ -246,6 +246,16 @@ impl Session {
         }
     }
 
+    /// Tells the guest the free bytes of the macOS volume that holds the data disk (`HOSTFREE`, TD-053). The launcher
+    /// does this every 30 s; this is the same request, for tests and diagnosis.
+    pub fn host_free(&mut self, bytes: u64) -> Result<(), String> {
+        self.send(&format!("HOSTFREE {bytes}"))?;
+        match self.read_line()?.trim() {
+            "OK" => Ok(()),
+            other => Err(format!("HOSTFREE: {other}")),
+        }
+    }
+
     /// Last `count` lines of a guest log (`messages`, `containerd` or `docker`).
     pub fn logs(&mut self, log: &str, count: u32) -> Result<Vec<String>, String> {
         self.send(&format!("LOGS {log} {count}"))?;
@@ -467,6 +477,12 @@ mod tests {
                                     .write_all(format!("KILL {name} 4242\n").as_bytes())
                                     .unwrap();
                             }
+                            Some("HOSTFREE") => {
+                                let ok = parts.next().is_some_and(|b| b.parse::<u64>().is_ok());
+                                writer
+                                    .write_all(if ok { b"OK\n" } else { b"ERR bad bytes\n" })
+                                    .unwrap();
+                            }
                             Some("LOGS") => {
                                 let name = parts.next().unwrap_or("");
                                 let body = if name == "messages" {
@@ -598,6 +614,7 @@ mod tests {
         let endpoint = ControlEndpoint::new(&path, DEFAULT_AGENT_PORT);
         let mut session = connect(&endpoint).unwrap();
         assert_eq!(session.kill_service("docker").unwrap(), 4242);
+        session.host_free(123_456_789).unwrap();
         assert_eq!(session.logs("docker", 10).unwrap().len(), 2);
         let report =
             run_services_suite(&endpoint, &["containerd", "docker"], Duration::from_secs(2));
