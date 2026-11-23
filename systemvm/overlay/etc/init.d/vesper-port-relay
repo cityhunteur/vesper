@@ -9,7 +9,7 @@ command=/usr/bin/socat
 # -t: after one side half-closes (an attach with no stdin, an HTTP client that shuts its write side), keep
 # relaying the other direction until it closes too; socat's default ends the connection 0.5 s later (GH #167).
 # max-children: as for vesper-docker-relay, past 256 open connections socat waits for one to end.
-command_args="-t 86400 VSOCK-LISTEN:${relay_port},reuseaddr,fork,max-children=256 EXEC:/usr/local/bin/vesper-port-relay-conn"
+command_args="-t 86400 VSOCK-LISTEN:${relay_port},reuseaddr,fork,max-children=256,backlog=128 EXEC:/usr/local/bin/vesper-port-relay-conn"
 respawn_delay=1
 respawn_max=0
 

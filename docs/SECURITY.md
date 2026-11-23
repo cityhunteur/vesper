@@ -133,7 +133,8 @@ address, so the guest relay can send only to `127.0.0.1:<n>`; its flows are capp
 idle. Listeners are loopback only; a binding to any other host ip is recorded as
 `unsupported` and not opened. Every connection travels the bridge to the guest gateway `vesper-port-relay`, which
 only connects to guest loopback ports, so nothing in the guest becomes reachable that dockerd did not publish.
-The live set is `run/vesper/ports.json`. Widening to non-loopback addresses is a human decision.
+A TCP mapping relays at most 64 connections at once and closes the next at once (D-093), so one port cannot take the
+bridge's 512 connections from the Docker socket and `vesperd`. The live set is `run/vesper/ports.json`. Widening to non-loopback addresses is a human decision.
 
 ## Shared host directories (GH #29)
 
