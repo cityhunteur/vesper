@@ -44,6 +44,25 @@ gw="${rc_out#nameserver }"; gw="${gw%% *}"
 out="$("${DOCKER}" run --rm "${RUN_ARGS[@]}" --add-host host.docker.internal:host-gateway "${IMAGE}" sh -c "getent hosts host.docker.internal | awk '{print \$1}' | head -1" 2>&1)"
 [ -n "${gw}" ] && [ "${out}" = "${gw}" ] && record host_gateway_is_the_mac true "host.docker.internal -> ${out}, the NAT gateway" || record host_gateway_is_the_mac false "host.docker.internal -> ${out:-none}, NAT gateway ${gw:-unknown}"
 
+# A container reaches a listener on the Mac through host.docker.internal (TD-039, D-098). The listener binds only the
+# NAT gateway address, answers one HTTP request with a random token and ends within 30 s; a Mac service bound to
+# loopback only stays out of reach, as recorded.
+token="vesper-mac-$$-${RANDOM}${RANDOM}"; portfile="$(mktemp)"
+python3 -I -c '
+import socket, sys
+s = socket.socket(); s.bind((sys.argv[1], 0)); s.listen(2); s.settimeout(30)
+print(s.getsockname()[1], flush=True)
+try:
+    c, _ = s.accept(); c.settimeout(5); c.recv(4096)
+    c.sendall(("HTTP/1.0 200 OK\r\nContent-Type: text/plain\r\n\r\n" + sys.argv[2]).encode()); c.close()
+except OSError:
+    pass
+' "${gw:-127.0.0.1}" "${token}" > "${portfile}" 2>&1 & lp=$!
+for _ in $(seq 1 40); do [ -s "${portfile}" ] && break; sleep 0.05; done
+port="$(head -1 "${portfile}")"
+out="$("${DOCKER}" run --rm "${RUN_ARGS[@]}" --add-host host.docker.internal:host-gateway "${IMAGE}" wget -qO- -T 5 "http://host.docker.internal:${port}/" 2>&1)"
+kill "${lp}" 2>/dev/null; wait "${lp}" 2>/dev/null; rm -f "${portfile}"
+[ -n "${gw}" ] && [ "${out}" = "${token}" ] && record mac_listener_reachable true "a listener on the Mac at ${gw}:${port} answered the container through host.docker.internal" || record mac_listener_reachable false "gateway ${gw:-none} port ${port:-none}: ${out:-no answer}"
 run_stack() { # suffix -> records web ip, subnet, resolver
   compose up -d >/dev/null 2>&1 || { echo "compose up failed"; return 1; }
   for _ in $(seq 1 40); do cexec true >/dev/null 2>&1 && break; sleep 0.25; done

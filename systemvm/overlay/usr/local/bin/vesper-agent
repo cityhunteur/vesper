@@ -15,6 +15,8 @@
 #   HOSTFREE <bytes>      -> OK after recording the macOS volume's free bytes for vesper-vesperd (TD-053, D-095)
 #   KILL <containerd|docker> -> KILL <name> <pid> after SIGKILL to the daemon (crash simulation)
 #   LOGS <messages|containerd|docker> <n> -> LOGS <count> then <count> log lines
+#   LOGPIPES <containerd|docker> -> LOGPIPES <count> then <count> lines: the daemon's stdout and stderr, and each
+#                            log_proxy for its log with its parent and what it reads (TD-094)
 #   MICROVM <args...>     -> MICROVM <rc> <count> then <count> output lines of `vesper-microvm <args>`
 #   ROOTFS <args...>      -> ROOTFS <rc> <count> then <count> output lines of `vesper-rootfs <args>`
 #   WORKLOAD <args...>    -> WORKLOAD <rc> <count> then <count> output lines of `vesper-workload <args>`
@@ -131,6 +133,30 @@ while IFS= read -r -t "$AGENT_IDLE_S" line; do
       if [ -z "$pid" ]; then echo "ERR $2 not running"; continue; fi
       kill -9 "$pid" 2>/dev/null
       echo "KILL $2 $pid"
+      ;;
+    LOGPIPES)
+      case "${2:-}" in
+        containerd) exe=containerd ;;
+        docker) exe=dockerd ;;
+        *) echo "ERR unknown daemon"; continue ;;
+      esac
+      out=$(
+        for p in $(pidof "$exe"); do
+          echo "daemon pid=$p ppid=$(awk '/^PPid:/ {print $2}' "/proc/$p/status" 2>/dev/null) stdout=$(readlink "/proc/$p/fd/1") stderr=$(readlink "/proc/$p/fd/2")"
+        done
+        for d in /proc/[0-9]*; do
+          c=$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null)
+          case "$c" in
+            (supervise-daemon*"/var/log/$2.log"*)
+              echo "supervisor pid=${d#/proc/} cmd=$c" ;;
+            (*log_proxy*"/var/log/$2.log"*)
+              echo "logger pid=${d#/proc/} ppid=$(awk '/^PPid:/ {print $2}' "$d/status" 2>/dev/null) stdin=$(readlink "$d/fd/0") cmd=$c" ;;
+          esac
+        done
+      )
+      count=$(printf '%s\n' "$out" | grep -c .)
+      echo "LOGPIPES $count"
+      [ "$count" -gt 0 ] && printf '%s\n' "$out"
       ;;
     LOGS)
       case "$2" in

@@ -180,6 +180,10 @@ enum ControlAction {
     Kill {
         service: String,
     },
+    /// The pipes of containerd or docker and the log_proxy processes for its log (TD-094).
+    LogPipes {
+        daemon: String,
+    },
     /// Tell the guest the macOS volume's free bytes, as the launcher does every 30 s (TD-053; for tests).
     Hostfree {
         bytes: u64,
@@ -895,6 +899,12 @@ fn run_control(
         ControlAction::Kill { service } => {
             let mut session = control::connect(&endpoint)?;
             println!("killed {service} pid {}", session.kill_service(&service)?);
+        }
+        ControlAction::LogPipes { daemon } => {
+            let mut session = control::connect(&endpoint)?;
+            for line in session.log_pipes(&daemon)? {
+                println!("{line}");
+            }
         }
         ControlAction::Hostfree { bytes } => {
             let mut session = control::connect(&endpoint)?;

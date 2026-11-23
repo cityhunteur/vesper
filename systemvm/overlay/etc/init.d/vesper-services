@@ -58,6 +58,12 @@ start() {
       { grep -v "^LOGPROXY_CHMOD=\|^log_mode=" "$f" 2>/dev/null; echo "LOGPROXY_CHMOD=0600"; echo "log_mode=0600"; } > "$f.new" && mv -f "$f.new" "$f"
     done
     for svc in containerd docker; do
+      # TD-094: rc-service returns before containerd makes its socket. A dockerd that finds no socket starts a
+      # containerd of its own, which runs every container and logs through dockerd; daemon.json names the socket
+      # (vesper-containers), and this wait keeps dockerd from timing out on a slow boot.
+      if [ "$svc" = docker ]; then
+        for _ in $(seq 1 80); do [ -S /run/containerd/containerd.sock ] && break; sleep 0.25; done
+      fi
       if out="$(rc-service "$svc" start 2>&1)"; then
         echo "vesper: service $svc started" > /dev/console
       else

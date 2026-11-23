@@ -238,15 +238,19 @@ func (s *Service) createDocker(ctx context.Context, r *taskAPI.CreateTaskRequest
 	if spec.Linux != nil {
 		uids, gids = spec.Linux.UIDMappings, spec.Linux.GIDMappings
 	}
+	driveAt := time.Now()
 	image, built, err := s.backend.PrepareDocker(ctx, r.ID, root, uids, gids)
 	if err != nil {
 		return nil, errgrpc.ToGRPCf(errdefs.ErrFailedPrecondition, "%v", err)
 	}
-	log.G(ctx).WithFields(log.Fields{"task": r.ID, "drive": image, "built": built}).Info("docker drive ready")
+	netnsAt := time.Now()
 	holder, err := startNetns(ctx, r.ID, func() { s.holderGone(r.ID) })
 	if err != nil {
 		return nil, errgrpc.ToGRPCf(errdefs.ErrFailedPrecondition, "%v", err)
 	}
+	// TD-099: one line for each stage of a start; scripts/systemvm/launch-stages.sh reads them.
+	log.G(ctx).WithFields(log.Fields{"task": r.ID, "drive": image, "built": built,
+		"drive_ms": netnsAt.Sub(driveAt).Milliseconds(), "netns_ms": time.Since(netnsAt).Milliseconds()}).Info("docker drive ready")
 	t.Image, t.Docker, t.Holder = image, true, holder
 	t.SetCreatedPid(holder)
 	t.LaunchArgs, t.SizeArgs = append([]string{"--ctrns"}, plan.LaunchArgs()...), size.LaunchArgs()
@@ -306,6 +310,7 @@ func (s *Service) Start(ctx context.Context, r *taskAPI.StartRequest) (*taskAPI.
 			return nil, errgrpc.ToGRPCf(errdefs.ErrInvalidArgument, "%v", err)
 		}
 	}
+	launchAt := time.Now()
 	if r.ExecID == "" {
 		pid, err = s.backend.Launch(ctx, t.ID, t.Image, append(append([]string(nil), t.LaunchArgs...), t.SizeArgs...))
 		if err != nil {
@@ -328,7 +333,12 @@ func (s *Service) Start(ctx context.Context, r *taskAPI.StartRequest) (*taskAPI.
 		pid = parent.Pid()
 	}
 	t.guestKnows = true
+	sessionAt := time.Now()
 	session, err := s.backend.OpenSession(ctx, r.ID, t.Port, t.Config, r.ExecID != "", backend.IO{Stdin: t.Stdin, Stdout: t.Stdout, Stderr: t.Stderr, Terminal: t.Terminal})
+	if err == nil && r.ExecID == "" {
+		log.G(ctx).WithFields(log.Fields{"task": r.ID, "launch_ms": sessionAt.Sub(launchAt).Milliseconds(),
+			"session_ms": time.Since(sessionAt).Milliseconds()}).Info("microVM started (TD-099)")
+	}
 	if err != nil {
 		if r.ExecID == "" {
 			_ = s.backend.Cleanup(context.Background(), r.ID, false)
@@ -571,9 +581,11 @@ func (s *Service) Delete(ctx context.Context, r *taskAPI.DeleteRequest) (*taskAP
 		return &taskAPI.DeleteResponse{Pid: uint32(t.Pid()), ExitStatus: status, ExitedAt: protobuf.ToTimestamp(at)}, nil
 	}
 	s.persist(ctx, t)
+	cleanupAt := time.Now()
 	if err := s.backend.Cleanup(ctx, t.ID, true); err != nil {
 		log.G(ctx).WithError(err).Warn("microVM cleanup on delete")
 	}
+	log.G(ctx).WithFields(log.Fields{"task": t.ID, "cleanup_ms": time.Since(cleanupAt).Milliseconds()}).Info("microVM cleaned up (TD-099)")
 	if t.Docker {
 		// The drive is the container's own and outlives the task (ADR 0011 §5); the namespace goes with it.
 		if err := releaseNetns(ctx, t.ID); err != nil {

@@ -865,6 +865,7 @@ disk_sweep() {
 
 launch() {
   id=$1; shift
+  launch_at=$(now_ms)   # TD-099: prep_ms on the LAUNCHED line is the time before the jailer starts
   mode=""; rootfs=""; cmd64=""; vsock=0; runc_smoke=0; guestexec=0; sharenet=0; probe=""
   unfs_spec=""; unfs_srcs=""; unfs_mounts=""; unfs_squash=0; mem=$MEM_MIB; vcpus=$VCPUS; cpumax=""; snaproom=0; ctrns=0; extra_crash=0
   while [ $# -gt 0 ]; do
@@ -1068,7 +1069,7 @@ launch() {
   if ready; then
     end=$(now_ms)
     LAUNCHING=""; JAILER_PID=""
-    echo "LAUNCHED $id pid=$(fcpid "$id") boot_ms=$((end - start))"
+    echo "LAUNCHED $id pid=$(fcpid "$id") boot_ms=$((end - start)) prep_ms=$((start - launch_at))"
   else
     echo "FAILED $id"
     tail -n 8 "$lf"
