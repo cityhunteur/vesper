@@ -662,14 +662,52 @@ pub fn run_snapshot_suite(endpoint: &ControlEndpoint, run: &SnapshotRun, id: &st
         let before = memory(&mut control, m);
         api.expect("PATCH", "/vm", Some(r#"{"state":"Paused"}"#), 204)?;
         let t = Instant::now();
-        api.expect(
+        if let Err(err) = api.expect(
             "PUT",
             "/snapshot/create",
             Some(
                 r#"{"snapshot_type":"Full","snapshot_path":"/m.vmstate","mem_file_path":"/m.mem"}"#,
             ),
             204,
-        )?;
+        ) {
+            // TD-095: this once closed after 6.4 s with no cause in sight; record what would show one.
+            let mem_now = memory(&mut control, m);
+            let oom = control
+                .logs("messages", 400)
+                .map(|lines| {
+                    lines
+                        .iter()
+                        .filter(|l| {
+                            l.contains("oom")
+                                || l.contains("Out of memory")
+                                || l.contains("Killed process")
+                        })
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(" | ")
+                })
+                .unwrap_or_else(|e| e);
+            let log = control
+                .vesperd(&["log", m])
+                .map(|(_, l)| {
+                    l.iter()
+                        .rev()
+                        .take(6)
+                        .rev()
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(" | ")
+                })
+                .unwrap_or_else(|e| e);
+            let _ = vm.child.kill();
+            let vesperd_err = super::vesperd::stderr(&mut vm);
+            return Err(format!(
+                "{err} after {} ms; memory: {mem_now} (before the create: {before}); oom lines: {}; microVM log: {log}; vesperd: {}",
+                t.elapsed().as_millis(),
+                if oom.is_empty() { "none" } else { &oom },
+                vesperd_err.trim()
+            ));
+        }
         let took = t.elapsed();
         let after = memory(&mut control, m);
         let state = state_of(&api.expect("GET", "/", None, 200)?);
