@@ -132,7 +132,7 @@ rm -f "${SHARE}"/sub/*; rmdir "${SHARE}/sub" 2>/dev/null
 # A path that is not shared and does not exist in the System VM: Docker would create it there for the container.
 # Since ADR 0010 the authorisation plugin refuses that, so nothing is created on either side.
 out="$(run -v /tmp/vesper-not-shared:/x "${IMAGE}" sh -c 'ls -A /x | wc -l' 2>&1)"; rc=$?
-[ "${rc}" = 125 ] && case "${out}" in *"does not exist"*"shared macOS directory"*) true ;; *) false ;; esac && [ ! -e /tmp/vesper-not-shared ] && record unshared_path_is_refused true "-v /tmp/vesper-not-shared is refused; only configured shares map host paths, and no directory is made in the System VM (path policy)" || record unshared_path_is_refused false "rc ${rc}: ${out}; host dir exists: $([ -e /tmp/vesper-not-shared ] && echo yes || echo no)"
+[ "${rc}" = 125 ] && case "${out}" in *"does not exist"*"shared macOS directory"*|*"refused for the vesper runtime"*"shared macOS directory"*) true ;; *) false ;; esac && [ ! -e /tmp/vesper-not-shared ] && record unshared_path_is_refused true "-v /tmp/vesper-not-shared is refused; only configured shares map host paths, and no directory is made in the System VM (path policy)" || record unshared_path_is_refused false "rc ${rc}: ${out}; host dir exists: $([ -e /tmp/vesper-not-shared ] && echo yes || echo no)"
 
 rm -f "${SHARE}"/c.txt "${SHARE}"/p.txt "${SHARE}"/from-guest.txt "${SHARE}"/from-host.txt
 passed=true; for s in "${steps[@]}"; do case "$s" in *'"ok":false'*) passed=false;; esac; done

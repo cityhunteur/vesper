@@ -159,3 +159,20 @@ func TestVesperShareBindsAllowed(t *testing.T) {
 		}
 	}
 }
+
+// ADR 0011 slice 4b: a microVM runs arm64 only, so another --platform is refused by name; arm64 passes.
+func TestVesperPlatform(t *testing.T) {
+	store(t)
+	b := `{"Image":"alpine","HostConfig":{"Runtime":"vesper"}}`
+	if d := decide("POST", create+"&platform=linux/amd64", b); d.Allow || !strings.Contains(d.Reason, "linux/arm64 only") {
+		t.Errorf("amd64: %+v", d)
+	}
+	for _, p := range []string{"", "&platform=linux/arm64", "&platform=linux/arm64/v8"} {
+		if d := decide("POST", create+p, b); !d.Allow {
+			t.Errorf("%q refused: %s", p, d.Reason)
+		}
+	}
+	if d := decide("POST", create+"&platform=linux/amd64", `{"Image":"alpine","HostConfig":{"Runtime":"runc"}}`); !d.Allow {
+		t.Errorf("runc amd64 refused: %s", d.Reason)
+	}
+}

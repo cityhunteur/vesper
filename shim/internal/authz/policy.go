@@ -230,7 +230,7 @@ func checkVesperCreate(c *createBody) Decision {
 
 const unreadable = "its body is not visible to the authorisation plugin (dockerd passes only a JSON body with a declared length under 1 MiB)"
 
-func checkCreate(_ *url.URL, body []byte) Decision {
+func checkCreate(u *url.URL, body []byte) Decision {
 	if len(body) == 0 {
 		return deny("container create refused: %s", unreadable)
 	}
@@ -259,6 +259,10 @@ func checkCreate(_ *url.URL, body []byte) Decision {
 	if h.Runtime == VesperRuntime {
 		if d := checkVesperCreate(&c); !d.Allow {
 			return d
+		}
+		// A microVM runs the System VM's own architecture; no emulator is in the guest (ADR 0011 slice 4b).
+		if p := u.Query().Get("platform"); p != "" && !strings.HasPrefix(p, "linux/arm64") {
+			return denyVesper("--platform %s is refused for the vesper runtime: its microVM runs linux/arm64 only", p)
 		}
 	}
 	if h.VolumeDriver != "" && h.VolumeDriver != "local" {
