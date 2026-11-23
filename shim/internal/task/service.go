@@ -322,6 +322,9 @@ func (s *Service) Start(ctx context.Context, r *taskAPI.StartRequest) (*taskAPI.
 		if parent.Phase() != PhaseRunning || parent.exiting {
 			return nil, errgrpc.ToGRPCf(errdefs.ErrFailedPrecondition, "task is not running")
 		}
+		if parent.paused.Load() {
+			return nil, errgrpc.ToGRPCf(errdefs.ErrFailedPrecondition, "task is paused; resume it first")
+		}
 		pid = parent.Pid()
 	}
 	t.guestKnows = true
@@ -456,12 +459,21 @@ func (s *Service) Kill(ctx context.Context, r *taskAPI.KillRequest) (*emptypb.Em
 	case PhaseRunning:
 		// A paused guest cannot take a signal: its vCPUs are stopped. As a frozen runc container gets SIGKILL when it
 		// thaws, the microVM is resumed first (ADR 0011 slice 5).
+		// Signal 0 only asks whether the process lives: it is answered without resuming.
 		if task, _ := s.getTask(r.ID); task != nil && task.paused.Load() {
+			if r.Signal == 0 {
+				return &emptypb.Empty{}, nil
+			}
 			if r.ExecID != "" {
 				// The task's lock is not held here; its own Kill or Resume changes the pause.
 				return nil, errgrpc.ToGRPCf(errdefs.ErrFailedPrecondition, "task is paused; resume it first")
 			}
 			if err := s.backend.SetPaused(ctx, r.ID, false); err != nil {
+				if r.Signal == uint32(syscall.SIGKILL) {
+					// A paused guest that cannot be resumed still dies: the bounded wait stops its VMM (review of D-090).
+					go s.killFallback(r.ID, t)
+					return &emptypb.Empty{}, nil
+				}
 				return nil, errgrpc.ToGRPCf(errdefs.ErrUnknown, "resume before the signal: %v", err)
 			}
 			task.paused.Store(false)
@@ -763,6 +775,10 @@ func (s *Service) ResizePty(ctx context.Context, r *taskAPI.ResizePtyRequest) (*
 	defer t.opMu.Unlock()
 	if !t.Terminal || t.Phase() != PhaseRunning {
 		return nil, errgrpc.ToGRPCf(errdefs.ErrFailedPrecondition, "terminal session is not running")
+	}
+	// A paused guest would hold this lock through the resize deadline, and with it Resume and Kill.
+	if task, _ := s.getTask(r.ID); task != nil && task.paused.Load() {
+		return nil, errgrpc.ToGRPCf(errdefs.ErrFailedPrecondition, "task is paused; resume it first")
 	}
 	if err := s.backend.Resize(ctx, r.ID, t.Port, r.Height, r.Width); err != nil {
 		return nil, errgrpc.ToGRPCf(errdefs.ErrInvalidArgument, "resize: %v", err)

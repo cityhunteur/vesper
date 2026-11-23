@@ -16,7 +16,7 @@ func store(t *testing.T, rows ...[3]string) {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			t.Fatal(err)
 		}
-		_ = os.WriteFile(filepath.Join(dir, "config.v2.json"), []byte(`{"ID":"`+r[0]+`","Name":"/`+r[1]+`"}`), 0o600)
+		_ = os.WriteFile(filepath.Join(dir, "config.v2.json"), []byte(`{"ID":"`+r[0]+`","Name":"/`+r[1]+`","State":{"StartedAt":"2026-11-23T10:00:00Z"}}`), 0o600)
 		_ = os.WriteFile(filepath.Join(dir, "hostconfig.json"), []byte(`{"Runtime":"`+r[2]+`"}`), 0o600)
 	}
 	old := StoreRoots
@@ -210,5 +210,40 @@ func TestVesperHonestyRefusals(t *testing.T) {
 		if d := decide(req[0], req[1], req[2]); !d.Allow {
 			t.Errorf("%s %s: refused: %s", req[0], req[1], d.Reason)
 		}
+	}
+}
+
+// Review of D-090: an empty connect body is refused (dockerd decodes a body the plugin never saw); duplicate keys
+// resolve as dockerd's struct decoding does; a half-made container directory does not make the store unreadable; a
+// vesper container that never started keeps docker cp (its drive is built from dockerd's tree at the first start).
+func TestVesperHonestyEdges(t *testing.T) {
+	vid, rid := strings.Repeat("a", 64), strings.Repeat("b", 64)
+	store(t, [3]string{vid, "vm", "vesper"}, [3]string{rid, "rc", "runc"})
+	root := StoreRoots()[0]
+	if d := decide("POST", "/v1.51/networks/n1/connect", ""); d.Allow {
+		t.Error("an empty connect body was allowed")
+	}
+	if d := decide("POST", "/v1.51/networks/n1/connect", `{"Container":"rc","container":"vm"}`); d.Allow {
+		t.Error("a duplicate key naming the vesper container last was allowed")
+	}
+	if d := decide("POST", "/v1.51/networks/n1/connect", `{"container":"vm","Container":"rc"}`); !d.Allow {
+		t.Errorf("a duplicate key naming runc last was refused: %s", d.Reason)
+	}
+	if err := os.MkdirAll(filepath.Join(root, strings.Repeat("c", 64)), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if d := decide("GET", "/v1.51/containers/rc/changes", ""); !d.Allow {
+		t.Errorf("a half-made container directory refused a runc request: %s", d.Reason)
+	}
+	nid := strings.Repeat("d", 64)
+	dir := filepath.Join(root, nid)
+	_ = os.MkdirAll(dir, 0o700)
+	_ = os.WriteFile(filepath.Join(dir, "config.v2.json"), []byte(`{"ID":"`+nid+`","Name":"/fresh","State":{"StartedAt":"0001-01-01T00:00:00Z"}}`), 0o600)
+	_ = os.WriteFile(filepath.Join(dir, "hostconfig.json"), []byte(`{"Runtime":"vesper"}`), 0o600)
+	if d := decide("PUT", "/v1.51/containers/fresh/archive?path=/tmp", ""); !d.Allow {
+		t.Errorf("docker cp into a never-started vesper container refused: %s", d.Reason)
+	}
+	if d := decide("POST", "/v1.51/networks/n1/connect", `{"Container":"fresh"}`); d.Allow {
+		t.Error("network connect of a never-started vesper container was allowed")
 	}
 }

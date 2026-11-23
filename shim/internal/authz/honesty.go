@@ -14,8 +14,10 @@ import (
 // a namespace the running microVM cannot follow. The container is resolved as dockerd resolves it; any other
 // container is left to dockerd.
 
-// vesperContainer names why ref is refused for operation op, or "" when it is not a vesper container.
-func vesperContainer(op, ref string) string {
+// vesperContainer names why ref is refused for operation op, or "" when it is not a vesper container. With
+// filesOnly, a vesper container that has never started is allowed: its drive is built from dockerd's tree at its
+// first start, so `docker create` then `docker cp` then `docker start` is honest (review of D-090).
+func vesperContainer(op, ref string, filesOnly bool) string {
 	if ref == "" {
 		return ""
 	}
@@ -27,7 +29,7 @@ func vesperContainer(op, ref string) string {
 		return fmt.Sprintf("%s is refused: dockerd's container store could not be read (%v)", op, err)
 	}
 	c, found := resolveContainer(ref, all)
-	if !found || c.runtime != VesperRuntime {
+	if !found || c.runtime != VesperRuntime || (filesOnly && !c.started) {
 		return ""
 	}
 	return fmt.Sprintf("%s is refused for a vesper container: dockerd's copy of its files does not see the microVM's writes", op)
@@ -46,7 +48,7 @@ func containerRef(u *url.URL) string {
 
 func checkContainerFiles(op string) check {
 	return func(u *url.URL, _ []byte) Decision {
-		if why := vesperContainer(op, containerRef(u)); why != "" {
+		if why := vesperContainer(op, containerRef(u), true); why != "" {
 			return denyVesper("%s", why)
 		}
 		return allow
@@ -54,7 +56,7 @@ func checkContainerFiles(op string) check {
 }
 
 func checkCommit(u *url.URL, _ []byte) Decision {
-	if why := vesperContainer("docker commit", u.Query().Get("container")); why != "" {
+	if why := vesperContainer("docker commit", u.Query().Get("container"), true); why != "" {
 		return denyVesper("%s", why)
 	}
 	return allow
@@ -65,20 +67,17 @@ func checkNetworkMember(u *url.URL, body []byte) Decision {
 	if strings.HasSuffix(u.Path, "/disconnect") {
 		op = "docker network disconnect"
 	}
+	// dockerd passes the body only when it is JSON with a length under 1 MiB, yet decodes it in full itself: an
+	// empty body here may name any container, so it is refused, as for create (review of D-090).
 	if len(strings.TrimSpace(string(body))) == 0 {
-		return allow // no container named: dockerd refuses it itself
+		return deny("%s: the request body did not reach the authorization plugin; send it as JSON with a Content-Length under 1 MiB", op)
 	}
-	var b map[string]json.RawMessage
+	// Decoded as dockerd decodes it, into a struct: keys match without case and the last one wins.
+	var b struct{ Container string }
 	if err := json.Unmarshal(body, &b); err != nil {
 		return denyVesper("%s: the request body is not readable", op)
 	}
-	var ref string
-	for k, v := range b {
-		if strings.EqualFold(k, "Container") {
-			_ = json.Unmarshal(v, &ref)
-		}
-	}
-	if why := vesperContainer(op, ref); why != "" {
+	if why := vesperContainer(op, b.Container, false); why != "" {
 		return denyVesper("%s; a microVM keeps the networks it started with", strings.Replace(why, "dockerd's copy of its files does not see the microVM's writes", "its network namespace is fixed while it runs", 1))
 	}
 	return allow

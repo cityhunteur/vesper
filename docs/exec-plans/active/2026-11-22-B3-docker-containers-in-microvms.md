@@ -36,6 +36,9 @@ macOS. Each Docker command that cannot be honest about a microVM is refused with
 
 ## Surprises & Discoveries
 
+- Slice 5: after a Firecracker `PATCH /vm` pause and resume, the microVM took no new vsock connection (existing ones
+  kept working), so exec and kill broke after any pause; pause became the guest's cgroup freezer. Firecracker also
+  resets an API connection whose client half-closes before the answer.
 - Slice 4b: an amd64 container in a microVM failed only at exec ("exec format error"); the plugin now refuses the
   option. A `vesper` container running as a non-root user sees share binds owned by `0:0` (TD-097).
 - Slice 4a: BusyBox's `ip link add … type veth peer name X` succeeds but ignores the name (the peer is `veth0`); a
