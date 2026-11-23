@@ -31,7 +31,8 @@ harness (GH #87) and a design of the shim boundary (D-017), are not met.
   TD-026 narrowed with the bridge fault fixed (#251, D-075), TD-064 narrowed (#252), TD-044 narrowed (#253), TD-041
   (#254), TD-053 narrowed (#255, D-076), TD-037 UDP on loopback (#256, D-077). Residuals in the tracker (HOSTFREE for
   TD-053, the name without `extra_hosts` for TD-039, TD-087, TD-088)
-- [ ] E Sandbox and signing: TD-010 (#258); ADR 0012 accepted (#261, D-080); slices 1 to 3 open
+- [ ] E Sandbox and signing: TD-010 (#258); ADR 0012 accepted (#261, D-080); slice 1 `vesper-proxy` (#263); slice 2
+  `vesperd` (D-081, CE-0013); slice 3, the launcher, open
 - [ ] F Evidence: TD-047 property tests (#260), TD-052 (#259, D-079); TD-005 nightly and TD-033 open
 - [x] G Deviations and compat exceptions recorded: CE-0011 and CE-0012, the Uffd answer measured (#257, D-078)
 - [x] H Tracker truth: #96 closed as not planned; #59's criterion corrected; #103 and #56 given their status (2026-11-22)
@@ -94,8 +95,8 @@ Not yet written.
 ## Context and Orientation
 
 - Tracker rows: `docs/exec-plans/tech-debt-tracker.md`. Decisions: `docs/design-docs/decision-log.md`. Compat
-  exceptions: `docs/specs/compat-exceptions.yaml` (open on 2026-11-22: CE-0001, CE-0003, CE-0004, CE-0007, CE-0008,
-  CE-0009).
+  exceptions: `docs/specs/compat-exceptions.yaml` (open on 2026-11-23: CE-0001, CE-0003, CE-0004, CE-0007, CE-0008,
+  CE-0009, CE-0011, CE-0012, CE-0013).
 - dockerd's config is written by `systemvm/overlay/usr/local/bin/vesper-containers:121` (`default-runtime`
   `vesper-runc`, `userns-remap` default, the `vesper-authz` plugin). The plugin is `shim/internal/authz/`.
 - The shim (Go, ADR 0004) is `shim/`; it launches microVMs with `vesper-microvm` (`systemvm/overlay/usr/local/bin/`).

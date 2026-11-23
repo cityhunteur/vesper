@@ -181,8 +181,11 @@ These need Python 3.11 or later, and nothing outside the standard library. See [
   (or `README.md`); every `docs/` directory needs one.
 - **`make validate-entitlements` fails on Linux**: `plutil` is absent, so the Python path runs and also checks the
   required keys. Reproduce on macOS with `VALIDATE_ENTITLEMENTS_FORCE_PYTHON=1`.
-- **`vesperd` exits at startup with an entitlements error**: the plist passed to `--entitlements-file` must contain
-  the `com.apple.security.virtualization` key literally.
+- **`vesperd` or `vesper-proxy` exits with "cannot apply the sandbox profile"**: its parent process is sandboxed (an
+  IDE or agent sandbox). Start it from a normal shell; `--no-sandbox` runs it without the profile, for diagnosis
+  only (ADR 0012).
+- **A model-backend request gets "Operation not permitted (os error 1)" for a host path**: the path is outside the
+  `--host-root` directories (default: the working directory and `$TMPDIR`). Pass `--host-root DIR` (CE-0013).
 - **Duplicate `vesperd` processes after `make dev-up`**: the pid files were overwritten. Kill the strays by hand, then
   `make dev-down` and `make dev-up`.
 - **`baselinectl --mode validate-api-matrix` says the matrix is stale**: regenerate with the printed command and

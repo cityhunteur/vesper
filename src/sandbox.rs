@@ -11,6 +11,8 @@ use std::path::{Path, PathBuf};
 pub enum Rule {
     /// Read one file.
     ReadFile(PathBuf),
+    /// Read the attributes (`stat`) of one path, not its contents.
+    ReadMetadata(PathBuf),
     /// Read and write one file, which may not exist yet (a socket, a lock, a status file).
     WriteFile(PathBuf),
     /// Read and write a directory and everything under it.
@@ -109,6 +111,10 @@ pub fn render(rules: &[Rule]) -> Result<String, String> {
             Rule::ReadFile(p) => format!(
                 "(allow file-read* (literal {}))",
                 quote(&canonical_file(p)?)?
+            ),
+            Rule::ReadMetadata(p) => format!(
+                "(allow file-read-metadata (literal {}))",
+                quote(&canonical(p)?)?
             ),
             Rule::WriteFile(p) => {
                 format!(
@@ -226,11 +232,104 @@ pub fn check_canary_free(rules: &[Rule], canary: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// The canary for `self_check`: the user's home directory, which no profile names.
+/// The canary for `self_check`: the user's home directory, which no profile names. `HOME`, else the user database,
+/// so a binary started with no `HOME` still proves its profile.
 pub fn canary() -> Option<PathBuf> {
-    std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .filter(|h| h.is_absolute())
+    std::env::home_dir().filter(|h| h.is_absolute() && h != Path::new("/"))
+}
+
+/// The `--sandbox-probe` test hook of each binary: tries what no profile allows and returns one line each,
+/// `PROBE <name> denied` or `PROBE <name> ALLOWED`. `tcp` is a loopback port and `unix` a Unix socket that the
+/// profile does not name. Run without the profile, every attempt must succeed, or the probe shows nothing.
+pub fn probes(home: &Path, tcp: Option<u16>, unix: Option<&Path>) -> Vec<String> {
+    use std::net::{SocketAddr, TcpStream, UdpSocket};
+    // A name of its own, never an existing file: without the profile this write succeeds and is removed.
+    let scratch = home.join(format!(".vesper-sandbox-probe-{}", std::process::id()));
+    let mut out = Vec::new();
+    let mut check = |name: &str, r: std::io::Result<()>| match r {
+        Err(_) => out.push(format!("PROBE {name} denied")),
+        Ok(()) => out.push(format!("PROBE {name} ALLOWED")),
+    };
+    check("read_ssh", std::fs::read_dir(home.join(".ssh")).map(|_| ()));
+    check(
+        "write_home",
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&scratch)
+            .map(|_| ()),
+    );
+    check(
+        "exec_sh",
+        std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg("true")
+            .status()
+            .map(|_| ()),
+    );
+    check("bind_any", UdpSocket::bind("0.0.0.0:0").map(|_| ()));
+    if let Some(port) = tcp {
+        let to: SocketAddr = ([127, 0, 0, 1], port).into();
+        check(
+            "connect_loopback_tcp",
+            TcpStream::connect_timeout(&to, std::time::Duration::from_secs(2)).map(|_| ()),
+        );
+    }
+    if let Some(path) = unix {
+        check(
+            "connect_other_unix",
+            std::os::unix::net::UnixStream::connect(path).map(|_| ()),
+        );
+    }
+    let _ = std::fs::remove_file(&scratch);
+    out
+}
+
+/// Makes `dir` (0700, with its parents) if it is missing, and refuses it if it is a symbolic link: a profile
+/// allows writing in a directory but not making its parents, and a directory that is a symlink would let whoever
+/// made it choose what the profile grants. Call it before `apply`.
+pub fn prepare_dir(dir: &Path) -> Result<(), String> {
+    if !dir.exists() {
+        use std::os::unix::fs::DirBuilderExt;
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(dir)
+            .map_err(|e| format!("create {}: {e}", dir.display()))?;
+    }
+    if std::fs::symlink_metadata(dir)
+        .map(|m| m.file_type().is_symlink())
+        .unwrap_or(false)
+    {
+        return Err(format!(
+            "{} is a symbolic link; name the real directory",
+            dir.display()
+        ));
+    }
+    Ok(())
+}
+
+/// `path` made absolute against the working directory, as the sandbox sees it.
+pub fn absolute(path: &Path) -> PathBuf {
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map(|d| d.join(path))
+            .unwrap_or_else(|_| path.to_path_buf())
+    }
+}
+
+/// Builds the profile from `rules`, applies it and proves it is in force with the `HOME` canary, or returns why
+/// not. On other systems there is no seatbelt, so nothing is checked or applied.
+pub fn confine(rules: &[Rule]) -> Result<(), String> {
+    if !cfg!(target_os = "macos") {
+        return Ok(());
+    }
+    let home = canary().ok_or("sandbox self-check: HOME is not an absolute path")?;
+    check_canary_free(rules, &home)?;
+    apply(&render(rules)?)?;
+    self_check(&home)
 }
 
 #[cfg(test)]

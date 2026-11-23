@@ -53,16 +53,8 @@ struct Args {
     probe_unix: Option<String>,
 }
 
-/// `path` made absolute against the working directory, as the sandbox sees it.
 fn absolute(path: &str) -> std::path::PathBuf {
-    let p = std::path::Path::new(path);
-    if p.is_absolute() {
-        p.to_path_buf()
-    } else {
-        std::env::current_dir()
-            .map(|d| d.join(p))
-            .unwrap_or_else(|_| p.to_path_buf())
-    }
+    vesper::sandbox::absolute(std::path::Path::new(path))
 }
 
 /// What the proxy may touch (ADR 0012): its socket's directory, its socket (it also talks to it, for the publisher),
@@ -81,23 +73,7 @@ fn sandbox_rules(args: &Args) -> Result<Vec<vesper::sandbox::Rule>, String> {
         );
     }
     for dir in dirs.into_iter().flatten() {
-        if !dir.exists() {
-            use std::os::unix::fs::DirBuilderExt;
-            std::fs::DirBuilder::new()
-                .recursive(true)
-                .mode(0o700)
-                .create(&dir)
-                .map_err(|e| format!("create {}: {e}", dir.display()))?;
-        }
-        if std::fs::symlink_metadata(&dir)
-            .map(|m| m.file_type().is_symlink())
-            .unwrap_or(false)
-        {
-            return Err(format!(
-                "{} is a symbolic link; name the real directory",
-                dir.display()
-            ));
-        }
+        vesper::sandbox::prepare_dir(&dir)?;
     }
     let mut rules = vec![
         Rule::ListenUnix(listen.clone()),
@@ -143,64 +119,18 @@ fn confine(args: &Args) {
         );
         return;
     }
-    let checked = (|| {
-        let home =
-            vesper::sandbox::canary().ok_or("sandbox self-check: HOME is not an absolute path")?;
-        let rules = sandbox_rules(args)?;
-        vesper::sandbox::check_canary_free(&rules, &home)?;
-        vesper::sandbox::apply(&vesper::sandbox::render(&rules)?)?;
-        vesper::sandbox::self_check(&home)
-    })();
+    let checked = sandbox_rules(args).and_then(|rules| vesper::sandbox::confine(&rules));
     if let Err(err) = checked {
         eprintln!("vesper-proxy failed: {err}");
         std::process::exit(1);
     }
 }
 
-/// The --sandbox-probe test hook: each line is `PROBE <name> denied` or `PROBE <name> ALLOWED <detail>`.
+/// The --sandbox-probe test hook: one `PROBE <name> denied|ALLOWED` line per attempt.
 fn probe(args: &Args) {
-    use std::net::{SocketAddr, TcpStream, UdpSocket};
     let home = vesper::sandbox::canary().unwrap_or_default();
-    // A name of its own, never an existing file: without the profile this write succeeds and is removed.
-    let scratch = home.join(format!(".vesper-sandbox-probe-{}", std::process::id()));
-    let mut out = Vec::new();
-    let mut check = |name: &str, r: std::io::Result<()>| match r {
-        Err(_) => out.push(format!("PROBE {name} denied")),
-        Ok(()) => out.push(format!("PROBE {name} ALLOWED")),
-    };
-    check("read_ssh", std::fs::read_dir(home.join(".ssh")).map(|_| ()));
-    check(
-        "write_home",
-        std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&scratch)
-            .map(|_| ()),
-    );
-    check(
-        "exec_sh",
-        std::process::Command::new("/bin/sh")
-            .arg("-c")
-            .arg("true")
-            .status()
-            .map(|_| ()),
-    );
-    check("bind_any", UdpSocket::bind("0.0.0.0:0").map(|_| ()));
-    if let Some(port) = args.probe_tcp {
-        let to: SocketAddr = ([127, 0, 0, 1], port).into();
-        check(
-            "connect_loopback_tcp",
-            TcpStream::connect_timeout(&to, Duration::from_secs(2)).map(|_| ()),
-        );
-    }
-    if let Some(path) = &args.probe_unix {
-        check(
-            "connect_other_unix",
-            std::os::unix::net::UnixStream::connect(path).map(|_| ()),
-        );
-    }
-    let _ = std::fs::remove_file(&scratch);
-    for line in out {
+    let unix = args.probe_unix.as_deref().map(std::path::Path::new);
+    for line in vesper::sandbox::probes(&home, args.probe_tcp, unix) {
         println!("{line}");
     }
 }

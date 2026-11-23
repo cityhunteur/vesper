@@ -236,8 +236,9 @@ runtime or control-plane modules.
   machine-written.
 - `third_party/firecracker/`: vendored Firecracker OpenAPI, read by `spec::load_routes` (route table) and
   `spec::load_info_version` (pinned version string).
-- `packaging/macos/`: entitlement plists for `vesperd`, `vesper-proxy` and `vesper-vmlauncher`. The `vesperd` plist
-  is validated by `platform` at startup when `--entitlements-file` is given; the launcher plist is applied by
+- `packaging/macos/`: entitlement plists for `vesperd`, `vesper-proxy` and `vesper-vmlauncher`. `vesperd` and
+  `vesper-proxy` read their plist at startup when `--entitlements-file` is given and are signed with it by
+  `scripts/macos/sign.sh`; the launcher plist is applied by
   `scripts/macos/build-vmlauncher.sh` at signing time; all three are linted by `scripts/ci/validate-entitlements.sh`
   (syntax lint on macOS, required-key check on Linux CI, TD-010).
 - `launcher/`: Swift package for `vesper-vmlauncher` ([launcher/README.md](launcher/README.md)).
@@ -299,8 +300,10 @@ arm at the end of the dispatch table was removed (TD-022).
 State is held in `AppState` behind `std::sync::RwLock` fields on a multi-thread tokio runtime. There is no state
 persistence and no background work. Handlers open caller-supplied host files synchronously with `std::fs` on the
 async worker thread (log and metrics creation, kernel, initrd, drive and pmem validation) with no `spawn_blocking`,
-so a hung path stalls that thread (TD-024). Startup order in `vesperd` on the model backend is: validate
-entitlements (only when `--entitlements-file` is given), refuse the flags that only the System VM backend takes,
+so a hung path stalls that thread (TD-024). Startup order in `vesperd` on the model backend is: read
+the entitlements file (only when `--entitlements-file` is given), refuse the flags that only the System VM backend
+takes, make the socket directory, apply the seatbelt profile and check it (ADR 0012; `--no-sandbox` skips it), start
+the tokio runtime,
 load the baseline lock and fail if the Firecracker revision
 is blank, load routes and version from the swagger, load the surface stub matrix, build `AppState::new_with_matrix` (which
 validates the matrix against `documented_route_semantics`), choose the socket path (without `--socket`:
@@ -434,7 +437,7 @@ artefacts in step with the pinned baseline ([docs/process/baseline-governance.md
 `make dev-up` builds
 `vesperd` and `vesper-proxy`, starts `vesperd` on `run/vesperd.sock` and `vesper-proxy` on `run/docker.sock` with
 its upstream set to `vesperd`'s socket, so `run/docker.sock` is a second path to the API. The dev loop always passes
-`--entitlements-file packaging/macos/vesperd.entitlements`, so the entitlement check runs and the plist must exist.
+`--entitlements-file packaging/macos/vesperd.entitlements`, so the plist must exist, and signs both binaries.
 `vesper-proxy` makes its listener owner-only by default (`--listen-mode`), stops on Ctrl-C or SIGTERM, and has no
 entitlement check (TD-017; [scripts/macos/README.md](scripts/macos/README.md)). Entitlement
 plists live in `packaging/macos/`. No installer, launchd or packaging manifests exist. The System VM path is
@@ -513,7 +516,7 @@ or parity documents.
 | 6 | Compat exceptions carry required fields, and none is open past expiry | Verified | On change only: `compatexctl` in `compat-exceptions.yml` when the registry or its code changes; no scheduled run (TD-016) | `cargo run --bin compatexctl -- --registry docs/specs/compat-exceptions.yaml` | [docs/process/compat-exceptions.md](docs/process/compat-exceptions.md) |
 | 7 | Inputs are parsed into typed structs once where they enter the crate (request bodies, registries, lock file, proxy targets, launch config); internal code never re-probes raw JSON or YAML. Exceptions: the MMDS data store is schemaless JSON by contract and is handled as `serde_json::Value`; `spec` probes the swagger as untyped `serde_yaml::Value` at load ([src/README.md](src/README.md)) | Verified | Per module: unit tests in each module; no cross-cutting lint (TD-008) | `cargo test --lib` | [src/README.md](src/README.md), [core beliefs](docs/design-docs/core-beliefs.md) |
 | 8 | Library modules stay under their error budgets; warn budgets are advisory and none is exceeded (2026-11-22, TD-015, TD-023) | Verified | Budgets in `check_structure.py` for the files with a `RULES` row (`src/api.rs` warn 2500 / error 3200; others warn 800 / error 1200) and `janitor_scan.py` (top-level `src/*.rs` only, no 800 tier: `api.rs` over 2500 warns, any other file over 1200 errors) | `python3 scripts/harness/check_structure.py --root .` | [Hotspots](#hotspots-and-decomposition-queue) |
-| 9 | When started with `--entitlements-file`, `vesperd` refuses to start unless the plist contains `com.apple.security.virtualization`; without the flag no check runs | Verified | `platform::validate_entitlements_file` (substring match on the key, value not checked); `make validate-entitlements` lints the plists in `rust-tests.yml` | `make validate-entitlements` | [src/platform.rs](src/platform.rs) |
+| 9 | On macOS `vesperd` and `vesper-proxy` apply their seatbelt profile before any thread starts and refuse to start if it cannot be applied or its self-check fails; only `--no-sandbox` skips it, with a warning (ADR 0012) | Verified | `src/sandbox.rs`; `tests/vesperd_sandbox.rs` and `tests/proxy_sandbox.rs` on macOS CI (`systemvm-image.yml`), which also checks the hardened-runtime signature; `make validate-entitlements` checks each plist's exact key set | `cargo test --test vesperd_sandbox --test proxy_sandbox` | [ADR 0012](docs/design-docs/adr/0012-sandbox-and-signing.md), [src/sandbox.rs](src/sandbox.rs) |
 | 10 | Having a dispatch arm in `src/api.rs`, or answering `501`, does not count as parity with upstream Firecracker at the pinned revision | Verified | `tests/route_parity.rs` (TD-003): every pinned route has behaviour cases captured in the repository, which `tests/api_replay.rs` replays on the model and `make systemvm-replay-suite` on Backend A, and no API source answers `501`; the structure sensor counts dispatch arms and early bypasses | `cargo test --test route_parity` | [docs/specs/firecracker-feature-parity.md](docs/specs/firecracker-feature-parity.md), TD-003 |
 | 11 | No container is root on the System VM: dockerd remaps users, and the authorisation plugin refuses the Docker API requests that would undo it | Verified | `vesper-authz` (allow-list), `userns-remap`, `vesper-containers prepare`; `go test ./internal/authz` in `shim-tests.yml` | `make systemvm-confine-suite` | [ADR 0010](docs/design-docs/adr/0010-no-container-is-systemvm-root.md), [docs/SECURITY.md](docs/SECURITY.md) |
 | 12 | A microVM's share server serves only that task's bind sources, to that microVM only, and what was bound read-only stays read-only by any name | Verified, with the limits stated in [docs/SECURITY.md](docs/SECURITY.md) | The sandbox of `vesper-unfs run`, the share network's rules, the server's list of read-only objects and anchors (unfs3 patch 0006) | `make systemvm-unfs-suite`, `make systemvm-microvm-binds-suite` | [ADR 0009](docs/design-docs/adr/0009-shares-into-microvms-over-nfs.md) |

@@ -166,19 +166,22 @@ jobs:
             echo "require policy refused with diagnostics (expected on M1/M2 runners)"
           fi
 
-      - name: vesper-proxy's seatbelt profile refuses what it never needs, signed with the hardened runtime (ADR 0012)
+      - name: vesperd's and vesper-proxy's seatbelt profiles refuse what they never need, signed with the hardened runtime (ADR 0012)
         run: |
-          # Build once, sign, then run the built test directly: a second cargo run can relink the proxy and replace
+          # Build once, sign, then run the built tests directly: a second cargo run can relink a binary and replace
           # its signature with the linker's (seen on CI, 2026-11-22).
-          exe="$(cargo test -q --test proxy_sandbox --no-run --message-format=json | python3 -I -c 'import json,sys
+          exes="$(cargo test -q --test proxy_sandbox --test vesperd_sandbox --no-run --message-format=json | python3 -I -c 'import json,sys
           for l in sys.stdin:
               m = json.loads(l)
-              if m.get("executable") and m.get("target", {}).get("name") == "proxy_sandbox": print(m["executable"])')"
-          bash scripts/macos/sign.sh debug
-          "$exe"
-          # Read whole first: with pipefail, grep -q closing the pipe early would fail codesign with SIGPIPE.
-          sig="$(codesign --display --verbose target/debug/vesper-proxy 2>&1)"
-          case "$sig" in *flags=*runtime*) echo "vesper-proxy: hardened runtime" ;; *) echo "not signed with the hardened runtime: $sig"; exit 1 ;; esac
+              if m.get("executable") and m.get("target", {}).get("name") in ("proxy_sandbox", "vesperd_sandbox"): print(m["executable"])')"
+          [ "$(printf '%s\n' "$exes" | grep -c .)" = 2 ] || { echo "expected two test executables: $exes"; exit 1; }
+          bash scripts/macos/sign.sh debug vesperd vesper-proxy
+          while read -r exe; do "$exe" </dev/null; done <<<"$exes"
+          for bin in vesperd vesper-proxy; do
+            # Read whole first: with pipefail, grep -q closing the pipe early would fail codesign with SIGPIPE.
+            sig="$(codesign --display --verbose "target/debug/$bin" 2>&1)"
+            case "$sig" in *flags=*runtime*) echo "$bin: hardened runtime" ;; *) echo "$bin not signed with the hardened runtime: $sig"; exit 1 ;; esac
+          done
 
       - name: Entitlement plists are valid and hold exactly the approved keys (TD-010)
         run: make validate-entitlements

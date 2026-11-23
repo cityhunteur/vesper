@@ -1,7 +1,7 @@
 ---
 status: accepted
 owner: cityhunteur
-last_reviewed: 2026-11-22
+last_reviewed: 2026-11-23
 ---
 
 # 0012. Host binaries apply a seatbelt profile to themselves at start, and are ad-hoc signed with the hardened runtime
@@ -34,9 +34,10 @@ run on macOS: `vesper-vmlauncher` (Swift, Virtualization.framework), `vesperd` a
   - `vesper-proxy`: its listen socket and `<socket>.lock`, the bridge socket, `run/vesper/ports.json`, loopback TCP
     and UDP ports of any number, its `--entitlements-file`.
   - `vesperd`: its socket and `<socket>.lock` (`XDG_RUNTIME_DIR` or `--socket`), the bridge socket, the baseline
-    lock (a path relative to the working directory), `--launch-config`, `--stage` sources inside shares, the
-    launcher it runs for `--host-capabilities`, and on the model backend the host paths named in API requests
-    (`boot_source.rs`, `logger_metrics.rs`, `pmem.rs`).
+    lock (a path relative to the working directory), `--launch-config`, and on the model backend the host paths
+    named in API requests (`boot_source.rs`, `logger_metrics.rs`, `pmem.rs`). It runs no other program: the
+    agent, not `vesperd`, opens `--stage` sources inside shares, and `systemvmctl`, not `vesperd`, runs the
+    launcher for `--host-capabilities` (corrected 2026-11-23, slice 2).
 
 ## Decision
 
@@ -51,7 +52,7 @@ run on macOS: `vesper-vmlauncher` (Swift, Virtualization.framework), `vesperd` a
      result.
    - Network rules are exact. `vesper-proxy`: `network-bind` and `network-inbound` on `localhost:*` only, and
      `network-outbound` only to its named Unix sockets. `vesperd`: its socket inbound and the bridge outbound.
-     `(deny process-exec)`, except `vesperd`'s launcher probe.
+     Neither may start a process.
    - **Fail closed.** If `sandbox_init` fails, for example under a parent that is already sandboxed, the binary
      refuses to start and says so: "cannot apply the sandbox profile: <error>; is the parent process sandboxed?".
      After the call, it checks itself: opening a canary path the profile denies must fail with `EPERM`, or it
@@ -117,6 +118,13 @@ Slices, each with its runtime evidence and its own PR: (1) `vesper-proxy`: profi
 `make sign`, plist change, negative probes, CI verify; (2) `vesperd`, both backends, `--host-root`, its plist and
 `--entitlements-file`; (3) the launcher, after its denial-report spike. A slice that cannot pass its suites under
 its profile stops and returns here.
+
+Slice 2 (2026-11-23, D-081): `vesperd` checks its command line, makes its socket directory, then applies the
+profile before the tokio runtime. Its rules: read the files it names (baseline lock, swagger, surface stub matrix,
+launch config), `stat` its socket directory, take `<socket>.lock`, listen on and connect to its socket, read and
+connect to the bridge socket, and on the model backend read and write under each `--host-root` (CE-0013). The
+`stage` and `store` subcommands get the same rules without a socket. With no `HOME`, the canary is the user's home
+directory from the user database. `cargo test --test vesperd_sandbox` shows seven refusals on each backend.
 
 ## References
 

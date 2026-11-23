@@ -20,7 +20,9 @@ errors to stderr and exits with code 1 on failure.
   (default `third_party/firecracker/firecracker.yaml`),
   `--surface-stub-matrix`
   (default `docs/generated/firecracker-api-surface-stub-matrix.json`),
-  `--entitlements-file` (optional). Calls
+  `--entitlements-file` (optional; read only), `--host-root` (model backend; repeatable) and `--no-sandbox`
+  (ADR 0012). Before the tokio runtime, `main` checks the command line, makes the socket directory and applies the
+  seatbelt profile (`vesper::sandbox`). Calls
   `vesper::platform::validate_entitlements_file`, `vesper::baseline::load`,
   `vesper::spec::load_routes`, `vesper::spec::load_info_version`,
   `vesper::api_matrix::load_surface_stub_matrix`,
@@ -168,14 +170,14 @@ Subdirectories: none.
   the socket launches nothing; a `READY` version other than the swagger's `info.version` closes the lease and exits
   1 without binding; `vesperd`'s own failures on a client connection (bridge, agent, `FCAPI`, timeouts, the
   connection cap) close it with no bytes; every HTTP byte comes from Firecracker.
-- `vesperd.rs:run`: when `--entitlements-file` is given it is validated first
-  and must contain `com.apple.security.virtualization` (no check without the
-  flag); `AppState` is built only via
+- `vesperd.rs:main`: a profile that cannot be applied, or a self-check that can list the home directory, exits 1
+  before anything listens; `--host-root` with the System VM backend, or one that covers the home directory, exits
+  1. `AppState` is built only via
   `new_with_matrix`, so a matrix load failure prevents binding the socket.
 
 ## Side Effects
 
-- `vesperd.rs:run` creates the parent directory of `--socket` (mode 0700), takes `<socket>.lock`, removes a stale
+- `vesperd.rs:main` creates the parent directory of `--socket` (mode 0700) before the profile; `run` takes `<socket>.lock`, removes a stale
   socket (never a live one or a non-socket), binds a `tokio::net::UnixSocket`, chmods the socket to `0o600` and only then listens (a socket that does not listen refuses every connect, so none comes in before the mode is set),
   prints `vesperd listening on <socket>`, and serves the router until shutdown.
 - `vesperd.rs:run` with `--backend systemvm` starts one microVM in the System VM (`LAUNCHAPI`), holds its lease,
