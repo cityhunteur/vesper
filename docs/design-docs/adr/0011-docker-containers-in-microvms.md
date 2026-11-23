@@ -242,8 +242,9 @@ The table is kept in the shim's README with a test for each row.
   paused task is thawed before a signal, and `exec` is refused while paused, as Docker does; D-090; a pause of
   Firecracker's vCPUs was tried and left the microVM taking no new vsock connection after the resume); `docker stats` reports the microVM's cgroup; `docker top` and `docker inspect` show the
   namespace holder's pid; `Update` refused; `linux/amd64` images do not run in a `vesper` container (the guest has no qemu-user), and
-  since slice 4b `--platform` other than `linux/arm64` is refused at create by name (D-087); a non-root container
-  user sees its share binds owned by `0:0` and cannot `chmod` them (TD-097). `make phase4-vesper` runs the Phase 4
+  since slice 4b `--platform` other than `linux/arm64` is refused at create by name (D-087). Until 2026-11-23 a non-root
+  container user saw its share binds owned by `0:0` and could not `chmod` them; since D-097 it sees them as runc's
+  user does (TD-097). `make phase4-vesper` runs the Phase 4
   suites with the runtime forced and fails on any step not in its list of these deviations.
 - SECURITY.md's threat table gains the rows the pre-review found missing: the Docker socket holder's daemon-wide
   authority, the `vesper` container as its own row apart from runc, and the guest's NIC.

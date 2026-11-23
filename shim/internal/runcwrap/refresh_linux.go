@@ -10,9 +10,11 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// onShare: a macOS share is virtio-fs (FUSE) in the System VM, and NFS from the System VM's share server in a
+// vesper microVM (ADR 0009); that server answers each uid as the share does (TD-097).
 func onShare(path string) bool {
 	var fs unix.Statfs_t
-	return unix.Statfs(path, &fs) == nil && fs.Type == unix.FUSE_SUPER_MAGIC
+	return unix.Statfs(path, &fs) == nil && (fs.Type == unix.FUSE_SUPER_MAGIC || fs.Type == unix.NFS_SUPER_MAGIC)
 }
 
 // Refresh asks the share for the attributes of each path on a macOS share as t.UID and t.GID, so the System VM caches

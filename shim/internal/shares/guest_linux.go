@@ -146,6 +146,26 @@ func MountAll(sessionDir, root string) error {
 // a file share's export.
 const hiddenMark = "!"
 
+// Mounted returns the task-side paths of the shares MountAll recorded for a session (root joined with each
+// destination), in mount order; hidden mounts outside the task's root are left out. No record means no shares.
+func Mounted(sessionDir, root string) ([]string, error) {
+	raw, err := os.ReadFile(filepath.Join(sessionDir, mountedFile))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, l := range strings.Split(string(raw), "\n") {
+		if l == "" || strings.HasPrefix(l, hiddenMark) {
+			continue
+		}
+		out = append(out, filepath.Join(root, l))
+	}
+	return out, nil
+}
+
 // mountFile mounts a file share's export at a hidden directory of the session, outside the task's root, and binds its
 // one file onto the destination, which it makes as an empty file when missing (GH #208). up lists the hidden
 // directories mounted so far: a file bound at two destinations with one mode has one hidden mount, and a file bound

@@ -15,8 +15,7 @@ mkdir -p "${OUT}"
 # suite:step  reason (each line one deviation of the vesper runtime from runc for that step)
 DEVIATIONS='workflow-suite:platform_amd64 --platform linux/amd64 is refused: a microVM runs linux/arm64 only (D-087)
 crossarch-suite:run_platform_amd64 --platform linux/amd64 is refused: a microVM runs linux/arm64 only (D-087)
-crossarch-suite:container_inspect_architecture the amd64 container is never created: --platform linux/amd64 is refused (D-087)
-binds-suite:bind_owned_by_container_user_at_start a non-root container user sees its share bind owned by 0:0 and cannot chmod it: every share file is 0:0 to the share server, and the vesper runtime has no ownership refresh (TD-097)'
+crossarch-suite:container_inspect_architecture the amd64 container is never created: --platform linux/amd64 is refused (D-087)'
 export VESPER_DOCKER_RUNTIME=vesper DOCKER_BIN="${ROOT_DIR}/scripts/systemvm/docker-runtime.sh"
 rows=(); bad=0
 for suite in ${SUITES}; do

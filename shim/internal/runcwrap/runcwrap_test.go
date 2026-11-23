@@ -84,3 +84,26 @@ func TestTargetOf(t *testing.T) {
 		t.Error("nil spec")
 	}
 }
+
+// ProcessIDs maps the process's ids through the spec's mappings; ids outside them, or no process, are not ok
+// (TD-097: the guest asks its shares again as these ids).
+func TestProcessIDs(t *testing.T) {
+	maps := []specs.LinuxIDMapping{{ContainerID: 0, HostID: 100000, Size: 65536}}
+	for _, c := range []struct {
+		name     string
+		spec     *specs.Spec
+		uid, gid uint32
+		ok       bool
+	}{
+		{"nil spec", nil, 0, 0, false},
+		{"no process", &specs.Spec{}, 0, 0, false},
+		{"no mappings", &specs.Spec{Process: &specs.Process{User: specs.User{UID: 1000, GID: 1001}}}, 1000, 1001, true},
+		{"mapped", &specs.Spec{Process: &specs.Process{User: specs.User{UID: 1000, GID: 1000}}, Linux: &specs.Linux{UIDMappings: maps, GIDMappings: maps}}, 101000, 101000, true},
+		{"outside the mappings", &specs.Spec{Process: &specs.Process{User: specs.User{UID: 70000}}, Linux: &specs.Linux{UIDMappings: maps, GIDMappings: maps}}, 0, 0, false},
+	} {
+		uid, gid, ok := ProcessIDs(c.spec)
+		if ok != c.ok || (ok && (uid != c.uid || gid != c.gid)) {
+			t.Errorf("%s: %d:%d %v, want %d:%d %v", c.name, uid, gid, ok, c.uid, c.gid, c.ok)
+		}
+	}
+}

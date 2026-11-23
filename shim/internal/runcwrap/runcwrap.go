@@ -125,12 +125,11 @@ func isBind(m specs.Mount) bool {
 	return false
 }
 
-// TargetOf returns the bind sources of a container and the uid and gid its process has in the System VM. ok is false
-// when nothing needs asking again: the process runs as root in the System VM (root's answer is already the cached
-// one), its ids are outside the mappings, or it has no bind mounts.
-func TargetOf(s *specs.Spec) (t Target, ok bool) {
+// ProcessIDs returns the uid and gid the spec's process has outside its user namespace. ok is false when the spec
+// has no process or its ids are outside the mappings.
+func ProcessIDs(s *specs.Spec) (uid, gid uint32, ok bool) {
 	if s == nil || s.Process == nil {
-		return t, false
+		return 0, 0, false
 	}
 	var uidMaps, gidMaps []specs.LinuxIDMapping
 	if s.Linux != nil {
@@ -138,7 +137,15 @@ func TargetOf(s *specs.Spec) (t Target, ok bool) {
 	}
 	uid, uok := hostID(s.Process.User.UID, uidMaps)
 	gid, gok := hostID(s.Process.User.GID, gidMaps)
-	if !uok || !gok || uid == 0 {
+	return uid, gid, uok && gok
+}
+
+// TargetOf returns the bind sources of a container and the uid and gid its process has in the System VM. ok is false
+// when nothing needs asking again: the process runs as root in the System VM (root's answer is already the cached
+// one), its ids are outside the mappings, or it has no bind mounts.
+func TargetOf(s *specs.Spec) (t Target, ok bool) {
+	uid, gid, ok := ProcessIDs(s)
+	if !ok || uid == 0 {
 		return t, false
 	}
 	t.UID, t.GID = uid, gid

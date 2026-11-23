@@ -63,3 +63,18 @@ func TestOpenInRootStaysInside(t *testing.T) {
 		}
 	}
 }
+
+// Mounted lists the task-side paths MountAll recorded, without the hidden mounts; no record means no shares (TD-097).
+func TestMounted(t *testing.T) {
+	dir := t.TempDir()
+	if got, err := Mounted(dir, "/newroot"); err != nil || got != nil {
+		t.Fatalf("no record: %v, %v", got, err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, mountedFile), []byte("/data\n"+hiddenMark+"/run/hidden/x\n/data/sub\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Mounted(dir, "/newroot")
+	if err != nil || len(got) != 2 || got[0] != "/newroot/data" || got[1] != "/newroot/data/sub" {
+		t.Fatalf("got %v, %v", got, err)
+	}
+}
