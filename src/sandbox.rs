@@ -232,10 +232,102 @@ pub fn check_canary_free(rules: &[Rule], canary: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// The canary for `self_check`: the user's home directory, which no profile names. `HOME`, else the user database,
-/// so a binary started with no `HOME` still proves its profile.
+/// The user's home directory from the user database (`getpwuid_r`), which no environment value can change.
+#[cfg(target_os = "macos")]
+pub fn user_home() -> Option<PathBuf> {
+    use std::ffi::{CStr, c_char, c_int};
+    use std::os::unix::ffi::OsStrExt;
+    // `struct passwd` of <pwd.h> on macOS.
+    #[repr(C)]
+    struct Passwd {
+        pw_name: *mut c_char,
+        pw_passwd: *mut c_char,
+        pw_uid: u32,
+        pw_gid: u32,
+        pw_change: i64,
+        pw_class: *mut c_char,
+        pw_gecos: *mut c_char,
+        pw_dir: *mut c_char,
+        pw_shell: *mut c_char,
+        pw_expire: i64,
+    }
+    unsafe extern "C" {
+        fn getuid() -> u32;
+        fn getpwuid_r(
+            uid: u32,
+            pwd: *mut Passwd,
+            buf: *mut c_char,
+            len: usize,
+            result: *mut *mut Passwd,
+        ) -> c_int;
+    }
+    let mut buf = vec![0 as c_char; 4096];
+    // SAFETY: an all-zero `Passwd` is valid (null pointers and zero integers); getpwuid_r fills it, pointing into
+    // `buf`, which outlives every read below; `result` is null or points at `pwd`.
+    let mut pwd: Passwd = unsafe { std::mem::zeroed() };
+    let mut result: *mut Passwd = std::ptr::null_mut();
+    let rc = unsafe { getpwuid_r(getuid(), &mut pwd, buf.as_mut_ptr(), buf.len(), &mut result) };
+    if rc != 0 || result.is_null() || pwd.pw_dir.is_null() {
+        return None;
+    }
+    // SAFETY: getpwuid_r succeeded, so `pw_dir` is a NUL-terminated string inside `buf`.
+    let dir = unsafe { CStr::from_ptr(pwd.pw_dir) };
+    Some(PathBuf::from(std::ffi::OsStr::from_bytes(dir.to_bytes())))
+        .filter(|h| h.is_absolute() && h != Path::new("/"))
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn user_home() -> Option<PathBuf> {
+    None
+}
+
+/// The per-user temporary directory macOS assigns (`confstr(_CS_DARWIN_USER_TEMP_DIR)`), which no environment value
+/// can change; elsewhere `$TMPDIR`.
+pub fn user_temp_dir() -> Option<PathBuf> {
+    #[cfg(target_os = "macos")]
+    {
+        use std::ffi::{CStr, c_char, c_int};
+        use std::os::unix::ffi::OsStrExt;
+        unsafe extern "C" {
+            fn confstr(name: c_int, buf: *mut c_char, len: usize) -> usize;
+        }
+        const CS_DARWIN_USER_TEMP_DIR: c_int = 65537;
+        let mut buf = vec![0 as c_char; 1024];
+        // SAFETY: confstr writes at most `len` bytes, NUL included, into `buf`, and returns 0 on error.
+        let n = unsafe { confstr(CS_DARWIN_USER_TEMP_DIR, buf.as_mut_ptr(), buf.len()) };
+        if n == 0 || n > buf.len() {
+            return None;
+        }
+        // SAFETY: confstr succeeded and the result fitted, so `buf` holds a NUL-terminated string.
+        let dir = unsafe { CStr::from_ptr(buf.as_ptr()) };
+        Some(PathBuf::from(std::ffi::OsStr::from_bytes(dir.to_bytes())))
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        std::env::var_os("TMPDIR")
+            .filter(|t| !t.is_empty())
+            .map(PathBuf::from)
+    }
+}
+
+/// Every home directory a rule must not cover: the user database's, and `HOME` when it names another.
+pub fn homes() -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = Vec::new();
+    for home in [user_home(), std::env::var_os("HOME").map(PathBuf::from)]
+        .into_iter()
+        .flatten()
+    {
+        if home.is_absolute() && home != Path::new("/") && !out.contains(&home) {
+            out.push(home);
+        }
+    }
+    out
+}
+
+/// The canary for `self_check`: the user's home directory, which no profile names. The user database's, so no
+/// environment value can choose it; `HOME` only where there is no user database entry.
 pub fn canary() -> Option<PathBuf> {
-    std::env::home_dir().filter(|h| h.is_absolute() && h != Path::new("/"))
+    user_home().or_else(|| homes().into_iter().next())
 }
 
 /// The `--sandbox-probe` test hook of each binary: tries what no profile allows and returns one line each,
@@ -326,10 +418,12 @@ pub fn confine(rules: &[Rule]) -> Result<(), String> {
     if !cfg!(target_os = "macos") {
         return Ok(());
     }
-    let home = canary().ok_or("sandbox self-check: HOME is not an absolute path")?;
-    check_canary_free(rules, &home)?;
+    let canary = canary().ok_or("sandbox self-check: no home directory to check against")?;
+    for home in homes() {
+        check_canary_free(rules, &home)?;
+    }
     apply(&render(rules)?)?;
-    self_check(&home)
+    self_check(&canary)
 }
 
 #[cfg(test)]

@@ -58,7 +58,9 @@ fn assert_denied_then_allowed(backend: &[&str]) {
     for line in &confined {
         assert!(line.ends_with(" denied"), "under the profile: {line}");
     }
-    for line in probe(backend, dir.path(), &outside, true) {
+    let open = probe(backend, dir.path(), &outside, true);
+    assert_eq!(open.len(), 7, "{open:?}");
+    for line in &open {
         assert!(
             line.ends_with(" ALLOWED"),
             "without the profile the probe must succeed, or it shows nothing: {line}"
@@ -122,6 +124,9 @@ fn put_kernel(root: &Path, kernel: &Path) -> String {
         body.len()
     )
     .unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .unwrap();
     let mut reply = String::new();
     stream.read_to_string(&mut reply).unwrap();
     reply
@@ -162,17 +167,86 @@ fn output_within(mut cmd: Command) -> std::process::Output {
     child.wait_with_output().unwrap()
 }
 
-#[test]
-fn a_host_root_that_covers_home_is_refused() {
+/// The directory above the user's home directory.
+fn above_home() -> std::path::PathBuf {
+    std::env::home_dir()
+        .and_then(|h| h.parent().map(Path::to_path_buf))
+        .unwrap()
+}
+
+/// A model `vesperd` started with `args` in `cwd` with `env`, which must refuse to start with `want` in its error.
+fn assert_refused(cwd: &Path, args: &[&std::ffi::OsStr], env: &[(&str, &Path)], want: &str) {
     let dir = short_dir();
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_vesperd"));
-    cmd.current_dir(env!("CARGO_MANIFEST_DIR"))
-        .args(["--backend", "model", "--host-root", "/Users", "--socket"])
+    cmd.current_dir(cwd)
+        .args(["--backend", "model", "--swagger"])
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("third_party/firecracker/firecracker.yaml"))
+        .args(args)
+        .arg("--socket")
         .arg(dir.path().join("v.sock"));
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
     let out = output_within(cmd);
     let err = String::from_utf8_lossy(&out.stderr);
     assert_eq!(out.status.code(), Some(1), "{err}");
-    assert!(err.contains("would cover"), "{err}");
+    assert!(err.contains(want), "{err}");
+}
+
+#[test]
+fn a_host_root_that_covers_home_is_refused() {
+    assert_refused(
+        Path::new(env!("CARGO_MANIFEST_DIR")),
+        &["--host-root".as_ref(), above_home().as_os_str()],
+        &[],
+        "covers the home directory",
+    );
+}
+
+/// The real home directory comes from the user database, so a false `HOME` cannot hide it from the check.
+#[test]
+fn a_false_home_does_not_hide_the_real_one() {
+    let fake = short_dir();
+    assert_refused(
+        Path::new(env!("CARGO_MANIFEST_DIR")),
+        &["--host-root".as_ref(), above_home().as_os_str()],
+        &[("HOME", fake.path())],
+        "covers the home directory",
+    );
+}
+
+/// A working directory over the home directory is not a default host root; the error names `--host-root`.
+#[test]
+fn a_working_directory_over_home_needs_host_root() {
+    assert_refused(Path::new("/"), &[], &[], "pass --host-root DIR");
+}
+
+/// The default temporary root is the one macOS assigns, so `TMPDIR` cannot widen the profile.
+#[test]
+fn tmpdir_does_not_widen_the_profile() {
+    let dir = short_dir();
+    let other = short_dir();
+    let outside = other.path().join("vmlinux");
+    std::fs::write(&outside, b"kernel").unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_vesperd"))
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .env("TMPDIR", other.path())
+        .args(["--backend", "model", "--sandbox-probe", "--socket"])
+        .arg(dir.path().join("d.sock"))
+        .arg("--probe-file")
+        .arg(&outside)
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        text.contains("PROBE open_outside_host_root denied"),
+        "{text}"
+    );
 }
 
 #[test]

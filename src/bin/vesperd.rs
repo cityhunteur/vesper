@@ -113,7 +113,7 @@ struct Args {
     #[arg(long)]
     entitlements_file: Option<String>,
     /// A directory the model backend may open host paths in (`--backend model`; repeatable). Default: the working
-    /// directory and `$TMPDIR`. A request that names a path outside them gets the error a path that cannot be
+    /// directory and the per-user temporary directory macOS assigns. A request that names a path outside them gets the error a path that cannot be
     /// opened gets (ADR 0012, CE-0013).
     #[arg(long = "host-root", value_name = "DIR")]
     host_root: Vec<String>,
@@ -185,21 +185,45 @@ fn is_model(args: &Args) -> bool {
     args.command.is_none() && args.backend == Some(Backend::Model)
 }
 
-/// The directories the model backend may open host paths in: `--host-root`, else the working directory and
-/// `$TMPDIR`.
-fn host_roots(args: &Args) -> Vec<PathBuf> {
-    if !args.host_root.is_empty() {
-        return args
-            .host_root
+/// The directories the model backend may open host paths in: `--host-root`, else the working directory and the
+/// user's temporary directory (on macOS the one the system assigns, not `$TMPDIR`, so no environment value widens
+/// the profile). A root that covers a home directory is refused, which keeps the self-check meaningful.
+fn host_roots(args: &Args) -> Result<Vec<PathBuf>, String> {
+    let explicit = !args.host_root.is_empty();
+    let roots: Vec<PathBuf> = if explicit {
+        args.host_root
             .iter()
             .map(|r| vesper::sandbox::absolute(Path::new(r)))
-            .collect();
+            .collect()
+    } else {
+        let cwd = std::env::current_dir()
+            .map_err(|e| format!("the working directory: {e}; pass --host-root DIR"))?;
+        std::iter::once(cwd)
+            .chain(vesper::sandbox::user_temp_dir())
+            .collect()
+    };
+    // Only macOS has a profile, and so a self-check to keep meaningful.
+    for root in roots.iter().filter(|_| cfg!(target_os = "macos")) {
+        let real = vesper::sandbox::canonical(root)?;
+        for home in vesper::sandbox::homes() {
+            if vesper::sandbox::canonical(&home).is_ok_and(|h| h.starts_with(&real)) {
+                return Err(if explicit {
+                    format!(
+                        "--host-root {} covers the home directory {}; name a directory inside it",
+                        root.display(),
+                        home.display()
+                    )
+                } else {
+                    format!(
+                        "the working directory {} covers the home directory {}, so it cannot be the model backend's default host root; pass --host-root DIR",
+                        root.display(),
+                        home.display()
+                    )
+                });
+            }
+        }
     }
-    let mut roots: Vec<PathBuf> = std::env::current_dir().into_iter().collect();
-    if let Some(tmp) = std::env::var_os("TMPDIR").filter(|t| !t.is_empty()) {
-        roots.push(PathBuf::from(tmp));
-    }
-    roots
+    Ok(roots)
 }
 
 /// What `vesperd` may touch (ADR 0012), and its API socket (none for `stage` and `store`). Every mode may read the
@@ -245,7 +269,7 @@ fn sandbox_rules(args: &Args) -> Result<(Vec<vesper::sandbox::Rule>, Option<Path
         ] {
             rules.push(Rule::ReadFile(absolute(Path::new(file))));
         }
-        for root in host_roots(args) {
+        for root in host_roots(args)? {
             rules.push(Rule::WriteTree(root));
         }
     } else {

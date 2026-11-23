@@ -185,7 +185,8 @@ These need Python 3.11 or later, and nothing outside the standard library. See [
   IDE or agent sandbox). Start it from a normal shell; `--no-sandbox` runs it without the profile, for diagnosis
   only (ADR 0012).
 - **A model-backend request gets "Operation not permitted (os error 1)" for a host path**: the path is outside the
-  `--host-root` directories (default: the working directory and `$TMPDIR`). Pass `--host-root DIR` (CE-0013).
+  `--host-root` directories (default: the working directory and the per-user temporary directory macOS assigns (`confstr`, not `$TMPDIR`)). Pass `--host-root DIR` (CE-0013). From
+  a working directory over your home directory, such as `~` or `/`, the model backend needs `--host-root`.
 - **Duplicate `vesperd` processes after `make dev-up`**: the pid files were overwritten. Kill the strays by hand, then
   `make dev-down` and `make dev-up`.
 - **`baselinectl --mode validate-api-matrix` says the matrix is stale**: regenerate with the printed command and

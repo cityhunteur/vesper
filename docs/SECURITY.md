@@ -65,10 +65,12 @@ Vesper’s security model is part of its parity contract. Treat this file as the
   that reason. A `tcp://` upstream must be loopback. Missing directories are made, mode 0700, before the profile.
 - `vesperd` does the same on both backends (slice 2): it may read the files it names, take `<socket>.lock`, listen
   on its socket, connect to the bridge socket and, on the model backend, read and write under its `--host-root`
-  directories (default: the working directory and `$TMPDIR`; CE-0013). A request for a host path outside them gets
+  directories (default: the working directory and the per-user temporary directory macOS assigns (`confstr`, not `$TMPDIR`), so no environment value widens the profile;
+  CE-0013). A root that covers a home directory, the user database's or `HOME`'s, is refused. A request for a host path outside them gets
   Firecracker's error envelope for a path it cannot open. It may start no process and use no network.
   `cargo test --test vesperd_sandbox` (macOS) shows seven refusals on each backend, including a file outside the
-  host roots. With no `HOME`, the self-check's canary is the home directory from the user database.
+  host roots, and tests show a false `HOME` or `TMPDIR` does not widen the profile. The self-check's canary is the home
+  directory from the user database (`getpwuid_r`). As for the proxy, a socket directory that is a symlink is refused.
 - `make sign`, `make dev-up`, `make docker-up` and the `vesperd` suite targets sign `vesperd` and the proxy ad hoc
   with the hardened runtime. The launcher follows in slice 3.
 

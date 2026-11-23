@@ -33,7 +33,7 @@ run on macOS: `vesper-vmlauncher` (Swift, Virtualization.framework), `vesperd` a
     FSEvents on them), and Virtualization.framework's services.
   - `vesper-proxy`: its listen socket and `<socket>.lock`, the bridge socket, `run/vesper/ports.json`, loopback TCP
     and UDP ports of any number, its `--entitlements-file`.
-  - `vesperd`: its socket and `<socket>.lock` (`XDG_RUNTIME_DIR` or `--socket`), the bridge socket, the baseline
+  - `vesperd`: its socket and `<socket>.lock` (`--socket`, else the first of `XDG_RUNTIME_DIR`, `TMPDIR` and `HOME`), the bridge socket, the baseline
     lock (a path relative to the working directory), `--launch-config`, and on the model backend the host paths
     named in API requests (`boot_source.rs`, `logger_metrics.rs`, `pmem.rs`). It runs no other program: the
     agent, not `vesperd`, opens `--stage` sources inside shares, and `systemvmctl`, not `vesperd`, runs the
@@ -62,7 +62,7 @@ run on macOS: `vesper-vmlauncher` (Swift, Virtualization.framework), `vesperd` a
    - The launcher's read-only modes (`--host-capabilities`, `--print-config`, `--watch-dry-run`) need no VM; they
      run under the profile of a parent that starts them, such as `vesperd`, and skip their own call there.
    - The model backend reads and writes only under `--host-root` directories (default: the working directory and
-     `$TMPDIR`); a request for a path outside them gets the error envelope Firecracker gives for a path it cannot
+     the per-user temporary directory macOS assigns); a request for a path outside them gets the error envelope Firecracker gives for a path it cannot
      open, and the compat registry records the narrowing.
    - The order is `vesper-proxy` first, then `vesperd`, then the launcher. Each lands only with its runtime suites
      passing under its profile. The launcher's slice starts with a spike: boot once with denials reported
@@ -123,8 +123,9 @@ Slice 2 (2026-11-23, D-081): `vesperd` checks its command line, makes its socket
 profile before the tokio runtime. Its rules: read the files it names (baseline lock, swagger, surface stub matrix,
 launch config), `stat` its socket directory, take `<socket>.lock`, listen on and connect to its socket, read and
 connect to the bridge socket, and on the model backend read and write under each `--host-root` (CE-0013). The
-`stage` and `store` subcommands get the same rules without a socket. With no `HOME`, the canary is the user's home
-directory from the user database. `cargo test --test vesperd_sandbox` shows seven refusals on each backend.
+`stage` and `store` subcommands get the same rules without a socket. The canary and the home directories a rule may
+not cover come from the user database (`getpwuid_r`) as well as `HOME`, and the default temporary root from
+`confstr`, so no environment value widens the profile. `cargo test --test vesperd_sandbox` shows seven refusals on each backend.
 
 ## References
 

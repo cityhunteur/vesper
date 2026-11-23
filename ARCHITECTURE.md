@@ -306,9 +306,8 @@ takes, make the socket directory, apply the seatbelt profile and check it (ADR 0
 the tokio runtime,
 load the baseline lock and fail if the Firecracker revision
 is blank, load routes and version from the swagger, load the surface stub matrix, build `AppState::new_with_matrix` (which
-validates the matrix against `documented_route_semantics`), choose the socket path (without `--socket`:
-`vesperd.sock` in an owner-only runtime directory), then `proxy::claim_socket` (create the socket's parent
-directory with mode 0700, refuse one writable by group or others, take `<socket>.lock`, refuse a live socket and a
+validates the matrix against `documented_route_semantics`), then `proxy::claim_socket` on the socket path chosen
+before the profile (without `--socket`: `vesperd.sock` in an owner-only runtime directory; refuse a directory writable by group or others, take `<socket>.lock`, refuse a live socket and a
 path that is not a socket, remove a stale one), bind, chmod the socket to `0o600`, and only then listen, so that
 no connect reaches the server through a socket that is not yet owner-only. With `--backend systemvm`
 the start branches after the entitlement check and loads no lock, route list or matrix (next section); the
