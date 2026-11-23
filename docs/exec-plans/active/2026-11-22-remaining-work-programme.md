@@ -25,7 +25,8 @@ harness (GH #87) and a design of the shim boundary (D-017), are not met.
 
 - [x] P0 EGM review, council, judge and owner sign-off (2026-11-22; D-065, D-066, D-067)
 - [x] A Foundation: A1 toolchain pin (#234), A2 notices check in CI (#234), A3 file splits (#235), A4 formatting and lint (#237, #238), A5 checks (#239, #240, #241)
-- [ ] B Docker containers in microVMs: B1 spike done (`run/B1/findings.md`), B2 ADR 0011 accepted (D-068); B3 slices 1 to 3 merged (#242, #244, #245; D-071, D-073), slices 4 to 6 open
+- [x] B Docker containers in microVMs: B1 spike done (`run/B1/findings.md`), B2 ADR 0011 accepted (D-068); B3 done
+  (2026-11-23, D-091): slices 1 to 3 (#242, #244, #245), 4a to 4c (#269, #270, #271), 5 (#273), 6 not needed (#272)
 - [x] C API and proxy fixes (#246, 2026-11-22; D-072): TD-019, TD-024, TD-017 and TD-021 done, TD-007 narrowed
 - [x] D Runtime fixes and smaller decisions: TD-060 (#247), TD-039 narrowed (#249, D-074), TD-059 (#250),
   TD-026 narrowed with the bridge fault fixed (#251, D-075), TD-064 narrowed (#252), TD-044 narrowed (#253), TD-041
@@ -33,7 +34,8 @@ harness (GH #87) and a design of the shim boundary (D-017), are not met.
   TD-053, the name without `extra_hosts` for TD-039, TD-087, TD-088)
 - [x] E Sandbox and signing: TD-010 (#258); ADR 0012 accepted (#261, D-080); slice 1 `vesper-proxy` (#263); slice 2
   `vesperd` (#264, D-081, CE-0013); slice 3 the launcher (D-082)
-- [ ] F Evidence: TD-047 property tests (#260), TD-052 (#259, D-079); TD-005 nightly and TD-033 open
+- [ ] F Evidence: TD-047 property tests (#260), TD-052 (#259, D-079), TD-005 narrowed to `make nightly` (#268,
+  D-084); TD-033 open (B's measurements in D-088 cover run and stop latency and density)
 - [x] G Deviations and compat exceptions recorded: CE-0011 and CE-0012, the Uffd answer measured (#257, D-078)
 - [x] H Tracker truth: #96 closed as not planned; #59's criterion corrected; #103 and #56 given their status (2026-11-22)
 - [ ] Outcomes & Retrospective written; plan moved to completed
