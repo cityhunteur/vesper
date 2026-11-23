@@ -695,15 +695,23 @@ ctrns_links() {
   echo "$cl_boot"
 }
 # ctrns_share_link ID: the share link (ADR 0011 §3, slice 4). vh1, made with vh0 in the share namespace, moves into
-# the container's namespace through its holder, checked by start time and namespace; tap vs0 carries the guest's
+# the container's namespace through a helper this function starts there and holds, so the pid it names cannot be
+# reused by another process before the move (review of D-086); tap vs0 carries the guest's
 # frames, mirrored both ways with vh1 by tc, so the namespace's own stack never handles them; from the guest only the
 # share MAC and address pass (an allow-list, as on the data link). A reason on failure.
 ctrns_share_link() {
   cs_f="$CTRNS/$1"
-  cs_pid=$(sed -n 's/^pid=\([0-9]*\) .*/\1/p' "$cs_f.holder" 2>/dev/null); cs_start=$(sed -n 's/.* start=\([0-9]*\)$/\1/p' "$cs_f.holder" 2>/dev/null)
-  digits "$cs_pid" && proc_alive "$cs_pid" "$cs_start" || { echo "the namespace holder is gone"; return 1; }
-  [ "$(stat -L -c %i "/proc/$cs_pid/ns/net" 2>/dev/null)" = "$(stat -L -c %i "$cs_f" 2>/dev/null)" ] || { echo "the holder is not in the namespace"; return 1; }
-  nsenter --net="$NETNS/$1" ip link set dev vh1 netns "$cs_pid" 2>/dev/null || { echo "move vh1"; return 1; }
+  cs_ino=$(stat -L -c %i "$cs_f" 2>/dev/null) || { echo "the container's namespace is gone"; return 1; }
+  # nsenter joins the namespace and execs sleep in the same process; this shell is its parent and has not reaped it,
+  # so its pid stays ours until the wait below.
+  nsenter --net="$cs_f" sleep 30 < /dev/null > /dev/null 2>&1 &
+  cs_h=$!
+  cs_in=""; for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+    [ "$(stat -L -c %i "/proc/$cs_h/ns/net" 2>/dev/null)" = "$cs_ino" ] && { cs_in=1; break; }; sleep 0.05
+  done
+  cs_ok=""; [ -n "$cs_in" ] && nsenter --net="$NETNS/$1" ip link set dev vh1 netns "$cs_h" 2>/dev/null && cs_ok=1
+  kill "$cs_h" 2>/dev/null; wait "$cs_h" 2>/dev/null
+  [ -n "$cs_ok" ] || { echo "move vh1"; return 1; }
   cs_why=$(vnetns_tap "$cs_f" "$JUSER" vs0) || { echo "$cs_why"; return 1; }
   nsenter --net="$cs_f" sh -c '
     set -e
