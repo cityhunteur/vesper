@@ -47,13 +47,13 @@ func TestSizeOf(t *testing.T) {
 		{"unlimited memory", resources(-1, -1, 100000, "", -1), Size{256, 1, 0, 0}, ""},
 		// 64 MiB fits the default guest, whose workload has about 149 MiB. Each vCPU after the first adds 8 MiB.
 		{"a small limit keeps the default guest", resources(64*m, 0, 0, "", 0), Size{256, 1, 0, 0}, ""},
-		{"128 MiB", resources(128*m, 0, 0, "", 0), Size{284, 1, 0, 0}, "--mem-mib 284"},
-		{"512 MiB", resources(512*m, 0, 0, "", 0), Size{680, 1, 0, 0}, "--mem-mib 680"},
-		{"a limit that is not whole MiB rounds up", resources(512*m+1, 0, 0, "", 0), Size{682, 1, 0, 0}, "--mem-mib 682"},
+		{"128 MiB", resources(128*m, 0, 0, "", 0), Size{292, 1, 0, 0}, "--mem-mib 292"},
+		{"512 MiB", resources(512*m, 0, 0, "", 0), Size{688, 1, 0, 0}, "--mem-mib 688"},
+		{"a limit that is not whole MiB rounds up", resources(512*m+1, 0, 0, "", 0), Size{690, 1, 0, 0}, "--mem-mib 690"},
 		// A guest over 2048 MiB gets 112 MiB more, for the bounce buffer the kernel keeps then.
-		{"the largest limit under the step", resources(1838*m, 0, 0, "", 0), Size{2048, 1, 0, 0}, "--mem-mib 2048"},
-		{"the first limit over the step", resources(1839*m, 0, 0, "", 0), Size{2161, 1, 0, 0}, "--mem-mib 2161"},
-		{"4 GiB", resources(4096*m, 0, 0, "", 0), Size{4488, 1, 0, 0}, "--mem-mib 4488"},
+		{"the largest limit under the step", resources(1830*m, 0, 0, "", 0), Size{2048, 1, 0, 0}, "--mem-mib 2048"},
+		{"the first limit over the step", resources(1831*m, 0, 0, "", 0), Size{2161, 1, 0, 0}, "--mem-mib 2161"},
+		{"4 GiB", resources(4096*m, 0, 0, "", 0), Size{4496, 1, 0, 0}, "--mem-mib 4496"},
 		{"half a CPU", resources(0, 50000, 100000, "", 0), Size{256, 1, 50000, 100000}, "--cpu-quota 50000:100000"},
 		{"one and a half CPUs", resources(0, 150000, 100000, "", 0), Size{264, 2, 150000, 100000}, "--mem-mib 264 --vcpus 2 --cpu-quota 150000:100000"},
 		{"two CPUs, default period", resources(0, 200000, 0, "", 0), Size{264, 2, 200000, 100000}, "--mem-mib 264 --vcpus 2 --cpu-quota 200000:100000"},
@@ -61,10 +61,10 @@ func TestSizeOf(t *testing.T) {
 		{"a CPU set", resources(0, 0, 0, "0-2,4", 0), Size{280, 4, 0, 0}, "--mem-mib 280 --vcpus 4"},
 		{"a CPU set decides the count, the quota the share", resources(0, 50000, 100000, "0,1", 0), Size{264, 2, 50000, 100000}, "--mem-mib 264 --vcpus 2 --cpu-quota 50000:100000"},
 		{"a CPU set naming one CPU twice", resources(0, 0, 0, "1,1,0-1", 0), Size{264, 2, 0, 0}, "--mem-mib 264 --vcpus 2"},
-		{"both", resources(1024*m, 400000, 100000, "", 0), Size{1232, 4, 400000, 100000}, "--mem-mib 1232 --vcpus 4 --cpu-quota 400000:100000"},
+		{"both", resources(1024*m, 400000, 100000, "", 0), Size{1240, 4, 400000, 100000}, "--mem-mib 1240 --vcpus 4 --cpu-quota 400000:100000"},
 		// Only the count matters, so the loop must end at the largest int without wrapping.
 		{"a set at the largest numbers", resources(0, 0, 0, "9223372036854775800-9223372036854775807", 0), Size{312, 8, 0, 0}, "--mem-mib 312 --vcpus 8"},
-		{"the largest limit", resources(maxLimitMiB*m, 0, 0, "", 0), Size{1048576 + 152 + 32768 + 112, 1, 0, 0}, "--mem-mib 1081608"},
+		{"the largest limit", resources(maxLimitMiB*m, 0, 0, "", 0), Size{1048576 + 160 + 32768 + 112, 1, 0, 0}, "--mem-mib 1081616"},
 	} {
 		got, err := SizeOf(c.spec, 0)
 		if err != nil || got != c.want {

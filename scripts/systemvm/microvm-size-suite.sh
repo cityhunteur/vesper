@@ -62,16 +62,16 @@ else
 fi
 
 # --- 2. A memory limit: the workload has that much memory, and the cgroup enforces it -----------------------------
-# 512 MiB asks for a 680 MiB guest (the limit, 152 MiB for the guest itself, 1 MiB in 32 for what the kernel keeps)
-# under a ceiling of 680 + 96 + 3 MiB. dd's block is anonymous memory that it fills: 496 MiB fits. 560 MiB is under
+# 512 MiB asks for a 688 MiB guest (the limit, 160 MiB for the guest itself, 1 MiB in 32 for what the kernel keeps)
+# under a ceiling of 688 + 96 + 3 MiB. dd's block is anonymous memory that it fills: 496 MiB fits. 560 MiB is under
 # the guest's memory, so the kernel grants the block, and over the limit: the cgroup kills dd when it has filled
 # 512 MiB. The guest itself is not short then, because the step also asserts that more than 512 MiB was available.
 L=$((512 * MIB))
 g="$(runb --memory="${L}" size-c "${VIEW}; dd if=/dev/zero of=/dev/null bs=496M count=1 2>/dev/null && echo under-ok; dd if=/dev/zero of=/dev/null bs=560M count=1 2>/dev/null; echo over-rc=\$?")"
 m="$(machine size-d --memory="${L}")"
-if between "$(field "${g}" mem)" 600 680 && between "$(field "${g}" avail)" 512 680 && [ "$(field "${g}" max)" = "${L}" ] \
+if between "$(field "${g}" mem)" 600 688 && between "$(field "${g}" avail)" 512 688 && [ "$(field "${g}" max)" = "${L}" ] \
   && case "${g}" in *"OUT under-ok"*"OUT over-rc=137"*) true ;; *) false ;; esac \
-  && case "${m}" in *NOT-REMOVED*) false ;; *"MACHINE size-d vcpus=1 mem_max=$((779 * MIB)) "*) true ;; *) false ;; esac; then
+  && case "${m}" in *NOT-REMOVED*) false ;; *"MACHINE size-d vcpus=1 mem_max=$((787 * MIB)) "*) true ;; *) false ;; esac; then
   record memory_limit_sizes_the_guest_and_is_enforced true "guest: ${g}; System VM: ${m}"
 else
   record memory_limit_sizes_the_guest_and_is_enforced false "guest: ${g}; System VM: ${m}"
@@ -87,11 +87,11 @@ else
 fi
 
 # --- 2c. Memory and CPUs together: each vCPU costs the guest memory, and the workload still has its limit --------
-# 1 GiB on 2 vCPUs asks for a 1216 MiB guest (1024 + 152 + 32 + 8) under a ceiling of 1216 + 96 + 7 MiB.
+# 1 GiB on 2 vCPUs asks for a 1224 MiB guest (1024 + 160 + 32 + 8) under a ceiling of 1224 + 96 + 7 MiB.
 G=$((1024 * MIB))
 g="$(runb --memory="${G}" --cpus=2 size-m "${VIEW}")"; m="$(machine size-n --memory="${G}" --cpus=2)"
-if [ "$(field "${g}" cpus)" = 2 ] && between "$(field "${g}" avail)" 1024 1216 && [ "$(field "${g}" max)" = "${G}" ] \
-  && case "${m}" in *NOT-REMOVED*) false ;; *"MACHINE size-n vcpus=2 mem_max=$((1319 * MIB)) "*" cpu_max=225000/100000 "*) true ;; *) false ;; esac; then
+if [ "$(field "${g}" cpus)" = 2 ] && between "$(field "${g}" avail)" 1024 1224 && [ "$(field "${g}" max)" = "${G}" ] \
+  && case "${m}" in *NOT-REMOVED*) false ;; *"MACHINE size-n vcpus=2 mem_max=$((1327 * MIB)) "*" cpu_max=225000/100000 "*) true ;; *) false ;; esac; then
   record memory_and_cpus_together true "guest: ${g}; System VM: ${m}"
 else
   record memory_and_cpus_together false "guest: ${g}; System VM: ${m}"
@@ -141,12 +141,12 @@ else
 fi
 
 # --- 5. A limit the memory budget cannot hold is refused by name, and takes nothing -------------------------------
-# 1 TiB is the largest limit the shim takes; its guest would be 1,081,608 MiB.
+# 1 TiB is the largest limit the shim takes; its guest would be 1,081,616 MiB.
 r="$(runb --memory=$((1048576 * MIB)) size-k 'echo RAN')"; ctl ctr -- delete size-k >/dev/null
 after="$(budget committed)"
 case "${r}" in
   *RAN*) record memory_over_the_budget_refused false "${r}" ;;
-  *"ERR memory: a 1081608 MiB microVM"*"does not fit"*"start the System VM with more memory"*)
+  *"ERR memory: a 1081616 MiB microVM"*"does not fit"*"start the System VM with more memory"*)
     [ "${after}" = "${base}" ] && record memory_over_the_budget_refused true "${r}; committed ${base} before and ${after} after" \
       || record memory_over_the_budget_refused false "committed ${base} before and ${after} after; ${r}" ;;
   *) record memory_over_the_budget_refused false "${r}" ;;

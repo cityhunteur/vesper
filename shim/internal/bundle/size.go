@@ -34,8 +34,10 @@ const (
 	// of 512 MiB to 4 GiB with 1, 4 and 6 vCPUs (run/TD-048/measurements.txt, 2026-11-18). The terms were chosen
 	// so that MemAvailable was above the limit by 16 MiB or more in all 24 cases measured again with them.
 	//
-	// guestBaseMiB: the kernel, the unpacked initramfs and the session tools (151 MiB at a 512 MiB limit).
-	guestBaseMiB = 152
+	// guestBaseMiB: the kernel, the unpacked initramfs and the session tools (151 MiB at a 512 MiB limit), plus 8 MiB:
+	// a 1 GiB guest on 2 vCPUs, a shape the fit did not measure, left the workload 9 MiB above its limit in one run and
+	// 1 MiB under it in another (TD-087).
+	guestBaseMiB = 160
 	// guestPerMiB: one MiB more for every guestPerMiB MiB of limit, for the kernel's page array and the memory it
 	// keeps free (overhead grew by 23 MiB from a 512 MiB limit to a 1536 MiB one).
 	guestPerMiB = 32
