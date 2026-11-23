@@ -46,7 +46,7 @@ func TestDockerRootAndFiles(t *testing.T) {
 	if _, ok := DockerRoot(&specs.Spec{Root: &specs.Root{Path: "rootfs"}}); ok {
 		t.Error("a ctr bundle was taken for dockerd's")
 	}
-	files, err := CheckDocker(s, cid)
+	files, err := CheckDocker(s, cid, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestCheckDockerRefusals(t *testing.T) {
 	for name, change := range cases {
 		s := dockerSpec()
 		change(s)
-		if _, err := CheckDocker(s, cid); err == nil {
+		if _, err := CheckDocker(s, cid, nil); err == nil {
 			t.Errorf("%s allowed", name)
 		} else if !strings.Contains(err.Error(), "ADR 0011") {
 			t.Errorf("%s: %v does not name ADR 0011", name, err)
@@ -81,7 +81,7 @@ func TestCheckDockerRefusals(t *testing.T) {
 	s.Mounts = append(s.Mounts,
 		specs.Mount{Destination: "/data", Type: "bind", Source: "/var/lib/docker/100000.100000/volumes/abc/_data"},
 		specs.Mount{Destination: "/sbin/docker-init", Type: "bind", Source: "/usr/bin/docker-init"})
-	if _, err := CheckDocker(s, cid); err != nil {
+	if _, err := CheckDocker(s, cid, nil); err != nil {
 		t.Errorf("an anonymous volume and --init refused: %v", err)
 	}
 }
@@ -90,13 +90,16 @@ func TestGuestDockerConfig(t *testing.T) {
 	s := dockerSpec()
 	s.Mounts = append(s.Mounts, specs.Mount{Destination: "/sbin/docker-init", Type: "bind", Source: "/usr/bin/docker-init"},
 		specs.Mount{Destination: "/data", Type: "bind", Source: "/var/lib/docker/100000.100000/volumes/abc/_data"})
-	raw, err := GuestDockerConfig(s, map[string][]byte{"hosts": []byte("127.0.0.1 localhost\n")}, nil, "/run/sessions/p1028")
+	raw, err := GuestDockerConfig(s, map[string][]byte{"hosts": []byte("127.0.0.1 localhost\n")}, nil, "/run/sessions/p1028", map[string]string{"io.vesper.shares": "[]"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	var g specs.Spec
 	if err := json.Unmarshal(raw, &g); err != nil {
 		t.Fatal(err)
+	}
+	if g.Annotations["io.vesper.shares"] != "[]" {
+		t.Errorf("the share list annotation is missing: %v", g.Annotations)
 	}
 	if g.Root.Path != "/newroot" || g.Hostname != "1915acf2fb8f" {
 		t.Errorf("root %q hostname %q", g.Root.Path, g.Hostname)
@@ -134,5 +137,26 @@ func TestGuestDockerConfig(t *testing.T) {
 	}
 	if !strings.Contains(g.Annotations[FilesAnnotation], `"hosts"`) {
 		t.Errorf("annotation = %q", g.Annotations[FilesAnnotation])
+	}
+}
+
+// ADR 0011 slice 4: a bind the share plan maps is allowed, unless the guest's runc would mount over it.
+func TestCheckDockerShareBinds(t *testing.T) {
+	share := specs.Mount{Destination: "/src", Type: "bind", Source: "/Users/me/src"}
+	s := dockerSpec()
+	s.Mounts = append(s.Mounts, share)
+	if _, err := CheckDocker(s, cid, map[string]bool{"/src": true}); err != nil {
+		t.Errorf("a share bind refused: %v", err)
+	}
+	if _, err := CheckDocker(s, cid, nil); err == nil || !strings.Contains(err.Error(), "shared macOS directory") {
+		t.Errorf("a bind outside the plan: %v", err)
+	}
+	for _, dest := range []string{"/dev/x", "/proc/y", "/sys", "/run/z"} {
+		s := dockerSpec()
+		s.Mounts = append(s.Mounts, specs.Mount{Destination: "/run", Type: "tmpfs", Source: "tmpfs"},
+			specs.Mount{Destination: dest, Type: "bind", Source: "/Users/me/src"})
+		if _, err := CheckDocker(s, cid, map[string]bool{dest: true}); err == nil || !strings.Contains(err.Error(), "mounts") {
+			t.Errorf("a share at %s under a guest mount: %v", dest, err)
+		}
 	}
 }

@@ -131,7 +131,8 @@ IPv6 address) fails the start with a message naming it.
 - **Rate limits**: `vn0` gets a Firecracker rate limiter of 1 MiB/s and 200 operations a second each way (the share
   tap has one too); `vd0` gets none, as Docker sets none.
 - **The share namespace** keeps ADR 0009's server, sandbox, `INPUT` rules and rate limiter. It now holds `lo`, `vh0`
-  with `169.254.77.1/30` and the server; Firecracker no longer runs in it. The veth pair is made inside the share
+  with `169.254.77.1/30` and the server; Firecracker no longer runs in it. (This holds for `vesper` containers; a
+  `ctr` task has no container namespace and keeps ADR 0009's model, Firecracker in the share namespace, D-086.) The veth pair is made inside the share
   namespace, where BusyBox's default peer name cannot collide, then the peer is renamed and moved with `ip link set`
   (no new tool). No container packet reaches the server: `vh1` has no address and its traffic is redirected
   (spike: closed from the namespace's stack, open from the guest). What the guest itself does with its exports is

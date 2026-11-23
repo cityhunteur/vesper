@@ -174,7 +174,9 @@ func denyVesper(format string, a ...any) Decision {
 	return Decision{Reason: "vesper: " + fmt.Sprintf(format, a...) + " (ADR 0011)"}
 }
 
-// checkVesperCreate refuses what a vesper container cannot honour (ADR 0011 §1). Until slice 4 no bind or mount.
+// checkVesperCreate refuses what a vesper container cannot honour (ADR 0011 §1). A bind reaches a vesper container
+// only from a shared macOS directory, through its microVM's share server (slice 4); named volumes, tmpfs mounts and
+// binds of the System VM's own files stay refused. The shim decides again after resolving links (CheckDocker).
 func checkVesperCreate(c *createBody) Decision {
 	h := c.HostConfig
 	switch {
@@ -186,8 +188,24 @@ func checkVesperCreate(c *createBody) Decision {
 		return denyVesper("--read-only is refused for the vesper runtime")
 	case len(h.VolumesFrom) > 0:
 		return denyVesper("--volumes-from is refused for the vesper runtime")
-	case len(h.Binds) > 0 || len(h.Mounts) > 0:
-		return denyVesper("-v and --mount are refused for the vesper runtime until shares reach its microVMs (ADR 0011 slice 4)")
+	}
+	for _, b := range h.Binds {
+		// "source:target[:options]"; a source that is not a path names a volume.
+		src, _, _ := strings.Cut(b, ":")
+		if !strings.HasPrefix(src, "/") {
+			return denyVesper("the named volume %q is refused for the vesper runtime: only binds from a shared macOS directory reach its microVM", src)
+		}
+		if !OnShare(src) {
+			return denyVesper("-v %s is refused for the vesper runtime: only binds from a shared macOS directory reach its microVM", src)
+		}
+	}
+	for _, m := range h.Mounts {
+		if !strings.EqualFold(m.Type, "bind") {
+			return denyVesper("--mount type=%s is refused for the vesper runtime: only binds from a shared macOS directory reach its microVM", m.Type)
+		}
+		if !OnShare(m.Source) {
+			return denyVesper("--mount source=%s is refused for the vesper runtime: only binds from a shared macOS directory reach its microVM", m.Source)
+		}
 	}
 	if h.NetworkMode == "host" || strings.HasPrefix(h.NetworkMode, "container:") {
 		return denyVesper("--network=%s is refused for the vesper runtime: its network namespace is its own", h.NetworkMode)
@@ -274,6 +292,10 @@ func checkCreate(_ *url.URL, body []byte) Decision {
 // container a directory that a root tool may later adopt (a state directory made lazily with mkdir -p), so it is
 // allowed only on a shared macOS directory. The plugin's main sets it; the default refuses every missing source.
 var MissingSourceOK = func(path string) (exists, creatable bool) { return false, false }
+
+// OnShare reports whether path, or its deepest existing ancestor, is on a shared macOS directory (virtio-fs). The
+// plugin's main sets it; the default says no, so every vesper bind is refused.
+var OnShare = func(path string) bool { return false }
 
 func bindProblem(src string) string {
 	if !strings.HasPrefix(src, "/") {

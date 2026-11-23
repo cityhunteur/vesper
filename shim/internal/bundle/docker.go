@@ -3,6 +3,7 @@ package bundle
 import (
 	"encoding/json"
 	"fmt"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -43,7 +44,10 @@ type DockerFile struct {
 }
 
 // CheckDocker applies ADR 0011 §4 to dockerd's spec for task id and returns the files to read for the guest.
-func CheckDocker(spec *specs.Spec, id string) ([]DockerFile, error) {
+// shareDests holds the destinations the share plan maps to the microVM's share server (slice 4): those binds are
+// allowed, unless runc would mount over them in the guest (under /proc, /sys, /dev or a tmpfs); every other bind of
+// a System VM path is refused.
+func CheckDocker(spec *specs.Spec, id string, shareDests map[string]bool) ([]DockerFile, error) {
 	if spec.Root != nil && spec.Root.Readonly {
 		return nil, fmt.Errorf("a read-only root filesystem is refused for the vesper runtime (ADR 0011)")
 	}
@@ -75,11 +79,32 @@ func CheckDocker(spec *specs.Spec, id string) ([]DockerFile, error) {
 		case dockerVolumeRe.MatchString(m.Source):
 			// An anonymous volume of the image: its directory in the container's drive stands in (ADR 0011 §4).
 		case m.Destination == "/sbin/docker-init":
+		case shareDests[path.Clean(m.Destination)]:
+			if under := hiddenBy(spec, path.Clean(m.Destination)); under != "" {
+				return nil, fmt.Errorf("bind %s:%s is refused for the vesper runtime: the guest mounts %s over it (ADR 0011)", m.Source, m.Destination, under)
+			}
 		default:
-			return nil, fmt.Errorf("bind %s:%s is refused for the vesper runtime until shares reach its microVMs (ADR 0011 slice 4)", m.Source, m.Destination)
+			return nil, fmt.Errorf("bind %s:%s is refused for the vesper runtime: only a bind from a shared macOS directory reaches its microVM (ADR 0011)", m.Source, m.Destination)
 		}
 	}
 	return files, nil
+}
+
+// hiddenBy names what the guest's runc mounts at or above dest after the shares are mounted: /proc, /sys, /dev and
+// the spec's tmpfs mounts. A share there would be covered and its writes would land in the cover.
+func hiddenBy(spec *specs.Spec, dest string) string {
+	for _, top := range []string{"/proc", "/sys", "/dev"} {
+		if dest == top || strings.HasPrefix(dest, top+"/") {
+			return top
+		}
+	}
+	for _, m := range spec.Mounts {
+		d := path.Clean(m.Destination)
+		if m.Type == "tmpfs" && (dest == d || strings.HasPrefix(dest, d+"/")) {
+			return "a tmpfs at " + d
+		}
+	}
+	return ""
 }
 
 func hasOpt(opts []string, want string) bool {
@@ -93,8 +118,10 @@ func hasOpt(opts []string, want string) bool {
 
 // GuestDockerConfig is the guest's runc spec for a Docker task: dockerd's process, hostname, kernel mounts,
 // namespaces (without the user namespace; the network is the guest's own), masked and read-only paths and sysctls;
-// its three files bound from sessionDir/files; resources as the guest applies them (ADR 0011 §4).
-func GuestDockerConfig(spec *specs.Spec, files map[string][]byte, resources *specs.LinuxResources, sessionDir string) ([]byte, error) {
+// its three files bound from sessionDir/files; resources as the guest applies them (ADR 0011 §4). annotations (the
+// share list, shares.Annotation) are added as they are: the guest's vesper-console mounts the shares under the root
+// before runc starts, so share binds are left out of the mounts here, like every other System VM bind.
+func GuestDockerConfig(spec *specs.Spec, files map[string][]byte, resources *specs.LinuxResources, sessionDir string, annotations map[string]string) ([]byte, error) {
 	process, err := GuestProcess(spec.Process)
 	if err != nil {
 		return nil, err
@@ -149,8 +176,11 @@ func GuestDockerConfig(spec *specs.Spec, files map[string][]byte, resources *spe
 		}
 	}
 	out.Linux = linux
-	if len(files) > 0 || len(netSysctls) > 0 {
+	if len(files) > 0 || len(netSysctls) > 0 || len(annotations) > 0 {
 		out.Annotations = map[string]string{}
+	}
+	for k, v := range annotations {
+		out.Annotations[k] = v
 	}
 	if len(files) > 0 {
 		enc, err := json.Marshal(files)

@@ -52,9 +52,11 @@ type Task struct {
 	vmmPid      int // a Docker task's Firecracker pid; its pid is the holder's (ADR 0011 §2)
 	dockerSpec  *specs.Spec
 	dockerFiles []bundle.DockerFile
-	Port        uint32
-	Session     *backend.Session
-	stdinClosed bool
+	// dockerAnnotations carries the share list to the guest config built at Start (ADR 0011 slice 4).
+	dockerAnnotations map[string]string
+	Port              uint32
+	Session           *backend.Session
+	stdinClosed       bool
 	// guestKnows is set once the guest may hold a session directory for Port (Start asked for one); its port is
 	// then reused only after the guest released it (TD-041).
 	guestKnows bool

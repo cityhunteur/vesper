@@ -23,6 +23,7 @@ func main() {
 	socket := flag.String("socket", "/run/docker/plugins/vesper-authz.sock", "the plugin socket dockerd connects to")
 	flag.Parse()
 	authz.MissingSourceOK = missingSourceOK
+	authz.OnShare = onShare
 	if err := run(*socket); err != nil {
 		fmt.Fprintln(os.Stderr, "vesper-authz:", err)
 		os.Exit(1)

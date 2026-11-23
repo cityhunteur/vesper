@@ -52,6 +52,8 @@ func TestVesperRefusals(t *testing.T) {
 		"bind":           `{"HostConfig":{"Runtime":"vesper","Binds":["/tmp:/x"]}}`,
 		"named volume":   `{"HostConfig":{"Runtime":"vesper","Binds":["data:/x"]}}`,
 		"mount":          `{"HostConfig":{"Runtime":"vesper","Mounts":[{"Type":"tmpfs","Target":"/t"}]}}`,
+		"volume mount":   `{"HostConfig":{"Runtime":"vesper","Mounts":[{"Type":"volume","Source":"data","Target":"/t"}]}}`,
+		"system mount":   `{"HostConfig":{"Runtime":"vesper","Mounts":[{"Type":"bind","Source":"/etc","Target":"/t"}]}}`,
 		"host network":   `{"HostConfig":{"Runtime":"vesper","NetworkMode":"host"}}`,
 		"container net":  `{"HostConfig":{"Runtime":"vesper","NetworkMode":"container:abc"}}`,
 		"host pid":       `{"HostConfig":{"Runtime":"vesper","PidMode":"host"}}`,
@@ -129,5 +131,31 @@ func TestResolveOrder(t *testing.T) {
 	}
 	if _, ok := resolveContainer("ab", all); ok {
 		t.Error("ambiguous prefix resolved")
+	}
+}
+
+// ADR 0011 slice 4: a bind from a shared macOS directory reaches a vesper container; any other source stays refused.
+func TestVesperShareBindsAllowed(t *testing.T) {
+	store(t)
+	old, oldMissing := OnShare, MissingSourceOK
+	OnShare = func(p string) bool { return p == "/Users/me/src" || strings.HasPrefix(p, "/Users/me/src/") }
+	MissingSourceOK = func(p string) (bool, bool) { return OnShare(p), false }
+	t.Cleanup(func() { OnShare, MissingSourceOK = old, oldMissing })
+	for _, b := range []string{
+		`{"Image":"alpine","HostConfig":{"Runtime":"vesper","Binds":["/Users/me/src:/src"]}}`,
+		`{"Image":"alpine","HostConfig":{"Runtime":"vesper","Binds":["/Users/me/src/app:/app:ro"]}}`,
+		`{"Image":"alpine","HostConfig":{"Runtime":"vesper","Mounts":[{"Type":"bind","Source":"/Users/me/src","Target":"/src"}]}}`,
+	} {
+		if d := decide("POST", create, b); !d.Allow {
+			t.Errorf("%s refused: %s", b, d.Reason)
+		}
+	}
+	for _, b := range []string{
+		`{"Image":"alpine","HostConfig":{"Runtime":"vesper","Binds":["/Users/me/src:/src","/tmp:/x"]}}`,
+		`{"Image":"alpine","HostConfig":{"Runtime":"vesper","Binds":["/Users/me/other:/x"]}}`,
+	} {
+		if d := decide("POST", create, b); d.Allow || !strings.Contains(d.Reason, "shared macOS directory") {
+			t.Errorf("%s: %+v", b, d)
+		}
 	}
 }
