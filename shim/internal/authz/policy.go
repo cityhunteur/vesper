@@ -145,30 +145,32 @@ func (d *driverConfig) problem() string {
 // createBody has dockerd's own field names, so encoding/json matches keys here exactly as it does in dockerd:
 // without regard to case, and the last of several equal keys wins.
 type createBody struct {
-	HostConfig *struct {
-		UsernsMode     string
-		Runtime        string
-		VolumeDriver   string
-		Binds          []string
-		Privileged     bool
-		ReadonlyRootfs bool
-		NetworkMode    string
-		PidMode        string
-		IpcMode        string
-		UTSMode        string
-		VolumesFrom    []string
-		Devices        []json.RawMessage
-		DeviceRequests []json.RawMessage
-		Mounts         []struct {
-			Type          string
-			Source        string
-			VolumeOptions *struct {
-				DriverConfig *driverConfig
-			}
-		}
-	}
+	HostConfig       *hostConfig
 	NetworkingConfig *struct {
 		EndpointsConfig map[string]json.RawMessage
+	}
+}
+
+type hostConfig struct {
+	UsernsMode     string
+	Runtime        string
+	VolumeDriver   string
+	Binds          []string
+	Privileged     bool
+	ReadonlyRootfs bool
+	NetworkMode    string
+	PidMode        string
+	IpcMode        string
+	UTSMode        string
+	VolumesFrom    []string
+	Devices        []json.RawMessage
+	DeviceRequests []json.RawMessage
+	Mounts         []struct {
+		Type          string
+		Source        string
+		VolumeOptions *struct {
+			DriverConfig *driverConfig
+		}
 	}
 }
 
@@ -240,16 +242,25 @@ func checkCreate(u *url.URL, body []byte) Decision {
 	if err := json.Unmarshal(body, &c); err != nil {
 		return deny("container create refused: its body is not valid JSON")
 	}
-	h := c.HostConfig
-	if h == nil {
-		return allow
+	if c.HostConfig == nil {
+		c.HostConfig = &hostConfig{} // no options: still a container of the daemon's default runtime
 	}
+	h := c.HostConfig
 	if h.UsernsMode != "" {
 		return deny("--userns=%s is refused: every container runs in the remapped user namespace", h.UsernsMode)
 	}
 	// vesper-runc is the default (TD-062); runc is the same runtime without the share-ownership refresh; vesper runs
 	// the container in a microVM (ADR 0011).
-	if h.Runtime != "" && h.Runtime != "vesper-runc" && h.Runtime != "runc" && h.Runtime != VesperRuntime {
+	// A create that names no runtime gets dockerd's default, which dockerd fills in after this check; the checks
+	// below must judge the runtime the container will have, so that vesper as the default is checked as vesper is.
+	if h.Runtime == "" {
+		rt, err := DefaultRuntime()
+		if err != nil {
+			return deny("container create refused: the daemon's default runtime could not be read: %v", err)
+		}
+		h.Runtime = rt
+	}
+	if h.Runtime != "vesper-runc" && h.Runtime != "runc" && h.Runtime != VesperRuntime {
 		return deny("--runtime=%s is refused: only vesper-runc, runc and vesper are known to stay in the remapped user namespace", h.Runtime)
 	}
 	// Any runtime: joining a vesper container's namespaces reaches past its microVM (ADR 0011 §1).
