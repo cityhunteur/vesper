@@ -9,7 +9,9 @@
 # a quota of more CPUs than the System VM has runs on the CPUs there are, while a CPU set of more, and more memory
 # than the shared budget holds, are refused by name with nothing left behind. `vesper-microvm launch --snapshot-room`
 # (TD-085) gives a ceiling and a booking one guest-size larger, and is refused with a rootfs.
-# Needs `make systemvm-up` with at least 2 CPUs and 1.5 GiB of free memory budget (the default System VM has them).
+# Needs `make systemvm-up` with at least 2 CPUs and 1.5 GiB of free memory budget. The default System VM's budget is
+# 1333 MiB since D-107's 640 MiB reserve, so the suite lowers the reserve to 256 MiB for its run (the test hook moves
+# the parent cgroup's cap with it) and puts it back on every exit: it tests the sizing, not the reserve.
 # Report: run/systemvm/microvm-size-report.json.
 set -uo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -26,7 +28,7 @@ budget() { ctl vesperd mem-budget | sed -n "s/.* $1=\([0-9]*\).*/\1/p" | head -1
 field() { printf '%s' "$1" | tr ' ' '\n' | sed -n "s/^$2=//p" | head -1; }
 # Whatever ends the suite, its tasks go: a detached one would hold its microVM and its share of the memory budget.
 sweep() { local n; ctl microvm cleanup size-s >/dev/null; for n in ${NAMES}; do case "$(ctl ctr -- state "${n}")" in STATE*) ctl ctr -- kill "${n}" 20 >/dev/null; ctl ctr -- delete "${n}" >/dev/null ;; esac; done; }
-trap sweep EXIT
+trap 'sweep; ctl vesperd test-mem-reserve clear >/dev/null' EXIT
 # What the workload sees: its CPUs, the guest's memory and what of it is available (MiB), and its cgroup's limits.
 VIEW='echo "cpus=$(nproc) mem=$(awk "/^MemTotal:/{print int(\$2/1024)}" /proc/meminfo) avail=$(awk "/^MemAvailable:/{print int(\$2/1024)}" /proc/meminfo) max=$(cat /sys/fs/cgroup/workload/memory.max) cpu=$(cat /sys/fs/cgroup/workload/cpu.max | tr " " /)"'
 # machine NAME [limit options]: start a task that sleeps, read its machine from the System VM's side, remove it.
@@ -42,6 +44,7 @@ between() { [ -n "$1" ] && [ "$1" -ge "$2" ] 2>/dev/null && [ "$1" -le "$3" ]; }
 
 ctl ctr -- import >/dev/null
 sweep   # what an interrupted run left
+ctl vesperd test-mem-reserve $((256 * MIB)) >/dev/null
 CPUS="$(field "$(ctl microvm limits | head -1)" cpus)"
 base="$(budget committed)"; room=$(( ($(budget budget) - base) / MIB ))
 # Step 4 asks for one CPU more than the System VM has, which must still be a CPU count a microVM can have (32).

@@ -41,30 +41,30 @@ func TestSizeOf(t *testing.T) {
 		want Size
 		args string
 	}{
-		{"no linux section", &specs.Spec{}, Size{256, 1, 0, 0}, ""},
-		{"nil spec", nil, Size{256, 1, 0, 0}, ""},
-		{"empty resources", resources(0, 0, 0, "", 0), Size{256, 1, 0, 0}, ""},
-		{"unlimited memory", resources(-1, -1, 100000, "", -1), Size{256, 1, 0, 0}, ""},
+		{"no linux section", &specs.Spec{}, Size{256, 1, 0, 0, false}, ""},
+		{"nil spec", nil, Size{256, 1, 0, 0, false}, ""},
+		{"empty resources", resources(0, 0, 0, "", 0), Size{256, 1, 0, 0, false}, ""},
+		{"unlimited memory", resources(-1, -1, 100000, "", -1), Size{256, 1, 0, 0, false}, ""},
 		// 64 MiB fits the default guest, whose workload has about 149 MiB. Each vCPU after the first adds 8 MiB.
-		{"a small limit keeps the default guest", resources(64*m, 0, 0, "", 0), Size{256, 1, 0, 0}, ""},
-		{"128 MiB", resources(128*m, 0, 0, "", 0), Size{292, 1, 0, 0}, "--mem-mib 292"},
-		{"512 MiB", resources(512*m, 0, 0, "", 0), Size{688, 1, 0, 0}, "--mem-mib 688"},
-		{"a limit that is not whole MiB rounds up", resources(512*m+1, 0, 0, "", 0), Size{690, 1, 0, 0}, "--mem-mib 690"},
+		{"a small limit keeps the default guest", resources(64*m, 0, 0, "", 0), Size{256, 1, 0, 0, true}, "--reserve-memory"},
+		{"128 MiB", resources(128*m, 0, 0, "", 0), Size{292, 1, 0, 0, true}, "--mem-mib 292 --reserve-memory"},
+		{"512 MiB", resources(512*m, 0, 0, "", 0), Size{688, 1, 0, 0, true}, "--mem-mib 688 --reserve-memory"},
+		{"a limit that is not whole MiB rounds up", resources(512*m+1, 0, 0, "", 0), Size{690, 1, 0, 0, true}, "--mem-mib 690 --reserve-memory"},
 		// A guest over 2048 MiB gets 112 MiB more, for the bounce buffer the kernel keeps then.
-		{"the largest limit under the step", resources(1830*m, 0, 0, "", 0), Size{2048, 1, 0, 0}, "--mem-mib 2048"},
-		{"the first limit over the step", resources(1831*m, 0, 0, "", 0), Size{2161, 1, 0, 0}, "--mem-mib 2161"},
-		{"4 GiB", resources(4096*m, 0, 0, "", 0), Size{4496, 1, 0, 0}, "--mem-mib 4496"},
-		{"half a CPU", resources(0, 50000, 100000, "", 0), Size{256, 1, 50000, 100000}, "--cpu-quota 50000:100000"},
-		{"one and a half CPUs", resources(0, 150000, 100000, "", 0), Size{264, 2, 150000, 100000}, "--mem-mib 264 --vcpus 2 --cpu-quota 150000:100000"},
-		{"two CPUs, default period", resources(0, 200000, 0, "", 0), Size{264, 2, 200000, 100000}, "--mem-mib 264 --vcpus 2 --cpu-quota 200000:100000"},
-		{"a period of its own", resources(0, 30000, 10000, "", 0), Size{272, 3, 30000, 10000}, "--mem-mib 272 --vcpus 3 --cpu-quota 30000:10000"},
-		{"a CPU set", resources(0, 0, 0, "0-2,4", 0), Size{280, 4, 0, 0}, "--mem-mib 280 --vcpus 4"},
-		{"a CPU set decides the count, the quota the share", resources(0, 50000, 100000, "0,1", 0), Size{264, 2, 50000, 100000}, "--mem-mib 264 --vcpus 2 --cpu-quota 50000:100000"},
-		{"a CPU set naming one CPU twice", resources(0, 0, 0, "1,1,0-1", 0), Size{264, 2, 0, 0}, "--mem-mib 264 --vcpus 2"},
-		{"both", resources(1024*m, 400000, 100000, "", 0), Size{1240, 4, 400000, 100000}, "--mem-mib 1240 --vcpus 4 --cpu-quota 400000:100000"},
+		{"the largest limit under the step", resources(1830*m, 0, 0, "", 0), Size{2048, 1, 0, 0, true}, "--mem-mib 2048 --reserve-memory"},
+		{"the first limit over the step", resources(1831*m, 0, 0, "", 0), Size{2161, 1, 0, 0, true}, "--mem-mib 2161 --reserve-memory"},
+		{"4 GiB", resources(4096*m, 0, 0, "", 0), Size{4496, 1, 0, 0, true}, "--mem-mib 4496 --reserve-memory"},
+		{"half a CPU", resources(0, 50000, 100000, "", 0), Size{256, 1, 50000, 100000, false}, "--cpu-quota 50000:100000"},
+		{"one and a half CPUs", resources(0, 150000, 100000, "", 0), Size{264, 2, 150000, 100000, false}, "--mem-mib 264 --vcpus 2 --cpu-quota 150000:100000"},
+		{"two CPUs, default period", resources(0, 200000, 0, "", 0), Size{264, 2, 200000, 100000, false}, "--mem-mib 264 --vcpus 2 --cpu-quota 200000:100000"},
+		{"a period of its own", resources(0, 30000, 10000, "", 0), Size{272, 3, 30000, 10000, false}, "--mem-mib 272 --vcpus 3 --cpu-quota 30000:10000"},
+		{"a CPU set", resources(0, 0, 0, "0-2,4", 0), Size{280, 4, 0, 0, false}, "--mem-mib 280 --vcpus 4"},
+		{"a CPU set decides the count, the quota the share", resources(0, 50000, 100000, "0,1", 0), Size{264, 2, 50000, 100000, false}, "--mem-mib 264 --vcpus 2 --cpu-quota 50000:100000"},
+		{"a CPU set naming one CPU twice", resources(0, 0, 0, "1,1,0-1", 0), Size{264, 2, 0, 0, false}, "--mem-mib 264 --vcpus 2"},
+		{"both", resources(1024*m, 400000, 100000, "", 0), Size{1240, 4, 400000, 100000, true}, "--mem-mib 1240 --vcpus 4 --cpu-quota 400000:100000 --reserve-memory"},
 		// Only the count matters, so the loop must end at the largest int without wrapping.
-		{"a set at the largest numbers", resources(0, 0, 0, "9223372036854775800-9223372036854775807", 0), Size{312, 8, 0, 0}, "--mem-mib 312 --vcpus 8"},
-		{"the largest limit", resources(maxLimitMiB*m, 0, 0, "", 0), Size{1048576 + 160 + 32768 + 112, 1, 0, 0}, "--mem-mib 1081616"},
+		{"a set at the largest numbers", resources(0, 0, 0, "9223372036854775800-9223372036854775807", 0), Size{312, 8, 0, 0, false}, "--mem-mib 312 --vcpus 8"},
+		{"the largest limit", resources(maxLimitMiB*m, 0, 0, "", 0), Size{1048576 + 160 + 32768 + 112, 1, 0, 0, true}, "--mem-mib 1081616 --reserve-memory"},
 	} {
 		got, err := SizeOf(c.spec, 0)
 		if err != nil || got != c.want {
@@ -85,13 +85,13 @@ func TestSizeOfClampsAQuota(t *testing.T) {
 		want   Size
 	}{
 		// The quota the microVM's cgroup is held to is at most its vCPUs' worth.
-		{400000, 2, Size{264, 2, 200000, 100000}},
-		{400000, 8, Size{280, 4, 400000, 100000}},
-		{3300000, 64, Size{504, 32, 3200000, 100000}},
-		{3300000, 0, Size{504, 32, 3200000, 100000}},
-		{150000, 1, Size{256, 1, 100000, 100000}},
+		{400000, 2, Size{264, 2, 200000, 100000, false}},
+		{400000, 8, Size{280, 4, 400000, 100000, false}},
+		{3300000, 64, Size{504, 32, 3200000, 100000, false}},
+		{3300000, 0, Size{504, 32, 3200000, 100000, false}},
+		{150000, 1, Size{256, 1, 100000, 100000, false}},
 		// A quota too long for the launcher's argument is clamped like any other (council JDG-7).
-		{10000000000, 4, Size{280, 4, 400000, 100000}},
+		{10000000000, 4, Size{280, 4, 400000, 100000, false}},
 	} {
 		if got, err := SizeOf(resources(0, c.quota, 100000, "", 0), c.system); err != nil || got != c.want {
 			t.Errorf("quota %d on %d CPUs: %+v, %v; want %+v", c.quota, c.system, got, err, c.want)

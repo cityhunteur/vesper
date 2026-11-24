@@ -163,7 +163,9 @@ mem() {
 # kind and Firecracker's resident memory by kind, then the resident memory of the shims and of the System VM's daemons.
 memparts() {
   awk 'BEGIN {printf "MEMINFO"} /^(MemTotal|MemFree|MemAvailable|Buffers|Cached|Shmem|AnonPages|Slab|SReclaimable|SUnreclaim|KernelStack|PageTables|Percpu):/ {sub(":", "", $1); printf " %s=%s", $1, $2} END {print ""}' /proc/meminfo
-  for cg in /sys/fs/cgroup/firecracker/*/; do
+  pc=/sys/fs/cgroup/vesper-vms
+  echo "PARENT max=$(cat "$pc/memory.max" 2>/dev/null) current=$(cat "$pc/memory.current" 2>/dev/null) peak=$(cat "$pc/memory.peak" 2>/dev/null) $(awk '$1 == "oom" || $1 == "oom_kill" {printf "%s=%s ", $1, $2}' "$pc/memory.events" 2>/dev/null)"
+  for cg in "$pc"/firecracker/*/ "$pc"/vesperd/*/; do
     [ -f "$cg/memory.current" ] || continue
     id=${cg%/}; id=${id##*/}
     st=$(awk '$1 ~ /^(anon|file|kernel|kernel_stack|pagetables|shmem|file_mapped|sock|slab)$/ {printf "%s=%d ", $1, $2 / 1024}' "$cg/memory.stat")
@@ -177,6 +179,14 @@ memparts() {
       case "$(cat "/proc/$p/comm" 2>/dev/null)" in "$n"*) r=$(awk '/^VmRSS:/ {print $2}' "/proc/$p/status" 2>/dev/null); [ -n "$r" ] && { c=$((c + 1)); t=$((t + r)); } ;; esac
     done
     echo "PROC $n count=$c rss_kib=$t"
+  done
+  # The OOM scores that decide who the kernel kills (D-107): the daemons protected, Firecracker not.
+  for d in /proc/[0-9]*; do
+    n=$(cat "$d/comm" 2>/dev/null) || continue
+    case "$n" in
+      supervise-daemo*) echo "OOMADJ supervise-daemon pid=${d#/proc/} adj=$(cat "$d/oom_score_adj" 2>/dev/null) svc=$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null | awk '{print $2}')" ;;
+      containerd|dockerd|socat|vesper-authz|containerd-shim|firecracker|sleep) echo "OOMADJ $n pid=${d#/proc/} adj=$(cat "$d/oom_score_adj" 2>/dev/null)" ;;
+    esac
   done
   # Each shim process, with its resident memory and the start of its command line.
   for p in $(pgrep containerd-shim 2>/dev/null); do

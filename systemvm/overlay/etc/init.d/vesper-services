@@ -53,9 +53,13 @@ start() {
       *) exit 1 ;;
     esac
     # The logs of the two daemons name containers, images and paths; the packages make them world-readable (ADR 0010).
+    # The two daemons are protected from the OOM killer, so that guests reaching their shared memory cap never take
+    # them (D-107). OpenRC reads this file in the shell that starts supervise-daemon, which passes the score to the
+    # daemon and to every respawn of it. Each launcher of a microVM sets its own score back to 0.
     for c in containerd docker; do
       f=/etc/conf.d/$c
-      { grep -v "^LOGPROXY_CHMOD=\|^log_mode=" "$f" 2>/dev/null; echo "LOGPROXY_CHMOD=0600"; echo "log_mode=0600"; } > "$f.new" && mv -f "$f.new" "$f"
+      { grep -v "^LOGPROXY_CHMOD=\|^log_mode=\|oom_score_adj" "$f" 2>/dev/null; echo "LOGPROXY_CHMOD=0600"; echo "log_mode=0600"
+        echo "echo -900 > /proc/self/oom_score_adj 2>/dev/null"; } > "$f.new" && mv -f "$f.new" "$f"
     done
     for svc in containerd docker; do
       # TD-094: rc-service returns before containerd makes its socket. A dockerd that finds no socket starts a
@@ -70,6 +74,12 @@ start() {
         echo "vesper: service $svc failed to start: $(printf "%s" "$out" | tail -2 | tr "\n" " ")" > /dev/console
         exit 1
       fi
+    done
+    # The conf.d line above protects every start and respawn; this sets the score on what runs now as well, so a
+    # conf.d that could not be written leaves no daemon unprotected, and says so on the console when it fails
+    # (council D-108 review).
+    for p in $(pidof containerd dockerd) $(pgrep -f "^supervise-daemon containerd ") $(pgrep -f "^supervise-daemon docker "); do
+      echo -900 > "/proc/$p/oom_score_adj" 2>/dev/null || echo "vesper: OOM protection FAILED for pid $p" > /dev/console
     done
     # The start scripts of the two packages set their logs back to 0644; close them again.
     chmod 0600 /var/log/containerd.log /var/log/docker.log 2>/dev/null

@@ -2,7 +2,8 @@
 # Vesper microVM manager (GH #18): stock Firecracker under the jailer inside the System VM.
 # usage: vesper-microvm prepare
 #        vesper-microvm launch ID [--exit] [--rootfs PATH] [--cmd BASE64] [--vsock] [--share-net]
-#                                      [--mem-mib N] [--vcpus N] [--cpu-quota QUOTA:PERIOD] [--snapshot-room] [--test-crash]
+#                                      [--mem-mib N] [--vcpus N] [--cpu-quota QUOTA:PERIOD] [--reserve-memory] [--snapshot-room]
+#                                      [--test-crash]
 #                                             boot a microVM (kernel + busybox initramfs); --exit powers off after the
 #                                             marker; --rootfs attaches an ext4 image as /dev/vda, mounts it, prints
 #                                             VESPER-ROOTFS-OK <source digest> from its provenance and switches root;
@@ -25,6 +26,10 @@
 #                                             the System VM has CPUs (and Firecracker's 32); --cpu-quota is the
 #                                             task's CFS quota in µs for each period, and the microVM's own cgroup
 #                                             gets cpu.max of that quota plus a quarter of a CPU for Firecracker
+#                                             --reserve-memory books the whole ceiling in the memory budget, for a
+#                                             task that asked for memory (the shim passes it for a memory limit);
+#                                             without it a launch books IDLE_MIB plus the guest memory above the
+#                                             default, and the guest runs under the shared cap (D-107)
 #                                             --snapshot-room adds the guest's memory size to the ceiling and to
 #                                             what is admitted, for one full snapshot's memory file in the jail
 #                                             (TD-085): the jail is on tmpfs, and the file's pages are charged to
@@ -92,6 +97,13 @@ MEM_MIB=256                        # guest memory without --mem-mib; also the le
 VCPUS=1                            # vCPUs without --vcpus
 VCPUS_MAX=32                       # Firecracker's limit
 ceiling_of() { echo $(( ($1 + 96 + ($1 - MEM_MIB) / 128) * 1048576 )); }
+# Bounded overcommit (D-107): what a launch without --reserve-memory books, for a default guest. An idle
+# `alpine sleep` container held 113 MiB of Firecracker memory and about 3 MiB of kernel memory in its cgroup
+# (2026-11-24, D-106). The guest can still grow to its ceiling; the parent cgroup's cap is what then holds.
+IDLE_MIB=128
+# Every microVM cgroup is under vesper-memadmit's capped parent (D-107); the jailer makes $FC_CG/ID.
+FC_PARENT=vesper-vms/firecracker
+FC_CG=/sys/fs/cgroup/$FC_PARENT
 # A number an option takes: digits with no leading zero, which the shell's arithmetic would read as octal while
 # `[` and Firecracker read it as decimal.
 number() { digits "${1:-}" && case "$1" in 0?*) return 1 ;; esac; }
@@ -871,8 +883,12 @@ disk_sweep() {
 launch() {
   id=$1; shift
   launch_at=$(now_ms)   # TD-099: prep_ms on the LAUNCHED line is the time before the jailer starts
+  # The shim inherits containerd's OOM protection, and the jailer and Firecracker would inherit it from here: a guest
+  # must stay the kernel's choice when the guests reach their shared cap, so this launch and all it starts go back
+  # to the default score (D-107).
+  echo 0 > /proc/$$/oom_score_adj 2>/dev/null
   mode=""; rootfs=""; cmd64=""; vsock=0; runc_smoke=0; guestexec=0; sharenet=0; probe=""
-  unfs_spec=""; unfs_srcs=""; unfs_mounts=""; unfs_squash=0; mem=$MEM_MIB; vcpus=$VCPUS; cpumax=""; snaproom=0; ctrns=0; extra_crash=0
+  unfs_spec=""; unfs_srcs=""; unfs_mounts=""; unfs_squash=0; mem=$MEM_MIB; vcpus=$VCPUS; cpumax=""; snaproom=0; ctrns=0; extra_crash=0; reserve=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --exit) mode=--exit ;;
@@ -890,6 +906,7 @@ launch() {
         unfs_srcs="$unfs_srcs${unfs_srcs:+$NL}$2"; unfs_spec="$unfs_spec${unfs_spec:+$NL}src $2"; shift ;;
       --unfs-squash) unfs_squash=1 ;;
       --snapshot-room) snaproom=1 ;;
+      --reserve-memory) reserve=1 ;;
       --ctrns) ctrns=1 ;;   # a Docker task: its namespace at $CTRNS/ID, its jail on the data disk (ADR 0011)
       --rootfs) rootfs=$2; shift ;;
       --cmd) cmd64=$2; shift ;;
@@ -968,8 +985,13 @@ launch() {
   if [ -e "$REC/$id" ] || [ -e "$NETNS/$id" ]; then
     old=$(cleanup "$id") || { unlock; echo "ERR $id: leftovers of an earlier run: $old"; return 1; }
   fi
-  book=$((ceiling + copies)); [ -n "$unfs_srcs" ] && book=$((book + UNFS_MEM))
-  adm=$(/usr/local/bin/vesper-memadmit acquire shim "$id" "$book") || {
+  # The whole ceiling for a task that asked for memory or a snapshot's room; otherwise the idle allowance (D-107).
+  if [ "$reserve" = 1 ] || [ "$snaproom" = 1 ]; then book=$ceiling; else book=$(( (IDLE_MIB + mem - MEM_MIB) * 1048576 )); fi
+  # The tmpfs copies and the share server use memory outside the capped parent: they are booked, and the parent's
+  # cap goes down by them while this microVM lives (council D-108 review).
+  outside=$copies; [ -n "$unfs_srcs" ] && outside=$((outside + UNFS_MEM))
+  book=$((book + outside))
+  adm=$(/usr/local/bin/vesper-memadmit acquire shim "$id" "$book" "$outside") || {
     unlock; adm=$(echo "$adm" | head -1)
     # A sized guest names its size, so the reader can tell a large limit from a full System VM.
     case "$mem:$adm" in
@@ -980,6 +1002,9 @@ launch() {
     return 1
   }
   LAUNCHING=$id
+  # The parent's OOM count now: cleanup tells a kill at the shared cap (the count went up) from one in an OOM of the
+  # whole System VM (it did not), council D-108 review.
+  awk '$1 == "oom" {print $2}' "${FC_CG%/*}/memory.events" > "$STATE/oom0.$id" 2>/dev/null
   nsarg=""; netcfg=""
   if [ "$sharenet" = 1 ]; then
     # The record comes before the namespace, so the reaper never takes a half-made namespace for an orphan.
@@ -1061,7 +1086,7 @@ launch() {
   start=$(now_ms)
   # shellcheck disable=SC2086
   setsid "$FC_DIR/jailer" --id "$id" --exec-file "$FC_DIR/firecracker" --uid "$JUID" --gid "$JGID" $nsarg \
-    --chroot-base-dir "$jb" --cgroup-version 2 --cgroup pids.max=256 --cgroup "memory.max=$ceiling" \
+    --chroot-base-dir "$jb" --parent-cgroup "$FC_PARENT" --cgroup-version 2 --cgroup pids.max=256 --cgroup "memory.max=$ceiling" \
     ${cpumax:+--cgroup "cpu.max=$cpumax"} \
     -- --config-file /vm.json --api-sock /run/firecracker.socket \
     > "$pipe" 2>&1 < /dev/null &
@@ -1113,7 +1138,7 @@ machine() {
   n=$(for f in /proc/"$pid"/fd/*; do
         l=$(readlink "$f" 2>/dev/null); case "$l" in (anon_inode:kvm-vcpu:*) echo "$l" ;; esac
       done | sort -u | wc -l)
-  cg="/sys/fs/cgroup/firecracker/$id"
+  cg="$FC_CG/$id"
   # cpu.max exists once a launch has set one: the jailer enables the cpu controller for it, and it stays enabled,
   # so a later microVM without a quota reads "max".
   cm=none; [ -r "$cg/cpu.max" ] && cm=$(tr ' ' / < "$cg/cpu.max")
@@ -1133,7 +1158,7 @@ isolation() {
   chroot_ok=false
   if [ -e "/proc/$pid/root/vm.json" ] && [ ! -e "/proc/$pid/root/etc/alpine-release" ] \
      && [ "$(readlink "/proc/$pid/ns/mnt")" != "$(readlink /proc/1/ns/mnt)" ]; then chroot_ok=true; fi
-  cg_ok=false; case "$cg" in */firecracker/"$id"*) cg_ok=true;; esac
+  cg_ok=false; [ "$cg" = "/$FC_PARENT/$id" ] && cg_ok=true   # under the capped parent only (D-107)
   sec_ok=false; [ "$sec" = "2" ] && sec_ok=true
   jail_files=$(ls "/proc/$pid/root" 2>/dev/null | tr '\n' ' ')
   printf '{"id":"%s","pid":%s,"uid":%s,"root":"%s","jail_files":"%s","cgroup":"%s","seccomp_mode":%s,"uid_ok":%s,"chroot_ok":%s,"cgroup_ok":%s,"seccomp_ok":%s}\n' \
@@ -1178,15 +1203,27 @@ cleanup_locked() {
   # A microVM killed at its memory ceiling looks like any other kill to its task (exit 137). The count goes with
   # the cgroup, so it is put on record first: in the System VM's log and in the microVM's console log, which a
   # failure keeps (council REL-2).
-  oomk=$(awk '$1=="oom_kill"{print $2}' "/sys/fs/cgroup/firecracker/$id/memory.events" 2>/dev/null)
+  oomk=$(awk '$1=="oom_kill"{print $2}' "$FC_CG/$id/memory.events" 2>/dev/null)
   if digits "$oomk" && [ "$oomk" -gt 0 ]; then
-    msg="VESPER-MICROVM-OOM $id: the System VM killed $oomk process(es) of this microVM at its memory ceiling ($(cat "/sys/fs/cgroup/firecracker/$id/memory.max" 2>/dev/null) bytes)"
+    # Its own "oom" count says the microVM reached its own ceiling; else, when the parent's count rose since the
+    # launch, the guests together reached the shared cap and the kernel chose this one; else the whole System VM ran
+    # out of memory (D-107, council D-108 review).
+    own=$(awk '$1=="oom"{print $2}' "$FC_CG/$id/memory.events" 2>/dev/null)
+    p0=$(cat "$STATE/oom0.$id" 2>/dev/null); p1=$(awk '$1=="oom"{print $2}' "${FC_CG%/*}/memory.events" 2>/dev/null)
+    if digits "$own" && [ "$own" -gt 0 ]; then
+      msg="VESPER-MICROVM-OOM $id: the System VM killed $oomk process(es) of this microVM at its memory ceiling ($(cat "$FC_CG/$id/memory.max" 2>/dev/null) bytes)"
+    elif digits "$p0" && digits "$p1" && [ "$p1" -gt "$p0" ]; then
+      msg="VESPER-MICROVM-OOM $id: the System VM killed $oomk process(es) of this microVM because all microVMs together reached their shared memory cap ($(cat "${FC_CG%/*}/memory.max" 2>/dev/null) bytes); give the container a memory limit (-m) to reserve its memory"
+    else
+      msg="VESPER-MICROVM-OOM $id: the System VM killed $oomk process(es) of this microVM because the System VM itself ran out of memory, outside the microVMs' cap"
+    fi
     logger -t vesper-microvm "$msg" 2>/dev/null
     [ "${2:-}" = --logs ] || { [ -f "$(logfile "$id")" ] && echo "$msg" >> "$(logfile "$id")"; }
   fi
+  rm -f "$STATE/oom0.$id"
   # The kernel can still count a process that has just ended in its cgroup, so rmdir gets a few tries; a cgroup
   # left behind reads as DIRTY and keeps the memory booked.
-  for cg in "/sys/fs/cgroup/firecracker/$id" "/sys/fs/cgroup/$id"; do
+  for cg in "$FC_CG/$id" "/sys/fs/cgroup/$id"; do
     for _ in 1 2 3 4 5 6 7 8 9 10; do [ -d "$cg" ] || break; rmdir "$cg" 2>/dev/null && break; sleep 0.05; done
   done
   # shellcheck disable=SC2046
@@ -1197,7 +1234,7 @@ cleanup_locked() {
   [ -e "$NETNS/$id" ] && dirty="$dirty netns"
   [ -n "$(fcpid "$id")" ] && dirty="$dirty process"
   { [ -e "$JAIL/firecracker/$id" ] || [ -e "$DISK_JAIL/firecracker/$id" ]; } && dirty="$dirty chroot"
-  [ -d "/sys/fs/cgroup/firecracker/$id" ] && dirty="$dirty cgroup"
+  [ -d "$FC_CG/$id" ] && dirty="$dirty cgroup"
   [ -d "$UNFS_CG/$id" ] && dirty="$dirty unfs-cgroup"
   [ -e "$UNFS/$id.pid" ] && dirty="$dirty unfs"
   [ -e "$UNFS/$id.prot.d" ] && dirty="$dirty unfs-holds"   # the release at unfs_stop left something (TD-076)

@@ -1,16 +1,22 @@
 #!/bin/sh
 # One memory budget for every Firecracker microVM in the System VM, the shim's and vesperd's together (TD-056,
-# decision D-029). Each microVM's cgroup memory.max is its ceiling; a launch is admitted only when the ceilings
-# already committed plus the new one stay within MemTotal less a reserve kept for the System VM itself (dockerd,
-# containerd, the agent, the tmpfs root). The ledger is one file per admitted microVM under $DIR, written under one
-# lock shared by both owners. An entry counts while its microVM's jail directory or cgroup exists (the launcher makes
-# the jail right after admission and removes it at teardown or cleanup), or for PENDING_S after admission; otherwise
-# it is stale and is dropped, so a launcher that crashed cannot leak budget.
-# usage: vesper-memadmit acquire OWNER ID BYTES   -> ADMIT ... | ERR memory: ... (rc 1)
+# D-029, D-107). Each microVM's cgroup memory.max is its ceiling, and every microVM cgroup sits under one parent,
+# $PARENT, whose memory.max is the budget: MemTotal less a reserve for what runs outside it (dockerd, containerd,
+# the agent, the shims, runc containers, the tmpfs root). When the guests together reach the budget, the kernel
+# kills a guest inside the parent, never a process outside it. A launch books what its launcher passes: the full
+# ceiling for a guest whose memory was asked for, an idle allowance for a Docker container without a memory limit
+# (bounded overcommit, D-107); it is admitted only while the bookings fit in the budget. The ledger is one file per
+# admitted microVM under $DIR, written under one lock shared by both owners. An entry counts while its microVM's
+# jail directory or cgroup exists (the launcher makes the jail right after admission and removes it at teardown or
+# cleanup), or for PENDING_S after admission; otherwise it is stale and is dropped, so a launcher that crashed
+# cannot leak budget.
+# usage: vesper-memadmit acquire OWNER ID BYTES [OUTSIDE] -> ADMIT ... | ERR memory|parent|lock: ... (rc 1); OUTSIDE
+#                                          is the part of BYTES the launch uses outside the parent (tmpfs copies)
 #        vesper-memadmit release OWNER ID
-#        vesper-memadmit status                  -> MEMBUDGET total=N reserve=N budget=N committed=N entries=N
+#        vesper-memadmit setup                   -> PARENT path=P max=N (makes the parent and both owners' cgroups)
+#        vesper-memadmit status                  -> MEMBUDGET total=N reserve=N budget=N committed=N entries=N outside=N cap=N
 #        vesper-memadmit test-reserve BYTES|clear test hook: override the reserve until reboot
-# OWNER is shim (cgroup /sys/fs/cgroup/firecracker/ID) or vesperd (cgroup /sys/fs/cgroup/vesperd/ID).
+# OWNER is shim (cgroup $PARENT/firecracker/ID) or vesperd (cgroup $PARENT/vesperd/ID).
 set -u
 # ADR 0010: containers run as an unprivileged uid of the System VM, and dockerd can bind any single file into
 # one whatever its parent directory allows. So nothing this tool writes is readable by other uids unless a line
@@ -21,73 +27,134 @@ R=""; [ "$(id -u)" != 0 ] && R=${VESPER_MEMADMIT_ROOT:-}
 DIR=$R/run/vesper/mem
 LOCK=$R/run/vesper/mem.lock
 OVERRIDE=$R/run/vesper/mem.reserve
-DEFAULT_RESERVE=268435456   # 256 MiB for the System VM's own processes and tmpfs
+# 640 MiB for everything outside the parent: measured 2026-11-24, the System VM used about 475 MiB before any
+# microVM (dockerd, containerd, the 273 MiB tmpfs root), and each Docker task adds about 6 MiB of shim outside it.
+DEFAULT_RESERVE=671088640
+# The parent of every microVM cgroup (D-107). The launchers pass --parent-cgroup $PARENT_REL/<owner's dir>.
+PARENT_REL=vesper-vms
+PARENT=$R/sys/fs/cgroup/$PARENT_REL
 PENDING_S=30
 
 digits() { case "${1:-}" in ''|*[!0-9]*) return 1 ;; esac; }
 valid_id() { case "${1:-}" in ''|*[!A-Za-z0-9-]*) return 1 ;; esac; [ "${#1}" -le 64 ]; }
-cgroup_of() { case "$1" in shim) echo "$R/sys/fs/cgroup/firecracker/$2" ;; vesperd) echo "$R/sys/fs/cgroup/vesperd/$2" ;; esac; }
+cgroup_of() { case "$1" in shim) echo "$PARENT/firecracker/$2" ;; vesperd) echo "$PARENT/vesperd/$2" ;; esac; }
 jail_of() { case "$1" in shim) echo "$R/srv/jailer/firecracker/$2" ;; vesperd) echo "$R/var/lib/vesper/state/vesperd/jailer/firecracker/$2" ;; esac; }
 total() { awk '/^MemTotal:/{print $2 * 1024}' "$R/proc/meminfo"; }
 reserve() { r=$(cat "$OVERRIDE" 2>/dev/null); if digits "$r"; then echo "$r"; else echo "$DEFAULT_RESERVE"; fi; }
 now() { date +%s; }
+# The budget in bytes, a multiple of 64 KiB so the kernel keeps memory.max as written.
+budget() { echo $(( ( $(total) - $(reserve) ) / 65536 * 65536 )); }
 
-# Sum of live entries; drops stale ones. Caller holds the lock.
+# The parent and the owners' cgroups under it, with the memory and pids controllers for their children, and the
+# parent's memory.max set to the budget less OUTSIDE, the bytes booked for memory the guests use outside the parent
+# (a launch's tmpfs jail copies, its share server): without that, the guests could fill the cap while those copies
+# took the reserve (council D-108 review). Fails, so the caller refuses the launch, when any of it cannot be made or
+# read back: a guest outside the parent would be outside the cap. memory.oom.group stays 0 on the parent, so an OOM
+# there kills one guest, not all of them.
+# Its variables are its own (su_*): acquire calls it between reading the ledger and comparing with the budget.
+setup() { # OUTSIDE
+  # Rounded down to 64 KiB: the outside bytes are file sizes, and the kernel keeps memory.max only page-aligned.
+  su_b=$(( ( $(budget) - ${1:-0} ) / 65536 * 65536 ))
+  [ "$su_b" -gt 0 ] || return 1
+  for su_c in memory pids; do
+    grep -qw "$su_c" "$R/sys/fs/cgroup/cgroup.subtree_control" 2>/dev/null || echo "+$su_c" > "$R/sys/fs/cgroup/cgroup.subtree_control" || return 1
+  done
+  mkdir -p "$PARENT" || return 1
+  echo "+memory +pids" > "$PARENT/cgroup.subtree_control" || return 1
+  if grep -qw cpu "$R/sys/fs/cgroup/cgroup.controllers" 2>/dev/null; then
+    grep -qw cpu "$R/sys/fs/cgroup/cgroup.subtree_control" 2>/dev/null || echo +cpu > "$R/sys/fs/cgroup/cgroup.subtree_control" || return 1
+    echo +cpu > "$PARENT/cgroup.subtree_control" || return 1
+  fi
+  for su_o in firecracker vesperd; do
+    mkdir -p "$PARENT/$su_o" || return 1
+    echo "+memory +pids" > "$PARENT/$su_o/cgroup.subtree_control" || return 1
+    grep -qw cpu "$PARENT/cgroup.subtree_control" 2>/dev/null && { echo +cpu > "$PARENT/$su_o/cgroup.subtree_control" || return 1; }
+  done
+  [ "$(cat "$PARENT/memory.max" 2>/dev/null)" = "$su_b" ] || echo "$su_b" > "$PARENT/memory.max" || return 1
+  [ "$(cat "$PARENT/memory.max" 2>/dev/null)" = "$su_b" ]
+}
+
+# Sums of live entries: "BOOKED ENTRIES OUTSIDE"; drops stale ones. Caller holds the lock. An entry is
+# "BYTES OUTSIDE", or "BYTES" (nothing outside) as earlier versions wrote it.
 committed() {
-  sum=0; n=0; t=$(now)
+  sum=0; n=0; out=0; t=$(now)
   for e in "$DIR"/*; do
     [ -f "$e" ] || continue
     name=${e##*/}; owner=${name%%.*}; id=${name#*.}
-    bytes=$(cat "$e" 2>/dev/null)
+    read -r bytes eo < "$e" 2>/dev/null; digits "${eo:-}" || eo=0
     age=$(( t - $(stat -c %Y "$e" 2>/dev/null || echo 0) ))
-    if digits "$bytes" && { [ -d "$(cgroup_of "$owner" "$id")" ] || [ -d "$(jail_of "$owner" "$id")" ] || { [ "$owner" = shim ] && [ -d "$R/var/lib/vesper/state/microvm/jailer/firecracker/$id" ]; } || [ "$age" -lt "$PENDING_S" ]; }; then
-      sum=$((sum + bytes)); n=$((n + 1))
+    if digits "${bytes:-}" && { [ -d "$(cgroup_of "$owner" "$id")" ] || [ -d "$(jail_of "$owner" "$id")" ] || { [ "$owner" = shim ] && [ -d "$R/var/lib/vesper/state/microvm/jailer/firecracker/$id" ]; } || [ "$age" -lt "$PENDING_S" ]; }; then
+      sum=$((sum + bytes)); n=$((n + 1)); out=$((out + eo))
     else
       rm -f "$e"
     fi
+    bytes=""; eo=""
   done
-  echo "$sum $n"
+  echo "$sum $n $out"
 }
 
-# The ledger directory must be root's own: dockerd would create a missing one for a container (GH #194).
-with_lock() { mkdir -p "$DIR" && [ ! -L "$DIR" ] && [ "$(stat -c %u "$DIR")" = 0 ] && chmod 0700 "$DIR" && exec 7>"$LOCK" && flock 7; }
+# The ledger directory must be the caller's own, root's in the System VM: dockerd would create a missing one for a
+# container (GH #194). Every command that reads or writes the ledger stops when this fails (council D-108 review).
+with_lock() {
+  mkdir -p "$DIR" && [ ! -L "$DIR" ] && [ "$(stat -c %u "$DIR")" = "$(id -u)" ] && chmod 0700 "$DIR" && exec 7>"$LOCK" && flock 7 \
+    || { echo "ERR lock: the memory ledger $DIR could not be locked"; exit 1; }
+}
 
 cmd=${1:-}; shift 2>/dev/null
 case "$cmd" in
   acquire)
-    owner=${1:-}; id=${2:-}; bytes=${3:-}
-    case "$owner" in shim|vesperd) ;; *) echo "ERR usage: acquire shim|vesperd ID BYTES"; exit 2 ;; esac
-    valid_id "$id" && digits "$bytes" || { echo "ERR usage: acquire shim|vesperd ID BYTES"; exit 2; }
+    owner=${1:-}; id=${2:-}; bytes=${3:-}; outside=${4:-0}
+    case "$owner" in shim|vesperd) ;; *) echo "ERR usage: acquire shim|vesperd ID BYTES [OUTSIDE]"; exit 2 ;; esac
+    valid_id "$id" && digits "$bytes" && digits "$outside" && [ "$outside" -le "$bytes" ] || { echo "ERR usage: acquire shim|vesperd ID BYTES [OUTSIDE]"; exit 2; }
     with_lock
-    set -- $(committed); c=$1
+    set -- $(committed); c=$1; o=$3
     # An entry for the same id that is still counted: refuse while its launch may be in progress (PENDING_S), else
     # it belongs to a microVM the caller has already found dead, and this admission replaces it.
     e="$DIR/$owner.$id"
     if [ -f "$e" ]; then
       age=$(( $(now) - $(stat -c %Y "$e" 2>/dev/null || echo 0) ))
       [ "$age" -ge "$PENDING_S" ] || { echo "ERR busy: $owner $id was admitted ${age} s ago and may still be launching"; exit 1; }
-      old=$(cat "$e" 2>/dev/null); digits "$old" && c=$((c - old))
+      read -r old oldo < "$e" 2>/dev/null; digits "${old:-}" && c=$((c - old)); digits "${oldo:-}" && o=$((o - oldo))
     fi
-    tot=$(total); res=$(reserve); budget=$((tot - res))
+    tot=$(total); res=$(reserve); budget=$(budget)
     if [ $((c + bytes)) -gt "$budget" ]; then
-      echo "ERR memory: a $bytes-byte ceiling would commit $((c + bytes)) of $budget bytes (MemTotal $tot less a $res-byte reserve); stop a microVM or lower the ceiling"
+      echo "ERR memory: a $bytes-byte booking would commit $((c + bytes)) of $budget bytes (MemTotal $tot less a $res-byte reserve); stop a microVM or lower the memory limit"
       exit 1
     fi
-    echo "$bytes" > "$DIR/$owner.$id"
-    echo "ADMIT $owner $id bytes=$bytes committed=$((c + bytes)) budget=$budget" ;;
+    # The cap goes down by this launch's outside bytes before the launch makes them.
+    setup $((o + outside)) || { echo "ERR parent: the memory cgroup $PARENT could not be made or capped; no microVM is admitted outside it"; exit 1; }
+    echo "$bytes $outside" > "$e"
+    echo "ADMIT $owner $id bytes=$bytes committed=$((c + bytes)) budget=$budget cap=$(cat "$PARENT/memory.max" 2>/dev/null)" ;;
   release)
     owner=${1:-}; id=${2:-}
     valid_id "$id" || exit 2
-    with_lock; rm -f "$DIR/$owner.$id" ;;
+    with_lock; rm -f "$DIR/$owner.$id"
+    # The cap goes back up by what the entry had outside; if that fails, it stays lower, which is safe.
+    set -- $(committed); setup "$3" >/dev/null 2>&1 ;;
+  setup)
+    with_lock; set -- $(committed)
+    setup "$3" || { echo "ERR parent: the memory cgroup $PARENT could not be made or capped"; exit 1; }
+    echo "PARENT path=$PARENT max=$(cat "$PARENT/memory.max")" ;;
   status)
     with_lock; set -- $(committed)
     tot=$(total); res=$(reserve)
-    echo "MEMBUDGET total=$tot reserve=$res budget=$((tot - res)) committed=$1 entries=$2" ;;
+    echo "MEMBUDGET total=$tot reserve=$res budget=$(budget) committed=$1 entries=$2 outside=$3 cap=$(cat "$PARENT/memory.max" 2>/dev/null)" ;;
   test-reserve)
+    # Under the lock, so no admission sees the reserve and the cap disagree; a reserve the cap cannot follow is
+    # undone and refused (council D-108 review).
     case "${1:-}" in
-      clear) rm -f "$OVERRIDE" ;;
-      *) digits "${1:-}" || { echo "ERR usage: test-reserve BYTES|clear"; exit 2; }; mkdir -p "${OVERRIDE%/*}"; echo "$1" > "$OVERRIDE" ;;
+      clear) ;;
+      *) digits "${1:-}" && [ "${#1}" -le 15 ] || { echo "ERR usage: test-reserve BYTES|clear"; exit 2; } ;;
     esac
+    with_lock
+    prev=$(cat "$OVERRIDE" 2>/dev/null)
+    if [ "$1" = clear ]; then rm -f "$OVERRIDE"; else mkdir -p "${OVERRIDE%/*}" && echo "$1" > "$OVERRIDE"; fi
+    set -- $(committed)
+    if ! setup "$3" >/dev/null 2>&1; then
+      if digits "$prev"; then echo "$prev" > "$OVERRIDE"; else rm -f "$OVERRIDE"; fi
+      setup "$3" >/dev/null 2>&1
+      echo "ERR reserve: the parent's cap could not follow it; the reserve stays $(reserve) bytes"; exit 1
+    fi
     echo "RESERVE bytes=$(reserve)" ;;
-  *) echo "ERR usage: vesper-memadmit acquire|release|status|test-reserve"; exit 2 ;;
+  *) echo "ERR usage: vesper-memadmit acquire|release|setup|status|test-reserve"; exit 2 ;;
 esac

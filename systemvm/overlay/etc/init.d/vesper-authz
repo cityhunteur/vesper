@@ -14,3 +14,10 @@ depend() {
   need localmount vesper-packages
   before docker
 }
+
+# The System VM's own services are protected from the OOM killer, so that guests reaching their shared memory cap
+# never take them (D-107). OpenRC runs this in the shell that then starts supervise-daemon, which passes the score to
+# the service and to every respawn of it.
+start_pre() {
+  echo -900 > /proc/self/oom_score_adj
+}
