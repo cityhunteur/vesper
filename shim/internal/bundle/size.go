@@ -22,6 +22,9 @@ type Size struct {
 	// at most its vCPUs' worth, which is all the microVM can use. Both are zero when the task has no quota.
 	CPUQuota  uint64
 	CPUPeriod uint64
+	// Reserved is set when the task asked for memory (a memory limit in its spec): admission then books the guest's
+	// full ceiling. Without it, a guest books an idle allowance and runs under the shared cap (D-107).
+	Reserved bool
 }
 
 const (
@@ -73,6 +76,7 @@ func SizeOf(spec *specs.Spec, systemCPUs int) (Size, error) {
 	perVCPU := int64(s.VCPUs-1) * guestPerVCPUMiB
 	s.MemMiB = DefaultMemMiB + int(perVCPU)
 	if l := memoryLimit(r); l > 0 {
+		s.Reserved = true
 		if l > maxLimitMiB*mib { // before any sum, so no limit can wrap into a small machine
 			return Size{}, fmt.Errorf("memory limit %d bytes is too large (at most %d MiB)", l, maxLimitMiB)
 		}
@@ -169,7 +173,7 @@ func countCPUs(list string) (int, error) {
 	return len(seen), nil
 }
 
-// LaunchArgs are the vesper-microvm launch arguments for a size: none for the default machine.
+// LaunchArgs are the vesper-microvm launch arguments for a size: none for the default machine without a memory limit.
 func (s Size) LaunchArgs() []string {
 	var a []string
 	if s.MemMiB != DefaultMemMiB {
@@ -180,6 +184,9 @@ func (s Size) LaunchArgs() []string {
 	}
 	if s.CPUQuota != 0 {
 		a = append(a, "--cpu-quota", strconv.FormatUint(s.CPUQuota, 10)+":"+strconv.FormatUint(s.CPUPeriod, 10))
+	}
+	if s.Reserved {
+		a = append(a, "--reserve-memory")
 	}
 	return a
 }

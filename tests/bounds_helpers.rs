@@ -124,6 +124,7 @@ impl Ledger {
     fn new(name: &str, mem_total_kib: u64) -> Ledger {
         let root = scratch(name);
         fs::create_dir_all(root.join("proc")).unwrap();
+        fs::create_dir_all(root.join("sys/fs/cgroup")).unwrap();
         fs::write(
             root.join("proc/meminfo"),
             format!("MemTotal:       {mem_total_kib} kB\n"),
@@ -176,14 +177,29 @@ impl Ledger {
 #[cfg(target_os = "linux")] // only the Linux ledger test uses it
 const MIB: u64 = 1 << 20;
 
+/// The helper ignores VESPER_MEMADMIT_ROOT as root and would act on the real ledger and cgroups, so the ledger tests
+/// do not run as root (council D-108 review).
+#[cfg(target_os = "linux")]
+fn as_root() -> bool {
+    let out = Command::new("id").arg("-u").output().unwrap();
+    let root = String::from_utf8_lossy(&out.stdout).trim() == "0";
+    if root {
+        eprintln!("skipped: the ledger tests do not run as root");
+    }
+    root
+}
+
 /// Acquire, refuse, release and stale expiry, a refused acquire that leaves the live entry alone, and a launch in
 /// progress for the same id. `flock` is Linux's; CI runs this on Linux.
 #[cfg(target_os = "linux")]
 #[test]
 fn the_ledger_admits_refuses_releases_and_never_loses_a_live_entry() {
-    // 2 GiB, less the 256 MiB reserve: room for 1792 MiB.
+    if as_root() {
+        return;
+    }
+    // 2 GiB, less the 640 MiB reserve: room for 1408 MiB; four 352 MiB bookings fill it, and 128 MiB more does not fit.
     let l = Ledger::new("ledger", 2 * 1024 * 1024);
-    let b = (384 * MIB).to_string();
+    let b = (352 * MIB).to_string();
     assert!(
         l.run(&["acquire", "shim", "a", &b])
             .1
@@ -194,32 +210,111 @@ fn the_ledger_admits_refuses_releases_and_never_loses_a_live_entry() {
         assert_eq!(l.run(&["acquire", "shim", id, &b]).0, 0, "{id}");
         fs::create_dir_all(l.jail(id)).unwrap();
     }
-    assert_eq!(l.committed(), (4 * 384 * MIB, 4));
-    let (rc, out) = l.run(&["acquire", "shim", "e", &b]);
+    assert_eq!(l.committed(), (4 * 352 * MIB, 4));
+    let (rc, out) = l.run(&["acquire", "shim", "e", &(128 * MIB).to_string()]);
     assert!(rc == 1 && out.starts_with("ERR memory:"), "{out}");
 
     // A duplicate id while the first launch may be in progress is refused, and the live entry stays counted.
     let (rc, out) = l.run(&["acquire", "shim", "a", &(999 * MIB * 1024).to_string()]);
     assert!(rc == 1 && out.starts_with("ERR busy"), "{out}");
-    assert_eq!(l.committed(), (4 * 384 * MIB, 4));
+    assert_eq!(l.committed(), (4 * 352 * MIB, 4));
     // After the pending window, a relaunch of the same (dead) id replaces its entry rather than adding to it.
     l.age("shim", "a");
     assert_eq!(l.run(&["acquire", "shim", "a", &b]).0, 0);
-    assert_eq!(l.committed(), (4 * 384 * MIB, 4));
+    assert_eq!(l.committed(), (4 * 352 * MIB, 4));
 
     // Release frees it; an entry whose jail and cgroup are gone and whose pending window passed is dropped.
     l.run(&["release", "shim", "b"]);
-    assert_eq!(l.committed(), (3 * 384 * MIB, 3));
+    assert_eq!(l.committed(), (3 * 352 * MIB, 3));
     fs::remove_dir_all(l.jail("c")).unwrap();
     l.age("shim", "c");
-    assert_eq!(l.committed(), (2 * 384 * MIB, 2));
+    assert_eq!(l.committed(), (2 * 352 * MIB, 2));
     // The owners are separate: a vesperd entry with the same id is its own.
     assert_eq!(
         l.run(&["acquire", "vesperd", "a", &(640 * MIB).to_string()])
             .0,
         0
     );
-    assert_eq!(l.committed(), (2 * 384 * MIB + 640 * MIB, 3));
+    assert_eq!(l.committed(), (2 * 352 * MIB + 640 * MIB, 3));
+}
+
+/// The parent of every microVM cgroup (D-107): an acquire makes it and both owners' cgroups under it, with the
+/// budget as its memory.max, and refuses when it cannot, so no guest runs outside the cap.
+#[cfg(target_os = "linux")]
+#[test]
+fn the_ledger_caps_the_parent_cgroup_and_refuses_without_it() {
+    if as_root() {
+        return;
+    }
+    let l = Ledger::new("parent", 2 * 1024 * 1024);
+    assert_eq!(
+        l.run(&["acquire", "shim", "a", &(128 * MIB).to_string()]).0,
+        0
+    );
+    let parent = l.root.join("sys/fs/cgroup/vesper-vms");
+    let max = fs::read_to_string(parent.join("memory.max")).unwrap();
+    assert_eq!(max.trim(), (1408 * MIB).to_string());
+    for o in ["firecracker", "vesperd"] {
+        assert!(parent.join(o).is_dir(), "{o}");
+    }
+    let (rc, out) = l.run(&["status"]);
+    assert!(
+        rc == 0 && out.contains(&format!("budget={}", 1408 * MIB)),
+        "{out}"
+    );
+    // What a launch uses outside the parent (tmpfs copies) lowers the cap while it lives, and comes back at release.
+    let (rc, out) = l.run(&[
+        "acquire",
+        "shim",
+        "b",
+        &(400 * MIB).to_string(),
+        &(100 * MIB).to_string(),
+    ]);
+    assert!(
+        rc == 0 && out.contains(&format!("cap={}", 1308 * MIB)),
+        "{out}"
+    );
+    let max = fs::read_to_string(parent.join("memory.max")).unwrap();
+    assert_eq!(max.trim(), (1308 * MIB).to_string());
+    l.run(&["release", "shim", "b"]);
+    let max = fs::read_to_string(parent.join("memory.max")).unwrap();
+    assert_eq!(max.trim(), (1408 * MIB).to_string());
+    // Outside bytes are file sizes; the cap is rounded down to 64 KiB, which the kernel keeps as written.
+    let odd = 45 * MIB + 12_345;
+    assert_eq!(
+        l.run(&[
+            "acquire",
+            "shim",
+            "b",
+            &(400 * MIB).to_string(),
+            &odd.to_string()
+        ])
+        .0,
+        0
+    );
+    let max = fs::read_to_string(parent.join("memory.max")).unwrap();
+    assert_eq!(
+        max.trim(),
+        ((1408 * MIB - odd) / 65_536 * 65_536).to_string()
+    );
+    l.run(&["release", "shim", "b"]);
+    // OUTSIDE larger than BYTES is a usage error.
+    assert_eq!(l.run(&["acquire", "shim", "c", "1", "2"]).0, 2);
+    // A lower reserve moves the cap with it.
+    l.run(&["test-reserve", &(512 * MIB).to_string()]);
+    let max = fs::read_to_string(parent.join("memory.max")).unwrap();
+    assert_eq!(max.trim(), (1536 * MIB).to_string());
+    // A reserve the cap cannot follow (more than MemTotal) is refused, and the one before stays.
+    let (rc, out) = l.run(&["test-reserve", &(4096 * MIB).to_string()]);
+    assert!(rc == 1 && out.starts_with("ERR reserve:"), "{out}");
+    let max = fs::read_to_string(parent.join("memory.max")).unwrap();
+    assert_eq!(max.trim(), (1536 * MIB).to_string());
+
+    let l = Ledger::new("parent-blocked", 2 * 1024 * 1024);
+    fs::write(l.root.join("sys/fs/cgroup/vesper-vms"), "not a directory").unwrap();
+    let (rc, out) = l.run(&["acquire", "shim", "a", &(128 * MIB).to_string()]);
+    assert!(rc == 1 && out.starts_with("ERR parent:"), "{out}");
+    assert_eq!(l.committed(), (0, 0));
 }
 
 /// The store's default quota is 25% of the data disk in 64-bit arithmetic: BusyBox awk's printf "%d" once clamped it

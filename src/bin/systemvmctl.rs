@@ -67,7 +67,7 @@ enum Commands {
         #[arg(long)]
         cpus: Option<u16>,
         /// The System VM's memory in MiB (default 2048, at least 1024). The microVM memory budget is this less a
-        /// 256 MiB reserve (TD-048, TD-056).
+        /// 640 MiB reserve (TD-048, TD-056, D-107).
         #[arg(long)]
         memory_mib: Option<u32>,
         #[arg(long, default_value = "run/systemvm/console.log")]

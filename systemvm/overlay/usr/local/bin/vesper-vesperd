@@ -5,7 +5,7 @@
 # agent's buffered VESPERD verb.
 # usage: vesper-vesperd launch ID [CEILING] [stage=SRC:DEST|tap=NAME|tapaddr=NAME:ADDR/PREFIX|net=none|nat]...
 #                                             LAUNCHAPI: start Firecracker unconfigured under the jailer (uid 20000,
-#                                             --parent-cgroup vesperd, memory.max=CEILING bytes) in a fresh jail on the
+#                                             --parent-cgroup vesper-vms/vesperd, memory.max=CEILING bytes) in a fresh jail on the
 #                                             data disk, after staging each SRC (share:/PATH or store:NAME) to the jail
 #                                             path DEST (store:*.mem and store:*.vmstate are hard-linked, root-owned and
 #                                             read-only; everything else is copied), in a fresh network namespace
@@ -87,7 +87,7 @@ DATA=/var/lib/vesper/state       # bind-mounted onto the data disk by vesper-dat
 BASE=$DATA/vesperd/jailer         # --chroot-base-dir
 JAILS=$BASE/firecracker           # <chroot base>/<exec file name>/<id>/root
 STORE=$DATA/vesperd/store         # files that outlive a microVM; root-owned, read-only, one trust domain
-CG=/sys/fs/cgroup/vesperd         # --parent-cgroup vesperd
+CG=/sys/fs/cgroup/vesper-vms/vesperd   # --parent-cgroup: under vesper-memadmit's capped parent (D-107)
 STATE=/run/vesper/vesperd
 LEASES=$STATE/leases              # one record per id: "holder=<pid>:<start> conn=<pid>:<start> fc=<pid>:<start>"
 LOCK=$STATE/lock                  # one flock serialises reaping, jail creation and teardown
@@ -205,6 +205,18 @@ teardown() { # ID (caller holds the lock) -> CLEAN ID | DIRTY ID <what>
   fi
   # rm -rf does not follow symlinks; the jail's mounts live in the jailer's own mount namespace.
   rm -rf "${JAILS:?}/$tid"
+  # A Firecracker the kernel killed for memory: on record before the cgroup and its counts go, in the System VM's
+  # log and the kept console log. Since D-107 a vesperd microVM, though it books its whole ceiling, can be the one
+  # the kernel chooses when the guests together reach the shared cap (council D-108 review).
+  oomk=$(awk '$1=="oom_kill"{print $2}' "$CG/$tid/memory.events" 2>/dev/null)
+  if digits "$oomk" && [ "$oomk" -gt 0 ]; then
+    own=$(awk '$1=="oom"{print $2}' "$CG/$tid/memory.events" 2>/dev/null)
+    if digits "$own" && [ "$own" -gt 0 ]; then why="at its memory ceiling ($(cat "$CG/$tid/memory.max" 2>/dev/null) bytes)"
+    else why="because all microVMs together reached their shared memory cap, or the System VM ran out of memory"; fi
+    msg="VESPERD-MICROVM-OOM $tid: the System VM killed $oomk process(es) of this microVM $why"
+    logger -t vesper-vesperd "$msg" 2>/dev/null
+    [ -f "$LOGS/$tid.log" ] && echo "$msg" >> "$LOGS/$tid.log"
+  fi
   i=0; while [ -d "$CG/$tid" ] && [ "$i" -lt 20 ]; do rmdir "$CG/$tid" 2>/dev/null || sleep 0.1; i=$((i + 1)); done
   nat_down "$tid"
   netns_down "$tid"
@@ -212,7 +224,7 @@ teardown() { # ID (caller holds the lock) -> CLEAN ID | DIRTY ID <what>
   # Start the log's keep time now, so the reaper prunes it KEEP after teardown, not after its last write.
   touch -c "$LOGS/$tid.log" 2>/dev/null
   left=$(leftovers "$tid")
-  # The memory stays admitted while anything of the microVM is left (D-029: never overcommit). A DIRTY entry is
+  # The memory stays admitted while anything of the microVM is left (D-029, D-107). A DIRTY entry is
   # dropped by vesper-memadmit itself once the cgroup and jail are gone.
   if [ -z "$left" ]; then "$MEMADMIT" release vesperd "$tid" 2>/dev/null; echo "CLEAN $tid"; else echo "DIRTY $tid $left"; return 1; fi
 }
@@ -825,6 +837,9 @@ launch_fail() { echo "ERR $*"; exit 1; }
 launch() {
   LID=${1:-}; shift 2>/dev/null
   valid_id "$LID" || { echo "ERR bad id"; return 2; }
+  # The agent's OOM protection must not reach the jailer and Firecracker: a guest stays the kernel's choice when the
+  # guests reach their shared cap (D-107). vesperd microVMs still book their whole ceiling.
+  echo 0 > /proc/$$/oom_score_adj 2>/dev/null
   # TD-053: a Mac volume below the reserve takes no new microVM; a full volume would turn the data disk read-only.
   lh=$(hostfree_bytes); lr=$(reserve_bytes)
   if digits "$lh" && digits "$lr" && [ "$lh" -lt "$lr" ]; then
@@ -909,7 +924,7 @@ launch() {
   # Not on our stdout or stderr (the caller reads them to EOF) nor the lock (fd 9): the bounder outlives us.
   "$BOUNDLOG" "$log" "$LOG_MAX" < "$pipe" > /dev/null 2>&1 9>&- &
   setsid "$JAILER" --id "$LID" --exec-file "$FC" --uid "$JUID" --gid "$JGID" --chroot-base-dir "$BASE" \
-    --netns "$NETNS/$LID" --parent-cgroup vesperd --cgroup-version 2 --cgroup pids.max=256 --cgroup "memory.max=$ceiling" \
+    --netns "$NETNS/$LID" --parent-cgroup vesper-vms/vesperd --cgroup-version 2 --cgroup pids.max=256 --cgroup "memory.max=$ceiling" \
     -- --api-sock /run/firecracker.socket > "$pipe" 2>&1 < /dev/null 9>&- &
   SPID=$!
   unlock
@@ -978,7 +993,7 @@ isolation() {
   chroot_ok=false
   if [ -e "/proc/$pid/root/Image" ] && [ ! -e "/proc/$pid/root/etc/alpine-release" ] \
      && [ "$(readlink "/proc/$pid/ns/mnt")" != "$(readlink /proc/1/ns/mnt)" ]; then chroot_ok=true; fi
-  cg_ok=false; [ "$cg" = "/vesperd/$sid" ] && cg_ok=true
+  cg_ok=false; [ "$cg" = "/vesper-vms/vesperd/$sid" ] && cg_ok=true   # under the capped parent (D-107)
   sec_ok=false; [ "$sec" = 2 ] && sec_ok=true
   # netns_ok: Firecracker is in the lease's own bound namespace, which is not the System VM's (fails closed).
   net_ok=false; pnet=$(ns_ino "/proc/$pid/ns/net"); bnet=""; netns_mounted "$sid" && bnet=$(ns_ino "$NETNS/$sid")
