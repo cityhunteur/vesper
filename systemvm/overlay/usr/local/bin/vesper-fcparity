@@ -9,6 +9,10 @@
 #        vesper-fcparity perf N                                  N sequential launch/exit/cleanup cycles; SAMPLE lines then
 #                                                               PERF n= boot_p50_ms= boot_p95_ms= boot_max_ms= cycle_p50_ms=
 #                                                               create_rate_per_min= wall_ms= failures=
+#        vesper-fcparity mem                                     MEM avail_kib= firecracker= firecracker_rss_kib=
+#        vesper-fcparity memparts                                where memory goes (TD-100 G2): MEMINFO, then MVM lines
+#                                                               (each microVM's cgroup use and Firecracker's RSS by
+#                                                               kind), PROC, SHIM, TMPFS and TMPDIR lines
 set -u
 # ADR 0010: containers run as an unprivileged uid of the System VM, and dockerd can bind any single file into
 # one whatever its parent directory allows. So nothing this tool writes is readable by other uids unless a line
@@ -155,11 +159,41 @@ mem() {
   echo "MEM avail_kib=$avail firecracker=$count firecracker_rss_kib=$rss"
 }
 
+# Where a microVM's memory goes (TD-100 G2): the System VM's meminfo lines, then for each microVM its cgroup's use by
+# kind and Firecracker's resident memory by kind, then the resident memory of the shims and of the System VM's daemons.
+memparts() {
+  awk 'BEGIN {printf "MEMINFO"} /^(MemTotal|MemFree|MemAvailable|Buffers|Cached|Shmem|AnonPages|Slab|SReclaimable|SUnreclaim|KernelStack|PageTables|Percpu):/ {sub(":", "", $1); printf " %s=%s", $1, $2} END {print ""}' /proc/meminfo
+  for cg in /sys/fs/cgroup/firecracker/*/; do
+    [ -f "$cg/memory.current" ] || continue
+    id=${cg%/}; id=${id##*/}
+    st=$(awk '$1 ~ /^(anon|file|kernel|kernel_stack|pagetables|shmem|file_mapped|sock|slab)$/ {printf "%s=%d ", $1, $2 / 1024}' "$cg/memory.stat")
+    fp=""; for p in $(cat "$cg/cgroup.procs" 2>/dev/null); do case "$(cat "/proc/$p/comm" 2>/dev/null)" in firecracker) fp=$p ;; esac; done
+    rs=""; [ -n "$fp" ] && rs=$(awk '/^(VmRSS|RssAnon|RssFile|RssShmem):/ {printf "%s=%s ", $1, $2}' "/proc/$fp/status" | tr -d ':')
+    echo "MVM ${id%"${id#????????????}"} current_kib=$(( $(cat "$cg/memory.current") / 1024 )) ${st}${rs}"
+  done
+  for n in containerd-shim containerd dockerd vesper-agent; do
+    t=0; c=0
+    for p in $(pgrep -f "$n" 2>/dev/null); do
+      case "$(cat "/proc/$p/comm" 2>/dev/null)" in "$n"*) r=$(awk '/^VmRSS:/ {print $2}' "/proc/$p/status" 2>/dev/null); [ -n "$r" ] && { c=$((c + 1)); t=$((t + r)); } ;; esac
+    done
+    echo "PROC $n count=$c rss_kib=$t"
+  done
+  # Each shim process, with its resident memory and the start of its command line.
+  for p in $(pgrep containerd-shim 2>/dev/null); do
+    echo "SHIM pid=$p rss_kib=$(awk '/^VmRSS:/ {print $2}' "/proc/$p/status" 2>/dev/null) anon_kib=$(awk '/^RssAnon:/ {print $2}' "/proc/$p/status" 2>/dev/null) cmd=$(tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null | cut -c1-120)"
+  done
+  # The used KiB of each tmpfs: these pages are Shmem, outside every microVM's cgroup.
+  df -k -t tmpfs 2>/dev/null | awk 'NR > 1 {print "TMPFS " $6 " used_kib=" $3}'
+  # The largest directories of the root tmpfs, without other mounts.
+  du -x -k -d 4 / 2>/dev/null | sort -rn | head -25 | awk '{print "TMPDIR " $2 " kib=" $1}'
+}
+
 cmd=${1:-}; shift 2>/dev/null
 case "$cmd" in
   api) api "$@" ;;
   conformance) conformance "$@" ;;
   perf) perf "$@" ;;
   mem) mem ;;
-  *) echo "ERR usage: vesper-fcparity api ID METHOD PATH [BODY] [TIMEOUT]|conformance ID|perf N|mem"; exit 2 ;;
+  memparts) memparts ;;
+  *) echo "ERR usage: vesper-fcparity api ID METHOD PATH [BODY] [TIMEOUT]|conformance ID|perf N|mem|memparts"; exit 2 ;;
 esac

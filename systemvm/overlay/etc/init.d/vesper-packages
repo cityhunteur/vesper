@@ -20,6 +20,9 @@ start() {
       eend 1
       return 1
     fi
+    # The root is tmpfs: the installed packages no longer need the 66 MB of package files (TD-100 G2). A restart of
+    # this service then finds none and leaves the installed packages as they are.
+    rm -f /var/lib/vesper/apks/*.apk
   else
     echo "vesper: no extra packages in the overlay" > /dev/console
   fi

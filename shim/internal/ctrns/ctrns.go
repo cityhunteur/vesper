@@ -2,8 +2,8 @@
 
 // Package ctrns gives a Docker task its own network namespace before dockerd wires it (ADR 0011 §2).
 //
-// At Create the shim starts a holder: a re-exec of the shim binary in new network, pid, ipc, uts, mount and cgroup
-// namespaces that only waits, with PR_SET_PDEATHSIG. The shim binds the holder's network namespace at Dir/<id> and
+// At Create the shim starts a holder: the System VM's sleep in new network, pid, ipc, uts and cgroup namespaces,
+// which only waits, with PR_SET_PDEATHSIG. The shim binds the holder's network namespace at Dir/<id> and
 // asks vesper-microvm to make it default-deny; Create then reports the holder's pid, and dockerd moves the
 // container's veth into that namespace. At Start, vesper-microvm launches Firecracker in it. At Delete (or after a
 // shim crash, from containerd's shim delete) vesper-microvm ctrns-down stops the holder and unbinds the namespace.
@@ -27,8 +27,15 @@ import (
 // Dir holds the bound namespaces; ADR 0009's share namespaces are in /run/vesper/microvm/netns, apart.
 const Dir = "/run/vesper/microvm/ctrns"
 
-// HoldArg is the shim's hidden mode for the holder.
+// HoldArg is the shim's hidden mode for the holder. New holders are holdProgram; the mode stays so that a shim
+// started before an upgrade, which re-executes the binary at its old path, still gets a holder.
 const HoldArg = "__vesper_ctrns_hold"
+
+// holdProgram and holdArgs make the holder: the System VM's busybox sleep, for about 68 years. A re-exec of the shim
+// held about 4.5 MiB of private memory for each Docker task, against about 0.1 MiB for sleep (TD-100 G2).
+const holdProgram = "/bin/sleep"
+
+var holdArgs = []string{"2147483647"}
 
 const microvmBin = "/usr/local/bin/vesper-microvm"
 
@@ -51,17 +58,13 @@ func Start(ctx context.Context, id string, onExit func()) (int, error) {
 	if err := os.MkdirAll(Dir, 0o700); err != nil {
 		return 0, fmt.Errorf("namespace directory: %w", err)
 	}
-	self, err := os.Executable()
-	if err != nil {
-		return 0, fmt.Errorf("find the shim binary: %w", err)
-	}
 	started := make(chan error, 1)
 	pidC := make(chan int, 1)
 	// The kernel sends Pdeathsig when the thread that forked the child exits, not the process. So the fork happens
 	// on a thread locked for the holder's life: the goroutine blocks in Wait and never unlocks it (ADR 0011 §2).
 	go func() {
 		runtime.LockOSThread()
-		cmd := exec.Command(self, HoldArg)
+		cmd := exec.Command(holdProgram, holdArgs...)
 		cmd.SysProcAttr = &syscall.SysProcAttr{
 			// No mount namespace: the holder needs none, and a copy of every mount would pin other tasks' namespace
 			// binds while it lives (council COR-6).

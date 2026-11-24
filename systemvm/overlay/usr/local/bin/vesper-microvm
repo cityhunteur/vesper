@@ -475,6 +475,8 @@ prepare() {
     (cd "$MVM/initroot" && find . | cpio -o -H newc 2>/dev/null | gzip -c > "$MVM/initrd.gz.tmp") || { echo "ERR initramfs build failed"; return 1; }
     mv "$MVM/initrd.gz.tmp" "$MVM/initrd.gz"
     echo "$stamp" > "$MVM/initrd.sha256"
+    # The tree is in initrd.gz now, and $MVM is on the tmpfs root: keeping it would hold about 32 MB (TD-100 G2).
+    rm -rf "$MVM/initroot"
   fi
   echo "PREPARED kernel=$(stat -c %s "$MVM/Image") initrd=$(stat -c %s "$MVM/initrd.gz") firecracker=$("$FC_DIR/firecracker" --version 2>/dev/null | head -1)"
 }
@@ -1044,7 +1046,11 @@ launch() {
     extra="$extra vesper_vsock=1"
     vsockcfg=',"vsock":{"guest_cid":3,"uds_path":"/v.sock"}'
   fi
-  printf '{"boot-source":{"kernel_image_path":"/Image","initrd_path":"/initrd.gz","boot_args":"console=ttyS0 reboot=k panic=1 pci=off rdinit=/init%s"},"drives":%s,"machine-config":{"vcpu_count":%s,"mem_size_mib":%s}%s%s}\n' "$extra" "$drives" "$vcpus" "$mem" "$vsockcfg" "$netcfg" > "$root/vm.json"
+  # A balloon that never inflates, for free page reporting: the guest hands back the pages it frees (the compressed
+  # initramfs after it is unpacked, among others) and Firecracker releases them, so they stop counting against the
+  # System VM (TD-100 G2). deflate_on_oom keeps a guest under pressure from being held by its own balloon.
+  balloon=',"balloon":{"amount_mib":0,"deflate_on_oom":true,"free_page_reporting":true}'
+  printf '{"boot-source":{"kernel_image_path":"/Image","initrd_path":"/initrd.gz","boot_args":"console=ttyS0 reboot=k panic=1 pci=off rdinit=/init%s"},"drives":%s,"machine-config":{"vcpu_count":%s,"mem_size_mib":%s}%s%s%s}\n' "$extra" "$drives" "$vcpus" "$mem" "$vsockcfg" "$netcfg" "$balloon" > "$root/vm.json"
   chown -R "$JUID:$JGID" "$jb/firecracker/$id"
   lf=$(logfile "$id"); pipe="/var/log/.vesper-microvm-$id.pipe"
   rm -f "$lf" "$lf.1" "$pipe"
