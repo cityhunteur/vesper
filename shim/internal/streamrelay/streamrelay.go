@@ -31,22 +31,39 @@ type HalfCloser interface {
 	CloseWrite() error
 }
 
-// Relay copies in to target and target to out until the target ends its writes, then closes out (shutting down
-// its write side first, when it is a socket, so a duplicate of the descriptor cannot keep the stream open) and
-// returns. An end of in half-closes the target and the relay goes on. It returns the error that ended the
-// target-to-client copy, or nil for a clean end. After the client's end the target has halfCloseLimit to end its
-// reply (HalfCloseLimit in the program). The copy from in is left blocked when the target ends first; the program exits then.
+// DrainLimit bounds how long the relay goes on reading the client after the target has ended: see Relay.
+const DrainLimit = 10 * time.Second
+
+// Relay copies in to target and target to out until the target ends its writes, then shuts down out's write side
+// (when it is a socket, so a duplicate of the descriptor cannot keep the stream open): the client sees the end at
+// once. An end of in half-closes the target and the relay goes on. After the client's end the target has
+// halfCloseLimit to end its reply (HalfCloseLimit in the program).
+//
+// When the target stops taking the client's bytes (it closed, often after refusing a large request early), the rest
+// of in is read and dropped (TD-103). Without that, socat's next write to the relay failed and socat could end before
+// it passed the target's answer to the host. After the target ends, the relay waits up to DrainLimit for in to end,
+// then closes out and the target and returns the error that ended the target-to-client copy, or nil for a clean end.
 func Relay(in io.Reader, out io.WriteCloser, target HalfCloser, halfCloseLimit time.Duration) error {
+	inDone := make(chan struct{})
 	go func() {
-		_, _ = io.Copy(target, in)
+		defer close(inDone)
+		if _, err := io.Copy(target, in); err != nil {
+			_, _ = io.Copy(io.Discard, in)
+			return
+		}
 		// The client has no more to send; the target may still answer, within halfCloseLimit.
 		_ = target.CloseWrite()
 		_ = target.SetReadDeadline(time.Now().Add(halfCloseLimit))
 	}()
 	_, err := io.Copy(out, target)
 	shutdownWrite(out)
-	_ = out.Close()
+	// A write to the closed target fails, so a client still sending is drained from here on.
 	_ = target.Close()
+	select {
+	case <-inDone:
+	case <-time.After(DrainLimit):
+	}
+	_ = out.Close()
 	return err
 }
 

@@ -182,7 +182,15 @@ where
 {
     let mut buf = vec![0u8; size];
     loop {
-        let n = from.read(&mut buf).await?;
+        let n = match from.read(&mut buf).await {
+            Ok(n) => n,
+            Err(err) => {
+                // A Linux Unix socket closed with unread data reports a reset after its queued data: give the
+                // other side a clean end too.
+                let _ = to.shutdown().await;
+                return Err(err);
+            }
+        };
         if n == 0 {
             // Pass the half-close on; the other direction keeps running.
             let _ = to.shutdown().await;
@@ -198,11 +206,77 @@ where
             }
             c.last = now;
         }
-        to.write_all(&buf[..n]).await?;
+        if let Err(err) = to.write_all(&buf[..n]).await {
+            if !client {
+                return Err(err);
+            }
+            // The upstream no longer takes the request: it closed, often after it refused the request early. Read
+            // and drop the rest, so that a client still sending finishes its send and reads the answer, which the
+            // other direction delivers (TD-103).
+            while from.read(&mut buf).await? != 0 {}
+            return Ok(());
+        }
     }
 }
 
-/// Copies bytes both ways under `bounds` until both sides close, one fails, or a timeout passes.
+/// Copies bytes both ways until both sides close or the upstream-to-client direction fails. A failure towards the
+/// upstream does not end the relay: the upstream's answer, an early refusal for example, still reaches the client
+/// (TD-103). `try_join!` and `copy_bidirectional` both ended the two directions on the first error, and so lost an
+/// answer that had not yet been copied.
+async fn two_way<C, U>(
+    client: C,
+    upstream: U,
+    size: usize,
+    clock: &Mutex<Clock>,
+    turn: &Notify,
+) -> io::Result<()>
+where
+    C: AsyncRead + AsyncWrite + Unpin,
+    U: AsyncRead + AsyncWrite + Unpin,
+{
+    let (client_read, client_write) = tokio::io::split(client);
+    let (upstream_read, upstream_write) = tokio::io::split(upstream);
+    let request = pump(client_read, upstream_write, size, clock, turn, true);
+    let answer = pump(upstream_read, client_write, size, clock, turn, false);
+    tokio::pin!(request, answer);
+    let mut request_done = false;
+    loop {
+        tokio::select! {
+            sent = &mut request, if !request_done => {
+                sent?;
+                request_done = true;
+            }
+            answered = &mut answer => {
+                answered?;
+                return if request_done { Ok(()) } else { request.await };
+            }
+        }
+    }
+}
+
+/// Copies bytes both ways with no bounds; the plain path of `run_server`.
+pub(super) async fn plain<C, U>(client: C, upstream: U) -> io::Result<()>
+where
+    C: AsyncRead + AsyncWrite + Unpin,
+    U: AsyncRead + AsyncWrite + Unpin,
+{
+    let now = Instant::now();
+    let clock = Mutex::new(Clock {
+        client_last: false,
+        since: now,
+        last: now,
+    });
+    two_way(
+        client,
+        upstream,
+        DEFAULT_READ_BUFFER,
+        &clock,
+        &Notify::new(),
+    )
+    .await
+}
+
+/// Copies bytes both ways under `bounds` until both sides close, the answer direction fails, or a timeout passes.
 pub(super) async fn bounded<C, U>(client: C, upstream: U, bounds: &Bounds) -> RelayEnd
 where
     C: AsyncRead + AsyncWrite + Unpin,
@@ -220,14 +294,7 @@ where
         last: now,
     });
     let turn = Notify::new();
-    let (client_read, client_write) = tokio::io::split(client);
-    let (upstream_read, upstream_write) = tokio::io::split(upstream);
-    let both = async {
-        tokio::try_join!(
-            pump(client_read, upstream_write, size, &clock, &turn, true),
-            pump(upstream_read, client_write, size, &clock, &turn, false),
-        )
-    };
+    let both = two_way(client, upstream, size, &clock, &turn);
     let watchdog = async {
         loop {
             let (deadline, end) = {
@@ -400,6 +467,22 @@ mod tests {
         client_peer.shutdown().await.unwrap();
         assert_eq!(writer.await.unwrap(), b"after-half-close");
         assert_eq!(relay.await.unwrap(), RelayEnd::Closed);
+    }
+
+    #[tokio::test]
+    async fn an_early_answer_reaches_a_client_that_still_sends() {
+        // TD-103: the upstream reads part of a large request, answers and closes while the client still sends.
+        for _ in 0..20 {
+            let (client, client_peer) = duplex(16 * 1024);
+            let (upstream, upstream_peer) = duplex(16 * 1024);
+            let relay =
+                tokio::spawn(async move { bounded(client, upstream, &bounds(5_000, 5_000)).await });
+            assert_eq!(
+                super::super::tests::early_answer(client_peer, upstream_peer).await,
+                super::super::tests::EARLY
+            );
+            assert_eq!(relay.await.unwrap(), RelayEnd::Closed);
+        }
     }
 
     /// What the fake agent does after `CONNECT 1024`.
