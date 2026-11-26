@@ -1075,7 +1075,7 @@ launch() {
   # initramfs after it is unpacked, among others) and Firecracker releases them, so they stop counting against the
   # System VM (TD-100 G2). deflate_on_oom keeps a guest under pressure from being held by its own balloon.
   balloon=',"balloon":{"amount_mib":0,"deflate_on_oom":true,"free_page_reporting":true}'
-  printf '{"boot-source":{"kernel_image_path":"/Image","initrd_path":"/initrd.gz","boot_args":"console=ttyS0 reboot=k panic=1 pci=off rdinit=/init%s"},"drives":%s,"machine-config":{"vcpu_count":%s,"mem_size_mib":%s}%s%s%s}\n' "$extra" "$drives" "$vcpus" "$mem" "$vsockcfg" "$netcfg" "$balloon" > "$root/vm.json"
+  printf '{"boot-source":{"kernel_image_path":"/Image","initrd_path":"/initrd.gz","boot_args":"console=ttyS0 loglevel=4 reboot=k panic=1 pci=off rdinit=/init%s"},"drives":%s,"machine-config":{"vcpu_count":%s,"mem_size_mib":%s}%s%s%s}\n' "$extra" "$drives" "$vcpus" "$mem" "$vsockcfg" "$netcfg" "$balloon" > "$root/vm.json"
   chown -R "$JUID:$JGID" "$jb/firecracker/$id"
   lf=$(logfile "$id"); pipe="/var/log/.vesper-microvm-$id.pipe"
   rm -f "$lf" "$lf.1" "$pipe"

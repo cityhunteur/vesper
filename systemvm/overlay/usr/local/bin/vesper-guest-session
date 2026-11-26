@@ -126,8 +126,9 @@ echo "READY $port"
   echo "VESPER-WORKLOAD-EXIT $rc p$port" > /dev/ttyS0
 ) < "$dir/in" > "$dir/out" 2> "$dir/err" &
 runner=$!
-# An unsuccessful runtime must still publish its status (the subshell disables errexit).
-for _ in $(seq 1 300); do
+# An unsuccessful runtime must still publish its status (the subshell disables errexit). Every 20 ms for up to 30 s:
+# a 0.1 s poll added about 50 ms to each start on average (TD-100 G1).
+for _ in $(seq 1 1500); do
   [ -f "$dir/pid" ] && break
   if [ -f "$dir/status" ]; then
     [ -s "$dir/runc.log" ] || fail runtime runtime-did-not-start
@@ -136,7 +137,7 @@ for _ in $(seq 1 300); do
     tail -n 1 "$dir/runc.log"
     exit 1
   fi
-  sleep 0.1
+  sleep 0.02
 done
 [ -f "$dir/pid" ] || fail start runtime-timeout
 [ ! -f "$dir/abort" ] || { terminate; fail start aborted; }
