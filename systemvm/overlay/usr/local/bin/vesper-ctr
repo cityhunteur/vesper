@@ -294,8 +294,10 @@ run_tty() {
   if [ "$mode" = exec ]; then
     out=$(vesper-ptyrun 37 101 ctr -n "$NS" task exec --tty --exec-id tty-exec "$name" /bin/busybox sh -c 'tty; echo BEFORE; stty size; sleep 5; echo AFTER; stty size; exit 7' 2>&1)
   else
-    out=$(vesper-ptyrun 37 101 ctr -n "$NS" run --rm --tty --runtime "$RT" "$r" "$name" /bin/busybox sh -c 'tty; echo BEFORE; stty size; sleep 2; echo AFTER; stty size; exit 7' 2>&1)
+    out=$(vesper-ptyrun 37 101 ctr -n "$NS" run --rm --tty --runtime "$RT" "$r" "$name" /bin/busybox sh -c 'tty; echo BEFORE; stty size; sleep 4; echo AFTER; stty size; exit 7' 2>&1)
   fi
+  # vesper-ptyrun resizes 3 s after ctr starts: AFTER must come later than that however fast the microVM starts
+  # (D-110 made a start about 1.2 s, and a 2 s sleep then ended near the resize).
   rc=$?
   emit "$rc" "$out"
 }

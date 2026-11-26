@@ -59,7 +59,7 @@ The durable signals this project relies on are artifacts rather than live teleme
   response, both performance runs, compat exception summary) and `systemvmctl control fcparity api <id> GET /`
   for a live microVM's state; `run/systemvm/shim-report.json` from `make systemvm-shim-suite`, `systemvmctl
   control ctr state <name>` and `ctr -n vesper task ls` in the guest; the shim logs through containerd's shim log
-  FIFO (`ctr` prints them with `--debug`), and each task's console is `/var/log/vesper-microvm-<task>.log`; `run/systemvm/bundle-report.json` from
+  FIFO (`ctr` prints them with `--debug`), and each task's console is `/var/log/vesper-microvm-<task>.log` (its kernel prints errors and worse there, `loglevel=4`, D-110); `run/systemvm/bundle-report.json` from
   `make systemvm-bundle-suite`, `systemvmctl control ctr meta <task>` (the task's `vesper-rootfs.json`: strategy,
   cached, key, layers, digest, build time) and `systemvmctl control ctr cache` (cached root drives); `run/systemvm/restart-report.json` from
   `make systemvm-restart-suite` and `systemvmctl control ctr state-file <task>` (the task's `vesper-task.json`:
