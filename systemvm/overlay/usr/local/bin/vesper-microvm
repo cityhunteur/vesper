@@ -421,15 +421,17 @@ prepare() {
   # create a missing one for a container, which could then plant them (GH #194).
   mkdir -p "$MVM" && [ ! -L "$MVM" ] && [ "$(stat -c %u "$MVM")" = 0 ] || { echo "ERR $MVM is not a root-owned directory"; return 1; }
   umask 022 # the initramfs tree keeps ordinary modes: they become the guest's (runs in a subshell or as the last act)
-  mkdir -p "$MVM"
+  # The shim's launches and vesperd's call this outside one common lock: two first launches at once would build into
+  # the same tree and temporary files (council D-112). The lock ends with the subshell or the process.
+  exec 8>"$MVM/.prepare.lock" && flock 8 || { echo "ERR prepare lock"; return 1; }
   if [ ! -f "$MVM/Image" ]; then
     # The ISO kernel is an EFI zboot PE: gzip payload at the offset/size stored at bytes 8..16.
     k=/media/vda/boot/vmlinuz-virt
     [ -f "$k" ] || { echo "ERR kernel $k missing"; return 1; }
     off=$(od -A n -t u4 -j 8 -N 4 "$k" | tr -d ' ')
     size=$(od -A n -t u4 -j 12 -N 4 "$k" | tr -d ' ')
-    tail -c "+$((off + 1))" "$k" | head -c "$size" | gunzip -c > "$MVM/Image.tmp" || { echo "ERR kernel unpack failed"; return 1; }
-    mv "$MVM/Image.tmp" "$MVM/Image"
+    (set -o pipefail; tail -c "+$((off + 1))" "$k" | head -c "$size" | gunzip -c > "$MVM/Image.tmp") \
+      && mv "$MVM/Image.tmp" "$MVM/Image" || { rm -f "$MVM/Image.tmp"; echo "ERR kernel unpack failed"; return 1; }
   fi
   # Runtime bytes inherit the package-lock and ISO digests verified by build-overlay.sh.
   libs=$(for bin in /usr/bin/runc /usr/bin/socat; do ldd "$bin" || exit 1; done 2>&1) || { echo "ERR runtime library closure: $libs"; return 1; }
@@ -484,9 +486,11 @@ prepare() {
     cp /usr/local/bin/vesper-microvm-init "$MVM/initroot/init"
     cp /usr/local/bin/vesper-guest-session "$MVM/initroot/bin/vesper-guest-session"
     chmod +x "$MVM/initroot/init"
-    (cd "$MVM/initroot" && find . | cpio -o -H newc 2>/dev/null | gzip -c > "$MVM/initrd.gz.tmp") || { echo "ERR initramfs build failed"; return 1; }
-    mv "$MVM/initrd.gz.tmp" "$MVM/initrd.gz"
-    echo "$stamp" > "$MVM/initrd.sha256"
+    # pipefail: a failed find or cpio fails the build, so a short archive is never stamped as good (council D-112).
+    (set -o pipefail; cd "$MVM/initroot" && find . | cpio -o -H newc 2>/dev/null | gzip -c > "$MVM/initrd.gz.tmp") \
+      && gzip -t "$MVM/initrd.gz.tmp" && mv "$MVM/initrd.gz.tmp" "$MVM/initrd.gz" \
+      && echo "$stamp" > "$MVM/initrd.sha256.tmp" && mv "$MVM/initrd.sha256.tmp" "$MVM/initrd.sha256" \
+      || { rm -f "$MVM/initrd.gz.tmp" "$MVM/initrd.sha256.tmp"; echo "ERR initramfs build failed"; return 1; }
     # The tree is in initrd.gz now, and $MVM is on the tmpfs root: keeping it would hold about 32 MB (TD-100 G2).
     rm -rf "$MVM/initroot"
   fi
