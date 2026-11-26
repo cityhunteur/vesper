@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use tokio::io::{AsyncRead, AsyncWrite, copy_bidirectional};
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpStream, UnixListener, UnixStream};
 use tokio::sync::Semaphore;
 use tokio::time::timeout;
@@ -345,19 +345,59 @@ fn vsock_socket_path(vsock_socket_dir: &str, cid: u32) -> Result<String, String>
     Ok(path.to_string_lossy().into_owned())
 }
 
-async fn relay<U>(mut client: UnixStream, mut upstream: U) -> Result<(), String>
+async fn relay<U>(client: UnixStream, upstream: U) -> Result<(), String>
 where
     U: AsyncRead + AsyncWrite + Unpin,
 {
-    copy_bidirectional(&mut client, &mut upstream)
+    relay::plain(client, upstream)
         .await
-        .map_err(|err| format!("relay stream error: {err}"))?;
-    Ok(())
+        .map_err(|err| format!("relay stream error: {err}"))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    pub(super) const EARLY: &[u8] = b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n";
+
+    /// Plays both ends of an early refusal: the client sends 4 MiB; the upstream reads 64 KiB of it, answers `EARLY`
+    /// and closes. Returns what the client read.
+    pub(super) async fn early_answer<C, U>(client_peer: C, mut upstream_peer: U) -> Vec<u8>
+    where
+        C: AsyncRead + AsyncWrite + Send + 'static,
+        U: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    {
+        let server = tokio::spawn(async move {
+            let mut head = vec![0u8; 64 * 1024];
+            upstream_peer.read_exact(&mut head).await.unwrap();
+            upstream_peer.write_all(EARLY).await.unwrap();
+            drop(upstream_peer);
+        });
+        let (mut read, mut write) = tokio::io::split(client_peer);
+        let sender = tokio::spawn(async move {
+            // The upstream closes before it has read the request; the send may then fail, as with a direct socket.
+            let _ = write.write_all(&vec![b'x'; 4 * 1024 * 1024]).await;
+            let _ = write.shutdown().await;
+        });
+        let mut got = Vec::new();
+        let _ = timeout(Duration::from_secs(5), read.read_to_end(&mut got)).await;
+        server.await.unwrap();
+        sender.await.unwrap();
+        got
+    }
+
+    #[tokio::test]
+    async fn the_plain_relay_delivers_an_early_answer_to_a_client_that_still_sends() {
+        // TD-103: the Docker socket's path. A server that refuses a large body early closes while the client sends.
+        for _ in 0..20 {
+            let (client, client_peer) = UnixStream::pair().unwrap();
+            let (upstream, upstream_peer) = UnixStream::pair().unwrap();
+            let relay = tokio::spawn(relay(client, upstream));
+            let got = early_answer(client_peer, upstream_peer).await;
+            assert_eq!(got, EARLY);
+            relay.await.unwrap().unwrap();
+        }
+    }
 
     #[test]
     fn upstream_socket_path_follows_the_scheme() {

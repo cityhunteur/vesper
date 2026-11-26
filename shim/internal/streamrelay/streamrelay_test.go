@@ -179,3 +179,41 @@ func TestATargetThatNeverEndsIsCutOffAfterTheHalfClose(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+// TD-103: the server reads part of a large request, answers and closes while the client still sends. The relay reads
+// and drops the rest, so the client's send finishes (socat's write to a relay that stopped reading failed, and socat
+// could end before it passed the answer on), and the client then reads the answer.
+func TestAnEarlyAnswerReachesAClientThatStillSends(t *testing.T) {
+	in, out, toRelay, fromRelay := client(t)
+	const answer = "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n"
+	tg := target(t, func(c *net.UnixConn) {
+		head := make([]byte, 64*1024)
+		_, _ = io.ReadFull(c, head)
+		_, _ = c.Write([]byte(answer))
+		c.Close()
+	})
+	done := make(chan error, 1)
+	go func() { done <- Relay(in, out, tg, HalfCloseLimit) }()
+	sent := make(chan error, 1)
+	go func() {
+		_, err := toRelay.Write(make([]byte, 4*1024*1024))
+		sent <- err
+	}()
+	select {
+	case err := <-sent:
+		if err != nil {
+			t.Fatalf("the client's send failed: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the client's send did not finish: the relay stopped reading it")
+	}
+	if got := readAll(t, fromRelay, 3*time.Second); got != answer {
+		t.Fatalf("got %q", got)
+	}
+	_ = toRelay.Close()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the relay did not end after the client closed")
+	}
+}
