@@ -395,7 +395,10 @@ mod tests {
             let relay = tokio::spawn(relay(client, upstream));
             let got = early_answer(client_peer, upstream_peer).await;
             assert_eq!(got, EARLY);
-            relay.await.unwrap().unwrap();
+            // Linux reports the server's close with unread data as a reset once the answer has been read.
+            if let Err(err) = relay.await.unwrap() {
+                assert!(err.contains("reset by peer"), "{err}");
+            }
         }
     }
 

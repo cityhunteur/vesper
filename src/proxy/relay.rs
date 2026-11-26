@@ -182,7 +182,15 @@ where
 {
     let mut buf = vec![0u8; size];
     loop {
-        let n = from.read(&mut buf).await?;
+        let n = match from.read(&mut buf).await {
+            Ok(n) => n,
+            Err(err) => {
+                // A Linux Unix socket closed with unread data reports a reset after its queued data: give the
+                // other side a clean end too.
+                let _ = to.shutdown().await;
+                return Err(err);
+            }
+        };
         if n == 0 {
             // Pass the half-close on; the other direction keeps running.
             let _ = to.shutdown().await;
@@ -470,8 +478,8 @@ mod tests {
             let relay =
                 tokio::spawn(async move { bounded(client, upstream, &bounds(5_000, 5_000)).await });
             assert_eq!(
-                crate::proxy::tests::early_answer(client_peer, upstream_peer).await,
-                crate::proxy::tests::EARLY
+                super::super::tests::early_answer(client_peer, upstream_peer).await,
+                super::super::tests::EARLY
             );
             assert_eq!(relay.await.unwrap(), RelayEnd::Closed);
         }
