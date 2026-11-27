@@ -40,9 +40,17 @@ bad=""; for i in 1 2 3 4 5; do out="$(run -v "${SHARE}/own:/data" "${IMAGE}" sh 
 [ -z "${bad}" ] && record bind_owned_by_container_root_at_start true "5 of 5 containers saw the bind owned by 0:0 and could chmod it in their first command" || record bind_owned_by_container_root_at_start false "${bad}"
 out="$(run -u 1000:1000 -v "${SHARE}/own:/data" "${IMAGE}" sh -c "${first_look}" 2>&1 | tr '\n' ' ')"
 [ "${out}" = "1000:1000 chmod-ok " ] && record bind_owned_by_container_user_at_start true "a container running as 1000:1000 saw the bind owned by 1000:1000 and could chmod it at once" || record bind_owned_by_container_user_at_start false "${out}"
-out="$(run --runtime runc -v "${SHARE}/own:/data" "${IMAGE}" sh -c "${first_look}" 2>&1 | tr '\n' ' ')"
+# The control needs the share's cached answer to be one that plain runc's own lookup made. The run before left an
+# answer from vesper-runc's refresh in the cache for about a second, so each try first waits that out; three tries,
+# because a lookup by dockerd can still land first (TD-092).
+tries=""; for i in 1 2 3; do
+  sleep 2
+  out="$(run --runtime runc -v "${SHARE}/own:/data" "${IMAGE}" sh -c "${first_look}" 2>&1 | tr '\n' ' ')"
+  tries="${tries}try ${i}: ${out}; "
+  case "${out}" in *65534:65534*) break ;; esac
+done
 # stderr and stdout can arrive in either order through a relay, so the owner may follow the chmod error.
-case "${out}" in *65534:65534*) record plain_runc_shows_the_fault true "with --runtime runc (no refresh) the first look saw ${out}: the checks above can fail" ;; *) record plain_runc_shows_the_fault false "plain runc did not show the fault, so the checks above prove nothing: ${out}" ;; esac
+case "${out}" in *65534:65534*) record plain_runc_shows_the_fault true "with --runtime runc (no refresh) the first look saw ${out} (${tries% }): the checks above can fail" ;; *) record plain_runc_shows_the_fault false "${tries}plain runc did not show the fault, so the checks above prove nothing: ${out}" ;; esac
 rmdir "${SHARE}/own"
 host_owner="$(stat -f '%u:%g' "${SHARE}/hello.txt")"; guest_owner="$(run -v "${SHARE}:/data" "${IMAGE}" sh -c 'stat -c %u:%g /data/hello.txt' 2>&1)"
 [ "${guest_owner}" = "0:0" ] && record ownership_mapped_to_root_in_guest true "host ${host_owner} appears as ${guest_owner} in the container (the sharing user owns the share; containers see root)" || record ownership_mapped_to_root_in_guest false "host ${host_owner}, guest ${guest_owner}"
